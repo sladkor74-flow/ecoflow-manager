@@ -3,14 +3,32 @@
 // le regole del gestionale: kg interi, tonnellate con 2-3 decimali, euro con 2
 // decimali, prezzi unitari con 4.
 //
-// colonne: [{ titolo, valore: (riga) => any, tipo: 'testo'|'kg'|'t'|'euro'|'prezzo'|'data'|'intero', peso?: number }]
+// colonne: [{ titolo, valore: (riga) => any, tipo: 'testo'|'kg'|'t'|'euro'|'prezzo'|'prezzoLibero'|'data'|'intero', peso?: number }]
 // totali:  { etichetta, valori: { [indiceColonna]: numero } }
+// documento: { canale, periodo, entita, perFineTrasporto, stato } - il blocco di
+//   testa comune (intestazioneDocumento di fogliProfessionali.js): canale,
+//   periodo per fine trasporto, dati fino al degli archivi in entita, generato
+//   il ... da .... Senza, il file dice solo quando e da chi e' stato generato.
+//
+// LA STESSA TESTA PER EXCEL E PDF (chiusura dell'audit, 11/10/2026). L'Excel
+// usciva da SheetJS, senza fascia ne' piede; il PDF diceva «Esportato il ...» e
+// nessuno dei due diceva fino a che giorno arrivano i dati. Ora tutti e due
+// prendono il blocco di testa da intestazioneDocumento, e il piede del PDF dice
+// «Pagina x di N» su ogni pagina.
 
 import { formatNumber, formatKg, formatTonnellate, formatIntero } from '@/lib/utils';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella, ENTE } from '@/lib/fogliProfessionali';
 
-const NUMERICI = new Set(['kg', 't', 'euro', 'prezzo', 'intero', 'percentuale']);
-const FORMATO_EXCEL = { kg: '#,##0', t: '#,##0.00#', euro: '#,##0.00', prezzo: '#,##0.0000', intero: '#,##0', percentuale: '#,##0.0"%"', data: 'dd/mm/yyyy' };
+// IL PREZZO LIBERO: due decimali, fino a quattro se servono (revisione delle
+// migliorie, 11/10/2026). Col tipo 'euro', fisso a due, un prezzo al chilo da
+// 0,202 nel PDF dell'extra raccolta usciva «0,20 €», mentre l'Excel dello stesso
+// mese, col formato '#,##0.00##', diceva 0,202: due prezzi per la stessa riga.
+// 'prezzoLibero' ha il formato dell'Excel (FORMATI.prezzoLibero di
+// fogliProfessionali.js) e nel PDF scrive come cifreItaliane(v, 2, 4). 'euro'
+// resta a due decimali e 'prezzo' a quattro: gli altri export non cambiano.
+const NUMERICI = new Set(['kg', 't', 'euro', 'prezzo', 'prezzoLibero', 'intero', 'percentuale']);
+const FORMATO_EXCEL = { kg: '#,##0', t: '#,##0.00#', euro: '#,##0.00', prezzo: '#,##0.0000', prezzoLibero: '#,##0.00##', intero: '#,##0', percentuale: '#,##0.0"%"', data: 'dd/mm/yyyy' };
 
 // IL GIORNO DI UNA DATA E' QUELLO ITALIANO, e lo dice giornoRoma (chiusura
 // dell'audit, 11/10/2026). Qui c'era una correzione fatta a mano che riportava al
@@ -27,11 +45,16 @@ const comeData = (v) => {
 
 function testoCella(valore, tipo) {
   if (valore === null || valore === undefined || valore === '') return tipo && NUMERICI.has(tipo) ? '' : '—';
+  // Un testo in una colonna di numeri si scrive com'e': «—» per un peso che
+  // manca, «12,34%» in fondo a una colonna di euro. Passato dal formato dei
+  // numeri diventava «0» (11/10/2026).
+  if (typeof valore === 'string' && NUMERICI.has(tipo) && !Number.isFinite(Number(valore))) return valore;
   switch (tipo) {
     case 'kg': return formatKg(valore);
     case 't': return formatTonnellate(valore);
     case 'euro': return `${formatNumber(valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
     case 'prezzo': return `${formatNumber(valore, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} €`;
+    case 'prezzoLibero': return `${formatNumber(valore, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €`;
     case 'intero': return formatIntero(valore);
     // Una percentuale non e' un euro: senza il suo tipo finiva in euro, come ogni
     // numero senza tipo (06/10/2026).
@@ -47,35 +70,38 @@ const nomeSicuro = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '-').trim();
 // cosi' diventano segni a caso e allargano la riga. Si scrivono con caratteri che ha.
 const perPdf = (t) => String(t ?? '').replace(/[→➜➔]/g, '>').replace(/←/g, '<').replace(/…/g, '...').replace(/[≤]/g, '<=').replace(/[≥]/g, '>=').replace(/[⋮]/g, ':').replace(/[\u2028\u2029]/g, ' ');
 
-/** Foglio Excel con titolo, intestazioni, righe e totali formattati. */
-export async function esportaTabellaExcel({ nomeFile, foglio = 'Dettaglio', titolo, sottotitolo, colonne, righe, totali }) {
-  const XLSX = await import('xlsx');
-  const aoa = [[titolo], [sottotitolo || ''], [], colonne.map(c => c.titolo)];
+/**
+ * Foglio Excel col blocco di testa del documento, intestazioni, righe e totali
+ * formattati: il corredo dei fogli che si mandano fuori (fogliProfessionali.js).
+ * Le celle sono le stesse di prima: numeri veri, date vere, vuote dove manca.
+ */
+export async function esportaTabellaExcel({ nomeFile, foglio = 'Dettaglio', titolo, sottotitolo, colonne, righe, totali, documento }) {
+  const intest = await documentoDa({ titolo, sottotitolo, ...(documento || {}) });
+  const tabella = [colonne.map(c => c.titolo)];
   for (const r of righe) {
-    aoa.push(colonne.map(c => {
+    tabella.push(colonne.map(c => {
       const v = c.valore(r);
       if (c.tipo === 'data') return comeData(v);
       if (NUMERICI.has(c.tipo)) return v === null || v === undefined || v === '' ? null : Number(v);
       return v ?? '';
     }));
   }
+  const stili = {};
   if (totali) {
-    aoa.push([]);
-    aoa.push(colonne.map((c, i) => (i === 0 ? totali.etichetta : (totali.valori[i] ?? null))));
+    tabella.push([]);
+    tabella.push(colonne.map((c, i) => (i === 0 ? totali.etichetta : (totali.valori[i] ?? null))));
+    stili[tabella.length - 1] = 'totale';
   }
-  const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  for (let R = 4; R <= range.e.r; R++) {
-    colonne.forEach((c, C) => {
-      const cella = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-      if (cella && FORMATO_EXCEL[c.tipo] && (cella.t === 'n' || cella.t === 'd')) cella.z = FORMATO_EXCEL[c.tipo];
-    });
-  }
-  ws['!cols'] = colonne.map(c => ({ wch: Math.max(10, Math.min(45, Math.round((c.peso || 1) * 12))) }));
-  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 3, c: 0 }, e: { r: 3 + righe.length, c: colonne.length - 1 } }) };
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, foglio.slice(0, 31));
-  XLSX.writeFile(wb, `${nomeSicuro(nomeFile)}.xlsx`);
+  const { wb } = await nuovaCartella();
+  const ws = foglioDaRighe(wb, foglio, {
+    doc: intest, righe: tabella, testate: [0], stili,
+    // il formato lo dice il tipo della colonna, non il titolo
+    formati: Object.fromEntries(colonne.map((c, i) => [i, FORMATO_EXCEL[c.tipo] || null])),
+    larghezze: colonne.map(c => Math.max(10, Math.min(45, Math.round((c.peso || 1) * 12)))),
+  });
+  const testata = ws.views && ws.views[0] ? ws.views[0].ySplit : 1;
+  ws.autoFilter = { from: { row: testata, column: 1 }, to: { row: testata + righe.length, column: colonne.length } };
+  return scaricaCartella(wb, `${nomeSicuro(nomeFile)}.xlsx`);
 }
 
 const C = {
@@ -84,11 +110,55 @@ const C = {
 };
 
 /**
+ * Le righe del documento sotto la fascia, su ogni pagina: canale e periodo per
+ * fine trasporto, dati fino al, e gli avvisi sui caricamenti in ambra. Chi
+ * genera e quando sta nel piede. Restituisce di quanto scendere (mm).
+ */
+function righeDelDocumento(doc, intest, { M, W, y }) {
+  const contesto = intest.righe.filter(r => r !== intest.generato).join('  ·  ');
+  let giu = 0;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  // Con piu' archivi la riga si allunga: va a capo invece di uscire dal foglio.
+  const scrivi = (testo, colore) => {
+    doc.setTextColor(...colore);
+    for (const linea of doc.splitTextToSize(perPdf(testo), W - 2 * M)) {
+      doc.text(linea, M, y + giu);
+      giu += 3.6;
+    }
+  };
+  if (contesto) scrivi(contesto, C.grigio);
+  for (const a of intest.avvisi || []) scrivi(a, C.ambra);
+  return giu;
+}
+
+/**
+ * Il piede di ogni pagina, scritto alla fine, quando si sa quante sono: chi ha
+ * generato il file e quando, e «Pagina x di N». Prima ogni pagina diceva solo il
+ * suo numero, e chi ne riceveva tre non sapeva se ne mancava una.
+ */
+function piedi(doc, intest, { M, W, H, sinistra = '' }) {
+  const n = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= n; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(...C.bordo);
+    doc.setLineWidth(0.2);
+    doc.line(M, H - 9, W - M, H - 9);
+    doc.setTextColor(...C.grigio);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    if (sinistra) doc.text(perPdf(sinistra), M, H - 5);
+    doc.text(perPdf(`${intest.generato}  ·  Pagina ${p} di ${n}`), W - M, H - 5, { align: 'right' });
+  }
+}
+
+/**
  * PDF A4 orizzontale: fascia di intestazione, tabella con intestazioni ripetute a
  * ogni pagina, righe alternate, totali e numero di pagina.
  * colore(riga) opzionale: 'ambra' o 'rosso' per evidenziare una riga.
  */
-export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottotitolo, colonne, righe, totali, colore }) {
+export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottotitolo, colonne, righe, totali, colore, documento }) {
+  const intest = await documentoDa({ titolo, sottotitolo, ...(documento || {}) });
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -96,9 +166,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
   const M = 10;
   const pesoTotale = colonne.reduce((s, c) => s + (c.peso || 1), 0);
   const larghezze = colonne.map(c => ((W - 2 * M) * (c.peso || 1)) / pesoTotale);
-  const esportato = new Date().toLocaleString('it-IT');
   let y = 0;
-  let pagina = 1;
 
   const testata = () => {
     doc.setFillColor(...C.scuro);
@@ -108,7 +176,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     doc.setTextColor(...C.bianco);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
-    doc.text(intestazione || 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE', M, 7.5);
+    doc.text(intestazione || ENTE, M, 7.5);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     doc.text(titolo, M, 15);
@@ -117,7 +185,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
       doc.setFontSize(8.5);
       doc.text(sottotitolo, W - M, 15, { align: 'right' });
     }
-    y = 27;
+    y = 27 + righeDelDocumento(doc, intest, { M, W, y: 25.5 });
   };
 
   // L'intestazione va a capo invece di essere tagliata: "Prezzo Unitario (Euro/TON)"
@@ -140,16 +208,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     y += alta;
   };
 
-  const piede = () => {
-    doc.setDrawColor(...C.bordo);
-    doc.setLineWidth(0.2);
-    doc.line(M, H - 9, W - M, H - 9);
-    doc.setTextColor(...C.grigio);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.text(`${formatIntero(righe.length)} ${righe.length === 1 ? 'riga' : 'righe'}`, M, H - 5);
-    doc.text(`Esportato il ${esportato}  ·  Pagina ${pagina}`, W - M, H - 5, { align: 'right' });
-  };
+  const conteggio = `${formatIntero(righe.length)} ${righe.length === 1 ? 'riga' : 'righe'}`;
 
   // Anche le celle vanno a capo, fino a tre righe: una nota lunga non si perde.
   const riga = (celle, { sfondo, grassetto, coloreTesto, altezza: minima = 6 } = {}) => {
@@ -161,9 +220,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     });
     const altezza = minima + (Math.max(1, ...testi.map(t => t.length)) - 1) * 3.3;
     if (y + altezza > H - 12) {
-      piede();
       doc.addPage();
-      pagina++;
       testata();
       intestazioni();
     }
@@ -205,7 +262,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     riga(colonne.map((c, i) => (i === 0 ? totali.etichetta : (totali.valori[i] !== undefined ? testoCella(totali.valori[i], c.tipo) : ''))),
       { sfondo: C.chiaro, grassetto: true, coloreTesto: C.scuro, altezza: 7 });
   }
-  piede();
+  piedi(doc, intest, { M, W, H, sinistra: conteggio });
   doc.save(`${nomeSicuro(nomeFile)}.pdf`);
 }
 
@@ -223,33 +280,27 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
  * Giacenze le note spiegano come si leggono i numeri e quel titolo diceva
  * un'altra cosa (09/10/2026).
  */
-export async function esportaSezioniPdf({ nomeFile, intestazione, titolo, sottotitolo, sezioni, riepilogo, note, titoloNote = 'Anomalie da guardare prima di pagare' }) {
+export async function esportaSezioniPdf({ nomeFile, intestazione, titolo, sottotitolo, sezioni, riepilogo, note, titoloNote = 'Anomalie da guardare prima di pagare', documento }) {
+  const intest = await documentoDa({ titolo, sottotitolo, ...(documento || {}) });
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const M = 10;
-  const esportato = new Date().toLocaleString('it-IT');
   let y = 0;
-  let pagina = 1;
 
   const testata = () => {
     doc.setFillColor(...C.scuro); doc.rect(0, 0, W, 20, 'F');
     doc.setFillColor(...C.medio); doc.rect(0, 20, W, 1.2, 'F');
     doc.setTextColor(...C.bianco);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
-    doc.text(intestazione || 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE', M, 7.5);
+    doc.text(intestazione || ENTE, M, 7.5);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
     doc.text(titolo, M, 15);
     if (sottotitolo) { doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.text(sottotitolo, W - M, 15, { align: 'right' }); }
-    y = 27;
+    y = 27 + righeDelDocumento(doc, intest, { M, W, y: 25.5 });
   };
-  const piede = () => {
-    doc.setDrawColor(...C.bordo); doc.setLineWidth(0.2); doc.line(M, H - 9, W - M, H - 9);
-    doc.setTextColor(...C.grigio); doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
-    doc.text(`Esportato il ${esportato}  ·  Pagina ${pagina}`, W - M, H - 5, { align: 'right' });
-  };
-  const nuovaPagina = () => { piede(); doc.addPage(); pagina++; testata(); };
+  const nuovaPagina = () => { doc.addPage(); testata(); };
 
   testata();
   if (riepilogo && riepilogo.length) {
@@ -321,6 +372,6 @@ export async function esportaSezioniPdf({ nomeFile, intestazione, titolo, sottot
       doc.text(righe, M, y + 3); y += righe.length * 3.8 + 1.2;
     }
   }
-  piede();
+  piedi(doc, intest, { M, W, H });
   doc.save(`${nomeSicuro(nomeFile)}.pdf`);
 }

@@ -1,4 +1,4 @@
-import { formattaPesi } from '@/lib/formatoExcel';
+import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella, FORMATI } from '@/lib/fogliProfessionali';
 
 // L'Excel del report dei conferimenti: le settimane in colonna, le tratte in riga,
 // e - quando e' stata chiesta - la quadratura con la fatturazione passiva in un
@@ -6,18 +6,37 @@ import { formattaPesi } from '@/lib/formatoExcel';
 //
 // Un file per canale, mai due canali nello stesso foglio (regola 3): il report da
 // cui nasce ne ha uno solo, e il nome del file lo dice.
+//
+// IL FILE SI MANDA AL FORNITORE, QUINDI SI VESTE (chiusura dell'audit,
+// 11/10/2026). Usciva da SheetJS, senza fascia ne' piede, e non diceva fino a che
+// giorno arrivavano i movimenti da cui nasce. Ora passa dal corredo comune
+// (fogliProfessionali.js): le stesse righe e le stesse colonne di prima, sotto il
+// blocco di testa del documento - canale, mese per fine trasporto, dati fino al,
+// generato il ... da ... - e col piede delle pagine.
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 const NOME_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const gg = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '');
 
-export async function scaricaExcelConferimenti(report, quadratura, titolo) {
-  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
+// L'archivio da cui nasce il report: le primarie del canale o le secondarie.
+// L'extra raccolta tiene raccolta e trasferimenti nelle sue schede.
+function archiviDel(report) {
+  if (report.canale === 'EXTRA_RACCOLTA') return ['ExtraRaccolta'];
+  if (report.tipo === 'secondaria') return ['Secondaria'];
+  return [report.canale === 'ACI' ? 'PrimariaAci' : 'PrimariaRete'];
+}
+
+/** L'Excel del report. opzioni.stato: lo stato dei dati gia' letto (le prove). */
+export async function scaricaExcelConferimenti(report, quadratura, titolo, opzioni = {}) {
   const canale = NOME_CANALE[report.canale] || report.canale;
   const tipo = report.tipo === 'secondaria' ? 'Secondarie' : 'Primarie';
   const colonnaOrigine = report.tipo === 'secondaria' ? 'Stoccaggio di origine' : 'Provincia di ritiro';
+  const periodo = `${MESI[report.mese - 1]} ${report.anno}`;
+  const doc = await documentoDa({
+    titolo: `${titolo || 'Conferimenti'} — ${tipo.toLowerCase()} ${canale}, ${periodo}`,
+    canale: report.canale, periodo, entita: archiviDel(report),
+    ...(opzioni.stato !== undefined ? { stato: opzioni.stato } : {}),
+  });
 
   const intestazioni = [
     colonnaOrigine, 'Destinazione', 'Trasportatore',
@@ -45,39 +64,57 @@ export async function scaricaExcelConferimenti(report, quadratura, titolo) {
   }
   nota.push([]);
 
-  const ws = XLSX.utils.aoa_to_sheet([...nota, intestazioni, ...righe]);
-  ws['!cols'] = [{ wch: 28 }, { wch: 28 }, { wch: 24 }, ...report.settimane.map(() => ({ wch: 14 })), { wch: 14 }, { wch: 11 }];
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Per settimana');
+  const { wb } = await nuovaCartella();
+  const settimana = [...nota, intestazioni, ...righe];
+  const ultimaColonna = intestazioni.length - 1;
+  foglioDaRighe(wb, 'Per settimana', {
+    doc, righe: settimana, testate: [nota.length],
+    stili: Object.fromEntries(nota.map((r, i) => [i, r.length ? (/^Restano fuori/.test(r[0]) ? 'avviso' : 'nota') : null]).filter(([, s]) => s)),
+    // i formulari sono un conteggio, non chili
+    formati: { [ultimaColonna]: FORMATI.intero },
+    larghezze: [28, 28, 24, ...report.settimane.map(() => 14), 14, 11],
+  });
 
-  const wsDest = XLSX.utils.aoa_to_sheet([
-    ['Destinazione', 'Tratte', 'Formulari', 'Totale kg'],
-    ...report.per_destinazione.map(d => [d.destinazione, d.tratte, d.formulari, d.kg]),
-  ]);
-  wsDest['!cols'] = [{ wch: 30 }, { wch: 10 }, { wch: 11 }, { wch: 14 }];
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsDest), 'Per destinazione');
+  foglioDaRighe(wb, 'Per destinazione', {
+    doc,
+    righe: [
+      ['Destinazione', 'Tratte', 'Formulari', 'Totale kg'],
+      ...report.per_destinazione.map(d => [d.destinazione, d.tratte, d.formulari, d.kg]),
+    ],
+    formati: { 1: FORMATI.intero, 2: FORMATI.intero },
+    larghezze: [30, 10, 11, 14],
+  });
 
   if (quadratura && quadratura.disponibile) {
-    const wsQ = XLSX.utils.aoa_to_sheet([
+    const testa = [
       [quadratura.quadra
         ? `Quadra con la fatturazione passiva: ${quadratura.totale_report_kg} kg su tutte le tratte.`
         : `${quadratura.n_difformi} tratte non quadrano con la fatturazione passiva.`],
       ['Si confrontano i chili, non gli euro. L\'importo della passiva e\' accanto solo per informazione: dipende anche dai viaggi e dalle tariffe.'],
       ['Lo scarto si dice e non si aggiusta.'],
       [],
-      [colonnaOrigine, 'Destinazione', 'Trasportatore', 'kg nel report', 'kg nella passiva', 'Scarto kg', 'Importo passiva', 'Unita', 'Nota'],
-      ...quadratura.voci.map(v => [
-        v.origine, v.destinazione, v.trasportatore,
-        v.kg_report, v.kg_passiva === null ? '' : v.kg_passiva,
-        v.scarto_kg === null ? '' : v.scarto_kg,
-        v.importo_passiva === null ? '' : v.importo_passiva,
-        v.unita_misura || '',
-        v.solo_report ? 'la passiva non la paga: di solito manca la tariffa' : v.solo_passiva ? 'sta solo nella passiva' : v.torna ? 'torna' : 'scarto da capire',
-      ]),
-    ]);
-    wsQ['!cols'] = [{ wch: 28 }, { wch: 28 }, { wch: 24 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 15 }, { wch: 10 }, { wch: 44 }];
-    XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsQ), 'Quadratura passiva');
+    ];
+    foglioDaRighe(wb, 'Quadratura passiva', {
+      doc,
+      righe: [
+        ...testa,
+        [colonnaOrigine, 'Destinazione', 'Trasportatore', 'kg nel report', 'kg nella passiva', 'Scarto kg', 'Importo passiva', 'Unita', 'Nota'],
+        ...quadratura.voci.map(v => [
+          v.origine, v.destinazione, v.trasportatore,
+          v.kg_report, v.kg_passiva === null ? '' : v.kg_passiva,
+          v.scarto_kg === null ? '' : v.scarto_kg,
+          v.importo_passiva === null ? '' : v.importo_passiva,
+          v.unita_misura || '',
+          v.solo_report ? 'la passiva non la paga: di solito manca la tariffa' : v.solo_passiva ? 'sta solo nella passiva' : v.torna ? 'torna' : 'scarto da capire',
+        ]),
+      ],
+      testate: [testa.length],
+      stili: { 0: quadratura.quadra ? 'nota' : 'avviso', 1: 'nota', 2: 'nota' },
+      formati: { 6: FORMATI.euro },
+      larghezze: [28, 28, 24, 14, 16, 12, 15, 10, 44],
+    });
   }
 
   const nome = `${titolo || 'Conferimenti'} ${canale} ${MESI[report.mese - 1]} ${report.anno}`.replace(/[\\/:*?"<>|]/g, '-');
-  XLSX.writeFile(wb, `${nome}.xlsx`);
+  return scaricaCartella(wb, `${nome}.xlsx`);
 }

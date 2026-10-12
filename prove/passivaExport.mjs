@@ -4,14 +4,14 @@
 // l'extra raccolta ai costi dell'intervento, le date obbligatorie.
 import { calcolaPassivaMese, indiceMesePassiva, quoteViaggioMisto } from '../base44/shared/passivaCalcolo.ts';
 import { eAci } from '../base44/shared/canaleSecondaria.ts';
+import { caricaLibPagine } from './dati/libPagine.mjs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
 
-// la libreria importa xlsx e l'alias @: qui si prova la sola costruzione delle righe
-const sorgente = (await import('node:fs')).readFileSync(new URL('../src/lib/passivaExport.js', import.meta.url), 'utf8')
-  .replace("import * as XLSX from 'xlsx';", 'const XLSX = null;');
-const { righePassiva } = await import('data:text/javascript;base64,' + Buffer.from(sorgente).toString('base64'));
+// la libreria importa il corredo dei fogli con l'alias @: qui si prova la sola
+// costruzione delle righe, e caricaLibPagine risolve l'alias (11/10/2026).
+const { righePassiva } = await caricaLibPagine('lib/passivaExport');
 
 const base = { stato: 'terminato', cer: '160103', classe: 'A' };
 const dati = {

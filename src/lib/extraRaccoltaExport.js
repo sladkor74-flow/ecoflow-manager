@@ -1,6 +1,14 @@
 // Esportazione Excel e PDF per Extra Raccolta — formato amministrazione.
-import { formattaPesi } from '@/lib/formatoExcel';
+//
+// I DUE FILE SI VESTONO E DICONO LA DATA DEI DATI (chiusura dell'audit,
+// 11/10/2026). L'Excel usciva da SheetJS senza fascia ne' piede, e il PDF era
+// una griglia scritta a mano, senza intestazioni in negativo ne' numero di
+// pagina. Ora l'Excel passa dal corredo comune (fogliProfessionali.js) con le
+// stesse righe di prima, cella per cella, e il PDF da esportaSezioniPdf, come la
+// passiva: tutti e due col blocco di testa - canale, mese per fine trasporto,
+// fino a che giorno arrivano le schede, generato il ... da ....
 import { cifreItaliane } from '@/lib/formatoSoldi';
+import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella, FORMATI } from '@/lib/fogliProfessionali';
 import { giornoRoma } from '@/lib/giornoItaliano';
 import { calcExtraRaccolta, totaleRiga, aggregaPerProduttore, prezzoAttivoExtra, avvisoPesoMancante } from '@/lib/extraRaccoltaCalc';
 
@@ -26,18 +34,18 @@ const MESI_UPPER = {
 
 const r2 = (n) => Math.round(n * 100) / 100;
 
+// La data nella cella e' il GIORNO ITALIANO, scritto come mezzanotte UTC: Excel
+// mostra quel giorno qualunque sia il fuso del computer. Con l'istante nudo un
+// trasporto finito alle 23:30 UTC del 30 giugno, in Italia il 1° luglio, usciva
+// al 30 giugno (11/10/2026, la stessa regola di esportaTabella.js).
 function toDate(v) {
-  if (!v) return null;
-  try { const d = new Date(v); return isNaN(d.getTime()) ? null : d; } catch { return null; }
+  const g = giornoRoma(v);
+  return g ? new Date(`${g}T00:00:00.000Z`) : null;
 }
 
-// Numeri e date nel PDF all'italiana: punto per le migliaia, virgola per i
-// decimali, euro con due, il giorno italiano gg/mm/aaaa (11/10/2026). Prima il
-// PDF scriveva String(numero): «404» per 404,00 euro e «3000» per 3.000 kg.
-const euroPdf = (v) => cifreItaliane(v, 2, 2);
-const prezzoPdf = (v) => cifreItaliane(v, 2, 4);
+// Numeri all'italiana nel PDF: punto per le migliaia, virgola per i decimali.
+// Un peso che manca resta «—», non 0.
 const kgPdf = (v) => (v === null || v === undefined ? '—' : cifreItaliane(v, 0, 0));
-const giornoPdf = (v) => { const g = giornoRoma(v); return g ? g.split('-').reverse().join('/') : ''; };
 
 /**
  * I NUMERI DEL FILE, CALCOLATI UNA VOLTA PER EXCEL E PDF (chiusura dell'audit,
@@ -89,9 +97,19 @@ export function datiExportExtra(records, contesto) {
 
 const TITOLO_SENZA_PESO = 'DA SISTEMARE: interventi terminati senza peso effettivo, fuori dalla fattura e dal totale imponibile';
 
-export async function exportExtraRaccoltaExcel(records, mese, anno, contesto) {
-  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
-  const XLSX = await import('xlsx');
+// Il blocco di testa dei due file: canale, mese per fine trasporto, fino a che
+// giorno arrivano le schede dell'extra raccolta. stato: quello gia' letto (le prove).
+function documentoExtra(mese, anno, stato, comeDocumento = true) {
+  const opzioni = {
+    titolo: `Fatturazione extra raccolta — ${mese} ${anno}`,
+    canale: 'EXTRA_RACCOLTA', periodo: `${mese} ${anno}`, entita: ['ExtraRaccolta'],
+    ...(stato !== undefined ? { stato } : {}),
+  };
+  return comeDocumento ? documentoDa(opzioni) : opzioni;
+}
+
+export async function exportExtraRaccoltaExcel(records, mese, anno, contesto, opzioni = {}) {
+  const doc = await documentoExtra(mese, anno, opzioni.stato);
   const sheetName = `${MESI_UPPER[mese] || String(mese).toUpperCase()} ${anno}`;
   const dati = datiExportExtra(records, contesto);
   const wsData = [];
@@ -123,15 +141,18 @@ export async function exportExtraRaccoltaExcel(records, mese, anno, contesto) {
 
   // === Area 2: riepilogo ===
   wsData.push([]);
+  const iRiepilogo = wsData.length;
   wsData.push(["TOTALE QUANTITA' (kg)", dati.totale_kg]);
   wsData.push(['Sovracosto Raccolta', dati.sovracosto_raccolta]);
   wsData.push(['Sovracosto Trasporto', dati.sovracosto_trasporto]);
   wsData.push(['Sovracosto Trattamento', dati.sovracosto_trattamento]);
   wsData.push(['Totale imponibile', dati.totale_imponibile]);
+  const avvisi = [];
   if (dati.senza_peso.length) {
     wsData.push([]);
+    avvisi.push(wsData.length);
     wsData.push([TITOLO_SENZA_PESO]);
-    for (const s of dati.senza_peso) wsData.push([s.numero_fir, s.avviso]);
+    for (const s of dati.senza_peso) { avvisi.push(wsData.length); wsData.push([s.numero_fir, s.avviso]); }
   }
 
   // === Area 3: analisi margine per produttore ===
@@ -153,6 +174,7 @@ export async function exportExtraRaccoltaExcel(records, mese, anno, contesto) {
   // finisce nel totale imponibile della fatturazione attiva, e un costo che
   // paghiamo noi lo gonfierebbe.
   wsData.push([]);
+  const iAnalisi = wsData.length;
   wsData.push(['PRODUTTORE', 'costi aggiuntivi', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'sovracosto raccoglitore', 'sovracosto impianto', 'costo totale', 'ricavi', 'margine']);
 
   const byProd = dati.per_produttore;
@@ -183,132 +205,85 @@ export async function exportExtraRaccoltaExcel(records, mese, anno, contesto) {
   wsData.push([]);
   wsData.push(['Margine % complessivo', `${cifreItaliane(margPercTot, 2, 2)}%`]);
 
-  const ws = XLSX.utils.aoa_to_sheet(wsData, { cellDates: true });
-
-  // Formato date per colonne E (4) e F (5)
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  for (let R = range.s.r + 1; R <= range.e.r; R++) {
-    for (const C of [4, 5]) {
-      const addr = XLSX.utils.encode_cell({ r: R, c: C });
-      if (ws[addr] && ws[addr].t === 'd') ws[addr].z = 'dd/mm/yyyy';
-    }
-  }
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), sheetName);
-  XLSX.writeFile(wb, `SMOCO-Fatturazione EXTRA RACCOLTA ${mese} ${anno}.xlsx`);
+  // I formati, area per area: negli interventi chili, prezzo a tonnellata e
+  // importo; nel riepilogo i chili del totale e gli euro dei sovracosti; nell'analisi
+  // tutti euro. Prima i formati si deducevano dai titoli della prima tabella e
+  // valevano per tutto il foglio: nell'analisi il «sovracosto impianto» usciva
+  // coi chili interi (12,50 € si leggeva 13).
+  const formati = (c, riga, i) => {
+    if (i < iRiepilogo) return { 8: FORMATI.kg, 9: FORMATI.prezzoLibero, 10: FORMATI.euro }[c] || null;
+    if (i < iAnalisi) return c === 1 ? (/\(kg\)/.test(String(riga[0])) ? FORMATI.kg : FORMATI.euro) : null;
+    return c >= 1 ? FORMATI.euro : null;
+  };
+  const { wb } = await nuovaCartella();
+  foglioDaRighe(wb, sheetName, {
+    doc, righe: wsData, testate: [0, iAnalisi], formati,
+    stili: { ...Object.fromEntries(avvisi.map(i => [i, 'avviso'])), [wsData.length - 1]: 'gruppo' },
+    larghezze: [24, 30, 28, 28, 14, 14, 14, 18, 14, 14, 14, 14],
+  });
+  return scaricaCartella(wb, `SMOCO-Fatturazione EXTRA RACCOLTA ${mese} ${anno}.xlsx`);
 }
 
-export async function exportExtraRaccoltaPDF(records, mese, anno, contesto) {
-  // jspdf si carica quando si stampa, non all'apertura della pagina.
-  const { jsPDF } = await import('jspdf');
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+export async function exportExtraRaccoltaPDF(records, mese, anno, contesto, opzioni = {}) {
   const dati = datiExportExtra(records, contesto);
-
-  doc.setFontSize(13);
-  doc.text(`SMOCO - Fatturazione EXTRA RACCOLTA ${mese} ${anno}`, 14, 12);
-
-  // === Area 1: interventi ===
-  doc.setFontSize(7);
-  const H1 = ['Nr. FIR', 'PRODUTTORE', 'TRASPORTATORE', 'DESTINATARIO', 'DT INIZIO', 'DT FINE', 'CER', 'TIPOLOGIA', 'Q.TA (kg)', 'PREZZO', 'TOTALE'];
-  const W1 = [24, 38, 38, 38, 20, 20, 16, 28, 20, 18, 20];
-  let y = 20;
-
-  doc.setFont(undefined, 'bold');
-  let x = 14;
-  H1.forEach((h, i) => { doc.text(h, x, y); x += W1[i]; });
-  doc.setFont(undefined, 'normal');
-  y += 4.5;
-
-  for (const riga of dati.righe) {
-    if (y > 195) { doc.addPage(); y = 15; }
-    const r = riga.record;
-    x = 14;
-    const row = [
-      String(r.numero_fir || '').substring(0, 14),
-      String(r.produttore || '').substring(0, 24),
-      String(r.trasportatore || '').substring(0, 24),
-      String(r.destinazione || '').substring(0, 24),
-      giornoPdf(r.trasporto_iniziato_il), giornoPdf(r.trasporto_finito_il),
-      String(r.cer || '160103').substring(0, 10),
-      String(r.tipologia_trasporto || '').substring(0, 18),
-      kgPdf(riga.kg),
-      prezzoPdf(riga.prezzo),
-      euroPdf(riga.totale),
-    ];
-    row.forEach((cell, i) => { doc.text(cell, x, y); x += W1[i]; });
-    y += 4.5;
-  }
-
-  // === Area 2: riepilogo ===
-  y += 3;
-  doc.setFont(undefined, 'bold');
-  doc.text('RIEPILOGO', 14, y); y += 5;
-  doc.setFont(undefined, 'normal');
-  doc.text(`Totale quantita' (kg): ${kgPdf(dati.totale_kg)}`, 14, y); y += 5;
-  doc.text(`Sovracosto Raccolta: ${euroPdf(dati.sovracosto_raccolta)}`, 14, y); y += 5;
-  doc.text(`Sovracosto Trasporto: ${euroPdf(dati.sovracosto_trasporto)}`, 14, y); y += 5;
-  doc.text(`Sovracosto Trattamento: ${euroPdf(dati.sovracosto_trattamento)}`, 14, y); y += 5;
-  doc.text(`Totale imponibile: ${euroPdf(dati.totale_imponibile)}`, 14, y); y += 8;
-  if (dati.senza_peso.length) {
-    if (y > 185) { doc.addPage(); y = 15; }
-    doc.setFont(undefined, 'bold');
-    doc.text(TITOLO_SENZA_PESO, 14, y); y += 5;
-    doc.setFont(undefined, 'normal');
-    for (const s of dati.senza_peso) {
-      if (y > 195) { doc.addPage(); y = 15; }
-      doc.text(s.avviso, 14, y, { maxWidth: 265 });
-      y += 8;
-    }
-    y += 2;
-  }
-
-  // === Area 3: analisi margine ===
-  if (y > 170) { doc.addPage(); y = 15; }
-  doc.setFont(undefined, 'bold');
-  doc.text('ANALISI MARGINE', 14, y); y += 5;
-  doc.setFont(undefined, 'normal');
-
-  // Le stesse voci del foglio Excel: il trasporto a viaggio e i due sovracosti
-  // pagati, al raccoglitore e all'impianto, entrano tutti nel costo totale e
-  // quindi vanno mostrati anche qui. Le larghezze sono state strette per far
-  // posto alle due colonne nuove, come si e' fatto per il trasporto: le
-  // intestazioni sono abbreviate ma dicono chi incassa il sovracosto, perche'
-  // «sovr. raccogl.» e «sovr. impianto» non si confondano con i sovracosti del
-  // ricavo, che qui non ci sono.
-  const H2 = ['PRODUTTORE', 'costi agg.', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'sovr. raccogl.', 'sovr. impianto', 'costo tot.', 'ricavi', 'margine'];
-  const W2 = [32, 19, 19, 19, 21, 17, 19, 23, 23, 20, 19, 19];
-  x = 14;
-  H2.forEach((h, i) => { doc.text(h, x, y); x += W2[i]; });
-  y += 4.5;
-
+  // Le stesse tre aree dell'Excel, con la veste del PDF della passiva: il
+  // riepilogo nei riquadri in alto, gli interventi, l'analisi per produttore e,
+  // in coda, le schede senza peso da sistemare.
   const byProd = dati.per_produttore;
-  let tCA = 0, tR = 0, tS = 0, tTr = 0, tP = 0, tTrasp = 0, tSRac = 0, tSImp = 0, tCT = 0, tRi = 0, tM = 0;
-
-  for (const [p, v] of Object.entries(byProd)) {
-    if (y > 195) { doc.addPage(); y = 15; }
-    x = 14;
-    const row = [
-      String(p).substring(0, 20),
-      euroPdf(v.costi_aggiuntivi), euroPdf(v.raccolta), euroPdf(v.stoccaggio), euroPdf(v.trattamento),
-      euroPdf(v.pulizia), euroPdf(v.trasporto), euroPdf(v.sovracosto_raccoglitore), euroPdf(v.sovracosto_impianto),
-      euroPdf(v.costo_totale), euroPdf(v.ricavi), euroPdf(v.margine),
-    ];
-    row.forEach((cell, i) => { doc.text(String(cell), x, y); x += W2[i]; });
-    y += 4.5;
-    tCA += v.costi_aggiuntivi; tR += v.raccolta; tS += v.stoccaggio; tTr += v.trattamento;
-    tP += v.pulizia; tTrasp += v.trasporto; tSRac += v.sovracosto_raccoglitore; tSImp += v.sovracosto_impianto;
-    tCT += v.costo_totale; tRi += v.ricavi; tM += v.margine;
-  }
-
-  x = 14;
-  doc.setFont(undefined, 'bold');
-  ['TOTALE', euroPdf(tCA), euroPdf(tR), euroPdf(tS), euroPdf(tTr), euroPdf(tP), euroPdf(tTrasp), euroPdf(tSRac), euroPdf(tSImp), euroPdf(tCT), euroPdf(tRi), euroPdf(tM)].forEach((cell, i) => {
-    doc.text(String(cell), x, y); x += W2[i];
+  const tot = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, trasporto: 0, sovracosto_raccoglitore: 0, sovracosto_impianto: 0, costo_totale: 0, ricavi: 0, margine: 0 };
+  const voci = Object.keys(tot);
+  const analisi = Object.entries(byProd).map(([p, v]) => {
+    for (const k of voci) tot[k] += v[k];
+    return { celle: [p, ...voci.map(k => r2(v[k]))] };
   });
-  y += 6;
-  const mPerc = tRi !== 0 ? r2((tM / tRi) * 100) : 0;
-  doc.text(`Margine % complessivo: ${cifreItaliane(mPerc, 2, 2)}%`, 14, y);
+  analisi.push({ stile: 'totale', celle: ['TOTALE', ...voci.map(k => r2(tot[k]))] });
+  const margPercTot = tot.ricavi !== 0 ? r2((tot.margine / tot.ricavi) * 100) : 0;
+  analisi.push({ stile: 'gruppo', celle: ['Margine % complessivo', ...voci.map(() => null).slice(1), `${cifreItaliane(margPercTot, 2, 2)}%`] });
 
-  doc.save(`SMOCO-Fatturazione EXTRA RACCOLTA ${mese} ${anno}.pdf`);
+  const { esportaSezioniPdf } = await import('@/lib/esportaTabella');
+  await esportaSezioniPdf({
+    nomeFile: `SMOCO-Fatturazione EXTRA RACCOLTA ${mese} ${anno}`,
+    intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE  ·  EXTRA RACCOLTA',
+    titolo: `Fatturazione extra raccolta — ${mese} ${anno}`,
+    sottotitolo: `${dati.righe.length} ${dati.righe.length === 1 ? 'intervento' : 'interventi'}`,
+    documento: documentoExtra(mese, anno, opzioni.stato, false),
+    riepilogo: [
+      { etichetta: "Totale quantita' (kg)", valore: kgPdf(dati.totale_kg) },
+      { etichetta: 'Sovracosto raccolta', valore: dati.sovracosto_raccolta, tipo: 'euro' },
+      { etichetta: 'Sovracosto trasporto', valore: dati.sovracosto_trasporto, tipo: 'euro' },
+      { etichetta: 'Sovracosto trattamento', valore: dati.sovracosto_trattamento, tipo: 'euro' },
+      { etichetta: 'Totale imponibile', valore: dati.totale_imponibile, tipo: 'euro' },
+    ],
+    sezioni: [
+      {
+        titolo: 'INTERVENTI',
+        // Il prezzo tiene da due a quattro decimali, come l'Excel (prezzoLibero):
+        // col tipo 'euro' un prezzo al chilo da 0,202 usciva «0,20 €» e il PDF e
+        // l'Excel dello stesso mese dicevano due prezzi (revisione delle
+        // migliorie, 11/10/2026).
+        colonne: [
+          { titolo: 'Nr. FIR', tipo: 'testo', peso: 1.2 }, { titolo: 'PRODUTTORE', tipo: 'testo', peso: 1.8 }, { titolo: 'TRASPORTATORE', tipo: 'testo', peso: 1.6 },
+          { titolo: 'DESTINATARIO', tipo: 'testo', peso: 1.6 }, { titolo: 'DATA INIZIO TRASPORTO', tipo: 'data', peso: 0.9 }, { titolo: 'DATA FINE TRASPORTO', tipo: 'data', peso: 0.9 },
+          { titolo: 'CER', tipo: 'testo', peso: 0.6 }, { titolo: 'TIPOLOGIA TRASPORTO', tipo: 'testo', peso: 1.1 }, { titolo: "QUANTITA' (kg)", tipo: 'kg', peso: 0.8 },
+          { titolo: 'PREZZO (Euro/ton)', tipo: 'prezzoLibero', peso: 0.8 }, { titolo: 'TOTALE (Euro)', tipo: 'euro', peso: 0.9 },
+        ],
+        righe: dati.righe.map(x => {
+          const r = x.record;
+          // Un peso che manca non e' zero: «—», come nella pagina e nell'Excel.
+          return { celle: [r.numero_fir || '', r.produttore || '', r.trasportatore || '', r.destinazione || '', r.trasporto_iniziato_il || null, r.trasporto_finito_il || null, r.cer || '160103', r.tipologia_trasporto || '', x.kg === null ? '—' : x.kg, x.prezzo, x.totale] };
+        }),
+      },
+      {
+        titolo: 'ANALISI MARGINE PER PRODUTTORE',
+        colonne: [
+          { titolo: 'PRODUTTORE', tipo: 'testo', peso: 2 },
+          ...['costi agg.', 'raccolta', 'stoccaggio', 'trattamento', 'pulizia', 'trasporto', 'sovr. raccogl.', 'sovr. impianto', 'costo tot.', 'ricavi', 'margine'].map(t => ({ titolo: t, tipo: 'euro', peso: 1 })),
+        ],
+        righe: analisi,
+      },
+    ],
+    note: dati.senza_peso.map(x => x.avviso),
+    titoloNote: TITOLO_SENZA_PESO,
+  });
 }

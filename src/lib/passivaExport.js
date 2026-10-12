@@ -6,6 +6,15 @@
 // totale e, sotto, il dettaglio con l'ambito, le tonnellate, il prezzo e l'importo.
 // I numeri sono quelli a video: l'export non ricalcola niente. La struttura si
 // costruisce in un punto solo (sezioniPassiva): Excel e PDF dicono le stesse cose.
+//
+// IL FOGLIO SI VESTE E DICE LA DATA DEI DATI (chiusura dell'audit, 11/10/2026).
+// L'Excel usciva da SheetJS, senza fascia ne' piede, e nessuno dei due file
+// diceva fino a che giorno arrivavano le primarie e le secondarie da cui nasce
+// il conto. Ora l'Excel passa dal corredo comune (fogliProfessionali.js) con le
+// stesse righe di prima, cella per cella, sotto il blocco di testa del
+// documento; il PDF prende lo stesso blocco da esportaTabella.js.
+import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella } from '@/lib/fogliProfessionali';
+
 const NOMI = { RETE: 'RETE', ACI: 'ACI', EXTRA_RACCOLTA: 'EXTRA RACCOLTA' };
 const NOMI_TITOLO = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const EER = 160103;
@@ -98,51 +107,73 @@ const FORMATI = {
   secondarie: { 3: '#,##0.00#', 5: '#,##0.00', 6: '#,##0', 7: '#,##0.00' },
 };
 
-/** Le righe del foglio Excel, dalle stesse sezioni del PDF. tipi[i] dice il blocco della riga i. */
-export function righePassiva(result, tipi = []) {
+/**
+ * Le righe del foglio Excel, dalle stesse sezioni del PDF. tipi[i] dice il
+ * blocco della riga i; stili[i], se si passa, come si veste: 'testata' per le
+ * intestazioni dei blocchi, 'gruppo' per il fornitore, 'totale', 'avviso'.
+ */
+export function righePassiva(result, tipi = [], stili = []) {
   const aoa = [];
   let tipo = 'testa';
-  const riga = (r) => { tipi.push(tipo); aoa.push(r); };
-  riga([NOMI[result.tipologia] || result.tipologia, `${result.mese} ${result.anno}`, null, null, null, 'TOTALE', r2(result.totali.totale_complessivo)]);
+  const riga = (r, stile = null) => { tipi.push(tipo); stili.push(stile); aoa.push(r); };
+  riga([NOMI[result.tipologia] || result.tipologia, `${result.mese} ${result.anno}`, null, null, null, 'TOTALE', r2(result.totali.totale_complessivo)], 'totale');
   riga([]);
   for (const s of sezioniPassiva(result)) {
     tipo = s.tipo;
-    riga(s.colonne.map(c => c.titolo));
-    for (const r of s.righe) riga(r.celle);
+    riga(s.colonne.map(c => c.titolo), 'testata');
+    for (const r of s.righe) riga(r.celle, r.stile || null);
     riga([]);
   }
   tipo = 'testa';
   if ((result.anomalie || []).length) {
-    riga(['ANOMALIE DA GUARDARE PRIMA DI PAGARE']);
-    for (const a of result.anomalie) riga([a.descrizione, a.tonnellate ? r3(a.tonnellate) : null]);
+    riga(['ANOMALIE DA GUARDARE PRIMA DI PAGARE'], 'avviso');
+    for (const a of result.anomalie) riga([a.descrizione, a.tonnellate ? r3(a.tonnellate) : null], 'avviso');
   }
   return aoa;
 }
 
 const nomeFile = (result, estensione) => `Fatturazione_passiva_${result.tipologia}_${result.mese}_${result.anno}${estensione ? `.${estensione}` : ''}`;
 
-export async function exportFatturazionePassiva(result) {
-  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
-  const XLSX = await import('xlsx');
-  const tipi = [];
-  const ws = XLSX.utils.aoa_to_sheet(righePassiva(result, tipi));
-  tipi.forEach((t, R) => {
-    for (const [C, z] of Object.entries(FORMATI[t] || {})) {
-      const c = ws[XLSX.utils.encode_cell({ r: R, c: Number(C) })];
-      if (c && c.t === 'n') c.z = z;
-    }
+// Gli archivi da cui nasce il conto di un canale: le primarie del canale e le
+// secondarie (il trasporto); l'extra raccolta le sole sue schede.
+const ARCHIVI_PASSIVA = { RETE: ['PrimariaRete', 'Secondaria'], ACI: ['PrimariaAci', 'Secondaria'], EXTRA_RACCOLTA: ['ExtraRaccolta'] };
+
+/** Il blocco di testa del documento di un canale (canale, mese per fine trasporto, dati fino al). */
+function documentoPassiva(result, stato) {
+  return {
+    canale: result.tipologia, periodo: `${result.mese} ${result.anno}`,
+    entita: ARCHIVI_PASSIVA[result.tipologia] || [],
+    ...(stato !== undefined ? { stato } : {}),
+  };
+}
+
+/** L'Excel della passiva di un canale. opzioni.stato: lo stato dei dati gia' letto (le prove). */
+export async function exportFatturazionePassiva(result, opzioni = {}) {
+  const doc = await documentoDa({
+    titolo: `Fatturazione passiva ${NOMI_TITOLO[result.tipologia] || result.tipologia} — ${result.mese} ${result.anno}`,
+    sottotitolo: 'Costi verso i fornitori, per prestazione',
+    ...documentoPassiva(result, opzioni.stato),
   });
-  ws['!cols'] = [{ wch: 46 }, { wch: 26 }, { wch: 24 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 28 }, { wch: 60 }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, NOMI[result.tipologia] || 'Passiva');
-  XLSX.writeFile(wb, nomeFile(result, 'xlsx'));
-  return nomeFile(result, 'xlsx');
+  const tipi = [];
+  const stili = [];
+  const righe = righePassiva(result, tipi, stili);
+  const { wb } = await nuovaCartella();
+  foglioDaRighe(wb, NOMI[result.tipologia] || 'Passiva', {
+    doc, righe,
+    testate: stili.map((s, i) => (s === 'testata' ? i : -1)).filter(i => i >= 0),
+    stili: Object.fromEntries(stili.map((s, i) => [i, s]).filter(([, s]) => s)),
+    // il formato lo decide il blocco della riga, come prima: tonnellate, euro, viaggi
+    formati: (c, _r, i) => (FORMATI[tipi[i]] || {})[c] || null,
+    larghezze: [46, 26, 24, 12, 16, 14, 14, 14, 28, 60],
+  });
+  return scaricaCartella(wb, nomeFile(result, 'xlsx'));
 }
 
 // Lo stesso report in PDF: stesse sezioni, stesse righe, stessi totali
-export async function exportFatturazionePassivaPdf(result) {
+export async function exportFatturazionePassivaPdf(result, opzioni = {}) {
   const { esportaSezioniPdf } = await import('@/lib/esportaTabella');
   await esportaSezioniPdf({
+    documento: documentoPassiva(result, opzioni.stato),
     nomeFile: nomeFile(result),
     intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE  ·  FATTURAZIONE PASSIVA',
     titolo: `Fatturazione passiva ${NOMI_TITOLO[result.tipologia] || result.tipologia} — ${result.mese} ${result.anno}`,

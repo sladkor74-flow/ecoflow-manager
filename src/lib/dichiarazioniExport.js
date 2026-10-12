@@ -2,6 +2,7 @@
 // mese per mese, uno con il dettaglio dei materiali e uno con la quadratura.
 import { MESI, materialiDi, statoDichiarazione, caricatoDelMese, CANALI } from '@/lib/dichiarazioniImpianti';
 import { INTESTAZIONE_DATE, righeExcelDate } from '@/components/giacenze/DateDaSistemare';
+import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella } from '@/lib/fogliProfessionali';
 
 const nomeCanale = (f) => {
   const c = CANALI.find(x => x.chiave === f.canale);
@@ -11,10 +12,31 @@ const nomeCanale = (f) => {
 const mig = (v) => String(Math.round(Number(v) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const STATO_PAROLE = { nessuna: '', non_dovuta: 'non dovuta', solo_metalli: 'solo metalli ferrosi', inserita: 'inserita', ricevuta: 'in mano', caricata: 'caricata a portale' };
 
-export async function esportaDichiarazioni(dati) {
+// Gli archivi che il riepilogo delle dichiarazioni legge: i movimenti dei tre
+// canali, la fotografia del portale e il report delle dichiarazioni.
+const ARCHIVI_DICHIARAZIONI = ['PrimariaRete', 'PrimariaAci', 'Secondaria', 'Terziaria', 'ExtraRaccolta', 'OrdineNonDichiarato', 'DichiarazioneTrattamento'];
+
+/**
+ * IL FILE SI VESTE E DICE LA DATA DEI DATI (chiusura dell'audit, 11/10/2026).
+ * Usciva da SheetJS, senza fascia ne' piede; ora ogni foglio passa dal corredo
+ * comune (fogliProfessionali.js) con le stesse righe di prima, sotto il blocco
+ * di testa: l'anno coi suoi due orologi, fino a che giorno arrivano i movimenti, la
+ * fotografia del portale e il report delle dichiarazioni, generato il ... da
+ * .... I canali restano su righe loro. opzioni.stato: lo stato dei dati gia'
+ * letto (le prove).
+ */
+export async function esportaDichiarazioni(dati, opzioni = {}) {
   if (!dati) return;
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
+  const doc = await documentoDa({
+    titolo: `Dichiarazioni impianti ${dati.anno}`,
+    // Due orologi, e la testa li dice tutti e due: il conferito e cio' che resta
+    // stanno nel mese della fine trasporto, il dichiarato nel mese in cui e'
+    // caricato a portale (per un R1 il mese della nave).
+    sottotitolo: 'conferito per fine trasporto, dichiarato nel mese del caricamento a portale  ·  un canale per riga, mai sommati',
+    periodo: `Anno ${dati.anno}`, perFineTrasporto: false, entita: ARCHIVI_DICHIARAZIONI,
+    ...(opzioni.stato !== undefined ? { stato: opzioni.stato } : {}),
+  });
+  const { wb } = await nuovaCartella();
 
   // Due righe per flusso, come a video (06/10/2026): quello che in quel mese e'
   // stato dichiarato a portale e quello che in quel mese e' entrato. Il
@@ -150,19 +172,15 @@ export async function esportaDichiarazioni(dati) {
     }
   }
 
+  // Ogni foglio: la prima riga e' l'intestazione, i formati sono quelli detti
+  // colonna per colonna (le altre colonne restano come sono: un conteggio non
+  // si legge come un peso).
   const aggiungi = (nome, righe, formati) => {
-    const ws = XLSX.utils.aoa_to_sheet(righe);
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const formato = formati && formati[C];
-      if (!formato) continue;
-      for (let R = 1; R <= range.e.r; R++) {
-        const cella = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-        if (cella && cella.t === 'n') cella.z = formato;
-      }
-    }
-    ws['!cols'] = righe[0].map(h => ({ wch: Math.min(28, Math.max(11, String(h).length + 2)) }));
-    XLSX.utils.book_append_sheet(wb, ws, nome);
+    foglioDaRighe(wb, nome, {
+      doc, righe,
+      formati: (c) => (formati && formati[c]) || null,
+      larghezze: righe[0].map(h => Math.min(28, Math.max(11, String(h).length + 2))),
+    });
   };
   // Tonnellate con due decimali, tre se i kg non sono tondi (come formattaPesi);
   // chilogrammi interi. Con '#,##0.00' 12,345 t usciva 12,35.
@@ -177,5 +195,5 @@ export async function esportaDichiarazioni(dati) {
   if (date.length > 1) aggiungi('Date da sistemare', date, { 6: '#,##0' });
   if (senzaGiorno.length > 1) aggiungi('Carichi senza giorno', senzaGiorno, { 4: '#,##0' });
 
-  XLSX.writeFile(wb, `Dichiarazioni impianti ${dati.anno}.xlsx`);
+  return scaricaCartella(wb, `Dichiarazioni impianti ${dati.anno}.xlsx`);
 }

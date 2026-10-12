@@ -1,5 +1,5 @@
-import { formattaPesi } from '@/lib/formatoExcel';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella, FORMATI } from '@/lib/fogliProfessionali';
 import { testoFormulario, testoCollocato } from '@/lib/giacenzeDaDichiarareExport';
 import { INTESTAZIONE_DATE, righeExcelDate } from '@/components/giacenze/DateDaSistemare';
 
@@ -18,11 +18,29 @@ function fmtData(v) {
   return g ? g.split('-').reverse().join('/') : '';
 }
 
-// Export complessivo: un foglio per ciascuna delle quattro schede.
-export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
-  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
+// Gli archivi che le giacenze leggono: i movimenti dei tre canali, la
+// fotografia del portale e il report delle dichiarazioni.
+const ARCHIVI_GIACENZE = ['PrimariaRete', 'PrimariaAci', 'Secondaria', 'Terziaria', 'ExtraRaccolta', 'OrdineNonDichiarato', 'DichiarazioneTrattamento'];
+
+/**
+ * Export complessivo: un foglio per ciascuna delle schede.
+ *
+ * IL FILE SI VESTE E DICE LA DATA DEI DATI (chiusura dell'audit, 11/10/2026).
+ * Usciva da SheetJS, senza fascia ne' piede, e non diceva fino a che giorno
+ * arrivavano i movimenti e la fotografia del portale. Ora ogni foglio passa dal
+ * corredo comune (fogliProfessionali.js) con le stesse righe di prima, sotto il
+ * blocco di testa: anno per fine trasporto, dati fino al di ogni archivio,
+ * generato il ... da .... I canali restano in colonne loro, mai sommati, e il
+ * blocco lo dice. opzioni.stato: lo stato dei dati gia' letto (le prove).
+ */
+export async function exportGiacenzeAllExcel(data, ordiniData, anno, opzioni = {}) {
+  const doc = await documentoDa({
+    titolo: `Giacenze ${anno}`,
+    sottotitolo: 'rete, ACI ed extra raccolta in colonne separate, mai sommate',
+    periodo: `Anno ${anno}`, entita: ARCHIVI_GIACENZE,
+    ...(opzioni.stato !== undefined ? { stato: opzioni.stato } : {}),
+  });
+  const { wb } = await nuovaCartella();
 
   // --- Foglio 1: Situazione ---
   // Giacenza per classe in kg, come nel portale Ecotyre. Una colonna per canale:
@@ -56,9 +74,11 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   const dt = data.totali.date_da_sistemare || {};
   const testoDateTotali = Object.entries(dt).filter(([, v]) => v && v.n).map(([c, v]) => `${NOMI_CANALE[c] || c} ${v.n}${v.senza_fine ? ` (${v.senza_fine} senza fine trasporto)` : ''}`).join(' · ');
   sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, data.totali.giacenza_aci_t || 0, data.totali.giacenza_extra_t || 0, ...classi(data.totali), '', '', data.totali.in_attesa_dichiarazione_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '', testoDateTotali]);
-  const ws1 = XLSX.utils.aoa_to_sheet([sitHeaders, ...sitRows]);
-  ws1['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 22 }, { wch: 16 }, { wch: 24 }, ...CLASSI.map(() => ({ wch: 11 })), { wch: 20 }, { wch: 18 }, { wch: 24 }, { wch: 18 }, { wch: 16 }, { wch: 20 }, { wch: 40 }];
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws1), 'Situazione');
+  foglioDaRighe(wb, 'Situazione', {
+    doc, righe: [sitHeaders, ...sitRows],
+    formati: { [CLASSI.length + 8]: FORMATI.intero },
+    larghezze: [28, 12, 22, 16, 24, ...CLASSI.map(() => 11), 20, 18, 24, 18, 16, 20, 40],
+  });
 
   // --- Foglio 2: Da dichiarare ---
   // La data che conta e' la fine del trasporto, gia' sul giorno italiano, come
@@ -75,9 +95,10 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
     testoFormulario(r), testoCollocato(r),
   ]);
   ddRows.push(['TOTALE', '', '', '', '', '', '', '', ordiniData.totale_kg, '', '', '', '', '']);
-  const ws2 = XLSX.utils.aoa_to_sheet([ddHeaders, ...ddRows]);
-  ws2['!cols'] = [{ wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 28 }, { wch: 18 }, { wch: 6 }, { wch: 18 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 24 }, { wch: 48 }, { wch: 36 }];
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws2), 'Da dichiarare');
+  foglioDaRighe(wb, 'Da dichiarare', {
+    doc, righe: [ddHeaders, ...ddRows],
+    larghezze: [16, 16, 14, 28, 18, 6, 18, 10, 18, 24, 24, 24, 48, 36],
+  });
 
   // --- Foglio 3: Derivati ---
   const derHeaders = ['Sito', 'Dichiarato (t)', 'Granulo (t)', 'Fibre (t)', 'Metallo (t)', 'Cippato (t)', 'Ciabattato (t)'];
@@ -85,9 +106,7 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
     r.sito, r.dichiarato_t, r.granulo_t, r.fibre_t, r.metallo_t, r.cippato_t, r.ciabattato_t,
   ]);
   derRows.push(['TOTALE', data.totali.dichiarato_t, data.totali.granulo_t, data.totali.fibre_t, data.totali.metallo_t, data.totali.cippato_t, data.totali.ciabattato_t]);
-  const ws3 = XLSX.utils.aoa_to_sheet([derHeaders, ...derRows]);
-  ws3['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws3), 'Derivati');
+  foglioDaRighe(wb, 'Derivati', { doc, righe: [derHeaders, ...derRows], larghezze: [28, 14, 14, 14, 14, 14, 14] });
 
   // --- Foglio 4: Target ---
   // Target, residuo e copertura solo sul canale RETE; ACI ed Extra a parte.
@@ -114,19 +133,23 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno) {
   const residuoTot = data.totali.target_totale_t > 0 ? data.totali.target_totale_t - data.totali.conferito_t : '';
   const copTot = data.totali.target_totale_t > 0 ? (data.totali.conferito_primarie_t / data.totali.target_totale_t * 100) : '';
   tarRows.push(['TOTALE', '', data.totali.target_primarie_t, data.totali.target_totale_t || '', data.totali.conferito_primarie_t, data.totali.secondarie_nette_t, data.totali.secondarie_in_t, data.totali.secondarie_out_t, data.totali.terziarie_t, data.totali.conferito_t, residuoTot, copTot, data.totali.conferito_aci_t || 0, data.totali.conferito_extra_t || 0]);
-  const ws4 = XLSX.utils.aoa_to_sheet([tarHeaders, ...tarRows]);
-  ws4['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }];
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws4), 'Target');
+  foglioDaRighe(wb, 'Target', {
+    doc, righe: [tarHeaders, ...tarRows],
+    // la copertura e' una percentuale con un decimale, non un peso
+    formati: { 11: FORMATI.percentuale },
+    larghezze: [28, 12, 16, 16, 18, 16, 14, 14, 14, 14, 14, 14, 16, 22],
+  });
 
   // --- Foglio 5: Date da sistemare (regola dell'utente, 22/09/2026) ---
   // I formulari terminati senza tutte le date obbligatorie, per soggetto e canale,
   // uno per riga: quali sono, che cosa manca e che cosa comporta per la giacenza.
   const gruppiDate = (data.anomalie || []).filter(a => a.tipo === 'date_da_sistemare');
   if (gruppiDate.length) {
-    const ws5 = XLSX.utils.aoa_to_sheet([INTESTAZIONE_DATE, ...righeExcelDate(gruppiDate)]);
-    ws5['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 34 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 50 }, { wch: 60 }];
-    XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws5), 'Date da sistemare');
+    foglioDaRighe(wb, 'Date da sistemare', {
+      doc, righe: [INTESTAZIONE_DATE, ...righeExcelDate(gruppiDate)],
+      larghezze: [28, 12, 14, 16, 16, 34, 12, 12, 14, 14, 18, 40, 50, 60],
+    });
   }
 
-  XLSX.writeFile(wb, `giacenze_${anno}.xlsx`);
+  return scaricaCartella(wb, `giacenze_${anno}.xlsx`);
 }

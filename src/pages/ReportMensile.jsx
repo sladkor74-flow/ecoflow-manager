@@ -4,7 +4,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, RefreshCw, Download, AlertCircle } from 'lucide-react';
 import ReportPivotTable from '@/components/report-mensile/ReportPivotTable';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
-import { formatTonnellate, formatIntero } from '@/lib/utils';
 
 // Riproduce le otto pivot del foglio REPORT MENSILE del gestionale Excel.
 // Le definizioni vivono nel backend, in shared/reportMensile.ts: qui restano solo
@@ -15,7 +14,7 @@ import { formatTonnellate, formatIntero } from '@/lib/utils';
 // obbligatorie in ogni formulario terminato). Ogni pivot e' di un canale solo,
 // e il riepilogo pure: rete, ACI ed extra raccolta non si sommano. Chi non ha la
 // fine trasporto non e' in nessuna pivot; gli altri ci sono, nel mese della
-// fine trasporto. Lo stesso nel CSV, in una riga sotto il totale.
+// fine trasporto. Lo stesso nell'Excel, in una riga sotto il totale.
 
 const MESI = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -47,71 +46,13 @@ function anniDisponibili() {
   return [corrente + 1, corrente, corrente - 1, corrente - 2];
 }
 
-// Appiattisce le pivot di una scheda in un CSV leggibile da Excel:
-// punto e virgola come separatore, virgola come segno decimale.
-// Ogni pivot porta il suo periodo, come in pagina: in una scheda ce ne sono di
-// mensili e di annuali, e scrivere il mese anche sopra una pivot dell'anno dice
-// una cosa falsa a chi legge il foglio senza averlo scaricato lui (05/10/2026).
-function componiCsv(pivots, gruppo, periodoDi) {
-  const righe = [];
-  // I numeri come nel resto del gestionale (chiusura dell'audit, 11/10/2026): le
-  // tonnellate con due decimali, tre se i kg non sono tondi, e il punto delle
-  // migliaia; i viaggi interi. Prima un valore mancante diventava 0 e 12,30 t
-  // usciva «12,3». Una cella senza movimenti resta vuota, come nella pivot a
-  // video: vuota non vuol dire zero.
-  const num = (v, misura) => {
-    if (v === null || v === undefined || v === '') return '';
-    return misura === 'conteggio' ? formatIntero(v) : formatTonnellate(v);
-  };
-
-  for (const k of gruppo.pivot) {
-    const p = pivots[k];
-    if (!p) continue;
-    const colonne = p.senzaColonne ? [] : p.colonne;
-    const unaMisura = p.misure.length === 1;
-
-    righe.push([p.titolo, periodoDi(p)]);
-    righe.push([
-      p.etichetteRiga.join(' > '),
-      ...colonne.flatMap(c => p.misure.map((m, i) => (unaMisura ? c : c + ' ' + p.etichetteMisure[i]))),
-      ...p.misure.map((m, i) => (p.senzaColonne ? p.etichetteMisure[i] : 'Totale ' + p.etichetteMisure[i])),
-    ]);
-
-    const visita = (nodo, prefisso) => {
-      if (!nodo.figli) return;
-      for (const f of nodo.figli) {
-        const etichetta = prefisso ? prefisso + ' > ' + f.etichetta : f.etichetta;
-        righe.push([
-          etichetta,
-          ...colonne.flatMap(c => p.misure.map(m => num(f.valori[c] ? f.valori[c][m] : null, m))),
-          ...p.misure.map(m => num(f.totali[m], m)),
-        ]);
-        visita(f, etichetta);
-      }
-    };
-    visita(p.radice, '');
-
-    righe.push([
-      'Totale complessivo',
-      ...colonne.flatMap(c => p.misure.map(m => num(p.radice.valori[c] ? p.radice.valori[c][m] : null, m))),
-      ...p.misure.map(m => num(p.radice.totali[m], m)),
-    ]);
-    const d = p.date_da_sistemare;
-    if (d && d.totale > 0) {
-      const sf = d.senza_fine_trasporto || 0;
-      const effetto = [sf ? `${sf} fuori da ogni periodo perché senza fine trasporto` : '', d.totale - sf ? `${d.totale - sf} nella pivot, nel mese della fine trasporto` : ''].filter(Boolean).join(', ');
-      righe.push([`Date da sistemare: ${d.totale} terminati (${d.testo}): ${effetto}`]);
-    }
-    righe.push([]);
-  }
-
-  return righe
-    .map(r => r.map(c => {
-      const s = String(c ?? '');
-      return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-    }).join(';'))
-    .join('\n');
-}
+// L'ESPORTAZIONE E' UN EXCEL, NON PIU' UN CSV (chiusura dell'audit, 11/10/2026).
+// Il CSV non aveva formati ne' intestazione, e non diceva di che canale fosse
+// ogni pivot ne' fino a che giorno arrivavano i dati. Il file lo scrive
+// src/lib/reportMensileExport.js: un foglio per pivot, col blocco di testa dei
+// documenti che escono, le tonnellate con due decimali (tre se i chili non sono
+// tondi) e le celle senza movimenti vuote, mai 0. Ogni pivot porta il suo
+// periodo, come in pagina: in una scheda ce ne sono di mensili e di annuali.
 
 export default function ReportMensile() {
   const oggi = new Date();
@@ -121,6 +62,7 @@ export default function ReportMensile() {
   const [pivots, setPivots] = useState({});
   const [caricando, setCaricando] = useState(true);
   const [errore, setErrore] = useState(null);
+  const [esportando, setEsportando] = useState(false);
   const caricatiRef = useRef(new Set());
 
   const azzera = () => { caricatiRef.current = new Set(); setPivots({}); };
@@ -158,15 +100,19 @@ export default function ReportMensile() {
   const etichettaMese = `${mese} ${anno}`;
   const etichettaAnno = `Anno ${anno}`;
 
-  const scarica = () => {
-    const csv = componiCsv(pivots, gruppoAttivo, (p) => (p.periodo === 'mese' ? etichettaMese : etichettaAnno));
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `report-mensile-${gruppoAttivo.chiave}-${anno}-${mese.toLowerCase()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const scarica = async () => {
+    setEsportando(true);
+    try {
+      // exceljs si carica quando si esporta, non all'apertura della pagina.
+      const { esportaReportMensileExcel } = await import('@/lib/reportMensileExport');
+      await esportaReportMensileExcel({
+        pivots, gruppo: gruppoAttivo, anno, mese,
+        periodoDi: (p) => (p.periodo === 'mese' ? etichettaMese : etichettaAnno),
+      });
+    } catch (e) {
+      setErrore(`Esportazione non riuscita: ${(e && e.message) || e}`);
+    }
+    setEsportando(false);
   };
 
   const prontoPerScarico = gruppoAttivo.pivot.every(k => pivots[k]);
@@ -211,7 +157,7 @@ export default function ReportMensile() {
           </button>
           <button
             onClick={scarica}
-            disabled={!prontoPerScarico}
+            disabled={!prontoPerScarico || esportando}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm hover:bg-muted disabled:opacity-40"
           >
             <Download className="w-3.5 h-3.5" /> Esporta scheda

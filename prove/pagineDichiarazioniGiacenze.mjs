@@ -139,20 +139,29 @@ console.log('IL RIQUADRO DEI DOPPIONI DICE QUELLO CHE SUCCEDE AI CONTI');
 
 console.log("IL FOGLIO DEGLI STOCCAGGI DICE PERCHE' MANCA LA GIACENZA DI UN PIAZZALE");
 {
-  const xlsx = import.meta.resolve('xlsx');
+  // Il foglio lo scrive exceljs e si scarica col link del browser (11/10/2026):
+  // il download si intercetta e il file vero si rilegge.
+  const { resolveObjectURL } = await import('node:buffer');
+  let scaricato = null;
+  globalThis.document = { body: { appendChild() {} }, createElement: () => ({ click() { scaricato = resolveObjectURL(this.href); }, remove() {} }) };
   const modulo = await caricaLibPagine('lib/dichiarazioniExport', [
     ["import { INTESTAZIONE_DATE, righeExcelDate } from '@/components/giacenze/DateDaSistemare';", "const INTESTAZIONE_DATE = ['Data']; const righeExcelDate = () => [];"],
-    ["await import('xlsx')", `await import(${JSON.stringify(xlsx)})`],
-    ['XLSX.writeFile(wb, ', 'globalThis.__FOGLIO_DICHIARAZIONI = wb; ((..._x) => _x)(wb, '],
   ]);
   const PERCHE = 'Questo piazzale non ha nessuna rilevazione del portale.';
   await modulo.esportaDichiarazioni({ anno: 2026, siti: [], stoccaggi: [
     { sito: 'GAMMA SRL', anche_impianto: false, canali: [{ canale: 'RETE', entrato_t: 3, uscito_t: 0, saldo_t: 3, verso: [], in_piazzale_t: null, in_piazzale_perche: PERCHE }] },
     { sito: 'NAPPI SUD SRL', anche_impianto: false, canali: [{ canale: 'RETE', entrato_t: 5, uscito_t: 1, saldo_t: 4, verso: [], in_piazzale_t: 44 }] },
-  ] });
-  const wb = globalThis.__FOGLIO_DICHIARAZIONI;
-  const XLSX = await import(xlsx);
-  const righe = wb ? XLSX.utils.sheet_to_json(wb.Sheets.Stoccaggi, { header: 1, defval: null }) : [];
+  ] }, { stato: { letto: true, archivi: [] } });
+  delete globalThis.document;
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  if (scaricato) await wb.xlsx.load(Buffer.from(await scaricato.arrayBuffer()));
+  const ws = wb.getWorksheet('Stoccaggi');
+  // Le righe come prima (null dove la cella e' vuota), dall'intestazione della
+  // tabella in giu': sopra c'e' il blocco di testa del documento.
+  const tutte = [];
+  for (let n = 1; ws && n <= ws.rowCount; n++) tutte.push(Array.from({ length: ws.columnCount }, (_, c) => { const v = ws.getRow(n).getCell(c + 1).value; return v === undefined || v === '' ? null : v; }));
+  const righe = tutte.slice(Math.max(0, tutte.findIndex(r => r[0] === 'Stoccaggio')));
   const colonna = righe.length ? righe[0].indexOf('Perché manca la giacenza in piazzale') : -1;
   verifica("il foglio ha la colonna del perche'", colonna > 0, JSON.stringify(righe[0]));
   const gamma = righe.find(x => x[0] === 'GAMMA SRL') || [];

@@ -6,9 +6,12 @@
 // PDF e nell'Excel al 30 giugno, mentre il resto del gestionale lo conta a luglio.
 // Ora la data passa da giornoRoma (src/lib/giornoItaliano.js), come ovunque.
 // Si provano il PDF (il testo delle celle) e l'Excel (il valore della cella).
+// Dall'11/10/2026 l'Excel lo scrive il corredo dei fogli (exceljs): si riapre il
+// file scaricato e si legge la cella vera.
 // npm run prove
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { resolveObjectURL } from 'node:buffer';
 import { caricaLibPagine } from './dati/libPagine.mjs';
 
 let ok = 0, ko = 0;
@@ -16,11 +19,8 @@ const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; cons
 
 const radice = new URL('../', import.meta.url);
 const jspdf = pathToFileURL(new URL('node_modules/jspdf/dist/jspdf.node.min.js', radice).pathname.replace(/^\/([A-Za-z]:)/, '$1')).href;
-// Un foglio finto: serve solo a vedere che cosa finisce nelle celle.
-const XLSX_FINTO = "({ utils: { aoa_to_sheet: (aoa) => { globalThis.__aoa = aoa; return { '!ref': 'A1:A1' }; }, decode_range: () => ({ e: { r: 0 } }), encode_cell: () => 'A1', encode_range: () => 'A1:A1', book_new: () => ({}), book_append_sheet: () => {} }, writeFile: () => {} })";
 const { esportaTabellaPdf, esportaTabellaExcel } = await caricaLibPagine('lib/esportaTabella', [
   [/await import\('jspdf'\)/g, `await import('${jspdf}').then(m => m.default || m)`],
-  [/await import\('xlsx'\)/g, XLSX_FINTO],
   [/doc\.save\(`\$\{nomeSicuro\(nomeFile\)\}\.pdf`\);/g, 'globalThis.__pdf = doc.output();'],
 ]);
 // Il finto window serviva solo a caricare utils.js: jspdf, se lo trova, lo
@@ -50,9 +50,19 @@ verifica('le 23:30 UTC del 30 giugno: in Italia e\' il 1° luglio', c_e('01/07/2
 verifica('un\'ora qualunque del giorno: quel giorno', c_e('15/07/2026'));
 
 console.log("L'EXCEL METTE NELLA CELLA LO STESSO GIORNO");
+// Il file finisce qui invece che nel browser: si intercetta il link del download.
+let scaricato = null;
+globalThis.document = { body: { appendChild() {} }, createElement: () => ({ click() { scaricato = resolveObjectURL(this.href); }, remove() {} }) };
 await esportaTabellaExcel({ nomeFile: 'prova', titolo: 'Prova', colonne, righe });
-const aoa = globalThis.__aoa || [];
-const giornoCella = (i) => { const v = (aoa[4 + i] || [])[1]; return v instanceof Date ? v.toISOString().slice(0, 10) : v; };
+const ExcelJS = (await import('exceljs')).default;
+const wb = new ExcelJS.Workbook();
+if (scaricato) await wb.xlsx.load(Buffer.from(await scaricato.arrayBuffer()));
+const ws = wb.worksheets[0];
+// Le righe dei dati stanno sotto l'intestazione della tabella, dopo il blocco di testa.
+let testata = 0;
+for (let n = 1; ws && n <= ws.rowCount; n++) if (ws.getRow(n).getCell(1).value === 'Ordine') { testata = n; break; }
+verifica('il file c\'e\' e ha la tabella', testata > 0, String(testata));
+const giornoCella = (i) => { const v = ws && testata ? ws.getRow(testata + 1 + i).getCell(2).value : undefined; return v instanceof Date ? v.toISOString().slice(0, 10) : (v ?? null); };
 verifica('mezzanotte UTC', giornoCella(0) === '2026-07-10', String(giornoCella(0)));
 verifica('mezzanotte italiana', giornoCella(1) === '2026-07-11', String(giornoCella(1)));
 verifica('le 23:30 UTC del 30 giugno vanno al 1° luglio', giornoCella(2) === '2026-07-01', String(giornoCella(2)));

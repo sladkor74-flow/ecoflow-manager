@@ -1,5 +1,5 @@
 import { leggiFogliLista } from '@/lib/evasioneAssegnati';
-import { formattaPesi } from '@/lib/formatoExcel';
+import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella, FORMATI } from '@/lib/fogliProfessionali';
 
 // Il consuntivo di un fornitore si legge NEL BROWSER e il file non si conserva:
 // al server arrivano solo le celle, come per le liste degli assegnati. Cosi' non
@@ -29,12 +29,46 @@ const ESITI = {
   solo_gestionale: 'l\'abbiamo noi e il consuntivo non lo riporta',
 };
 
-/** L'Excel del confronto, come per le verifiche settimanali. */
-export async function scaricaExcelConsuntivo(consuntivo, esito) {
-  // xlsx pesa mezzo megabyte: si carica quando si esporta, non all'apertura.
-  const XLSX = await import('xlsx');
+// Gli archivi con cui si confronta il consuntivo: le primarie del canale per chi
+// raccoglie, anche le secondarie per un impianto o uno stoccaggio, le sole
+// secondarie per chi le trasporta; l'extra raccolta le sue schede.
+function archiviDel(consuntivo) {
+  if (consuntivo.canale === 'EXTRA_RACCOLTA') return ['ExtraRaccolta'];
+  const primarie = consuntivo.canale === 'ACI' ? 'PrimariaAci' : 'PrimariaRete';
+  if (consuntivo.ruolo === 'trasportatore') return ['Secondaria'];
+  if (consuntivo.ruolo === 'impianto') return [primarie, 'Secondaria'];
+  return [primarie];
+}
+
+// Nel riepilogo le voci sono di misure diverse, una per riga: i chili interi, gli
+// importi in euro, i conteggi interi. Lo dice l'etichetta della riga.
+function formatoRiepilogo(c, riga) {
+  if (c !== 1) return null;
+  const etichetta = String(riga[0] || '');
+  if (/^Importo|importo/.test(etichetta)) return FORMATI.euro;
+  if (/^Chili|^Scarto$/.test(etichetta)) return FORMATI.kg;
+  return FORMATI.intero;
+}
+
+/**
+ * L'Excel del confronto, come per le verifiche settimanali.
+ *
+ * SI MANDA AL FORNITORE, QUINDI SI VESTE (chiusura dell'audit, 11/10/2026): il
+ * corredo comune dei fogli (fogliProfessionali.js), con le stesse righe di prima
+ * sotto il blocco di testa - canale, mese per fine trasporto, fino a che giorno
+ * arrivano i nostri movimenti, generato il ... da .... opzioni.stato: lo stato
+ * dei dati gia' letto (le prove).
+ */
+export async function scaricaExcelConsuntivo(consuntivo, esito, opzioni = {}) {
   const { confronto, costo, esito: verdetto, congelato, testo } = esito;
-  const wb = XLSX.utils.book_new();
+  const doc = await documentoDa({
+    titolo: `Verifica del consuntivo — ${consuntivo.fornitore}`,
+    sottotitolo: NOME_RUOLO[consuntivo.ruolo] || consuntivo.ruolo || '',
+    canale: consuntivo.canale, periodo: `${MESI[consuntivo.mese - 1]} ${consuntivo.anno}`,
+    entita: archiviDel(consuntivo),
+    ...(opzioni.stato !== undefined ? { stato: opzioni.stato } : {}),
+  });
+  const { wb } = await nuovaCartella();
 
   const info = [
     ['Verifica del consuntivo di chiusura mese'],
@@ -100,11 +134,17 @@ export async function scaricaExcelConsuntivo(consuntivo, esito) {
   }
   info.push([], ['Nota', 'E\' un report del fornitore, non una fattura: non c\'e\' IVA e non c\'e\' imponibile. Dal conto della passiva restano fuori per costruzione le terziarie, gli oneri fissi dell\'extra raccolta e il trasporto delle secondarie di extra raccolta.']);
 
-  const ws = XLSX.utils.aoa_to_sheet(info);
-  ws['!cols'] = [{ wch: 38 }, { wch: 70 }];
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, ws), 'Riepilogo');
+  // Le righe che avvertono (date sbagliate, carichi da registrare) in ambra; i
+  // titoli dei gruppi in grassetto.
+  const stili = {};
+  info.forEach((r, i) => {
+    const t = String((r && r[0]) || '');
+    if (/^(DATA SBAGLIATA|DA REGISTRARE)/.test(t)) stili[i] = 'avviso';
+    else if (i === 0 || /^(Righe di un altro mese|Come e' stato letto il file|Nota)$/.test(t)) stili[i] = 'gruppo';
+  });
+  foglioDaRighe(wb, 'Riepilogo', { doc, righe: info, testate: [], stili, formati: formatoRiepilogo, larghezze: [38, 70], orizzontale: false });
 
-  const wsR = XLSX.utils.aoa_to_sheet([
+  foglioDaRighe(wb, 'Riga per riga', { doc, righe: [
     // Le ultime due colonne dicono i numeri scritti male e come si e' capito di
     // che carico si trattava (01/10/2026).
     ['Formulario o ordine', 'Esito', 'kg nel consuntivo', 'kg nei nostri movimenti', 'Scarto kg', 'ID ordine', 'Errori nei dati del consuntivo', 'Riconosciuto da'],
@@ -118,10 +158,8 @@ export async function scaricaExcelConsuntivo(consuntivo, esito) {
       (v.differenze || []).map(d => d.testo).join('\n'),
       (v.riconosciuto_da || []).join(', '),
     ]),
-  ]);
-  wsR['!cols'] = [{ wch: 24 }, { wch: 34 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 70 }, { wch: 34 }];
-  XLSX.utils.book_append_sheet(wb, formattaPesi(XLSX, wsR), 'Riga per riga');
+  ], larghezze: [24, 34, 18, 22, 12, 16, 70, 34] });
 
   const nome = `Consuntivo ${consuntivo.fornitore} ${NOME_CANALE[consuntivo.canale]} ${MESI[consuntivo.mese - 1]} ${consuntivo.anno}`.replace(/[\\/:*?"<>|]/g, '-');
-  XLSX.writeFile(wb, `${nome}.xlsx`);
+  return scaricaCartella(wb, `${nome}.xlsx`);
 }

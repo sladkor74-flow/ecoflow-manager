@@ -6,13 +6,17 @@
 //    resto del gestionale. La regola dei pesi vuole tre decimali quando i kg non
 //    sono tondi, export compresi.
 // 2. Il CSV scriveva 0 dove una cella non aveva movimenti e «12,3» per 12,30 t,
-//    senza il punto delle migliaia.
+//    senza il punto delle migliaia. Dall'11/10/2026 la scheda esce in Excel
+//    (src/lib/reportMensileExport.js): numeri veri col formato delle tonnellate,
+//    e la cella senza movimenti vuota.
 // 3. La regione si leggeva prima dal campo «Regioni» del file e poi dalla
 //    provincia, mentre il resto del gestionale fa il contrario.
 // npm run prove
 import { readFileSync } from 'node:fs';
+import { resolveObjectURL } from 'node:buffer';
 import { transformSync } from 'esbuild';
 import { calcolaPivot } from '../base44/shared/reportMensile.ts';
+import { caricaLibPagine } from './dati/libPagine.mjs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -56,23 +60,32 @@ console.log('LA TABELLA SCRIVE IL PESO COME IL RESTO DEL GESTIONALE');
   verifica('una cella vuota resta il trattino', testo(Numero({ valore: null, misura: 'peso' })) === '—');
 }
 
-console.log('IL CSV: NIENTE ZERI INVENTATI, NUMERI ALL\'ITALIANA');
+console.log('L\'EXCEL: NIENTE ZERI INVENTATI, TONNELLATE COI DECIMALI GIUSTI');
 {
-  const src = sorgente('src/pages/ReportMensile.jsx');
-  const corpo = (src.match(/function componiCsv\([\s\S]*?\n\}\n/) || [''])[0];
-  const componiCsv = new Function('formatTonnellate', 'formatIntero', corpo + '\nreturn componiCsv;')(formatTonnellate, formatIntero);
+  // Il file finisce qui invece che nel browser: si intercetta il link del download.
+  let scaricato = null;
+  globalThis.document = { body: { appendChild() {} }, createElement: () => ({ click() { scaricato = resolveObjectURL(this.href); }, remove() {} }) };
+  const { esportaReportMensileExcel } = await caricaLibPagine('lib/reportMensileExport');
   // La pivot Raccolta ha le classi in colonna: UNO raccoglie solo P, DUE solo M.
   const p = calcolaPivot('raccolta', [riga('UNO SRL', 1234500), riga('DUE SRL', 12300, { prodotto: 'M - da 35 a 100 kg', classe: 'M' })], 2026, 'Maggio');
-  const csv = componiCsv({ raccolta: p }, { pivot: ['raccolta'] }, () => 'Maggio 2026');
-  const righe = csv.split('\n').map(r => r.split(';'));
-  const uno = righe.find(r => /UNO SRL/.test(r[0])) || [];
-  const due = righe.find(r => /DUE SRL/.test(r[0])) || [];
-  const intest = righe.find(r => r.includes('P')) || [];
-  const colP = intest.indexOf('P'), colM = intest.indexOf('M');
-  verifica('le colonne ci sono', colP > 0 && colM > 0, intest.join(';'));
-  verifica('una cella senza movimenti resta vuota, non 0', uno[colM] === '' && due[colP] === '', `UNO: ${uno.join(';')} | DUE: ${due.join(';')}`);
-  verifica('le tonnellate col punto delle migliaia e due decimali', uno[colP] === '1.234,50', uno[colP]);
-  verifica('12,30 t non diventa «12,3»', due[colM] === '12,30', due[colM]);
+  await esportaReportMensileExcel({ pivots: { raccolta: p }, gruppo: { chiave: 'rete', titolo: 'Rete', pivot: ['raccolta'] }, anno: 2026, mese: 'Maggio', periodoDi: () => 'Maggio 2026' },
+    { stato: { letto: true, archivi: [] } });
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  if (scaricato) await wb.xlsx.load(Buffer.from(await scaricato.arrayBuffer()));
+  const ws = wb.worksheets[0];
+  const righe = [];
+  for (let n = 1; ws && n <= ws.rowCount; n++) righe.push(ws.getRow(n));
+  const intest = righe.find(r => (r.values || []).includes('P') && (r.values || []).includes('M'));
+  const colP = intest ? intest.values.indexOf('P') : -1, colM = intest ? intest.values.indexOf('M') : -1;
+  const uno = righe.find(r => String(r.getCell(1).value).trim() === 'UNO SRL');
+  const due = righe.find(r => String(r.getCell(1).value).trim() === 'DUE SRL');
+  const vuota = (c) => c.value === null || c.value === undefined || c.value === '';
+  verifica('le colonne ci sono', colP > 0 && colM > 0, intest ? JSON.stringify(intest.values) : 'manca');
+  verifica('una cella senza movimenti resta vuota, non 0', uno && due && vuota(uno.getCell(colM)) && vuota(due.getCell(colP)), uno && due ? `UNO: ${uno.getCell(colM).value} | DUE: ${due.getCell(colP).value}` : 'righe mancanti');
+  verifica('le tonnellate sono numeri col punto delle migliaia e due decimali', uno && uno.getCell(colP).value === 1234.5 && uno.getCell(colP).numFmt === '#,##0.00#', uno ? `${uno.getCell(colP).value} ${uno.getCell(colP).numFmt}` : 'manca');
+  verifica('12,30 t resta 12,3 nella cella e si legge 12,30', due && due.getCell(colM).value === 12.3 && due.getCell(colM).numFmt === '#,##0.00#', due ? `${due.getCell(colM).value} ${due.getCell(colM).numFmt}` : 'manca');
+  verifica('la pagina non scrive piu\' un CSV', !/text\/csv/.test(sorgente('src/pages/ReportMensile.jsx')) && /esportaReportMensileExcel/.test(sorgente('src/pages/ReportMensile.jsx')));
 }
 
 console.log('LA REGIONE: PRIMA LA PROVINCIA, IL CAMPO DEL FILE PER ULTIMO');
