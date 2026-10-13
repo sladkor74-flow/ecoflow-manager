@@ -14,7 +14,10 @@ import { useAuth } from '@/lib/AuthContext';
 
 // Le schede che chi guarda ha davvero: un collegamento a una scheda
 // dell'amministratore, aperto da un altro utente, apre la pagina come sempre.
-const schedeDi = (isAdmin) => (isAdmin ? ['passiva', 'attiva', 'margine', 'fornitori', 'tariffe', 'storico'] : ['passiva', 'attiva', 'storico']);
+// COSTI E MARGINE SOLO ALL'AMMINISTRATORE (13/10/2026). La passiva (calcolaPassiva
+// risponde 403 a chi non lo e') e lo Storico, che sono i documenti della passiva
+// coi loro importi, sono costi: chi non e' amministratore vede la sola Attiva.
+const schedeDi = (isAdmin) => (isAdmin ? ['passiva', 'attiva', 'margine', 'fornitori', 'tariffe', 'storico'] : ['attiva']);
 
 export default function Fatturazione() {
   const { user } = useAuth();
@@ -34,6 +37,11 @@ export default function Fatturazione() {
     if (a.anno && a.mese) setPeriodo({ anno: a.anno, mese: a.mese });
     if (a.canale) setCanalePassiva(a.canale);
   }, [location.search, isAdmin]);
+  // Il ruolo arriva dopo la prima apertura: chi non e' amministratore, se la
+  // scheda aperta non e' fra le sue, va sull'Attiva.
+  useEffect(() => {
+    if (user && !schedeDi(isAdmin).includes(tab)) setTab(schedeDi(isAdmin)[0]);
+  }, [user, isAdmin, tab]);
 
   const openPeriod = (anno, mese) => {
     setPeriodo({ anno, mese });
@@ -48,14 +56,14 @@ export default function Fatturazione() {
       </div>
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="passiva"><FileText className="w-4 h-4 mr-1.5" /> Passiva</TabsTrigger>
+          {isAdmin && <TabsTrigger value="passiva"><FileText className="w-4 h-4 mr-1.5" /> Passiva</TabsTrigger>}
           <TabsTrigger value="attiva"><TrendingUp className="w-4 h-4 mr-1.5" /> Attiva</TabsTrigger>
           {isAdmin && <TabsTrigger value="margine"><Scale className="w-4 h-4 mr-1.5" /> Margine</TabsTrigger>}
           {isAdmin && <TabsTrigger value="fornitori"><Users className="w-4 h-4 mr-1.5" /> Fornitori</TabsTrigger>}
           {isAdmin && <TabsTrigger value="tariffe"><DollarSign className="w-4 h-4 mr-1.5" /> Tariffe & Anagrafiche</TabsTrigger>}
-          <TabsTrigger value="storico"><History className="w-4 h-4 mr-1.5" /> Storico</TabsTrigger>
+          {isAdmin && <TabsTrigger value="storico"><History className="w-4 h-4 mr-1.5" /> Storico</TabsTrigger>}
         </TabsList>
-        <TabsContent value="passiva" className="mt-4">
+        {isAdmin && <TabsContent value="passiva" className="mt-4">
           <Tabs value={canalePassiva} onValueChange={setCanalePassiva}>
             <TabsList>
               <TabsTrigger value="RETE">Rete</TabsTrigger>
@@ -66,12 +74,12 @@ export default function Fatturazione() {
             <TabsContent value="ACI" className="mt-4"><PassivaModulo tipologia="ACI" periodo={periodo} setPeriodo={setPeriodo} /></TabsContent>
             <TabsContent value="EXTRA_RACCOLTA" className="mt-4"><PassivaModulo tipologia="EXTRA_RACCOLTA" periodo={periodo} setPeriodo={setPeriodo} /></TabsContent>
           </Tabs>
-        </TabsContent>
+        </TabsContent>}
         <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} onVaiTariffe={() => setTab('tariffe')} periodoIniziale={periodoDelCollegamento(arrivo, null)} /></TabsContent>
         {isAdmin && <TabsContent value="margine" className="mt-4"><MargineCommessa /></TabsContent>}
         {isAdmin && <TabsContent value="fornitori" className="mt-4"><FornitoriManager /></TabsContent>}
         {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeUnificate /></TabsContent>}
-        <TabsContent value="storico" className="mt-4"><StoricoFatturazione onOpen={openPeriod} /></TabsContent>
+        {isAdmin && <TabsContent value="storico" className="mt-4"><StoricoFatturazione onOpen={openPeriod} /></TabsContent>}
       </Tabs>
     </div>
   );

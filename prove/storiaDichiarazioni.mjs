@@ -22,7 +22,8 @@
 // 5. sui dati veri (../dati-veri/, se c'e'): i numeri del caso T-Cycle, la
 //    giacenza dell'ultimo mese uguale al «Da dichiarare» e alle Giacenze su ogni
 //    impianto e canale, i mesi aperti della fotografia uguali alla colonna, e la
-//    risposta di oggi identica a quella di HEAD tolti i campi nuovi;
+//    risposta di oggi identica a quella di prima della storia (il commit
+//    45612c1) tolti i campi nuovi;
 // 6. la pagina disegnata e il foglio Excel sui dati veri;
 // 7. le correzioni della revisione del 13/10/2026 (sezione R sui numeri
 //    costruiti, sezione 10 sui dati veri): una copertura sola per casella (la
@@ -396,11 +397,15 @@ if (!copie.length) {
     const m = await import('data:text/javascript;base64,' + Buffer.from(p.outputFiles[0].text).toString('base64'));
     return async (corpo) => { const r = await m.default({ json: async () => corpo }); return { stato: r.status, j: await r.json() }; };
   };
-  // La funzione di HEAD, coi moduli condivisi di oggi: tolti i campi nuovi, la
-  // risposta deve essere la stessa al carattere.
+  // La funzione di prima della storia delle righe, coi moduli condivisi di oggi:
+  // tolti i campi nuovi, la risposta deve essere la stessa al carattere. Il
+  // confronto e' con un commit fisso, 45612c1, l'ultimo prima della storia: fino
+  // al 13/10/2026 era HEAD, e dopo il commit della storia (e8694e1) HEAD ha gia'
+  // i campi nuovi, e la prova si rompeva da sola (13/10/2026).
+  const PRIMA_DELLA_STORIA = '45612c1';
   const diHead = async (nome) => {
     let testo;
-    try { testo = execSync(`git show HEAD:base44/functions/${nome}/entry.ts`, { cwd: qui('..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; }
+    try { testo = execSync(`git show ${PRIMA_DELLA_STORIA}:base44/functions/${nome}/entry.ts`, { cwd: qui('..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; }
     return carica({ stdin: { contents: testo, resolveDir: qui(`../base44/functions/${nome}`), sourcefile: `${nome}-HEAD.ts`, loader: 'ts' } });
   };
   const OraVera = Date;
@@ -499,7 +504,7 @@ if (!copie.length) {
 
   console.log('8. SUI DATI VERI: NESSUN NUMERO CAMBIA');
   const head = await diHead('riepilogoDichiarazioni');
-  if (!head) console.log('  (git non disponibile: il confronto con HEAD si salta)');
+  if (!head) console.log('  (git non disponibile: il confronto con la versione di prima si salta)');
   else {
     const H = (await conOra(ORA, () => head({ anno: ANNO }))).j;
     const NUOVI_FLUSSO = ['giacenza_partenza_kg', 'ultimo_mese', 'prima_coperta_da', 'caricamenti_non_nostri', 'racconto', 'stoccaggio_stesso_sito'];
@@ -518,9 +523,9 @@ if (!copie.length) {
       stoccaggi: R.stoccaggi.map(s => ({ ...s, canali: s.canali.map(c => ({ ...c, verso: c.verso.map(v => senza(v, ['mesi_kg'])) })) })),
     };
     const pulitaH = { ...H, siti: H.siti.map(s => ({ ...s, flussi: (s.flussi || []).map(f => ({ ...f, mesi: f.mesi.map(m => senza(m, NUOVI_MESE)) })) })) };
-    verifica('la risposta di oggi, tolti i campi nuovi, e\' quella di HEAD al carattere', J(pulita) === J(pulitaH), `${J(pulita).length} contro ${J(pulitaH).length}`);
+    verifica('la risposta di oggi, tolti i campi nuovi, e\' quella di prima della storia al carattere', J(pulita) === J(pulitaH), `${J(pulita).length} contro ${J(pulitaH).length}`);
     // `copre` di una dichiarazione presa dal portale in un giorno solo e' quello
-    // di HEAD, nello stesso formato («dall'anno prima» in testa), con in piu'
+    // di prima della storia, nello stesso formato («dall'anno prima» in testa), con in piu'
     // `giorni`. Cambia solo dove il portale l'ha presa in piu' giorni.
     const copreDiversi = [];
     R.siti.forEach((s, a) => (s.flussi || []).forEach((f, b) => f.mesi.forEach((m, k) => {
@@ -529,7 +534,7 @@ if (!copie.length) {
       const unGiorno = !m.copre || (m.copre.giorni || []).length === 1;
       if (unGiorno && J(qui) !== J(h ? h.copre || null : null)) copreDiversi.push(`${s.sito} ${f.canale} ${m.mese}`);
     })));
-    verifica('`copre` di una dichiarazione presa in un giorno solo e\' quello di HEAD, nello stesso formato', !copreDiversi.length, copreDiversi.join(', '));
+    verifica('`copre` di una dichiarazione presa in un giorno solo e\' quello di prima della storia, nello stesso formato', !copreDiversi.length, copreDiversi.join(', '));
     verifica('e i campi nuovi ci sono', impianti.every(s => s.flussi.every(f => Array.isArray(f.racconto) && f.mesi.every(m => 'giacenza_fine_kg' in m))));
   }
   verifica('niente scritto sugli archivi', globalThis.__SCRITTE_DATI_VERI.length === 0, globalThis.__SCRITTE_DATI_VERI.join());
