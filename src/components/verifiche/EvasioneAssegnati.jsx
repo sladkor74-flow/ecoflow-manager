@@ -9,6 +9,8 @@ import { MESI, GRAVITA, tonnellate, dataIt, dataOraIt, leggiFogliLista } from '@
 import { formatTonnellate } from '@/lib/utils';
 import { eliminaParti } from '@/lib/testoLungo';
 import { oggiRoma } from '@/lib/giornoItaliano';
+import { TIPI_PRIMARIE } from '@/lib/registroCaricamenti';
+import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
 
 // Sezione 2 del modulo Verifiche: evasione delle liste di assegnati inviate ai
 // raccoglitori a inizio mese. A ogni caricamento delle primarie il gestionale
@@ -55,6 +57,101 @@ const messaggioErrore = (e) => {
 };
 // 409: un caricamento delle primarie aperto o interrotto, che la funzione nomina.
 const rinviato = (e) => statoErrore(e) === 409;
+
+// UN ANNO LETTO, I MESI SFOGLIATI IN MEMORIA (segnalazione alta A3 del 20/09,
+// corretta il 12/10/2026). Ogni mese che si guardava richiamava evasioneAssegnati,
+// che rilegge per intero sei archivi, i target, le liste e un controllo per
+// lista: sfogliare da ottobre a luglio erano quattro letture di tutto, sul limite
+// di richieste al minuto che vale per tutta l'app. Ora la funzione risponde per
+// i dodici mesi dell'anno in una chiamata ({ anno, anno_intero: true }) e la
+// pagina sfoglia i mesi in memoria; un altro anno e' un'altra chiamata, e gli
+// anni gia' letti restano. I numeri di ogni mese sono quelli di prima: il
+// calcolo e' lo stesso (prove/evasioneAnnoInMemoria.mjs).
+//
+// Quanto restano buoni: un anno letto da piu' di VALIDITA_ANNO_MS, o letto mentre
+// si caricavano le primarie, si rilegge in silenzio al primo cambio di mese, e
+// intanto si vede quello che c'era. Dopo un caricamento o un'eliminazione di una
+// lista e dopo «Controlla ora» si rilegge subito l'anno che si ha davanti, e gli
+// altri si dimenticano.
+//
+// UN CARICAMENTO DELLE PRIMARIE AGGIORNA LA PAGINA (revisione del 13/10/2026).
+// Senza iscrizione, dopo un caricamento chiuso da un'altra scheda o da un altro
+// utente, per cinque minuti cambiando mese si vedevano i numeri di prima, e
+// niente lo diceva: con la lettura mese per mese ogni mese rileggeva (regola 2).
+// Rileggere quando il caricamento si chiude pero' rifarebbe i controlli delle
+// liste insieme a controllaEvasioneAssegnati, che parte proprio allora. Il
+// momento giusto e' la nota «moduli collegati aggiornati», che importaBlocco
+// attacca alla riga del registro quando tutti i ricalcoli del caricamento,
+// evasione compresa, sono finiti: li' si dimenticano gli anni letti e si rilegge
+// quello davanti (src/lib/ascoltoCaricamenti.js). Fra l'inizio del caricamento e
+// la nota la pagina dice che i numeri a video sono di prima.
+//
+// LA NOTA PUO' NON ARRIVARE, E UN PARZIALE NON SI RILEGGE DA SOLO (revisione del
+// 13/10/2026). dopoCaricamento scrive la nota solo se riescono tutti e cinque i
+// ricalcoli delle primarie, anche verifiche e qualifica che con l'evasione non
+// c'entrano; e non la scrive se la scheda di chi carica si chiude prima. In quel
+// caso l'evasione puo' essere stata ricontrollata e la pagina non rileggeva
+// mai, mentre l'avviso prometteva che i numeri «si aggiornano da soli». Ora,
+// passati ATTESA_NOTA_MS dalla chiusura senza la nota, gli anni letti prima
+// sono vecchi: si rileggono al primo cambio di mese o con «Rileggi ora»
+// nell'avviso, e l'avviso dice proprio questo. Mai da soli allo scadere: la
+// chiusura arriva nello stesso istante a tutte le pagine aperte, e se il
+// ricontrollo delle liste non e' riuscito ciascuna lo rifarebbe per conto suo,
+// insieme alle altre. Per la stessa ragione un caricamento chiuso «parziale»
+// (o una riscrittura finita in errore) non si rilegge piu' subito: dopo un
+// parziale i ricalcoli non partono e la nota non arriva, quindi l'anno diventa
+// vecchio subito e si rilegge al cambio di mese, con «Rileggi ora» o con
+// «Controlla ora», che sono azioni di una persona e non partono in sincrono
+// su tutte le pagine. I cinque minuti restano come rete di sicurezza, tranne
+// mentre si aspetta la nota: li' rileggere rifarebbe i controlli due volte.
+//
+// LA NOTA ARRIVA MA LA RILETTURA NON RIESCE (revisione del 13/10/2026). Alla
+// nota rileggono insieme tutte le pagine aperte, e lo stesso aggiornamento del
+// registro fa ripartire il motore degli alert: la rilettura puo' fallire (un
+// 500, o il limite di richieste che non passa). Prima, dopo una nota cosi',
+// l'avviso prometteva ancora che la pagina rileggeva da sola, che non sarebbe
+// piu' successo; fino alla fine dell'attesa il cambio di mese non rileggeva e
+// «Rileggi ora» non c'era, e dopo l'avviso diceva che i ricalcoli «non
+// risultano finiti», che era falso. Ora la nota segna che i ricalcoli sono
+// finiti (fase 'ricalcoli_finiti'): se la rilettura non riesce l'anno e' vecchio
+// senza attesa, si rilegge al cambio di mese o con «Rileggi ora», e l'avviso
+// dice proprio questo. Mentre la rilettura e' in volo dice che la pagina sta
+// rileggendo, e «Rileggi ora» e' fermo, per non partire due volte.
+const VALIDITA_ANNO_MS = 5 * 60 * 1000;
+// Tre minuti: il ricontrollo delle liste e' il primo dei ricalcoli, e con tutti
+// i suoi tentativi (cinque attese sul limite di richieste, fino a 67 secondi
+// in tutto, poi mezzo minuto e un secondo giro, src/lib/importGrandeFile.js e
+// src/lib/limiteRichieste.js) si arrende entro i tre minuti. Il 09/10/2026 i
+// cinque ricalcoli insieme ci hanno messo 18 secondi.
+const ATTESA_NOTA_MS = 3 * 60 * 1000;
+
+// L'ora italiana di un istante, per dire quando e' successo e fino a quando si aspetta.
+const oraRoma = (ms) => new Date(ms).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+
+// Che cosa dice l'avviso, per ogni fase del caricamento sentito dopo la lettura.
+// Non promette mai un aggiornamento che non e' sicuro: dice che i numeri sono
+// quelli di prima e quando si rileggono davvero. rilegge: una lettura dell'anno
+// davanti e' in volo (dopo la nota, quella che la nota ha fatto partire).
+function testoPrimarieCambiate(c, attesaFinita, rilegge) {
+  const alle = oraRoma(c.il);
+  const come = 'cambiando mese o con «Rileggi ora»';
+  if (c.fase === 'in_corso') {
+    return `Dopo la lettura di questa pagina è partito un caricamento delle primarie (alle ${alle}), non ancora chiuso: i numeri qui sotto sono quelli di prima.`;
+  }
+  if (c.fase === 'senza_ricalcoli') {
+    const cosa = c.esito === 'parziale' ? "si è chiuso parziale: l'archivio è stato riscritto solo in parte" : "non è riuscito: l'archivio può essere vuoto o incompleto";
+    return `Dopo la lettura di questa pagina un caricamento delle primarie ${cosa} (alle ${alle}), e i ricalcoli del caricamento non partono. I numeri qui sotto sono quelli di prima: si rileggono ${come}.`;
+  }
+  if (c.fase === 'ricalcoli_finiti') {
+    return rilegge
+      ? `Dopo la lettura di questa pagina le primarie sono state ricaricate (alle ${alle}) e i ricalcoli sono finiti: la pagina sta rileggendo i numeri, e intanto quelli qui sotto sono di prima.`
+      : `Dopo la lettura di questa pagina le primarie sono state ricaricate (alle ${alle}): i ricalcoli sono finiti ma la rilettura non è riuscita, e i numeri qui sotto sono quelli di prima. Si rileggono ${come}.`;
+  }
+  if (attesaFinita) {
+    return `Dopo la lettura di questa pagina le primarie sono state ricaricate (alle ${alle}), ma i ricalcoli del caricamento non risultano finiti: i numeri qui sotto sono quelli di prima e si rileggono ${come}.`;
+  }
+  return `Dopo la lettura di questa pagina le primarie sono state ricaricate (alle ${alle}): i numeri qui sotto sono quelli di prima. La pagina li rilegge da sola quando il caricamento segna finiti i suoi ricalcoli, evasione delle liste compresa; se alle ${oraRoma(c.il + ATTESA_NOTA_MS)} non è successo, si rileggono ${come}.`;
+}
 
 function Barra({ valore, massimo }) {
   const perc = massimo ? Math.min(100, Math.round((valore / massimo) * 100)) : 0;
@@ -219,37 +316,182 @@ export default function EvasioneAssegnati({ isAdmin }) {
   const meseOggi = Number(oggiRoma().slice(5, 7));
   const [anno, setAnno] = useState(annoOggi);
   const [mese, setMese] = useState(meseOggi);
-  const [dati, setDati] = useState(null);
-  const [caricando, setCaricando] = useState(true);
-  const [errore, setErrore] = useState(null);
+  // Gli anni letti, ciascuno con i suoi dodici mesi e l'ora della lettura.
+  const [letti, setLetti] = useState({});
+  // Gli anni che si stanno leggendo con il cerchio che gira (la prima volta).
+  const [inLettura, setInLettura] = useState({});
+  // Gli anni con una lettura in volo, anche in silenzio: l'avviso dopo la nota
+  // dice che la pagina sta rileggendo, e non che la rilettura non e' riuscita
+  // (revisione del 13/10/2026). inVolo, qui sotto, non ridisegna la pagina.
+  const [rileggeAnno, setRileggeAnno] = useState({});
+  const [errori, setErrori] = useState({});
   const [occupato, setOccupato] = useState(null);
   const [aperto, setAperto] = useState(null);
   const [inControllo, setInControllo] = useState(false);
   const [tuttiAlert, setTuttiAlert] = useState(false);
   const [mostraAltri, setMostraAltri] = useState(false);
   const [inviataIl, setInviataIl] = useState(primoFeriale(annoOggi, meseOggi));
+  // Per anno: le letture in volo e l'ultima partita, che sola si prende lo schermo.
+  const inVolo = useRef(new Set()).current;
+  const ultimaDi = useRef({}).current;
 
-  const carica = useCallback(async (silenzioso = false) => {
-    if (!silenzioso) setCaricando(true);
-    setErrore(null);
+  const caricaAnno = useCallback(async (a, silenzioso = false) => {
+    const mia = (ultimaDi[a] = (ultimaDi[a] || 0) + 1);
+    inVolo.add(a);
+    setRileggeAnno(p => ({ ...p, [a]: true }));
+    if (!silenzioso) setInLettura(p => ({ ...p, [a]: true }));
+    // L'ora della lettura e' quella in cui parte: un caricamento chiuso mentre
+    // la funzione leggeva e' successivo alla lettura, non precedente.
+    const partita = Date.now();
     try {
-      const res = await base44.functions.invoke('evasioneAssegnati', { anno, mese });
-      setDati(res.data || res);
+      const res = await base44.functions.invoke('evasioneAssegnati', { anno: a, anno_intero: true });
+      if (ultimaDi[a] === mia) {
+        setLetti(p => ({ ...p, [a]: { ...(res.data || res), letto_il: partita } }));
+        setErrori(p => ({ ...p, [a]: null }));
+      }
     } catch (e) {
-      setErrore(messaggioErrore(e) || 'Errore nel caricamento');
+      if (ultimaDi[a] === mia) setErrori(p => ({ ...p, [a]: messaggioErrore(e) || 'Errore nel caricamento' }));
     }
-    if (!silenzioso) setCaricando(false);
-  }, [anno, mese]);
+    if (ultimaDi[a] === mia) {
+      inVolo.delete(a);
+      setInLettura(p => ({ ...p, [a]: false }));
+      setRileggeAnno(p => ({ ...p, [a]: false }));
+    }
+  }, [inVolo, ultimaDi]);
 
-  useEffect(() => { setDati(null); carica(); }, [carica]);
+  // All'apertura si legge l'anno di oggi.
+  useEffect(() => { if (!inVolo.has(annoOggi)) caricaAnno(annoOggi); }, [annoOggi, caricaAnno, inVolo]);
   useEffect(() => { setInviataIl(primoFeriale(anno, mese)); }, [anno, mese]);
+  const lettoAnno = letti[anno];
 
+  // Dopo una scrittura (lista caricata o eliminata, controllo rifatto) si
+  // rilegge l'anno che si ha davanti, e gli altri anni letti si dimenticano.
+  const carica = useCallback(async () => {
+    setLetti(p => (p[anno] ? { [anno]: p[anno] } : {}));
+    await caricaAnno(anno, true);
+  }, [anno, caricaAnno]);
+
+  // I caricamenti delle primarie, ascoltati con un'iscrizione sola per tutta la
+  // vita della pagina. Alla nota dei moduli aggiornati si rilegge l'anno davanti
+  // (e gli altri si dimenticano, come dopo una scrittura). Per il resto si segna
+  // la fase e quando, per dire che i numeri a video sono di prima:
+  // - in_corso: il caricamento e' aperto;
+  // - concluso: chiuso con successo, si aspetta la nota (ATTESA_NOTA_MS);
+  // - senza_ricalcoli: chiuso parziale, o riscrittura finita in errore. La nota
+  //   non arrivera' (moduliDaRicalcolare in src/lib/importGrandeFile.js) e
+  //   l'anno e' subito vecchio, ma non si rilegge qui (revisione del 13/10/2026):
+  //   l'evento arriva insieme a tutte le pagine aperte, e ognuna ricontrollerebbe
+  //   da se' le stesse liste (statoPrimarie conta anche il parziale).
+  // - ricalcoli_finiti: la nota e' arrivata sulla riga chiusa con successo
+  //   (revisione del 13/10/2026). La rilettura parte qui; se non riesce, l'anno
+  //   letto prima e' vecchio senza attesa, perche' un'altra nota non arrivera'.
+  //   Una nota di un'altra riga (arrivata tardi) non segna finiti i ricalcoli
+  //   del caricamento che si sta aspettando. Li segna invece la nota della
+  //   riga vista aperta, se la sua chiusura non si e' sentita (un evento perso
+  //   dall'iscrizione): la nota arriva solo dopo una chiusura riuscita, e senza
+  //   segnarla l'avviso restava «non ancora chiuso» anche a ricalcoli finiti.
+  // La riga vista aperta e chiusa in errore senza riscrivere niente (un rifiuto
+  // prima dello svuotamento, o la riga che un caricamento nuovo chiude) toglie
+  // l'avviso: i numeri a video valgono ancora, o li rilegge il caricamento nuovo.
+  //
+  // LE SCHEDE DI EXTRA RACCOLTA (revisione del 13/10/2026, lasciato fuori dal
+  // giro di prima). Ogni salvataggio nel modulo Extra Raccolta scrive una riga
+  // «extra_raccolta» gia' riuscita, senza nota. La pagina non la ascoltava, e
+  // con l'anno tenuto in memoria il canale Extra restava quello di prima fino
+  // alla rete dei cinque minuti (regola 2). Ora l'anno letto prima diventa
+  // vecchio: si rilegge al primo cambio di mese o con «Rileggi ora», non da
+  // solo, perche' un salvataggio dopo l'altro farebbe rileggere tutte le pagine
+  // aperte a ogni scheda. I controlli delle liste non c'entrano: dipendono dalle
+  // sole primarie, e nessun ricalcolo dell'extra raccolta li tocca.
+  const [extraDopo, setExtraDopo] = useState(null);
+  const [caricamentoDopo, setCaricamentoDopo] = useState(null);
+  const suCaricamento = useRef(null);
+  suCaricamento.current = (e) => {
+    const adesso = Date.now();
+    if (e.tipo_file === 'extra_raccolta') { if (e.concluso) setExtraDopo({ il: adesso }); return; }
+    if (e.moduli_aggiornati) {
+      const finiti = (c) => !!c && ((c.fase === 'concluso' && (!c.id || !e.id || c.id === e.id)) || (c.fase === 'in_corso' && !!c.id && c.id === e.id));
+      setCaricamentoDopo(c => (finiti(c) ? { ...c, fase: 'ricalcoli_finiti' } : c));
+      carica();
+    } else if (e.concluso) setCaricamentoDopo({ fase: e.esito === 'successo' ? 'concluso' : 'senza_ricalcoli', esito: e.esito, id: e.id, il: adesso });
+    else if (e.in_corso) setCaricamentoDopo(c => (c && c.fase === 'in_corso' && e.id && c.id === e.id ? c : { fase: 'in_corso', id: e.id, il: adesso }));
+    else if (e.esito === 'errore') setCaricamentoDopo(c => (c && c.fase === 'in_corso' && c.id === e.id ? null : c));
+  };
+  // Allo scadere dell'attesa della nota la pagina si ridisegna, perche'
+  // l'avviso dica come rileggere: nessuna richiesta parte da qui.
+  const [, setScadenza] = useState(0);
+  useEffect(() => {
+    if (!caricamentoDopo || caricamentoDopo.fase !== 'concluso') return undefined;
+    const resta = caricamentoDopo.il + ATTESA_NOTA_MS - Date.now();
+    if (resta <= 0) return undefined;
+    const t = setTimeout(() => setScadenza(Date.now()), resta + 100);
+    return () => clearTimeout(t);
+  }, [caricamentoDopo]);
+  useEffect(() => {
+    const leggi = creaAscoltoCaricamenti([...TIPI_PRIMARIE, 'extra_raccolta']);
+    const unsub = base44.entities.UploadLog.subscribe((evento) => {
+      const e = leggi(evento);
+      if (e) suCaricamento.current(e);
+    });
+    return unsub;
+  }, []);
+
+  // Il mese che si guarda, nella forma di sempre.
+  const dati = useMemo(() => {
+    const m = lettoAnno && lettoAnno.mesi ? lettoAnno.mesi[mese] || lettoAnno.mesi[String(mese)] : null;
+    if (!m) return null;
+    return {
+      anno, mese, primarie_caricate_il: lettoAnno.primarie_caricate_il, caricamento_aperto: lettoAnno.caricamento_aperto || null,
+      controlli_non_riusciti: lettoAnno.controlli_non_riusciti || null, raccoglitori: m.raccoglitori || [], senza_raccolta: m.senza_raccolta || [],
+    };
+  }, [lettoAnno, anno, mese]);
+  const caricando = !!inLettura[anno];
+  const errore = errori[anno] || null;
+  // Un caricamento delle primarie aperto o chiuso dopo la lettura dell'anno
+  // davanti: finche' l'anno non si rilegge, i numeri a video sono di prima e lo
+  // si dice. Si aspetta la nota solo per ATTESA_NOTA_MS dalla chiusura.
+  const primarieCambiate = caricamentoDopo && lettoAnno && lettoAnno.letto_il < caricamentoDopo.il ? caricamentoDopo : null;
+  const attesaDellaNota = !!caricamentoDopo && caricamentoDopo.fase === 'concluso' && Date.now() - caricamentoDopo.il < ATTESA_NOTA_MS;
+  // Un anno letto prima di un caricamento che ha riscritto l'archivio e' vecchio:
+  // subito se i ricalcoli non partono o se sono gia' finiti (la nota e' arrivata
+  // e la sua rilettura non ha preso il posto di quella di prima), a nota mancata
+  // se partono. Anche se dopo la lettura si sono salvate schede di extra raccolta.
+  const vecchioPerCaricamento = (d) => (!!extraDopo && d.letto_il < extraDopo.il)
+    || (!!caricamentoDopo && d.letto_il < caricamentoDopo.il
+      && (caricamentoDopo.fase === 'senza_ricalcoli' || caricamentoDopo.fase === 'ricalcoli_finiti'
+        || (caricamentoDopo.fase === 'concluso' && !attesaDellaNota)));
+  // L'avviso delle schede di extra raccolta, quando quello delle primarie non c'e'
+  // (che gia' dice che tutti i numeri sono di prima).
+  const extraCambiata = !primarieCambiate && extraDopo && lettoAnno && lettoAnno.letto_il < extraDopo.il ? extraDopo : null;
+  // Un anno letto prima della chiusura, mentre si aspetta la nota: lo rilegge la nota.
+  const aspettaLaNota = (d) => attesaDellaNota && d.letto_il < caricamentoDopo.il;
+  const rileggibile = !!(primarieCambiate || extraCambiata) && vecchioPerCaricamento(lettoAnno) && !aspettaLaNota(lettoAnno);
+  // Una lettura dell'anno davanti in volo: «Rileggi ora» resta fermo, col
+  // cerchio, per non far partire la stessa lettura due volte.
+  const rilegge = !!rileggeAnno[anno];
+
+  // Cambiando mese l'anno si legge se manca (o se l'ultima lettura non e'
+  // riuscita), e si rilegge in silenzio se e' vecchio, letto durante un
+  // caricamento delle primarie o prima di uno che l'ha riscritto. Finche'
+  // l'anno e' buono non parte niente, e nemmeno mentre si aspetta la nota: li'
+  // lavora controllaEvasioneAssegnati, e la nota fa rileggere da sola.
   const sposta = (passo) => {
     let m = mese + passo, a = anno;
     if (m < 1) { m = 12; a -= 1; }
     if (m > 12) { m = 1; a += 1; }
     setMese(m);
     setAnno(a);
+    if (inVolo.has(a)) return;
+    const d = letti[a];
+    if (!d) { caricaAnno(a); return; }
+    if (!aspettaLaNota(d) && (Date.now() - d.letto_il > VALIDITA_ANNO_MS || d.caricamento_aperto || vecchioPerCaricamento(d))) caricaAnno(a, true);
+  };
+  // «Rileggi ora», nell'avviso: l'anno davanti, come dopo una scrittura.
+  const [rileggendo, setRileggendo] = useState(false);
+  const rileggi = async () => {
+    setRileggendo(true);
+    await carica();
+    setRileggendo(false);
   };
 
   const caricaLista = async (riga, files) => {
@@ -282,7 +524,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
       toast({ title: rinviato(e) ? 'Caricamento rinviato' : 'Caricamento non riuscito', description: messaggioErrore(e), variant: 'destructive' });
     }
     // Anche dopo un errore: la lista puo' essere stata salvata senza controllo.
-    await carica(true);
+    await carica();
     setOccupato(null);
   };
 
@@ -295,7 +537,7 @@ export default function EvasioneAssegnati({ isAdmin }) {
       await base44.entities.ListaAssegnati.delete(riga.lista.id);
     } catch (e) {
       toast({ title: 'Eliminazione non riuscita', description: e.message || String(e), variant: 'destructive' });
-      await carica(true);
+      await carica();
       return;
     }
     // L'eliminazione non lascia traccia nei controlli: le richieste passate a
@@ -312,14 +554,14 @@ export default function EvasioneAssegnati({ isAdmin }) {
         variant: 'destructive',
       });
     }
-    await carica(true);
+    await carica();
   };
 
   const controllaOra = async () => {
     setInControllo(true);
     try {
       await base44.functions.invoke('controllaEvasioneAssegnati', { forza: true });
-      await carica(true);
+      await carica();
       toast({ title: 'Controllo aggiornato sulle ultime primarie caricate' });
     } catch (e) {
       toast({ title: rinviato(e) ? 'Controllo rinviato' : 'Controllo non riuscito', description: messaggioErrore(e), variant: 'destructive' });
@@ -410,14 +652,40 @@ export default function EvasioneAssegnati({ isAdmin }) {
         </div>
       )}
 
+      {(primarieCambiate || extraCambiata) && (
+        <div className="flex items-start gap-2 border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm flex-wrap sm:flex-nowrap">
+          <Info className="w-4 h-4 mt-0.5 shrink-0" />
+          <span className="min-w-0 flex-1">
+            {primarieCambiate
+              ? testoPrimarieCambiate(primarieCambiate, !attesaDellaNota, rilegge)
+              : `Dopo la lettura di questa pagina sono state salvate schede di extra raccolta (alle ${oraRoma(extraCambiata.il)}): il canale Extra qui sotto è quello di prima e si rilegge cambiando mese o con «Rileggi ora».`}
+          </span>
+          {rileggibile && (
+            <Button size="sm" variant="outline" className="h-8 shrink-0 bg-card" onClick={rileggi} disabled={rileggendo || rilegge}>
+              {rileggendo || rilegge ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}Rileggi ora
+            </Button>
+          )}
+        </div>
+      )}
+
       {errore && (
         <div className="flex items-start gap-2 border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{errore}</span>
         </div>
       )}
 
+      {/* Con l'anno intero, una lista che non si riesce a ricontrollare non
+          toglie la vista dei dodici mesi: si dice quale, e i suoi numeri sono
+          quelli dell'ultimo controllo riuscito. */}
+      {dati && dati.controlli_non_riusciti && (
+        <div className="flex items-start gap-2 border border-red-300 bg-red-50 text-red-800 rounded-lg px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{dati.controlli_non_riusciti}. Quelle liste mostrano l&apos;ultimo controllo riuscito{isAdmin ? ': si ripete con "Controlla ora".' : '.'}</span>
+        </div>
+      )}
+
       {caricando && !dati ? (
-        <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" />Controllo liste e primarie del mese…</div>
+        <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" />Controllo liste e primarie dell&apos;anno…</div>
       ) : dati && (
         <>
           {alert.length > 0 && (

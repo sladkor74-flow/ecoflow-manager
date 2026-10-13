@@ -42,6 +42,18 @@ function fmtData(v) {
 
 const PAGE_SIZE = 100;
 
+// LA RICERCA PARTE QUANDO SI SMETTE DI SCRIVERE (segnalazione alta A49 del 20/09,
+// corretta il 12/10/2026). Ogni tasto nel campo «Cerca FIR / ordine» chiamava
+// getOrdiniDaDichiarare, che legge primarie, secondarie e il file del portale:
+// scrivere un numero FIR di dodici cifre erano dodici chiamate pesanti, sul
+// limite di richieste al minuto che vale per tutta l'app. Le risposte superate
+// si scartavano gia' (creaSequenza), ma partivano lo stesso. Ora il testo scritto
+// diventa la ricerca 400 ms dopo l'ultimo tasto, o subito con Invio, e la pagina
+// riparte dalla prima insieme alla ricerca, in una lettura sola. Finche' una
+// ricerca scritta non e' partita, Excel e PDF aspettano: devono portare le righe
+// che si hanno davanti, non quelle di prima.
+const ATTESA_RICERCA_MS = 400;
+
 // Il mese di un gruppo, come lo scrive il portale: 'AAAA-MM' -> 'Gen 2026'.
 // Senza fine trasporto il carico non si colloca in nessun mese, e si dice.
 const MESI_BREVI = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
@@ -102,6 +114,9 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   const [ruolo, setRuolo] = useState(filtroRuoloEsterno || '');
   const [provincia, setProvincia] = useState('');
   const [annoChiusura, setAnnoChiusura] = useState('');
+  // testoRicerca e' quello che si sta scrivendo, ricerca quella che vale per
+  // l'elenco, l'Excel e il PDF.
+  const [testoRicerca, setTestoRicerca] = useState('');
   const [ricerca, setRicerca] = useState('');
   const [soloDate, setSoloDate] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -158,6 +173,17 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
 
   // Reset offset quando cambiano i filtri
   useEffect(() => { setOffset(0); }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo]);
+
+  // La ricerca scritta vale dopo ATTESA_RICERCA_MS dall'ultimo tasto. Ricerca e
+  // prima pagina cambiano insieme: una lettura sola, non una con la pagina
+  // vecchia e una con la prima.
+  const applicaRicerca = useCallback((testo) => { setRicerca(testo); setOffset(0); }, []);
+  useEffect(() => {
+    if (testoRicerca === ricerca) return undefined;
+    const attesa = setTimeout(() => applicaRicerca(testoRicerca), ATTESA_RICERCA_MS);
+    return () => clearTimeout(attesa);
+  }, [testoRicerca, ricerca, applicaRicerca]);
+  const ricercaInSospeso = testoRicerca !== ricerca;
 
   const handlePulisciSito = () => {
     setSito('');
@@ -254,8 +280,9 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
           <label className="text-xs text-muted-foreground">Cerca FIR / ordine</label>
           <Input
             placeholder="Numero FIR o ordine..."
-            value={ricerca}
-            onChange={e => setRicerca(e.target.value)}
+            value={testoRicerca}
+            onChange={e => setTestoRicerca(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && ricercaInSospeso) applicaRicerca(testoRicerca); }}
             className="h-9"
           />
         </div>
@@ -263,10 +290,10 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
           <input type="checkbox" checked={soloDate} onChange={e => setSoloDate(e.target.checked)} />
           Solo quelli col formulario da correggere
         </label>
-        <Button variant="outline" size="sm" onClick={handleExport} disabled={loading}>
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={loading || ricercaInSospeso}>
           <Download className="w-4 h-4 mr-1" /> Esporta Excel
         </Button>
-        <EsportaPdf sezioni={sezioniPdf} disabilitato={loading} />
+        <EsportaPdf sezioni={sezioniPdf} disabilitato={loading || ricercaInSospeso} />
         {sito && (
           <Button variant="ghost" size="sm" onClick={handlePulisciSito} title="Torna a vedere tutti i siti. Non cancella niente.">
             Mostra tutti i siti
@@ -299,7 +326,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
             in tabella {righe.length === 0 ? 0 : offset + 1}–{offset + righe.length}: l&apos;elenco parte dal carico arrivato da più tempo, i mesi più recenti sono nelle pagine dopo
           </span>
         )}
-        {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
+        {(loading || ricercaInSospeso) && <RefreshCw className="w-4 h-4 animate-spin" />}
       </div>
       {/* DI QUALI MESI SONO, SU TUTTO L'ELENCO (09/10/2026).
           Chiesto dall'utente dopo aver guardato gli ordini da dichiarare di

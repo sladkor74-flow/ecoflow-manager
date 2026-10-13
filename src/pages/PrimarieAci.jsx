@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { eTerminato, giornoElenco, giornoMovimento, dateDaSistemare, testoDate } from '@/lib/movimenti';
 import { giornoRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
-import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X } from 'lucide-react';
+import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X, AlertTriangle } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ReportConferimenti from '@/components/report-conferimenti/ReportConferimenti';
 import { useTableSort } from '@/hooks/useTableSort';
@@ -13,6 +13,9 @@ import { fetchAllClient } from '@/lib/fetchAllClient';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 import AvvisoDateDaSistemare, { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
 import AvvisoEseguiti from '@/components/primarie-rete/AvvisoEseguiti';
+import { contaFormulariConNumero } from '@/lib/formulari';
+import { controlliPortaleAci, problemiDellaRiga } from '@/lib/controlliPortaleAci';
+import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -32,15 +35,24 @@ const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Lug
 // I caricamenti che riscrivono l'archivio delle primarie ACI.
 const CARICAMENTI_ACI = ['primarie', 'primarie_aci'];
 
+// Il formulario, il ticket e lo stimato accanto al peso effettivo (audit del
+// 20/09, alte A12 e A13; corrette il 12/10/2026). Senza, un formulario ripartito
+// su due ordini sembrava un doppione e un ordine oltre la soglia del suo ticket
+// non si vedeva: il ticket e' quello che distingue le quote, e le due regole del
+// portale (stimato non sotto i 1.500 kg, effettivo non oltre il 110% dello
+// stimato) si leggono solo con lo stimato accanto all'effettivo.
 const DETAIL_COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
+  { key: 'numero_fir', label: 'Formulario' },
   { key: 'ragione_sociale', label: 'Ragione Sociale' },
   { key: 'provincia', label: 'Provincia' },
   { key: 'destinazione', label: 'Destinazione' },
   { key: 'classe', label: 'Classe' },
   { key: 'quantita_richiesta', label: 'Q.Rich', format: 'number' },
   { key: 'quantita_ritirata', label: 'Q.Ritir', format: 'number' },
-  { key: 'peso_effettivo', label: 'Kg', format: 'number' },
+  { key: 'numero_ordine_interno', label: 'Ticket' },
+  { key: 'peso_stimato', label: 'Stimato (kg)', format: 'number' },
+  { key: 'peso_effettivo', label: 'Effettivo (kg)', format: 'number' },
   { key: 'mese', label: 'Mese' },
   { key: 'trasportatore', label: 'Trasportatore' },
   { key: 'fine_trasporto', label: 'Fine trasporto', format: 'date' },
@@ -84,9 +96,20 @@ export default function PrimarieAci() {
   // Ogni caricamento delle primarie aggiorna la pagina: restava quella di prima
   // finche' qualcuno non premeva Aggiorna. Si ricarica a caricamento concluso,
   // mai mentre l'archivio si sta riscrivendo (in_corso).
+  //
+  // UNA RILETTURA PER CARICAMENTO (revisione del 13/10/2026). Ogni evento del
+  // registro che non fosse «in_corso» rileggeva l'archivio: un caricamento delle
+  // primarie ne manda tre, la riga vecchia chiusa in errore mentre quello nuovo
+  // si apre (proprio prima che l'archivio si svuoti), la chiusura e la nota
+  // «moduli collegati aggiornati» a ricalcoli finiti, con l'archivio cambiato una
+  // volta sola. Ora si rilegge alla chiusura (src/lib/ascoltoCaricamenti.js). La
+  // pagina mostra solo l'archivio, niente di quello che i ricalcoli scrivono
+  // dopo: alla nota non c'e' niente da rileggere.
   useEffect(() => {
+    const leggi = creaAscoltoCaricamenti(CARICAMENTI_ACI);
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && CARICAMENTI_ACI.includes(event.data?.tipo_file)) load();
+      const e = leggi(event);
+      if (e && e.concluso) load();
     });
     return unsub;
   }, [load]);
@@ -161,14 +184,27 @@ export default function PrimarieAci() {
   const totalKg = contati.reduce((s, r) => s + (r.peso_effettivo || 0), 0);
   const totalRichiesti = contati.reduce((s, r) => s + (r.quantita_richiesta || 0), 0);
   const totalRitirati = contati.reduce((s, r) => s + (r.quantita_ritirata || 0), 0);
+  // Gli ordini sono righe, i formulari si contano una volta per numero
+  // (12/10/2026): un formulario ripartito su due ordini ACI, ciascuno col suo
+  // ticket, e' un documento solo, come lo elenca il portale.
+  // Solo le righe col numero del formulario (revisione del 13/10/2026): con un
+  // filtro sugli stati non terminati, un ordine cancellato o assegnato un
+  // formulario non l'ha, e contato per uno «cancellato» diceva 6 formulari per
+  // 6 ordini che non ne hanno nessuno. Senza nessun formulario si scrive «—».
+  const totalFormulari = contaFormulariConNumero(contati);
+  const testoFormulari = (n) => (n > 0 ? formatIntero(n) : '—');
+  // I controlli del portale sui terminati contati, con le regole della passiva.
+  const controlli = controlliPortaleAci(contati);
+  const daControllare = controlli.sotto_minimo.length + controlli.oltre_soglia.length + controlli.doppi.length;
 
   // Aggregazione per destinazione
   const byDest = {};
   contati.forEach(r => {
     const d = (r.destinazione || '').trim() || 'N/D';
-    if (!byDest[d]) byDest[d] = { count: 0, kg: 0 };
+    if (!byDest[d]) byDest[d] = { count: 0, kg: 0, righe: [] };
     byDest[d].count++;
     byDest[d].kg += r.peso_effettivo || 0;
+    byDest[d].righe.push(r);
   });
   const destRows = Object.entries(byDest).sort((a, b) => b[1].kg - a[1].kg);
 
@@ -178,9 +214,10 @@ export default function PrimarieAci() {
   const byMese = {};
   contati.forEach(r => {
     const k = `${r.anno_ordine}|${r.mese}`;
-    if (!byMese[k]) byMese[k] = { anno: r.anno_ordine, meseIdx: MESI.indexOf(r.mese), count: 0, kg: 0 };
+    if (!byMese[k]) byMese[k] = { anno: r.anno_ordine, meseIdx: MESI.indexOf(r.mese), count: 0, kg: 0, righe: [] };
     byMese[k].count++;
     byMese[k].kg += r.peso_effettivo || 0;
+    byMese[k].righe.push(r);
   });
   const meseRows = Object.values(byMese)
     .sort((a, b) => (a.anno - b.anno) || (a.meseIdx - b.meseIdx))
@@ -212,6 +249,7 @@ export default function PrimarieAci() {
         <div className="border rounded-lg p-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><Package className="w-3.5 h-3.5" /> {conStato ? 'Ordini' : 'Ordini terminati'}</div>
           <p className="text-xl font-bold">{formatIntero(contati.length)}</p>
+          <p className="text-xs text-muted-foreground">{totalFormulari > 0 ? `${formatIntero(totalFormulari)} ${totalFormulari === 1 ? 'formulario' : 'formulari'}` : 'formulari: —'}</p>
         </div>
         <div className="border rounded-lg p-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1"><Truck className="w-3.5 h-3.5" /> Tonnellate</div>
@@ -241,6 +279,37 @@ export default function PrimarieAci() {
           contano a parte. Si guarda tutto l'archivio ACI, non i filtri: un
           ordine senza fine trasporto non risponde a nessun filtro di periodo. */}
       <AvvisoEseguiti righe={records} canale="ACI" />
+
+      {/* Le due regole del portale e il formulario ripetuto sullo stesso ordine,
+          sugli ordini contati (12/10/2026): le stesse della passiva, che fino a
+          oggi era l'unica a vederle. Non tolgono niente dai conti: si dicono. */}
+      {daControllare > 0 && (
+        <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm space-y-1">
+          <div className="font-semibold">Controlli del portale sugli ordini contati: {formatIntero(daControllare)} da guardare</div>
+          {controlli.sotto_minimo.length > 0 && (
+            <div>
+              {controlli.sotto_minimo.length === 1 ? 'Un ordine stimato' : `${formatIntero(controlli.sotto_minimo.length)} ordini stimati`} sotto i 1.500 kg ammessi per una richiesta ACI:{' '}
+              {controlli.sotto_minimo.slice(0, 5).map(r => `${r.id_ordine || '—'} (ticket ${r.numero_ordine_interno || '—'}, stimato ${formatIntero(r.peso_stimato)} kg)`).join('; ')}
+              {controlli.sotto_minimo.length > 5 ? ` e altri ${controlli.sotto_minimo.length - 5}` : ''}.
+            </div>
+          )}
+          {controlli.oltre_soglia.length > 0 && (
+            <div>
+              {controlli.oltre_soglia.length === 1 ? 'Un formulario chiuso' : `${formatIntero(controlli.oltre_soglia.length)} formulari chiusi`} oltre il 110% dello stimato del ticket, da ripartire su un altro ordine:{' '}
+              {controlli.oltre_soglia.slice(0, 5).map(o => `${o.riga.numero_fir || '—'} su ${o.riga.id_ordine || '—'} (ticket ${o.riga.numero_ordine_interno || '—'}, ${formatIntero(o.riga.peso_effettivo)} kg su ${formatIntero(o.massimo_kg)} ammessi)`).join('; ')}
+              {controlli.oltre_soglia.length > 5 ? ` e altri ${controlli.oltre_soglia.length - 5}` : ''}.
+            </div>
+          )}
+          {controlli.doppi.length > 0 && (
+            <div className="text-red-800">
+              {controlli.doppi.length === 1 ? 'Un formulario compare' : `${formatIntero(controlli.doppi.length)} formulari compaiono`} più volte sullo stesso ordine, cioè lo stesso ritiro caricato due volte:{' '}
+              {controlli.doppi.slice(0, 5).map(d => `${d.numero_fir} su ${d.ordine} (${d.righe.map(r => `${formatIntero(r.peso_effettivo)} kg`).join(' + ')})`).join('; ')}
+              {controlli.doppi.length > 5 ? ` e altri ${controlli.doppi.length - 5}` : ''}.
+            </div>
+          )}
+          <div className="text-xs">Un formulario ripartito su due ordini, ciascuno col suo ticket, è la regola del portale e non un doppione: nei conti vale una volta. Le righe sono segnate nel dettaglio.</div>
+        </div>
+      )}
 
       <CercaIdOrdine value={cercaId} onChange={setCercaId} trovati={loading || !records.length ? null : dettaglio.length} />
 
@@ -284,7 +353,8 @@ export default function PrimarieAci() {
             <table className="w-full text-sm">
               <thead className="bg-muted"><tr>
                 <th className="text-left px-3 py-2 font-semibold">Destinazione</th>
-                <th className="text-right px-3 py-2 font-semibold">Record</th>
+                <th className="text-right px-3 py-2 font-semibold">Ordini</th>
+                <th className="text-right px-3 py-2 font-semibold" title="Formulari distinti: uno ripartito su due ordini conta una volta">Formulari</th>
                 <th className="text-right px-3 py-2 font-semibold">Kg Totali</th>
                 <th className="text-right px-3 py-2 font-semibold">Ton</th>
               </tr></thead>
@@ -293,6 +363,7 @@ export default function PrimarieAci() {
                   <tr key={dest} className={`border-t ${i % 2 ? 'bg-muted/20' : ''}`}>
                     <td className="px-3 py-2 font-medium">{dest}</td>
                     <td className="px-3 py-2 text-right">{formatNumber(v.count, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    <td className="px-3 py-2 text-right">{testoFormulari(contaFormulariConNumero(v.righe))}</td>
                     <td className="px-3 py-2 text-right">{formatNumber(v.kg, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                     <td className="px-3 py-2 text-right font-bold">{fmtTon(v.kg / 1000)}</td>
                   </tr>
@@ -301,6 +372,7 @@ export default function PrimarieAci() {
               <tfoot><tr className="bg-primary text-primary-foreground font-bold">
                 <td className="px-3 py-3">TOTALE</td>
                 <td className="px-3 py-3 text-right">{formatIntero(contati.length)}</td>
+                <td className="px-3 py-3 text-right">{testoFormulari(totalFormulari)}</td>
                 <td className="px-3 py-3 text-right">{formatNumber(totalKg, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                 <td className="px-3 py-3 text-right">{fmtTon(totalKg / 1000)}</td>
               </tr></tfoot>
@@ -313,7 +385,8 @@ export default function PrimarieAci() {
             <table className="w-full text-sm">
               <thead className="bg-muted"><tr>
                 <th className="text-left px-3 py-2 font-semibold">Mese</th>
-                <th className="text-right px-3 py-2 font-semibold">Record</th>
+                <th className="text-right px-3 py-2 font-semibold">Ordini</th>
+                <th className="text-right px-3 py-2 font-semibold" title="Formulari distinti: uno ripartito su due ordini conta una volta">Formulari</th>
                 <th className="text-right px-3 py-2 font-semibold">Kg Totali</th>
                 <th className="text-right px-3 py-2 font-semibold">Ton</th>
               </tr></thead>
@@ -322,6 +395,7 @@ export default function PrimarieAci() {
                   <tr key={m} className={`border-t ${i % 2 ? 'bg-muted/20' : ''}`}>
                     <td className="px-3 py-2 font-medium">{m}</td>
                     <td className="px-3 py-2 text-right">{formatNumber(v.count, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                    <td className="px-3 py-2 text-right">{testoFormulari(contaFormulariConNumero(v.righe))}</td>
                     <td className="px-3 py-2 text-right">{formatNumber(v.kg, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                     <td className="px-3 py-2 text-right font-bold">{fmtTon(v.kg / 1000)}</td>
                   </tr>
@@ -347,22 +421,32 @@ export default function PrimarieAci() {
                 ))}
               </tr></thead>
               <tbody>
-                {sortedDetail.sorted.slice(0, 500).map((r, i) => (
-                  <tr key={r.id} className={`border-t hover:bg-muted/30 ${r.date_da_sistemare ? 'bg-amber-50/60' : i % 2 ? 'bg-muted/10' : ''}`}>
+                {sortedDetail.sorted.slice(0, 500).map((r, i) => {
+                  // le regole del portale e il formulario ripetuto, sui terminati (12/10/2026)
+                  const problemi = eTerminato(r) ? problemiDellaRiga(r, controlli.doppi) : [];
+                  return (
+                  <tr key={r.id} className={`border-t hover:bg-muted/30 ${problemi.length ? 'bg-red-50/60' : r.date_da_sistemare ? 'bg-amber-50/60' : i % 2 ? 'bg-muted/10' : ''}`}>
                     {DETAIL_COLUMNS.map((col) => {
                       let val = r[col.key];
-                      if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
+                      // un numero che manca non e' zero: si scrive «—»
+                      if (col.format === 'number') val = val != null && val !== '' ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—';
                       else if (col.format === 'date') val = dataIt(val);
                       return (
                         <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''}`}>
                           {/* il segno delle date da sistemare, col dettaglio nel title (22/09/2026) */}
                           {col.key === 'id_ordine' && <SegnoDate testo={r.date_da_sistemare} />}
+                          {col.key === 'id_ordine' && problemi.length > 0 && (
+                            <span title={`Controlli del portale: ${problemi.join('; ')}`} aria-label={`Controlli del portale: ${problemi.join('; ')}`} className="inline-flex align-middle mr-1 text-red-600">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                            </span>
+                          )}
                           {val ?? ''}
                         </td>
                       );
                     })}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

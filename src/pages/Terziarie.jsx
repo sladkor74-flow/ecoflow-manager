@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { eTerminato, giornoMovimento, giornoElenco, annoElenco, meseElenco, dateDaSistemare, testoDate } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X } from 'lucide-react';
@@ -12,6 +12,7 @@ import { formatIntero } from '@/lib/utils';
 import AvvisoDateDaSistemare from '@/components/primarie-rete/DateDaSistemare';
 import AvvisoEseguiti from '@/components/primarie-rete/AvvisoEseguiti';
 import { canaleDi } from '@/lib/canaleSecondaria';
+import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const MATERIALI = ['PFU SFUSO', 'CIAB/CIPP', 'FERRO'];
@@ -103,18 +104,40 @@ export default function Terziarie() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Auto-refresh on new uploads
+  // Ogni caricamento delle terziarie aggiorna la pagina, alla chiusura, una
+  // volta (revisione del 13/10/2026). Prima la pagina non guardava nemmeno il
+  // tipo: rileggeva tutto l'archivio a ogni evento del registro che non fosse
+  // «in_corso», di qualunque caricamento. Un caricamento delle primarie, con la
+  // riga vecchia chiusa in errore, la chiusura e la nota dei moduli aggiornati,
+  // erano tre letture delle terziarie, che non erano cambiate. Ora si ascoltano
+  // solo le terziarie, con la regola comune (src/lib/ascoltoCaricamenti.js).
+  // L'iscrizione e' una per tutta la vita della pagina: prima si rifaceva a ogni
+  // filtro, e chiama sempre l'ultima versione della lettura.
+  const ricarica = useRef(null);
+  ricarica.current = loadData;
   useEffect(() => {
+    const leggi = creaAscoltoCaricamenti(['terziarie']);
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso') loadData();
+      const e = leggi(event);
+      if (e && e.concluso) ricarica.current();
     });
     return unsub;
-  }, [loadData]);
+  }, []);
 
   // Indicatori e uscite per impianto senza i terminati senza fine trasporto:
   // non hanno un periodo, e si contano nell'avviso (regola 1).
-  const contati = records.filter(r => !r.senza_fine_trasporto);
-  const senzaFineInElenco = records.length - contati.length;
+  //
+  // E SENZA UN FILTRO DI STATO CONTANO SOLO I TERMINATI, come le secondarie
+  // (computeSecondarieMatrix) e i terminati ACI (audit del 20/09, alta A37;
+  // corretta il 12/10/2026). Il file TERZIARIE del 26/09/2026 portava 17 righe
+  // «assegnato» (unita' 30013, immesse il 18/09, senza peso), e l'import non
+  // filtra lo stato: «Spedizioni / Navi» le contava come navi partite. Con un
+  // filtro sugli stati si contano gli stati scelti; l'elenco li mostra tutti.
+  const conStato = filters.stato.length > 0;
+  const conPeriodo = records.filter(r => !r.senza_fine_trasporto);
+  const contati = conPeriodo.filter(r => conStato || eTerminato(r));
+  const senzaFineInElenco = records.length - conPeriodo.length;
+  const nonTerminatiInElenco = conPeriodo.length - contati.length;
   const dateInElenco = records.filter(r => r.date_da_sistemare).length;
   const kpi = {
     totale_t: contati.reduce((s, r) => s + (r.peso_t || 0), 0),
@@ -167,6 +190,9 @@ export default function Terziarie() {
       )}
 
       <TerziarieKpi kpi={kpi} />
+      <p className="text-xs text-muted-foreground -mt-3">
+        Indicatori e uscite per impianto contano {conStato ? 'i trasporti degli stati scelti' : 'i trasporti terminati'}, nel giorno della fine del trasporto; il dettaglio elenca tutti quelli che rispondono ai filtri{nonTerminatiInElenco > 0 ? `, compresi ${formatIntero(nonTerminatiInElenco)} non terminati che non entrano nei conti` : ''}.
+      </p>
 
       {/* Filters */}
       <div className="border rounded-lg p-4 space-y-3">

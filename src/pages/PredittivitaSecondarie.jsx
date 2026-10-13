@@ -14,6 +14,7 @@ import PredittivitaAgent from '@/components/predittivita/PredittivitaAgent';
 import { it, testoErrore, avvisiDaMostrare, Vuoto } from '@/components/predittivita/Comuni';
 import { usePermessi } from '@/lib/permessi';
 import { oggiRoma } from '@/lib/giornoItaliano';
+import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
 
 // La predittivita' delle secondarie, un anno alla volta (26/09/2026): parte
 // dall'ancora delle giacenze al 31/12 dell'anno prima, sola rete, per fine
@@ -162,17 +163,30 @@ function Predittivita() {
 
   // Ricalcolo a ogni caricamento concluso di primarie o secondarie, dopo una
   // breve attesa; piu' caricamenti vicini fanno un calcolo solo.
+  //
+  // UN RICALCOLO PER CARICAMENTO (revisione del 13/10/2026). La pagina
+  // ricalcolava a ogni evento del registro che non fosse «in_corso»: un
+  // caricamento delle primarie ne scrive tre (la riga vecchia chiusa in errore,
+  // la chiusura e, circa 18 secondi dopo, la nota «moduli collegati
+  // aggiornati»), quindi due o tre calcoli dell'anno intero, sul limite di
+  // richieste che vale per tutta l'app; e un file rifiutato a dati intatti
+  // ricalcolava lo stesso. Ora passa dalla regola comune delle pagine
+  // (src/lib/ascoltoCaricamenti.js): si ricalcola solo alla conclusione, dopo
+  // l'attesa di sempre. La nota non serve: il calcolo legge gli archivi, le
+  // giacenze e la configurazione, non quello che i ricalcoli del caricamento
+  // scrivono dopo. Una riga vista aperta esce dall'avviso a qualunque esito.
   useEffect(() => {
     let attesa = null;
-    const unsubscribe = base44.entities.UploadLog.subscribe((event) => {
-      const d = event && event.data;
-      if (!d || !TIPI_RICALCOLO.includes(d.tipo_file) || (event.type !== 'create' && event.type !== 'update')) return;
-      const id = d.id || event.id;
-      if (d.esito === 'in_corso') {
-        setAperti(m => ({ ...m, [id]: { tipo_file: d.tipo_file, utente: d.utente } }));
+    const leggi = creaAscoltoCaricamenti(TIPI_RICALCOLO);
+    const unsubscribe = base44.entities.UploadLog.subscribe((evento) => {
+      const e = leggi(evento);
+      if (!e) return;
+      if (e.in_corso) {
+        setAperti(m => ({ ...m, [e.id]: { tipo_file: e.tipo_file, utente: evento.data.utente } }));
         return;
       }
-      setAperti(m => { if (!(id in m)) return m; const x = { ...m }; delete x[id]; return x; });
+      setAperti(m => { if (!(e.id in m)) return m; const x = { ...m }; delete x[e.id]; return x; });
+      if (!e.concluso) return;
       clearTimeout(attesa);
       attesa = setTimeout(() => caricaRef.current(), ATTESA_RICALCOLO_MS);
     });

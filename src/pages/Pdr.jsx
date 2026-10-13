@@ -12,6 +12,7 @@ import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import { precisioneCoordinata } from '@/lib/geoLinks';
 import { formatIntero } from '@/lib/utils';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
 const PdrMap = React.lazy(() => import('@/components/pdr/PdrMap'));
 
 export default function Pdr() {
@@ -51,9 +52,17 @@ export default function Pdr() {
 
   useEffect(() => { loadRecords(); }, [loadRecords]);
 
+  // Ogni caricamento dei PDR aggiorna la pagina, alla chiusura, una volta, con la
+  // stessa regola delle altre pagine (src/lib/ascoltoCaricamenti.js, revisione
+  // del 13/10/2026). Un file rifiutato a dati intatti non rilegge piu'
+  // l'anagrafica, che e' quella di prima; una sostituzione finita in errore senza
+  // riuscire a rimettere l'anagrafica com'era si', perche' l'anagrafica e'
+  // cambiata.
   useEffect(() => {
+    const leggi = creaAscoltoCaricamenti(['pdr']);
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && event.data?.tipo_file === 'pdr') loadRecords();
+      const e = leggi(event);
+      if (e && e.concluso) loadRecords();
     });
     return unsub;
   }, [loadRecords]);

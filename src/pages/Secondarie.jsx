@@ -15,6 +15,7 @@ import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { canaleDi } from '@/lib/canaleSecondaria';
 import AvvisoEseguiti from '@/components/primarie-rete/AvvisoEseguiti';
+import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
 
 // Rete e ACI stanno nello stesso archivio ma sono commesse separate: la pagina
 // ne guarda una alla volta, e si apre sulla rete. Il filtro partiva vuoto, con
@@ -145,18 +146,35 @@ export default function Secondarie() {
   useEffect(() => { loadData(); }, [loadData, versione]);
   useEffect(() => { if (viewMode === 'detail') loadRecords(); }, [loadRecords, viewMode, versione]);
 
+  // Gli alert si rileggono anche da soli, alla nota dei moduli aggiornati
+  // (versioneAlert, qui sotto). Vale l'ultima lettura partita.
+  const [versioneAlert, setVersioneAlert] = useState(0);
+  const ultimoAlert = useRef(0);
   useEffect(() => {
+    const n = ++ultimoAlert.current;
     (async () => {
       try {
         const res = await base44.functions.invoke('getAlerts', { modulo: 'secondarie', solo_aperti: true });
-        setAlertCount(res.data?.total || 0);
+        if (n === ultimoAlert.current) setAlertCount(res.data?.total || 0);
       } catch { /* il contatore degli avvisi non e' essenziale */ }
     })();
-  }, [versione]);
+  }, [versione, versioneAlert]);
 
+  // UNA RILETTURA PER CARICAMENTO (revisione del 13/10/2026). Ogni evento del
+  // registro che non fosse «in_corso» rileggeva matrice, dettaglio e alert: un
+  // caricamento delle secondarie ne manda tre, la riga vecchia chiusa in errore
+  // mentre quello nuovo si apre, la chiusura e la nota «moduli collegati
+  // aggiornati» a ricalcoli finiti, con l'archivio cambiato una volta sola. Ora
+  // matrice e dettaglio si rileggono alla chiusura (src/lib/ascoltoCaricamenti.js),
+  // e alla nota solo gli alert: li scrive runAlertEngine, che il workflow lancia
+  // sullo stesso aggiornamento che chiude il caricamento, e alla chiusura il
+  // contatore risponde ancora con quelli di prima (come in Terminati Rete).
   useEffect(() => {
+    const leggi = creaAscoltoCaricamenti(['secondarie']);
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && event.data?.tipo_file === 'secondarie') aggiorna();
+      const e = leggi(event);
+      if (e && e.concluso) aggiorna();
+      else if (e && e.moduli_aggiornati) setVersioneAlert(v => v + 1);
     });
     return unsub;
   }, [aggiorna]);

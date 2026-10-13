@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { eAci } from '@/lib/canaleSecondaria';
 import { base44 } from '@/api/base44Client';
 import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Search, ListOrdered } from 'lucide-react';
@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
+import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
 
 export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Rete — Backlog Richieste', description = 'Ordini in stato "assegnato" di classe diversa da PFU Autodemolizione, derivati automaticamente dal caricamento delle Primarie.' }) {
   const [data, setData] = useState(null);
@@ -39,10 +40,15 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
 
   // Gli ordini si leggono una volta sola: i filtri si applicano qui, cosi' la
   // posizione in coda si puo' ricalcolare senza rileggere l'archivio.
+  // Vale solo l'ultima lettura partita (13/10/2026): un caricamento puo'
+  // chiudersi mentre se ne fa una, e quella vecchia non deve prendersi lo schermo.
+  const ultimaLetturaOrdini = useRef(0);
   const loadRecords = useCallback(async () => {
+    const mia = ++ultimaLetturaOrdini.current;
     setLoadingRecords(true);
     try {
       const all = await fetchAllClient(base44.entities[entity], null, '-ordine_immesso_il');
+      if (mia !== ultimaLetturaOrdini.current) return;
       // Sull'ACI un formulario non si chiude a piu' del 10% del peso stimato del
       // suo ticket: il massimo si mostra accanto allo stimato, cosi' chi evade
       // l'ordine sa fin dove puo' arrivare senza doverlo ripartire.
@@ -52,7 +58,7 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
         max_chiudibile_kg: eAci(r) && Number(r.peso_stimato) > 0 ? Math.round(Number(r.peso_stimato) * 1.1) : null,
       })));
     } catch (e) { console.error(e); }
-    setLoadingRecords(false);
+    if (mia === ultimaLetturaOrdini.current) setLoadingRecords(false);
   }, [entity]);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -114,13 +120,34 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     return migliore;
   }, [ordiniMostrati, coda, cercaPdr, cercaId]);
 
-  // Auto-refresh on new uploads
+  // Ogni caricamento delle primarie aggiorna la pagina, una volta (revisione del
+  // 13/10/2026). Ogni evento del registro che non fosse «in_corso» richiamava la
+  // matrice: un caricamento ne manda tre, la riga vecchia chiusa in errore
+  // mentre quello nuovo si apre, la chiusura e la nota «moduli collegati
+  // aggiornati», con gli assegnati cambiati una volta sola. Ora si rilegge alla
+  // chiusura (src/lib/ascoltoCaricamenti.js); alla nota no, perche' la pagina
+  // non mostra niente di quello che i ricalcoli scrivono dopo. L'iscrizione e'
+  // una per tutta la vita della pagina: prima si rifaceva a ogni filtro.
+  //
+  // E SI RILEGGE ANCHE IL DETTAGLIO (regola 2). Gli ordini del dettaglio si
+  // leggevano una volta sola e il caricamento richiamava solo la matrice: il
+  // dettaglio, la coda e la ricerca per ID restavano quelli di prima finche' non
+  // si riapriva la pagina. Se il dettaglio e' a video si rilegge subito; se no
+  // gli ordini letti si dimenticano, e si rileggono quando lo si apre.
+  const ricarica = useRef(null);
+  ricarica.current = () => {
+    loadData();
+    if (viewMode === 'detail') loadRecords();
+    else { ultimaLetturaOrdini.current++; setTuttiRecords(null); setLoadingRecords(false); }
+  };
   useEffect(() => {
+    const leggi = creaAscoltoCaricamenti(['primarie']);
     const unsub = base44.entities.UploadLog.subscribe((event) => {
-      if ((event.type === 'create' || event.type === 'update') && event.data?.esito !== 'in_corso' && event.data?.tipo_file === 'primarie') loadData();
+      const e = leggi(event);
+      if (e && e.concluso) ricarica.current();
     });
     return unsub;
-  }, [loadData]);
+  }, []);
 
   const handleExport = async (mode) => {
     setExporting(true);
