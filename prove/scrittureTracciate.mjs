@@ -121,8 +121,11 @@ verifica('ogni scrittura degli archivi tracciati passa dall\'involucro o e\' in 
 for (const p of [...Object.keys(FUORI_PER_NATURA), ...Object.keys(DA_PORTARE)]) {
   verifica(`l'eccezione ${p} serve ancora (scrive un archivio tracciato)`, conScritture.has(p));
 }
+// SurplusTariffa dal 13/10/2026: il surplus sulle tariffe (il Fuel Surcharge)
+// cambia attiva, passiva e margine come un prezzo, e chi lo scrive fuori
+// dall'involucro deve far fallire questa prova come per le tariffe.
 verifica('gli archivi tracciati sono quelli dei numeri che fanno i conti',
-  ['ImpiantoTargetSecondaria', 'TargetRaccoglitore', 'TargetMensile', 'GiacenzaSito', 'Tariffa', 'CommessaEcotyre', 'DichiarazioneSito', 'ExtraRaccolta', 'VocePassivaAmministrazione'].every(e => ENTITA_TRACCIATE.includes(e)), ENTITA_TRACCIATE.join(','));
+  ['ImpiantoTargetSecondaria', 'TargetRaccoglitore', 'TargetMensile', 'GiacenzaSito', 'Tariffa', 'SurplusTariffa', 'CommessaEcotyre', 'DichiarazioneSito', 'ExtraRaccolta', 'VocePassivaAmministrazione'].every(e => ENTITA_TRACCIATE.includes(e)), ENTITA_TRACCIATE.join(','));
 
 console.log('LE PAGINE E LE FUNZIONI CHE DOVEVANO PASSARE DALLO STORICO CI PASSANO');
 const DEVONO = {

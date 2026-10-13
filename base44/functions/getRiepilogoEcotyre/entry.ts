@@ -1,10 +1,16 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, TIPOLOGIE_ATTIVA } from "../../shared/attivaCalcolo.ts";
+import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eRigaSurplus, TIPOLOGIE_ATTIVA } from "../../shared/attivaCalcolo.ts";
 
 const ETICHETTE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra Raccolta' };
 const r2 = (v) => Math.round(v * 100) / 100;
+// Gli euro di una frase, all'italiana.
+const euroIt = (v) => {
+  const n = r2(Number(v) || 0);
+  const [intero, dec] = Math.abs(n).toFixed(2).split('.');
+  return (n < 0 ? '-' : '') + intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
+};
 
 // Riepilogo del dovuto da Ecotyre per un dato anno/mese, calcolato sui dati di
 // oggi con le stesse righe che "Elabora Mese" salverebbe (base44/shared/
@@ -14,6 +20,15 @@ const r2 = (v) => Math.round(v * 100) / 100;
 //
 // Se il mese ha gia' un documento, lo confronta con i dati di oggi
 // (riconciliazione): i movimenti arrivati dopo l'elaborazione si vedono qui.
+//
+// IL SURPLUS SULLE TARIFFE (13/10/2026). Il totale del canale e' quello che si
+// fattura e comprende la riga del surplus (il Fuel Surcharge del consorzio);
+// accanto ci sono lo standard (totale_standard) e le righe del surplus
+// (surplus), perche' la pagina dica la fattura com'e': riga standard, riga del
+// surplus, totale. La riga del surplus non e' un ordine e non ha una regione:
+// non entra nei chili, negli ordini, nelle regioni, nella ripartizione per
+// dicitura ne' nei prezzi del canale (la rete, che ha un prezzo solo, sarebbe
+// diventata «prezzi variabili» per colpa del surplus).
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -24,7 +39,7 @@ export default async function(req) {
     if (!anno || !mese) return Response.json({ error: 'Anno e mese obbligatori' }, { status: 400 });
     const annoNum = Number(anno);
 
-    const [reteAll, aciAll, extraAll, fornitori, tariffe, documenti] = await Promise.all([
+    const [reteAll, aciAll, extraAll, fornitori, tariffe, documenti, surplus] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
@@ -33,20 +48,24 @@ export default async function(req) {
       // default del backend anteprima e documento potevano dire importi diversi.
       fetchAll(base44.asServiceRole.entities.Tariffa, { direzione: 'ATTIVA' }),
       base44.asServiceRole.entities.DocumentoFatturazione.filter({ tipo: 'ATTIVA', anno: annoNum, mese }),
+      // tutti i surplus: il disattivato si toglie nel calcolo, come per le tariffe
+      fetchAll(base44.asServiceRole.entities.SurplusTariffa),
     ]);
-    const { righe, anomalie, extra_secondarie_escluse } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });
+    const { righe, anomalie, extra_secondarie_escluse, surplus_del_mese } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese, surplus });
 
     const tipologie = [];
     for (const tipologia of TIPOLOGIE_ATTIVA) {
       const lista = righe[tipologia];
-      let kg = 0, totale = 0, ordini = 0, missingKg = 0, missingCount = 0;
+      let kg = 0, totale = 0, totaleSurplus = 0, ordini = 0, missingKg = 0, missingCount = 0;
       const byRegione = {};
       const prezzi = new Map();
       const rip = { TRASP: { ordini: 0, kg: 0, totale: 0 }, TRASP_TRATT: { ordini: 0, kg: 0, totale: 0 } };
       for (const r of lista) {
+        totale += r.totale;
+        // la riga del surplus: nel totale del canale, e da nessun'altra parte
+        if (eRigaSurplus(r)) { totaleSurplus += r.totale; continue; }
         const corpo = eRigaACorpo(r);
         const regione = r.regione || 'N/D';
-        totale += r.totale;
         if (!byRegione[regione]) byRegione[regione] = { regione, kg: 0, totale: 0, ordini: 0 };
         byRegione[regione].totale += r.totale;
         const x = rip[r.servizio_ecotyre];
@@ -67,6 +86,18 @@ export default async function(req) {
       else if (prezzi.size === 1) { const v = Array.from(prezzi.values())[0]; badge = { tipo: 'uniforme', valore: v.valore, unita_misura: v.unita_misura }; }
       else badge = { tipo: 'vuoto' };
 
+      // Le righe del surplus del canale, come le dice la fattura: nome, origine,
+      // periodo, tonnellate del mese, €/t, importo. Gli ordini su cui vale
+      // (ordini_ids) servono al confronto con la prefattura, non alla pagina.
+      // SOLO I CAMPI DELL'ATTIVA, ELENCATI UNO PER UNO (revisione del
+      // 13/10/2026): il riepilogo risponde a chiunque sia collegato, e quanto
+      // SMOCO paga ai fornitori e' un costo, che vede solo l'amministratore. Un
+      // campo nuovo del calcolo non arriva qui finche' non lo si aggiunge.
+      const surplusCanale = (surplus_del_mese[tipologia] || []).map(s => ({
+        surplus_id: s.surplus_id, gruppo: s.gruppo, nome: s.nome, origine: s.origine, riferimento: s.riferimento,
+        prestazione: s.prestazione, euro_t: s.euro_t, kg: s.kg, ton: s.ton, ordini: s.ordini, totale: s.totale, dal: s.dal, al: s.al,
+      }));
+
       // Il documento salvato contro i dati di oggi
       const doc = documentoValido(documenti, tipologia);
       let riconciliazione = null;
@@ -78,12 +109,33 @@ export default async function(req) {
           totale_documento: doc.totale || 0,
           ...riconciliaAttiva(lista, voci),
         };
+        // UN SURPLUS SU UN MESE GIA' CHIUSO (13/10/2026). Se il consorzio
+        // comunica un surplus per un mese gia' fatturato, la differenza e' vera
+        // ma non e' un errore del documento: va fatturata a parte. Il gestionale
+        // lo dice e non riapre niente da solo.
+        const delSurplus = (elenco) => (elenco || []).filter(x => x.surplus);
+        const nomi = [...new Set([...delSurplus(riconciliazione.nuovi), ...delSurplus(riconciliazione.cambiati), ...delSurplus(riconciliazione.spariti)].map(x => x.descrizione))];
+        if (doc.stato === 'chiusa' && nomi.length) {
+          const euro = r2(
+            delSurplus(riconciliazione.nuovi).reduce((s, x) => s + (Number(x.totale) || 0), 0)
+            + delSurplus(riconciliazione.cambiati).reduce((s, x) => s + (Number(x.totale_oggi) || 0) - (Number(x.totale_documento) || 0), 0)
+            - delSurplus(riconciliazione.spariti).reduce((s, x) => s + (Number(x.totale) || 0), 0));
+          const quali = nomi.join(' e ');
+          riconciliazione.surplus_a_parte = {
+            euro,
+            testo: `Il documento di ${String(mese).toLowerCase()} ${annoNum} è chiuso: ${euro >= 0
+              ? `${quali}, ${euroIt(euro)} € in più, va fatturato a parte`
+              : `${quali}, ${euroIt(-euro)} € fatturati in più, va stornato a parte`}. Il documento non si riapre da solo.`,
+          };
+        }
       }
 
       const chiudi = (v) => ({ ordini: v.ordini, kg: Math.round(v.kg), ton: r2(v.kg / 1000), totale: r2(v.totale) });
       tipologie.push({
         tipologia, label: ETICHETTE[tipologia],
         volume_kg: kg, volume_ton: r2(kg / 1000), totale: r2(totale), ordini,
+        totale_standard: r2(totale - totaleSurplus), totale_surplus: r2(totaleSurplus),
+        surplus: surplusCanale,
         badge,
         by_regione: Object.values(byRegione).map(v => ({ ...v, totale: r2(v.totale) })).sort((a, b) => b.totale - a.totale),
         ripartizione_servizio: { TRASP: chiudi(rip.TRASP), TRASP_TRATT: chiudi(rip.TRASP_TRATT) },

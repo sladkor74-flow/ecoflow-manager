@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { calcolaRigheAttiva, eRigaACorpo, TIPOLOGIE_ATTIVA } from "../../shared/attivaCalcolo.ts";
+import { calcolaRigheAttiva, eRigaDiMovimento, eRigaSurplus, TIPOLOGIE_ATTIVA } from "../../shared/attivaCalcolo.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { controlloCaricamenti, TIPI_RINVIO } from "../../shared/statoArchivi.ts";
@@ -96,7 +96,7 @@ export default async function(req) {
     // canale solo quando si rifanno tutti e tre.
     const tocca = (d) => (TIPOLOGIE_ATTIVA.includes(d.tipologia) ? daFare.includes(d.tipologia) : tutti);
 
-    const [reteAll, aciAll, extraAll, fornitori, tariffe] = await Promise.all([
+    const [reteAll, aciAll, extraAll, fornitori, tariffe, surplus] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
@@ -104,8 +104,12 @@ export default async function(req) {
       // Tutte le pagine, come l'anteprima e l'assistente: con la pagina di
       // default del backend una tariffa oltre il limite mancava solo qui.
       fetchAll(base44.asServiceRole.entities.Tariffa, { direzione: 'ATTIVA' }),
+      // I surplus sulle tariffe (il Fuel Surcharge, 13/10/2026): tutti, il
+      // disattivato si toglie nel calcolo come per le tariffe. Il documento ha
+      // la riga del surplus sotto quelle dei formulari, come l'anteprima.
+      fetchAll(base44.asServiceRole.entities.SurplusTariffa),
     ]);
-    const calcolo = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });
+    const calcolo = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese, surplus });
     const { righe } = calcolo;
     // Le anomalie dei canali che non si rifanno non riguardano questa elaborazione.
     const anomalie = calcolo.anomalie.filter(a => !a.tipologia || daFare.includes(a.tipologia));
@@ -137,12 +141,18 @@ export default async function(req) {
     for (const tipo of daFare) {
       const lista = righe[tipo];
       const errori = lista.filter(r => r.stato_validazione === 'errore').length;
+      // Il totale del documento e' quello che si fattura: comprende la riga del
+      // surplus. Lo standard e il surplus si dicono anche a parte.
       const totale = r2(lista.reduce((s, r) => s + r.totale, 0));
+      const righeSurplus = lista.filter(eRigaSurplus);
+      const totaleSurplus = r2(righeSurplus.reduce((s, r) => s + r.totale, 0));
       const rip = { TRASP: { ordini: 0, kg: 0, totale: 0 }, TRASP_TRATT: { ordini: 0, kg: 0, totale: 0 } };
       for (const r of lista) {
+        // la riga del surplus non e' ne' «Trasp.» ne' «Trasp.+Tratt.»: e' del canale
+        if (eRigaSurplus(r)) continue;
         const x = rip[r.servizio_ecotyre];
         if (!x) continue;
-        if (!eRigaACorpo(r)) { x.ordini++; x.kg += r.quantita; }
+        if (eRigaDiMovimento(r)) { x.ordini++; x.kg += r.quantita; }
         x.totale += r.totale;
       }
       ripartizionePerTipologia[tipo] = rip;
@@ -160,7 +170,11 @@ export default async function(req) {
       });
       const conDoc = lista.map(r => ({ ...r, documento_id: doc.id }));
       for (let i = 0; i < conDoc.length; i += 100) await Voce.bulkCreate(conDoc.slice(i, i + 100));
-      docs.push({ tipologia: tipo, documento_id: doc.id, totale, voci: lista.length, errori, sospese: 0 });
+      docs.push({
+        tipologia: tipo, documento_id: doc.id, totale, voci: lista.length, errori, sospese: 0,
+        totale_standard: r2(totale - totaleSurplus), totale_surplus: totaleSurplus,
+        surplus: righeSurplus.map(r => ({ surplus_id: r.surplus_id, nome: r.descrizione, euro_t: r.tariffa_valore, kg: r.kg_riferimento, ordini: r.record_count, totale: r.totale, note: r.note })),
+      });
     }
 
     // Tutte le righe sono scritte: i nuovi documenti diventano validi...

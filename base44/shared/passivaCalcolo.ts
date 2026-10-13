@@ -14,7 +14,11 @@ import { eAci } from "./canaleSecondaria.ts";
 import { chiaveFormulario, raggruppaPerFormulario, ordineDi, ticketDi, MINIMO_ACI_KG, SOGLIA_ACI } from "./formulari.ts";
 import { anomalieDateFormulari } from "./filtroPeriodo.ts";
 import { tariffaValeIl, tariffaNonDisattivata, disattivateNelPeriodo } from "./validitaTariffa.ts";
-import { unitaSconosciuta, avvisoPesoMancante, arrotondaAlCentesimo } from "./ecotyreTariffe.ts";
+import { unitaSconosciuta, avvisoPesoMancante, arrotondaAlCentesimo, eSecondariaExtra } from "./ecotyreTariffe.ts";
+import {
+  surplusNelPeriodo, surplusDelMovimento, euroTDi, importoSurplus, etichettaSurplus, testoEuroT,
+  fornitoriDelSurplus, NOMI_ORIGINE, DESTINATARI, NOMI_PRESTAZIONE,
+} from "./surplus.ts";
 
 const NOMI_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 
@@ -384,6 +388,93 @@ function segnaImportoIntervento(g, tariffa, interno, peso, viaggioKey) {
   g.importoInterventi += arrotondaAlCentesimo(calcImporto(tariffa.unita_misura, tariffa.valore, peso, viaggioKey ? 1 : 0));
 }
 
+// ─── IL SURPLUS SULLE TARIFFE (13/10/2026) ───
+//
+// Richiesta dell'utente del 12/10/2026: accanto alla tariffa un eventuale
+// surplus in €/t, con le sue date, «una riga con l'importo standard ed una per
+// il surplus (sempre riferito alle stesse tonnellate raccolte o trattate nel
+// mese)». Il primo caso e' il Fuel Surcharge del consorzio Ecotyre, +5 €/t a
+// tutti i raccoglitori dal 01/10/2026 al 31/12/2026, su rete, ACI ed extra
+// raccolta, ognuno con la sua riga e mai sommati. Le regole (quando vale, per
+// chi, quanto fa una riga) stanno in surplus.ts; qui si contano i chili.
+//
+// Il surplus NON tocca le righe standard: ne' il numero, ne' gli importi, ne' le
+// tonnellate. E' una voce in piu' sotto il fornitore, una per surplus (non per
+// provincia o per tariffa: il fornitore la scrive in fattura come «t x €/t»),
+// sulle stesse tonnellate, e le tonnellate non si sommano una seconda volta da
+// nessuna parte: totale_tonnellate e la quadratura restano quelli delle righe.
+// totale_euro del fornitore invece la comprende, perche' e' «quello che gli
+// dobbiamo» ed e' il numero che leggono margine, consuntivi, congelamento, file
+// ed EcoTyna: chi non sa del surplus dice comunque il numero giusto, chi lo deve
+// mostrare a parte ha totale_standard e totale_surplus.
+//
+// Il centesimo: una riga di surplus e' importoSurplus(kg del fornitore nel mese,
+// €/t), arrotondata una volta per fornitore, per surplus e per canale, come il
+// fornitore la scrive in fattura e come il foglio la rifa' con =ROUND(t*p;2).
+
+// Le voci del canale si scrivono in un modo solo (come in surplus.ts): «EXTRA
+// RACCOLTA» e «EXTRA_RACCOLTA» sono lo stesso canale.
+const codiceSurplus = (v) => String(v || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+// Chi riceve il surplus di una prestazione, al singolare: «a 1 raccoglitore».
+const DESTINATARIO = { RACCOLTA: 'raccoglitore', TRATTAMENTO: 'impianto', CONFERIMENTO_STOCCAGGIO: 'stoccaggio', TRASPORTO_SECONDARIA: 'trasportatore delle secondarie' };
+const giornoSurplus = (v) => String(v || '').trim().slice(0, 10);
+
+/**
+ * Il conto dei surplus di un blocco della passiva: per ogni fornitore (la chiave
+ * normalizzata di chi fattura la riga) i chili di ciascun surplus, e chi ha
+ * righe di ciascuna prestazione (per dire quando un elenco nomina un fornitore
+ * che nel mese non ne ha).
+ */
+const nuovoContoSurplus = () => ({ fornitori: new Map(), visti: new Map() });
+
+/**
+ * Le righe del surplus di un fornitore, dal suo conto: una per surplus (e per
+ * importo), sulle tonnellate del periodo di validita', in ordine di nome e di
+ * inizio. Un fornitore interno non ne ha: a se stessi non si fattura, come per
+ * la tariffa (i suoi chili si contano a parte, in surplus_del_mese). Una voce
+ * senza chili non fa una riga a zero.
+ */
+function righeSurplusDi(conto, chiave) {
+  const f = conto.fornitori.get(chiave);
+  if (!f || f.interno) return [];
+  return [...f.voci.values()]
+    .filter(v => v.kg > 0)
+    .map(({ s, euro_t, kg }) => ({
+      surplus_id: s.id || '',
+      gruppo: s.gruppo || '',
+      nome: String(s.nome || '').trim() || 'Surplus',
+      origine: NOMI_ORIGINE[codiceSurplus(s.origine)] || '',
+      riferimento: String(s.riferimento || '').trim(),
+      prestazione: codiceSurplus(s.prestazione),
+      euro_t,
+      tonnellate: round3(kg / 1000),
+      importo: importoSurplus(kg, euro_t),
+      dal: giornoSurplus(s.data_inizio_validita),
+      al: giornoSurplus(s.data_fine_validita),
+      etichetta: etichettaSurplus(s),
+      // quando e' stato scritto: serve a dire, confrontando un conto congelato
+      // col ricalcolo, che una differenza e' un surplus arrivato dopo
+      scritto_il: String(s.updated_date || s.created_date || ''),
+    }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'it') || a.dal.localeCompare(b.dal) || a.euro_t - b.euro_t);
+}
+
+/**
+ * I campi del surplus di un fornitore, da aggiungere al suo totale. Senza
+ * surplus totale_euro e' esattamente quello di prima (lo standard).
+ */
+function campiSurplusFornitore(totaleStandard, conto, chiave) {
+  const surplus = righeSurplusDi(conto, chiave);
+  const standard = round2(totaleStandard);
+  const totaleSurplus = round2(surplus.reduce((s, v) => s + v.importo, 0));
+  return {
+    totale_euro: round2(standard + totaleSurplus),
+    totale_standard: standard,
+    surplus,
+    totale_surplus: totaleSurplus,
+  };
+}
+
 export const MESI_PASSIVA = MESI_MAP;
 
 /**
@@ -404,7 +495,16 @@ export function indiceMesePassiva(mese) {
   return MESI_MAP[meseNorm] !== undefined ? MESI_MAP[meseNorm] : (!isNaN(Number(meseNorm)) && meseNorm !== '' ? Number(meseNorm) - 1 : -1);
 }
 
-export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll }, annoNum, meseNum, mese, tipologia) {
+/**
+ * La passiva di un mese e di un canale.
+ *
+ * surplusAll: l'archivio SurplusTariffa letto tutto (anche i disattivati: li
+ * toglie surplus.ts, come per le tariffe). E' facoltativo solo perche' chi non lo
+ * passa ottenga esattamente i numeri di prima; ogni funzione che chiama questo
+ * calcolo lo legge e lo passa (13/10/2026), altrimenti da ottobre a dicembre 2026
+ * mancherebbe il Fuel Surcharge.
+ */
+export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll = [] }, annoNum, meseNum, mese, tipologia) {
     // Fornitore lookup per flag interno
     const fornitoreByNorm = new Map();
     for (const f of fornitoriAll) {
@@ -413,6 +513,45 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     function isInterno(nome) {
       const f = fornitoreByNorm.get(normalizzaRagioneSociale(nome));
       return !!(f && f.interno === true);
+    }
+
+    // I surplus del canale con una parte ai fornitori e almeno un giorno nel mese
+    // (la fine '-31' vale per ogni mese, come per le tariffe disattivate). Se non
+    // ce ne sono, il calcolo e' quello di prima, riga per riga.
+    const mmSurplus = String(meseNum + 1).padStart(2, '0');
+    const surplusMese = surplusNelPeriodo(surplusAll, `${annoNum}-${mmSurplus}-01`, `${annoNum}-${mmSurplus}-31`)
+      .filter(s => codiceSurplus(s.tipologia) === tipologia && euroTDi(s, 'PASSIVA') !== null);
+    const contoSurplus = {
+      RACCOLTA: nuovoContoSurplus(),
+      IMPIANTI: nuovoContoSurplus(),
+      TRASPORTO_SECONDARIA: nuovoContoSurplus(),
+    };
+    const contoDellaPrestazione = (p) => (p === 'RACCOLTA' ? contoSurplus.RACCOLTA : p === 'TRASPORTO_SECONDARIA' ? contoSurplus.TRASPORTO_SECONDARIA : contoSurplus.IMPIANTI);
+    /**
+     * Un movimento che fa una riga della passiva, guardato coi surplus: canale,
+     * prestazione del blocco, giorno italiano della fine del trasporto (mai la
+     * chiusura dell'ordine), e il fornitore che fattura la riga (dopo la catena
+     * dei subfornitori) coi nomi con cui il movimento lo porta. I chili vanno al
+     * fornitore che fattura, come la tariffa: il surplus delle tonnellate di un
+     * subraccoglitore si paga al principale.
+     */
+    function segnaSurplus(prestazione, rec, chiave, nome, nomi, interno) {
+      if (!surplusMese.length) return;
+      const conto = contoDellaPrestazione(prestazione);
+      const id = String((fornitoreByNorm.get(chiave) || {}).id || '');
+      if (!conto.visti.has(prestazione)) conto.visti.set(prestazione, { id: new Set(), nomi: new Set() });
+      const visti = conto.visti.get(prestazione);
+      if (id) visti.id.add(id);
+      for (const n of nomi) { const k = normalizzaRagioneSociale(n); if (k) visti.nomi.add(k); }
+      const trovati = surplusDelMovimento(surplusMese, { tipologia, prestazione, quando: rec.trasporto_finito_il, fornitore: { id, nomi } }, 'PASSIVA');
+      if (!trovati.length) return;
+      if (!conto.fornitori.has(chiave)) conto.fornitori.set(chiave, { fornitore: nome, interno, voci: new Map() });
+      const f = conto.fornitori.get(chiave);
+      const kg = Number(rec.peso_effettivo || 0);
+      for (const { surplus, euro_t } of trovati) {
+        if (!f.voci.has(surplus)) f.voci.set(surplus, { s: surplus, euro_t, kg: 0 });
+        f.voci.get(surplus).kg += kg;
+      }
     }
 
     // Tariffe con prestazione vuota → anomalia
@@ -756,6 +895,13 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         });
       }
 
+      // Il surplus di raccolta sulle tonnellate raccolte: nell'extra raccolta
+      // solo sugli interventi primari, perche' una secondaria e' un
+      // trasferimento da uno stoccaggio, non una raccolta (13/10/2026).
+      if (!(tipologia === 'EXTRA_RACCOLTA' && eSecondariaExtra(r))) {
+        segnaSurplus('RACCOLTA', r, trasKey, trasportatore, [trasportatore, raccoglitore], interno);
+      }
+
       if (um === '€/viaggio') {
         if (!raccPerTras.has(trasKey)) {
           raccPerTras.set(trasKey, {
@@ -906,13 +1052,15 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         for (const k of (d.viaggi_keys || [])) acc.viaggiSet.add(k);
       }
     }
-    const raccoglitori = Array.from(raccByForn.values()).map(f => ({
+    const raccoglitori = Array.from(raccByForn.entries()).map(([chiave, f]) => ({
       fornitore: f.fornitore, interno: f.interno, righe: f.righe,
       totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
       // Le tonnellate dei subraccoglitori sono comprese nel totale: si mostrano
       // per sapere quanto ha portato ciascuno, non per fatturarle a lui.
       di_cui: [...f.diCui.entries()].map(([fornitore, v]) => ({ fornitore, tonnellate: round3(v.peso_kg / 1000), viaggi: v.viaggiSet.size }))
         .sort((a, b) => b.tonnellate - a.tonnellate),
+      // lo standard, le righe del surplus e il totale che le comprende
+      ...campiSurplusFornitore(f.totale_euro, contoSurplus.RACCOLTA, chiave),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
 
     const tonnellateRaccoglitori = raccoglitori.reduce((s, f) => s + f.totale_tonnellate, 0);
@@ -1042,6 +1190,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         });
       }
 
+      // Il surplus di trattamento o di stoccaggio su tutto quello che arriva al
+      // sito, come la tariffa: la prestazione e' quella della riga, e la seconda
+      // prestazione di un intervento di extra raccolta conta per la sua.
+      segnaSurplus(prestazione, r, destKey, destinazione, [destinazione], interno);
+
       if (um === '€/viaggio') {
         const dkey = `${destKey}|${tk}`;
         if (!impPerDest.has(dkey)) {
@@ -1155,8 +1308,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       f.totale_tonnellate += row.riga.tonnellate;
       f.totale_euro += row.riga.importo;
     }
-    const impianti_stoccaggi = Array.from(impByForn.values()).map(f => ({
+    const impianti_stoccaggi = Array.from(impByForn.entries()).map(([chiave, f]) => ({
       ...f, totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
+      ...campiSurplusFornitore(f.totale_euro, contoSurplus.IMPIANTI, chiave),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
 
     // La pulizia e i costi aggiuntivi sono i due campi vecchi, e dal 03/10/2026
@@ -1480,6 +1634,15 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           note = unitaSconosciuta(um);
         }
 
+        // Il surplus del trasporto delle secondarie sulle tonnellate del canale
+        // della tratta, anche sui viaggi misti: a tonnellata ogni canale paga le
+        // sue, non c'e' una quota da dividere (13/10/2026). Una tratta senza
+        // tariffa non ha la riga, e quindi nemmeno il surplus: l'anomalia c'e'.
+        for (const rec of pt.records) {
+          if (isAciRow(rec) !== aciQui) continue;
+          segnaSurplus('TRASPORTO_SECONDARIA', rec, fatturanteKey, fatturante, [fatturante, tratta.trasportatore], interno);
+        }
+
         // Le tonnellate della riga sono sempre e solo quelle del canale che si
         // sta guardando: il totale del trasportatore non somma mai rete e ACI.
         trasportiRows.push({
@@ -1545,6 +1708,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         const fatt = fatturaA(perFattura, trasportatore);
         const interno = isInterno(fatt.nome);
         const peso = Number(r.peso_effettivo || 0);
+        // Un surplus del trasporto delle secondarie vale solo sugli interventi
+        // secondari: il trasporto di un intervento primario e' la sua raccolta.
+        if (eSecondariaExtra(r)) segnaSurplus('TRASPORTO_SECONDARIA', r, fatt.chiave, fatt.nome, [fatt.nome, trasportatore], interno);
         // La partenza: per una secondaria lo stoccaggio, per una primaria chi
         // conferisce. Nel foglio dell'amministrazione e' la colonna PRODUTTORE.
         const partenza = String(r.stoccaggio || r.produttore || r.ragione_sociale || r.punto_di_raccolta || '—').trim();
@@ -1579,8 +1745,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       f.totale_tonnellate += row.riga.tonnellate;
       f.totale_euro += row.riga.importo;
     }
-    const trasporti_secondaria = Array.from(trasByForn.values()).map(f => ({
+    const trasporti_secondaria = Array.from(trasByForn.entries()).map(([chiave, f]) => ({
       ...f, totale_tonnellate: round3(f.totale_tonnellate), totale_euro: round2(f.totale_euro),
+      ...campiSurplusFornitore(f.totale_euro, contoSurplus.TRASPORTO_SECONDARIA, chiave),
     })).sort((a, b) => b.totale_euro - a.totale_euro);
 
     // ─── LE DATE OBBLIGATORIE DEI FORMULARI ───
@@ -1620,9 +1787,84 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     const anomalieUniche = [...anomaliePerChiave.values()];
 
     // ─── TOTALI ───
+    // Le chiavi di sempre comprendono il surplus (sono la somma di totale_euro dei
+    // fornitori); standard e surplus le scompongono, per i riquadri della pagina
+    // e per il margine. Senza surplus standard e totali sono gli stessi numeri.
     const totaleRaccoglitori = raccoglitori.reduce((s, f) => s + f.totale_euro, 0);
     const totaleImpianti = impianti_stoccaggi.reduce((s, f) => s + f.totale_euro, 0);
     const totaleSecondaria = trasporti_secondaria.reduce((s, f) => s + f.totale_euro, 0);
+    const somma = (elenco, campo) => round2(elenco.reduce((s, f) => s + (Number(f[campo]) || 0), 0));
+    const scomposti = (campo) => {
+      const r = somma(raccoglitori, campo);
+      const i = somma(impianti_stoccaggi, campo);
+      const t = somma(trasporti_secondaria, campo);
+      return { raccoglitori: r, impianti_stoccaggi: i, trasporti_secondaria: t, totale: round2(r + i + t) };
+    };
+
+    // ─── IL SURPLUS DEL MESE, CANALE PER CANALE ───
+    // Uno per surplus in corso nel mese (anche senza chili: «il Fuel Surcharge
+    // vale, ma a ottobre non ci sono interventi»), per la fascia sopra le tabelle
+    // e per il margine: quanto si paga, a chi, e quante tonnellate sono di un
+    // fornitore interno, che il surplus non lo riceve (e che Ecotyre paga lo
+    // stesso: e' la parte che resta a SMOCO). Con un elenco di fornitori dice chi
+    // dell'elenco nel mese non ha righe di quella prestazione: un elenco sbagliato
+    // altrimenti tacerebbe. E' un'informazione, non un'anomalia.
+    const surplus_del_mese = surplusMese.map(s => {
+      const prestazione = codiceSurplus(s.prestazione);
+      const conto = contoDellaPrestazione(prestazione);
+      const euro_t = euroTDi(s, 'PASSIVA');
+      const pagati = [];
+      const interni = [];
+      for (const f of conto.fornitori.values()) {
+        const v = f.voci.get(s);
+        if (!v || !(v.kg > 0)) continue;
+        if (f.interno) interni.push({ fornitore: f.fornitore, tonnellate: round3(v.kg / 1000), kg: v.kg });
+        else pagati.push({ fornitore: f.fornitore, tonnellate: round3(v.kg / 1000), importo: importoSurplus(v.kg, v.euro_t), kg: v.kg });
+      }
+      pagati.sort((a, b) => b.kg - a.kg || a.fornitore.localeCompare(b.fornitore, 'it'));
+      interni.sort((a, b) => b.kg - a.kg || a.fornitore.localeCompare(b.fornitore, 'it'));
+      const kgPagati = pagati.reduce((x, f) => x + f.kg, 0);
+      const kgInterni = interni.reduce((x, f) => x + f.kg, 0);
+      const importo = round2(pagati.reduce((x, f) => x + f.importo, 0));
+      const visti = conto.visti.get(prestazione) || { id: new Set(), nomi: new Set() };
+      const senza_righe = fornitoriDelSurplus(s)
+        .filter(f => !((f.id && visti.id.has(f.id)) || (f.nome && visti.nomi.has(normalizzaRagioneSociale(f.nome)))))
+        .map(f => f.nome || f.id);
+      const chi = DESTINATARI[prestazione] || 'fornitori';
+      const uno = DESTINATARIO[prestazione] || 'fornitore';
+      const canale = NOMI_CANALE[tipologia] || tipologia;
+      // il mese a parole e in minuscolo, qualunque cosa abbia passato chi chiama
+      const quando = `${Object.keys(MESI_MAP).find(k => MESI_MAP[k] === meseNum) || String(mese).toLowerCase()} ${annoNum}`;
+      const frasi = [`${etichettaSurplus(s)}: +${testoEuroT(euro_t)} ${String(s.a_chi || 'tutti').trim().toLowerCase() === 'elenco' ? `ai ${chi} dell'elenco` : `a tutti i ${chi}`}, sulle stesse tonnellate del mese.`];
+      frasi.push(pagati.length
+        ? `${canale}, ${quando}: ${tTesto(kgPagati)} t a ${pagati.length} ${pagati.length === 1 ? uno : chi}, ${euroTesto(importo)} €.`
+        : `${canale}, ${quando}: nessuna tonnellata da pagare.`);
+      for (const f of interni) frasi.push(`${f.fornitore} (interno) ${tTesto(f.kg)} t: non si paga.`);
+      if (senza_righe.length) {
+        frasi.push(`Nell'elenco ${senza_righe.length === 1 ? `c'è ${senza_righe[0]}, che` : `ci sono ${senza_righe.join(', ')}, che`} in questo mese non ${senza_righe.length === 1 ? 'ha' : 'hanno'} righe di ${NOMI_PRESTAZIONE[prestazione] || 'questa prestazione'} in questo canale: controlla l'elenco del surplus.`);
+      }
+      return {
+        surplus_id: s.id || '',
+        gruppo: s.gruppo || '',
+        nome: String(s.nome || '').trim() || 'Surplus',
+        origine: NOMI_ORIGINE[codiceSurplus(s.origine)] || '',
+        riferimento: String(s.riferimento || '').trim(),
+        prestazione,
+        a_chi: String(s.a_chi || 'tutti').trim().toLowerCase() === 'elenco' ? 'elenco' : 'tutti',
+        euro_t,
+        dal: giornoSurplus(s.data_inizio_validita),
+        al: giornoSurplus(s.data_fine_validita),
+        etichetta: etichettaSurplus(s),
+        scritto_il: String(s.updated_date || s.created_date || ''),
+        tonnellate_pagate: round3(kgPagati / 1000),
+        importo,
+        fornitori: pagati.map(({ kg: _kg, ...f }) => f),
+        tonnellate_interni: round3(kgInterni / 1000),
+        interni: interni.map(({ kg: _kg, ...f }) => f),
+        senza_righe,
+        nota: frasi.join(' '),
+      };
+    });
 
     // ─── QUADRATURA ───
     const coincidente = Math.abs(tonnellateTotali - tonnellateRaccoglitori) < 0.001;
@@ -1639,7 +1881,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         impianti_stoccaggi: round2(totaleImpianti),
         trasporti_secondaria: round2(totaleSecondaria),
         totale_complessivo: round2(totaleRaccoglitori + totaleImpianti + totaleSecondaria),
+        standard: scomposti('totale_standard'),
+        surplus: scomposti('totale_surplus'),
       },
+      // i surplus in corso nel mese su questo canale (vedi sopra); [] senza
+      surplus_del_mese,
       anomalie: anomalieUniche,
       // Un formulario il cui peso e' stato ripartito su piu' ordini: non e' un
       // problema, e' come si sta dentro le regole del portale. Si mostra per

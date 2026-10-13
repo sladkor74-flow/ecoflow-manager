@@ -10,12 +10,31 @@
 // Il canale di un ordine non si chiede a nessuno: e' quello che l'ordine ha nel
 // gestionale.
 
+// Il surplus di un ordine come lo arrotonda il portale, ordine per ordine: la
+// stessa funzione della riga del gestionale (13/10/2026).
+import { importoSurplus } from "./surplus.ts";
+
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const r2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
 // Gli importi si sommano in centesimi interi: sommando quattrocento importi con
 // la virgola mobile il totale di luglio 2026 usciva 226.692,48 da una parte e
 // 226.692,49 dall'altra, con tutte le righe identiche.
 const centesimi = (v) => Math.round((Number(v) || 0) * 100);
+// Gli euro e le tonnellate delle frasi del surplus, all'italiana (13/10/2026).
+const euroIt = (v) => {
+  const n = r2(Number(v) || 0);
+  const [intero, dec] = Math.abs(n).toFixed(2).split('.');
+  return (n < 0 ? '-' : '') + intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
+};
+const tIt = (kg) => {
+  const n = Math.round(Number(kg) || 0) / 1000;
+  const [intero, decimali] = n.toFixed(3).split('.');
+  return intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + (decimali.endsWith('0') ? decimali.slice(0, 2) : decimali);
+};
+const euroTIt = (v) => {
+  const [intero, decimali] = (Number(v) || 0).toFixed(3).split('.');
+  return intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + (decimali.endsWith('0') ? decimali.slice(0, 2) : decimali) + ' €/t';
+};
 
 // Il tracciato vero (prefattura provvisoria 3716, luglio 2026): ID Prefattura,
 // Fatturante, Periodo, KeyAccount, Tipo (Trasp / Trasp+Tratt), Ordine, Data fine
@@ -29,6 +48,26 @@ export const comeOrdine = (v) => pulisci(v).toUpperCase().replace(/[\s.]/g, '');
 /** Il tipo di servizio come lo scrive il gestionale: "Trasp+Tratt" -> TRASP_TRATT, "Trasp" -> TRASP. */
 export const comeServizio = (v) => { const t = pulisci(v).toUpperCase(); return /TRATT/.test(t) ? 'TRASP_TRATT' : /TRASP/.test(t) ? 'TRASP' : ''; };
 
+// IL SURPLUS NELLA PREFATTURA (13/10/2026). Dal 01/10/2026 il consorzio
+// riconosce ai raccoglitori il Fuel Surcharge, +5 €/t, e SMOCO lo fattura a
+// Ecotyre con una riga sua, sotto quelle dei formulari (attivaCalcolo.ts). Come
+// lo scrivera' il portale nella prefattura non si sa ancora (la prima e' quella
+// di ottobre; nella cartella ci sono i mesi fino ad agosto, dove il Tipo e' solo
+// «Trasp» o «Trasp+Tratt» e il Prodotto e' la classe). Le forme possibili sono
+// quattro, e il confronto le riconosce tutte:
+//   a. nel prezzo: ogni ordine a 0,207 €/kg invece di 0,202;
+//   b. una riga per ordine, col Tipo o il Prodotto «Fuel Surcharge»;
+//   c. una riga sola, senza ordine;
+//   d. niente: il surplus arriva con una comunicazione a parte.
+// Una riga di surplus si riconosce dalle parole, nel Tipo o nel Prodotto (su una
+// riga senza ordine, in qualunque cella): mai dal Prodotto vuoto, che hanno
+// anche le terziarie.
+export const eTestoSurplus = (v) => /\bfuel\b|surcharge|carburant|\bsurplus\b/i.test(pulisci(v));
+// La riga del surplus del gestionale (eRigaSurplus di attivaCalcolo.ts, qui
+// riscritta per non portarsi dietro tutto il calcolo dell'attiva): una per canale,
+// senza ordine e con zero chili.
+const eRigaSurplusGestionale = (r) => !!r && (!!r.surplus_id || r.origine_dato === 'SURPLUS');
+
 const INTESTAZIONI = [
   ['ordine', /(id|n|num|numero|cod|codice)?[\s._°-]*ordine|^order/i],
   ['fir', /\bfir\b|formulario/i],
@@ -36,6 +75,9 @@ const INTESTAZIONI = [
   ['importo', /importo|imponibile|totale|valore|corrispettivo/i],
   ['prezzo', /prezzo|tariffa|€\s*\/\s*t|eur\s*\/\s*t/i],
   ['servizio', /servizio|prestazione|tipo/i],
+  // Il Prodotto (la classe, «.class1»): non serve al confronto, ma e' dove il
+  // portale potrebbe scrivere «Fuel Surcharge» (13/10/2026).
+  ['prodotto', /prodotto|descrizione|causale|articolo/i],
   // La data della prefattura e' la FINE del trasporto: e' quella che colloca il
   // movimento nel mese (regola 1), e da lei periodoPrefattura ricava il periodo del
   // file. Cercarla con /data|trasporto/ prendeva la prima colonna da sinistra il cui
@@ -114,7 +156,9 @@ export function leggiTabellePrefattura(tabelle) {
           if (trovate[chiave] === undefined && re.test(testo)) { trovate[chiave] = { j, testo }; break; }
         }
       });
-      if (Object.keys(trovate).length >= 2 && (trovate.ordine || trovate.importo)) { iTesta = i; colonne = trovate; break; }
+      // il Prodotto non conta per dire che e' la riga delle intestazioni: una riga
+      // «Descrizione ... Totale» sopra la tabella non lo e' (13/10/2026)
+      if (Object.keys(trovate).filter(k => k !== 'prodotto').length >= 2 && (trovate.ordine || trovate.importo)) { iTesta = i; colonne = trovate; break; }
     }
     const corpo = t.slice(iTesta + 1);
     // la colonna degli ordini dalla forma dei valori, se l'intestazione non l'ha detta
@@ -134,23 +178,41 @@ export function leggiTabellePrefattura(tabelle) {
     const inTonnellate = col('kg') >= 0 && (/\bt\b|tonn/i.test(colonne.kg.testo) && !/kg/i.test(colonne.kg.testo) || (mediana > 0 && mediana < 60));
     if (inTonnellate) note.push(`Foglio "${nome}": pesi letti come tonnellate e convertiti in kg.`);
 
-    let lette = 0;
+    let lette = 0, diSurplus = 0;
     for (const r of corpo) {
-      const id = comeOrdine((r || [])[jOrdine]);
-      if (!E_ORDINE.test(id)) continue;
-      const peso = col('kg') >= 0 ? comeNumero(r[col('kg')]) : null;
+      const celle = r || [];
+      const id = comeOrdine(celle[jOrdine]);
+      const conOrdine = E_ORDINE.test(id);
+      const servizio = col('servizio') >= 0 ? pulisci(celle[col('servizio')]) : '';
+      const prodotto = col('prodotto') >= 0 ? pulisci(celle[col('prodotto')]) : '';
+      // Una riga di surplus (13/10/2026): su un ordine la dicono il Tipo o il
+      // Prodotto (un produttore che si chiama «Fuel ...» non la fa diventare
+      // surplus); senza ordine, qualunque cella di testo, purche' non sia la riga
+      // dei totali e abbia un importo.
+      // Senza ordine il testo e' tutta la riga: puo' dire anche il canale («...
+      // ACI»), e serve a darla al canale giusto.
+      const testi = celle.map(pulisci).filter(t => t && comeNumero(t) === null);
+      const testoSurplus = conOrdine
+        ? [servizio, prodotto].find(eTestoSurplus)
+        : (testi.some(eTestoSurplus) ? testi.join(' · ') : '');
+      const importo = col('importo') >= 0 ? comeNumero(celle[col('importo')]) : null;
+      if (!conOrdine && (!testoSurplus || importo === null || celle.some(c => /^totale\b/i.test(pulisci(c))))) continue;
+      const peso = col('kg') >= 0 ? comeNumero(celle[col('kg')]) : null;
       righe.push({
-        id_ordine: id,
-        numero_fir: col('fir') >= 0 ? pulisci(r[col('fir')]).toUpperCase() : '',
+        id_ordine: conOrdine ? id : '',
+        numero_fir: col('fir') >= 0 ? pulisci(celle[col('fir')]).toUpperCase() : '',
         kg: peso === null ? null : Math.round(inTonnellate ? peso * 1000 : peso),
-        importo: col('importo') >= 0 ? comeNumero(r[col('importo')]) : null,
-        prezzo: col('prezzo') >= 0 ? comeNumero(r[col('prezzo')]) : null,
-        servizio: col('servizio') >= 0 ? pulisci(r[col('servizio')]) : '',
-        giorno: col('data') >= 0 ? comeGiorno(r[col('data')]) : '',
+        importo,
+        prezzo: col('prezzo') >= 0 ? comeNumero(celle[col('prezzo')]) : null,
+        servizio,
+        giorno: col('data') >= 0 ? comeGiorno(celle[col('data')]) : '',
         foglio: nome || '',
+        ...(testoSurplus ? { surplus: true, testo: testoSurplus } : {}),
       });
       lette++;
+      if (testoSurplus) diSurplus++;
     }
+    if (diSurplus) note.push(`Foglio "${nome}": ${diSurplus === 1 ? 'una riga' : `${diSurplus} righe`} di surplus (Fuel Surcharge) ${diSurplus === 1 ? 'letta' : 'lette'} a parte: i chili non si sommano agli ordini, l'importo va nel riquadro del surplus.`);
     if (lette && col('importo') < 0) note.push(`Foglio "${nome}": nessuna colonna con l'importo, si confrontano solo ordini e pesi.`);
     if (lette && col('kg') < 0) note.push(`Foglio "${nome}": nessuna colonna col peso, si confrontano solo ordini e importi.`);
   }
@@ -184,22 +246,50 @@ export function leggiLineePdfPrefattura(linee) {
     const tot = riga.match(/^Totale\s+(\d+)\s+([\d ]+)\s*Kg\s+([\d .]+,\d{2})\s*Euro/i);
     if (tot) { stampati.ordini += Number(tot[1]); stampati.kg += numero(tot[2]) || 0; stampati.euro += Math.round((numero(tot[3]) || 0) * 100); stampati.blocchi++; continue; }
     const id = (riga.match(/^([A-Z]{2,4}\d{6,})\b/) || [])[1];
+    const coda = id ? riga.match(/(\d{2})-(\d{2})-(\d{4})\s+(\S+)\s+(Trasp\+Tratt|Trasp|Tratt)\s+([\d ]+?)\s+(\d+,\d{3,6})\s+([\d .]*\d,\d{2})$/) : null;
+    // UNA RIGA DI SURPLUS (13/10/2026): il PDF di una prefattura col Fuel
+    // Surcharge non l'abbiamo ancora visto. Una riga che non e' quella di un
+    // formulario (Trasp o Trasp+Tratt: un produttore che si chiama «Carburanti
+    // ...» resta un formulario), nomina il surplus e finisce con un importo e' una
+    // riga di surplus, con o senza ordine; una che porta anche «Kg ... Euro» e'
+    // del riepilogo stampato in testa, e non si legge come riga. I suoi chili non
+    // contano nella completezza della lettura (sono quelli dell'ordine), e il suo
+    // importo vale coi totali stampati o senza. Una riga che comincia con
+    // «Totale» («Totale Fuel Surcharge 15,00») e' la somma delle righe sopra, non
+    // una riga in piu': come nell'Excel, si salta (revisione del 13/10/2026: il
+    // PDF contava il surplus due volte, l'Excel dello stesso file una).
+    if (!coda && eTestoSurplus(riga) && !/^Totale\b/i.test(riga) && !/\bKg\b[\s\S]*\bEuro\b/i.test(riga)) {
+      // l'importo in fondo, con le migliaia separate da spazio o punto («5 611,20»)
+      const imp = riga.match(/(?:^|\s)(\d{1,3}(?:[ .]\d{3})*,\d{2})\s*(?:€|Euro)?\s*$/i);
+      if (imp) {
+        const prezzo = riga.match(/\s(\d+,\d{3,6})\s+\d{1,3}(?:[ .]\d{3})*,\d{2}\s*(?:€|Euro)?\s*$/i);
+        righe.push({ id_ordine: id || '', numero_fir: '', kg: null, importo: numero(imp[1]), prezzo: prezzo ? numero(prezzo[1]) : null, servizio: '', giorno: '', foglio: 'PDF', surplus: true, testo: riga.slice(0, 120) });
+        continue;
+      }
+    }
     if (!id) continue;
-    const coda = riga.match(/(\d{2})-(\d{2})-(\d{4})\s+(\S+)\s+(Trasp\+Tratt|Trasp|Tratt)\s+([\d ]+?)\s+(\d+,\d{3,6})\s+([\d .]*\d,\d{2})$/);
     if (!coda) { note.push(`Riga dell'ordine ${id} non riconosciuta: "${riga.slice(0, 120)}".`); continue; }
     righe.push({
       id_ordine: id, numero_fir: coda[4].toUpperCase(), kg: Math.round(numero(coda[6]) || 0), importo: numero(coda[8]), prezzo: numero(coda[7]),
       servizio: coda[5], giorno: `${coda[3]}-${coda[2]}-${coda[1]}`, foglio: 'PDF',
     });
   }
-  const sKg = righe.reduce((s, r) => s + (r.kg || 0), 0), sCent = righe.reduce((s, r) => s + Math.round((r.importo || 0) * 100), 0);
+  // la completezza si misura sugli ordini; le righe di surplus si contano a parte
+  const ordinarie = righe.filter(r => !r.surplus);
+  const sKg = ordinarie.reduce((s, r) => s + (r.kg || 0), 0), sCent = ordinarie.reduce((s, r) => s + Math.round((r.importo || 0) * 100), 0);
+  const sCentSurplus = righe.filter(r => r.surplus).reduce((s, r) => s + Math.round((r.importo || 0) * 100), 0);
   const totali = stampati.blocchi ? { ordini: stampati.ordini, kg: stampati.kg, euro: stampati.euro / 100 } : null;
   let completa = null;
   if (totali) {
     // sugli importi il portale arrotonda il totale a modo suo: un centesimo per blocco e' tollerato
-    completa = righe.length === totali.ordini && sKg === totali.kg && Math.abs(sCent - stampati.euro) <= 2 * stampati.blocchi;
-    if (!completa) note.push(`ATTENZIONE: lette ${righe.length} righe per ${sKg} kg e ${(sCent / 100).toFixed(2)} euro, ma il riepilogo stampato dice ${totali.ordini} ordini, ${totali.kg} kg e ${totali.euro.toFixed(2)} euro: la lettura non e' completa.`);
+    const euroTornano = (cent) => Math.abs(cent - stampati.euro) <= 2 * stampati.blocchi;
+    completa = ordinarie.length === totali.ordini && sKg === totali.kg && (euroTornano(sCent) || (sCentSurplus > 0 && euroTornano(sCent + sCentSurplus)));
+    if (!completa) note.push(`ATTENZIONE: lette ${ordinarie.length} righe per ${sKg} kg e ${(sCent / 100).toFixed(2)} euro, ma il riepilogo stampato dice ${totali.ordini} ordini, ${totali.kg} kg e ${totali.euro.toFixed(2)} euro: la lettura non e' completa.`);
   } else note.push('Nel PDF non ho trovato il riepilogo stampato dei totali: non posso controllare che la lettura sia completa.');
+  if (righe.length > ordinarie.length) {
+    const n = righe.length - ordinarie.length;
+    note.push(`${n === 1 ? 'Una riga' : `${n} righe`} di surplus (Fuel Surcharge) per ${euroIt(sCentSurplus / 100)} euro, ${n === 1 ? 'letta' : 'lette'} a parte.`);
+  }
   return { righe, note, totali_stampati: totali, periodo: periodo || periodoPrefattura(righe), completa };
 }
 
@@ -219,10 +309,22 @@ const somma = (m, id, kg, importo) => {
  * date obbligatorie di un terminato, a parole), per dire dove sta un ordine che il mese
  * non ha. Una prefattura puo' avere piu' righe per lo stesso ordine (trasporto e
  * trattamento): si sommano, come le righe a corpo del gestionale.
+ *
+ * surplusDelMese (13/10/2026): il surplus_del_mese di calcolaRigheAttiva,
+ * { RETE: [{ nome, euro_t, kg, totale, ordini_ids }], ... }. Dice su quali ordini
+ * vale un surplus e con quanti €/t, per riconoscerlo anche dentro il prezzo di un
+ * ordine (forma a). Senza, vale la riga del surplus del canale su tutti i suoi
+ * ordini. Il surplus di ogni canale si confronta nel suo riquadro (surplus),
+ * qualunque sia la forma in cui la prefattura lo porta.
  */
-export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Map()) {
+export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Map(), surplusDelMese = null) {
   const pre = new Map();
+  // Le righe di surplus della prefattura (forme b e c) si tengono a parte: i loro
+  // chili sono quelli dell'ordine, e sommati all'ordine darebbero un «peso
+  // diverso» su ogni ordine del mese.
+  const preSurplus = [];
   for (const r of righePrefattura || []) {
+    if (r && r.surplus) { preSurplus.push(r); continue; }
     somma(pre, r.id_ordine, r.kg, r.importo);
     const e = pre.get(r.id_ordine);
     if (!e.servizio) e.servizio = comeServizio(r.servizio);
@@ -231,11 +333,24 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
   const conImporti = [...pre.values()].some(e => e.conImporto);
   const conPesi = [...pre.values()].some(e => e.conKg);
 
+  // Il canale di ogni ordine del gestionale: una riga di surplus su un ordine va
+  // nel canale di quell'ordine.
+  const canaleDi = new Map();
+  for (const canale of Object.keys(righeVive || {})) {
+    for (const r of righeVive[canale] || []) if (!eRigaSurplusGestionale(r) && r.ordine) canaleDi.set(comeOrdine(r.ordine), canale);
+  }
+
   const canali = [];
   const visti = new Set();
+  // per canale: le righe del surplus del gestionale e il surplus trovato dentro i prezzi
+  const surplusDi = new Map();
   for (const canale of Object.keys(righeVive || {})) {
     const gest = new Map();
+    const surplusGest = [];
     for (const r of righeVive[canale] || []) {
+      // la riga del surplus non ha ordine: sommata sotto l'ordine vuoto usciva un
+      // «solo nel gestionale» senza numero
+      if (eRigaSurplusGestionale(r)) { surplusGest.push(r); continue; }
       const id = comeOrdine(r.ordine);
       const e = gest.get(id) || { id_ordine: id, numero_fir: r.numero_fir || '', kg: 0, importo: 0, prezzo: 0, servizio: r.servizio_ecotyre || '' };
       e.kg += Number(r.quantita) || 0;
@@ -243,11 +358,40 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
       if (r.quantita > 0) e.prezzo = r.tariffa_valore;
       gest.set(id, e);
     }
+    // I €/t di surplus che il gestionale applica a ogni ordine: dal surplus del
+    // mese (gli ordini su cui vale), altrimenti la riga del canale su tutti.
+    const attesoPerOrdine = new Map();
+    const delMese = surplusDelMese && surplusDelMese[canale];
+    if (Array.isArray(delMese)) {
+      for (const s of delMese) {
+        for (const o of s.ordini_ids || []) { const k = comeOrdine(o); attesoPerOrdine.set(k, (attesoPerOrdine.get(k) || 0) + (Number(s.euro_t) || 0)); }
+      }
+    } else if (surplusGest.length) {
+      const euroT = surplusGest.reduce((s, r) => s + (Number(r.tariffa_valore) || 0), 0);
+      for (const k of gest.keys()) attesoPerOrdine.set(k, euroT);
+    }
+    // Il surplus atteso su ogni ordine, arrotondato ordine per ordine come lo
+    // farebbe il portale (revisione del 13/10/2026): ogni ordine si controlla col
+    // suo, e la somma, contro la riga del gestionale arrotondata sul mese, dice di
+    // quanto puo' scostarsi davvero l'arrotondamento (a luglio 2026, sulla rete,
+    // un centesimo). Prima la tolleranza era mezzo centesimo per ordine: fino a
+    // 2,05 € sulla rete, e ci passavano un ordine senza surplus o con il surplus
+    // due volte.
+    const attesoCent = new Map();
+    for (const [id, g] of gest) {
+      const euroT = attesoPerOrdine.get(id) || 0;
+      if (euroT > 0) attesoCent.set(id, Math.round(importoSurplus(g.kg, euroT) * 100));
+    }
+    // per = il surplus trovato nel prezzo di ogni ordine, in centesimi
+    const nelPrezzo = { ordini: 0, cent: 0, per: new Map() };
+    // gli ordini gia' fra le differenze (mancano, peso o importo diversi): il loro
+    // surplus non si puo' controllare da solo, si chiarisce con loro
+    const giaDiverso = new Set();
     const soloGestionale = [], pesoDiverso = [], importoDiverso = [], servizioDiverso = [], firDiverso = [];
     let kgPre = 0, euroPre = 0, ordiniPre = 0;
     for (const [id, g] of gest) {
       const p = pre.get(id);
-      if (!p) { soloGestionale.push({ id_ordine: id, numero_fir: g.numero_fir, kg: g.kg, importo: r2(g.importo) }); continue; }
+      if (!p) { soloGestionale.push({ id_ordine: id, numero_fir: g.numero_fir, kg: g.kg, importo: r2(g.importo) }); giaDiverso.add(id); continue; }
       visti.add(id);
       ordiniPre++; kgPre += p.kg; euroPre += centesimi(p.importo);
       // il tipo di servizio decide il prezzo: se la prefattura dice Trasp e il gestionale Trasp+Tratt va saputo
@@ -255,8 +399,20 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
       const firGest = pulisci(g.numero_fir).toUpperCase();
       if (p.fir && firGest && p.fir !== firGest) firDiverso.push({ id_ordine: id, fir_prefattura: p.fir, fir_gestionale: firGest, kg: Math.round(g.kg) });
       const kgDiversi = p.conKg && Math.round(p.kg) !== Math.round(g.kg);
-      if (kgDiversi) pesoDiverso.push({ id_ordine: id, numero_fir: g.numero_fir, kg_prefattura: Math.round(p.kg), kg_gestionale: Math.round(g.kg), importo_prefattura: p.conImporto ? r2(p.importo) : null, importo_gestionale: r2(g.importo) });
+      if (kgDiversi) { pesoDiverso.push({ id_ordine: id, numero_fir: g.numero_fir, kg_prefattura: Math.round(p.kg), kg_gestionale: Math.round(g.kg), importo_prefattura: p.conImporto ? r2(p.importo) : null, importo_gestionale: r2(g.importo) }); giaDiverso.add(id); }
       else if (p.conImporto && Math.abs(p.importo - g.importo) > 0.015) {
+        // FORMA a: IL SURPLUS NEL PREZZO (13/10/2026). Se lo scarto dell'ordine e'
+        // proprio il surplus che il gestionale applica a quell'ordine (5 €/t sulle
+        // sue tonnellate), non e' una differenza: va nel riquadro del surplus.
+        const atteso = (attesoPerOrdine.get(id) || 0) * g.kg / 1000;
+        if (atteso > 0 && Math.abs(p.importo - (g.importo + atteso)) <= 0.015) {
+          const cent = centesimi(p.importo) - centesimi(g.importo);
+          nelPrezzo.ordini++;
+          nelPrezzo.cent += cent;
+          nelPrezzo.per.set(id, cent);
+          continue;
+        }
+        giaDiverso.add(id);
         importoDiverso.push({
           id_ordine: id, numero_fir: g.numero_fir, kg: Math.round(g.kg),
           importo_prefattura: r2(p.importo), importo_gestionale: r2(g.importo),
@@ -271,13 +427,211 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     // 3716 di luglio 2026: 416 ordini fra rete e ACI, l'intervento extra non c'e').
     // Se la prefattura non ne porta nessun ordine, le sue righe non sono differenze.
     const fuoriPrefattura = canale === 'EXTRA_RACCOLTA' && ordiniPre === 0;
+    // arrotondamento: quanto la somma ordine per ordine si scosta dalla riga del
+    // gestionale, arrotondata una volta sul mese
+    const centGestCanale = surplusGest.reduce((s, r) => s + centesimi(r.totale), 0);
+    const attesoTot = [...attesoCent.values()].reduce((s, v) => s + v, 0);
+    surplusDi.set(canale, {
+      righe: surplusGest, nelPrezzo, perOrdine: [], sole: [], insieme: [],
+      gest, attesoCent, giaDiverso, arrotondamento: attesoCent.size ? attesoTot - centGestCanale : 0,
+    });
     canali.push({
       canale, fuori_prefattura: fuoriPrefattura,
+      // euro: gli ordini, cioe' lo standard; il surplus sta nel suo riquadro, e
+      // nella prefattura si toglie anche quello trovato dentro i prezzi
       gestionale: { ordini: gest.size, kg: Math.round(kgGest), euro: r2(euroGest) },
-      prefattura: { ordini: ordiniPre, kg: conPesi ? Math.round(kgPre) : null, euro: conImporti ? euroPre / 100 : null },
+      prefattura: { ordini: ordiniPre, kg: conPesi ? Math.round(kgPre) : null, euro: conImporti ? (euroPre - nelPrezzo.cent) / 100 : null },
       solo_gestionale: soloGestionale, peso_diverso: pesoDiverso, importo_diverso: importoDiverso,
       servizio_diverso: servizioDiverso, fir_diverso: firDiverso,
+      surplus: null,
     });
+  }
+
+  // LE RIGHE DI SURPLUS DELLA PREFATTURA (forme b e c, 13/10/2026). Una riga su
+  // un ordine va nel canale di quell'ordine. Una riga sola, senza ordine, va nel
+  // canale che nomina («... ACI»), o in quello di tutti gli ordini del file se e'
+  // uno solo, o in quello il cui surplus ha proprio quell'importo; se e' il
+  // surplus di tutti i canali insieme si dice, e se non si capisce si chiede. Un
+  // canale non prende mai il surplus di un altro.
+  const nomeCanale = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra raccolta' };
+  const centGest = (canale) => (surplusDi.get(canale)?.righe || []).reduce((s, r) => s + centesimi(r.totale), 0);
+  const canaliDelFile = [...new Set([...pre.keys()].map(id => canaleDi.get(id)).filter(Boolean))];
+  // i canali col surplus nel gestionale che passano dalla prefattura (l'extra
+  // raccolta no: il suo surplus non puo' essere in una riga del file)
+  const conSurplusGest = canali.filter(c => !c.fuori_prefattura && centGest(c.canale) > 0).map(c => c.canale);
+  const daAttribuire = [];
+  for (const r of preSurplus) {
+    const id = comeOrdine(r.id_ordine);
+    const voce = { id_ordine: id, testo: pulisci(r.testo || r.servizio), kg: r.kg ?? null, importo: r.importo ?? null, prezzo: r.prezzo ?? null };
+    if (id) {
+      const canale = canaleDi.get(id) || (altrove.get(id) || {}).canale || '';
+      if (surplusDi.has(canale)) { surplusDi.get(canale).perOrdine.push(voce); continue; }
+      const a = altrove.get(id);
+      daAttribuire.push({ ...voce, spiegazione: !a ? `riga di surplus sull'ordine ${id}, che il gestionale non conosce` : `riga di surplus sull'ordine ${id}, che nel gestionale non è del mese (${a.canale === 'TERZIARIE' ? 'è una terziaria' : a.giorno ? `fine trasporto il ${a.giorno.split('-').reverse().join('/')}` : `è ${a.stato || 'senza stato'}`})` });
+      continue;
+    }
+    const cent = centesimi(r.importo);
+    const scritto = /\baci\b/i.test(voce.testo) ? 'ACI' : /\bextra\b/i.test(voce.testo) ? 'EXTRA_RACCOLTA' : /\brete\b/i.test(voce.testo) ? 'RETE' : '';
+    // l'importo «giusto» di una riga sola: quello del gestionale, o la somma
+    // arrotondata ordine per ordine, con un centesimo in piu' o in meno
+    const arrot = (c) => Math.abs(surplusDi.get(c).arrotondamento) + 1;
+    const perImporto = conSurplusGest.filter(c => Math.abs(centGest(c) - cent) <= arrot(c));
+    const canale = surplusDi.has(scritto) ? scritto : canaliDelFile.length === 1 && surplusDi.has(canaliDelFile[0]) ? canaliDelFile[0] : perImporto.length === 1 ? perImporto[0] : '';
+    if (canale) { surplusDi.get(canale).sole.push(voce); continue; }
+    if (conSurplusGest.length > 1 && Math.abs(conSurplusGest.reduce((s, c) => s + centGest(c), 0) - cent) <= Math.abs(conSurplusGest.reduce((s, c) => s + surplusDi.get(c).arrotondamento, 0)) + 1) {
+      for (const c of conSurplusGest) surplusDi.get(c).insieme.push({ ...voce, canali: conSurplusGest, quota_cent: centGest(c) });
+      continue;
+    }
+    daAttribuire.push({ ...voce, spiegazione: `riga sola di surplus (${euroIt(r.importo)} €) senza ordine: non si capisce di quale canale sia${conSurplusGest.length ? `; nel gestionale ${conSurplusGest.map(c => `${nomeCanale[c]} ${euroIt(centGest(c) / 100)} €`).join(', ')}` : ', e il gestionale non ha surplus nel mese'}` });
+  }
+
+  // IL RIQUADRO DEL SURPLUS DI OGNI CANALE: gestionale, prefattura (con la forma
+  // riconosciuta), scarto, esito. Il riquadro conta fra le differenze che fermano
+  // l'esportazione solo se non torna (anche quando la prefattura non lo porta:
+  // va saputo prima di fatturare). Senza surplus ne' di qua ne' di la' non c'e'.
+  //
+  // QUANDO UNO SCARTO E' ARROTONDAMENTO (revisione del 13/10/2026). Nelle forme a
+  // e b la prefattura porta il surplus ordine per ordine: ogni ordine si controlla
+  // col suo (i chili del gestionale per i suoi €/t, arrotondati), entro un
+  // centesimo, e si dice quali ordini non l'hanno, quali l'hanno diverso (due
+  // volte, per esempio) e quali l'hanno senza che il gestionale lo preveda. Se
+  // ogni ordine torna, lo scarto col gestionale (che arrotonda una volta sul mese)
+  // e' arrotondamento, e lo e' davvero. Nella forma c (una riga sola) di
+  // arrotondamenti ce n'e' uno: la riga torna se fa quello del gestionale o la
+  // somma arrotondata ordine per ordine, con un centesimo in piu' o in meno. Prima
+  // la tolleranza era mezzo centesimo per ordine (2,05 € sulla rete di luglio
+  // 2026) e ci passavano una riga sola sbagliata di 2,00 €, un ordine senza
+  // surplus e un ordine col surplus due volte.
+  const elencoOrdini = (ids) => (ids.length <= 3 ? ids.join(', ') : `${ids.slice(0, 3).join(', ')} e altri ${ids.length - 3}`);
+  const suOrdini = (n) => (n === 1 ? 'un ordine' : `${n} ordini`);
+  const senzaNumero = (v) => v === null || v === undefined;
+  for (const c of canali) {
+    const s = surplusDi.get(c.canale);
+    const gestCent = centGest(c.canale);
+    const gestKg = s.righe.reduce((x, r) => x + (Number(r.kg_riferimento) || 0), 0);
+    // le righe per ordine della prefattura, ordine per ordine; un importo che
+    // manca non e' zero: si conta a parte
+    const perId = new Map();
+    for (const v of s.perOrdine) {
+      const e = perId.get(v.id_ordine) || { cent: 0, righe: 0, senza_importo: 0 };
+      e.righe++;
+      if (senzaNumero(v.importo)) e.senza_importo++; else e.cent += centesimi(v.importo);
+      perId.set(v.id_ordine, e);
+    }
+    const righeSenzaImporto = s.perOrdine.filter(v => senzaNumero(v.importo)).length;
+    const centPerOrdine = [...perId.values()].reduce((x, e) => x + e.cent, 0);
+    const centSole = s.sole.reduce((x, v) => x + centesimi(v.importo), 0);
+    const centInsieme = s.insieme.reduce((x, v) => x + v.quota_cent, 0);
+    const forme = [];
+    if (s.nelPrezzo.ordini) forme.push('nel_prezzo');
+    if (s.perOrdine.length) forme.push('riga_per_ordine');
+    if (s.sole.length) forme.push('riga_sola');
+    if (s.insieme.length) forme.push('insieme');
+    // Nessun surplus nel gestionale ma lo stesso €/t in piu' su tanti ordini:
+    // e' probabilmente un surplus che il gestionale non ha ancora. Gli ordini
+    // restano «importo diverso»; il riquadro lo dice.
+    let ipotesi = null;
+    if (!gestCent && !forme.length && c.importo_diverso.length >= 3 && c.importo_diverso.every(x => x.kg > 0)) {
+      // l'€/t si legge sull'ordine piu' pesante (il centesimo pesa meno), e ogni
+      // ordine deve tornarci entro il suo arrotondamento
+      const grande = c.importo_diverso.reduce((a, x) => (x.kg > a.kg ? x : a));
+      const euroT = (grande.importo_prefattura - grande.importo_gestionale) / (grande.kg / 1000);
+      if (euroT > 0 && c.importo_diverso.every(x => Math.abs((x.importo_prefattura - x.importo_gestionale) - euroT * x.kg / 1000) <= 0.015)) {
+        ipotesi = { euro_t: r2(euroT), ordini: c.importo_diverso.length, euro: r2(c.importo_diverso.reduce((x, d) => x + d.importo_prefattura - d.importo_gestionale, 0)) };
+      }
+    }
+    if (!gestCent && !forme.length && !ipotesi) continue;
+    // Tutte le righe di surplus senza importo (una prefattura senza la colonna
+    // dell'importo): il surplus c'e', quanto non si sa, e non si confronta.
+    const tuttoSenzaImporto = righeSenzaImporto > 0 && righeSenzaImporto === s.perOrdine.length && !s.nelPrezzo.ordini && !s.sole.length && !s.insieme.length;
+    const preCent = s.nelPrezzo.cent + centPerOrdine + centSole + centInsieme;
+    const scarto = forme.length && !tuttoSenzaImporto ? preCent - gestCent : null;
+
+    // Ordine per ordine (forme a e b, senza righe sole): ogni ordine col suo.
+    const perOrdine = (s.nelPrezzo.ordini > 0 || s.perOrdine.length > 0) && !s.sole.length && !s.insieme.length;
+    const ordini = { senza: [], diversi: [], in_piu: [], senza_importo: [], gia_fra_le_differenze: [] };
+    // la parte dello scarto che viene da ordini gia' fra le differenze
+    let centGia = 0;
+    // e quella che viene dagli ordini che non tornano (senza importo esclusi)
+    let centSbagliati = 0;
+    if (perOrdine && gestCent && !tuttoSenzaImporto) {
+      const ids = new Set([...s.attesoCent.keys(), ...perId.keys(), ...s.nelPrezzo.per.keys()]);
+      for (const id of ids) {
+        const atteso = s.attesoCent.get(id) || 0;
+        const linee = perId.get(id);
+        const trovato = (s.nelPrezzo.per.get(id) || 0) + (linee ? linee.cent : 0);
+        const g = s.gest.get(id);
+        const kg = g ? Math.round(g.kg) : null;
+        // mancano nella prefattura, hanno peso o importo diversi, o non sono del
+        // mese: sono gia' differenze, il loro surplus si chiarisce con loro
+        if (s.giaDiverso.has(id) || (!g && pre.has(id))) { ordini.gia_fra_le_differenze.push(id); centGia += trovato - atteso; continue; }
+        const p = pre.get(id);
+        if ((linee && linee.senza_importo) || (!linee && s.nelPrezzo.ordini && p && !p.conImporto)) { ordini.senza_importo.push({ id_ordine: id, kg, atteso: atteso / 100 }); continue; }
+        if (Math.abs(trovato - atteso) <= 1) continue;
+        centSbagliati += trovato - atteso;
+        if (!trovato) ordini.senza.push({ id_ordine: id, kg, atteso: atteso / 100 });
+        else if (!atteso) ordini.in_piu.push({ id_ordine: id, kg, importo: trovato / 100, righe: linee ? linee.righe : 0 });
+        else ordini.diversi.push({ id_ordine: id, kg, importo: trovato / 100, atteso: atteso / 100, righe: linee ? linee.righe : 0 });
+      }
+    }
+    const sbagliati = ordini.senza.length + ordini.diversi.length + ordini.in_piu.length + ordini.senza_importo.length;
+    const esito = ipotesi ? 'ipotesi'
+      : !forme.length ? (c.fuori_prefattura ? 'fuori_prefattura' : 'assente')
+        : tuttoSenzaImporto ? 'senza_importo'
+          : !gestCent ? 'solo_prefattura'
+            : sbagliati ? 'non_torna'
+              : perOrdine ? (centGia ? 'non_torna' : scarto === 0 ? 'torna' : 'arrotondamento')
+                : scarto === 0 ? 'torna'
+                  : Math.abs(scarto) <= Math.abs(s.arrotondamento) + 1 ? 'arrotondamento'
+                    : 'non_torna';
+    const nomi = [...new Set(s.righe.map(r => r.descrizione).filter(Boolean))].join(' e ') || 'Surplus';
+    const quanto = s.righe.length === 1
+      ? `${euroIt(gestCent / 100)} € nel gestionale (${tIt(gestKg)} t × ${euroTIt(s.righe[0].tariffa_valore)})`
+      : `${euroIt(gestCent / 100)} € nel gestionale (${s.righe.map(r => `${tIt(r.kg_riferimento)} t × ${euroTIt(r.tariffa_valore)}`).join(' + ')})`;
+    const come = [
+      s.nelPrezzo.ordini ? `nel prezzo di ${suOrdini(s.nelPrezzo.ordini)}` : '',
+      s.perOrdine.length ? `con ${s.perOrdine.length === 1 ? 'una riga' : `${s.perOrdine.length} righe`} per ordine` : '',
+      s.sole.length ? `con ${s.sole.length === 1 ? 'una riga sola' : `${s.sole.length} righe senza ordine`}` : '',
+      s.insieme.length ? `in una riga sola insieme a ${s.insieme[0].canali.filter(x => x !== c.canale).map(x => nomeCanale[x]).join(' e ')}` : '',
+    ].filter(Boolean).join(', ');
+    const quantoScarto = scarto ? `${euroIt(Math.abs(scarto) / 100)} € ${scarto > 0 ? 'in più' : 'in meno'}` : '';
+    const cosaNonTorna = [
+      ordini.senza.length ? `manca su ${suOrdini(ordini.senza.length)} (${elencoOrdini(ordini.senza.map(x => x.id_ordine))})` : '',
+      ordini.diversi.length ? `è diverso su ${suOrdini(ordini.diversi.length)} (${ordini.diversi.slice(0, 3).map(x => `${x.id_ordine}: ${euroIt(x.importo)} € invece di ${euroIt(x.atteso)} €`).join(', ')}${ordini.diversi.length > 3 ? ` e altri ${ordini.diversi.length - 3}` : ''})` : '',
+      ordini.in_piu.length ? `c'è su ${suOrdini(ordini.in_piu.length)} che nel gestionale non l'${ordini.in_piu.length === 1 ? 'ha' : 'hanno'} (${elencoOrdini(ordini.in_piu.map(x => x.id_ordine))})` : '',
+      ordini.senza_importo.length ? `è senza importo su ${suOrdini(ordini.senza_importo.length)} (${elencoOrdini(ordini.senza_importo.map(x => x.id_ordine))})` : '',
+    ].filter(Boolean).join('; ');
+    const gia = ordini.gia_fra_le_differenze;
+    const conclusione = esito === 'torna' ? 'Torna al centesimo.'
+      : esito === 'arrotondamento' ? (perOrdine
+        ? `${quantoScarto}: è l'arrotondamento ordine per ordine (il gestionale arrotonda una volta sul mese), e ogni ordine torna col suo surplus entro il centesimo.`
+        : `${quantoScarto}: è l'arrotondamento (il surplus arrotondato ordine per ordine fa ${euroIt((gestCent + s.arrotondamento) / 100)} €, sul mese ${euroIt(gestCent / 100)} €).`)
+        : sbagliati ? `${!centSbagliati && sbagliati > ordini.senza_importo.length ? 'In tutto torna, ma solo perché le differenze si compensano. ' : ''}Ordine per ordine non torna${centSbagliati ? `, ${euroIt(Math.abs(centSbagliati) / 100)} € ${centSbagliati > 0 ? 'in più' : 'in meno'}` : ''}: ${cosaNonTorna}. Va chiarito prima di fatturare.`
+          : centGia ? `${quantoScarto} del gestionale, per ${gia.length === 1 ? `l'ordine ${gia[0]}, che è` : `gli ordini ${elencoOrdini(gia)}, che sono`} già fra le differenze qui sopra: si chiarisce con ${gia.length === 1 ? 'quella' : 'quelle'}. Sugli altri ordini torna entro il centesimo.`
+            : `${quantoScarto} del gestionale: va chiarito prima di fatturare.`;
+    const testo = esito === 'ipotesi'
+      ? `${ipotesi.ordini} ordini hanno ${euroTIt(ipotesi.euro_t)} in più del gestionale, tutti uguali (${euroIt(ipotesi.euro)} €): se è un surplus del consorzio, come il Fuel Surcharge, scrivilo nella scheda Surplus delle tariffe con le sue date, e il confronto lo riconoscerà nel prezzo.`
+      : esito === 'fuori_prefattura' ? `${nomi}: ${quanto}. L'extra raccolta non passa dalla prefattura: il surplus si fattura col canale.`
+        : esito === 'assente' ? `${nomi}: ${quanto}, ma la prefattura non lo porta, né nei prezzi né in una riga. Va fatturato secondo la comunicazione del consorzio: controlla che ci sia, prima di esportare.`
+          : esito === 'senza_importo' ? `${gestCent ? `${nomi}: ${quanto}; la prefattura lo porta` : 'La prefattura porta un surplus'} ${come}, ma senza importo (—): non si può confrontare${conImporti ? ', e va chiarito prima di fatturare.' : ' (il file non ha la colonna degli importi).'}`
+            : esito === 'solo_prefattura' ? `La prefattura porta un surplus di ${euroIt(preCent / 100)} € ${come}, che il gestionale non ha: se vale, scrivilo nella scheda Surplus delle tariffe con le sue date.`
+              : `${nomi}: ${quanto}; la prefattura lo porta ${come}, ${euroIt(preCent / 100)} €. ${conclusione}`;
+    c.surplus = {
+      gestionale: { righe: s.righe.map(r => ({ surplus_id: r.surplus_id || '', nome: r.descrizione || '', euro_t: Number(r.tariffa_valore) || 0, kg: Number(r.kg_riferimento) || 0, ordini: Number(r.record_count) || 0, totale: r2(Number(r.totale) || 0) })), kg: Math.round(gestKg), euro: gestCent / 100 },
+      prefattura: { forme, euro: forme.length && !tuttoSenzaImporto ? preCent / 100 : null, ordini_nel_prezzo: s.nelPrezzo.ordini, righe_per_ordine: s.perOrdine.length, righe_sole: s.sole.length + s.insieme.length },
+      scarto: scarto === null ? null : scarto / 100,
+      // quanto l'arrotondamento ordine per ordine si scosta dalla riga sul mese
+      arrotondamento: s.arrotondamento / 100,
+      esito,
+      // ordine per ordine (forme a e b): dove non torna
+      ordini,
+      // conta fra le differenze se non torna; l'ipotesi no, perche' i suoi ordini
+      // sono gia' fra gli importi diversi; un surplus senza importo si', se il
+      // resto del file gli importi li ha
+      conta: ['assente', 'solo_prefattura', 'non_torna'].includes(esito) || (esito === 'senza_importo' && conImporti),
+      ipotesi,
+      testo,
+    };
   }
 
   // Le terziarie (ordini TER...): il portale le paga come "Trasp" a 8 euro la
@@ -331,7 +685,10 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
   //
   // Resta scritta e si vede, perche' dice da chi il portale si aspetta il
   // trattamento: e' un'osservazione, non un errore di fatturazione.
-  const differenze = soloPrefattura.length + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.fir_diverso.length, 0);
+  // Il surplus: un riquadro che non torna conta una volta per canale, e una riga
+  // di surplus che non si sa di quale canale sia conta anche lei (13/10/2026).
+  const differenze = soloPrefattura.length + daAttribuire.length
+    + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.fir_diverso.length + (c.surplus && c.surplus.conta ? 1 : 0), 0);
   const diciture_diverse = canali.reduce((s, c) => s + c.servizio_diverso.length, 0);
   return {
     coincide: differenze === 0 && pre.size > 0,
@@ -341,5 +698,7 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     ordini_prefattura: pre.size,
     con_importi: conImporti, con_pesi: conPesi,
     canali, solo_prefattura: soloPrefattura, terziarie,
+    // le righe di surplus della prefattura che non si sa a quale canale dare
+    surplus_da_attribuire: daAttribuire,
   };
 }

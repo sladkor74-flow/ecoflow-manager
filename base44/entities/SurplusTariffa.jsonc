@@ -1,0 +1,148 @@
+{
+  "name": "SurplusTariffa",
+  "type": "object",
+  // IL SURPLUS SULLE TARIFFE (13/10/2026).
+  //
+  // Richiesta dell'utente del 12/10/2026: accanto alle tariffe un eventuale
+  // surplus, sempre in euro a tonnellata, con le sue date di inizio e fine
+  // validita', da dare ai fornitori quando il consorzio o un accordo
+  // commerciale lo dicono; in attiva come in passiva una riga con l'importo
+  // standard e una per il surplus, sulle stesse tonnellate del mese. Il primo
+  // caso e' il Fuel Surcharge del consorzio Ecotyre: +5 euro/t a tutti i
+  // raccoglitori dal 01/10/2026 al 31/12/2026, su rete, ACI ed extra raccolta,
+  // che SMOCO fattura a Ecotyre e paga ai raccoglitori.
+  //
+  // Un archivio a parte e non un campo della Tariffa: lo stesso surplus vale per
+  // decine di tariffe e per l'extra raccolta, che tariffe non ne ha; ha date
+  // sue, che la rinegoziazione di una tariffa non deve perdere; e la copia
+  // dell'anno nuovo non lo porta nel 2027. Soprattutto, un lettore che se ne
+  // dimentica fa MANCARE un surplus (si vede come differenza), mentre un record
+  // «surplus» dentro Tariffa dimenticato da un filtro diventerebbe il prezzo
+  // della rete senza che nessuno se ne accorga.
+  //
+  // UN RECORD = UN SURPLUS SU UN CANALE. Il Fuel Surcharge sono tre record
+  // (RETE, ACI, EXTRA_RACCOLTA) con lo stesso gruppo: la pagina li mostra
+  // insieme, il calcolo li tiene separati, perche' i canali non si sommano mai.
+  // Niente TUTTE. Le regole (quando vale, a chi, i controlli al salvataggio, i
+  // conflitti) stanno in shared/surplus.ts, specchio src/lib/surplus.js.
+  //
+  // Le date si confrontano col giorno italiano della fine del trasporto, estremi
+  // compresi, come le tariffe (validitaTariffa.ts); tutte e due obbligatorie: i
+  // contratti sono annuali senza tacito rinnovo, e un surplus non va oltre il
+  // 31/12 dell'anno in cui comincia. Lo stato non_attivo vuol dire «non deve
+  // valere mai»; per finire prima si cambia la data di fine.
+  //
+  // Le regole di lettura e scrittura sono quelle delle tariffe: si legge, scrive
+  // solo l'amministratore (attraverso gestisciAnagrafiche, che lascia la traccia
+  // nello storico delle modifiche). euro_t_passiva e' un costo dei fornitori:
+  // pagine ed EcoTyna lo mostrano solo all'amministratore.
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Il nome del surplus, che e' anche la descrizione della riga in fattura: «Fuel Surcharge»"
+    },
+    "origine": {
+      "type": "string",
+      "enum": [
+        "CONSORZIO",
+        "ACCORDO_COMMERCIALE"
+      ],
+      "description": "Chi lo ha deciso: CONSORZIO (a video «consorzio Ecotyre») o ACCORDO_COMMERCIALE («accordo commerciale»)"
+    },
+    "riferimento": {
+      "type": "string",
+      "description": "La comunicazione o l'accordo da cui nasce: «comunicazione Ecotyre del ...». Facoltativo"
+    },
+    "tipologia": {
+      "type": "string",
+      "enum": [
+        "RETE",
+        "ACI",
+        "EXTRA_RACCOLTA"
+      ],
+      "description": "Il canale: un record per canale, mai TUTTE. Lo stesso surplus su piu' canali sono piu' record con lo stesso gruppo"
+    },
+    "prestazione": {
+      "type": "string",
+      "enum": [
+        "RACCOLTA",
+        "TRATTAMENTO",
+        "CONFERIMENTO_STOCCAGGIO",
+        "TRASPORTO_SECONDARIA"
+      ],
+      "description": "La prestazione dei fornitori su cui si paga, come Tariffa.prestazione. Il Fuel Surcharge e' RACCOLTA. Il TRASPORTO_SECONDARIA non ha una parte attiva: le secondarie non si fatturano a Ecotyre"
+    },
+    "a_chi": {
+      "type": "string",
+      "enum": [
+        "tutti",
+        "elenco"
+      ],
+      "default": "tutti",
+      "description": "tutti = tutti i fornitori che nel mese hanno una riga di quella prestazione nel canale, anche quelli aggiunti dopo; elenco = solo quelli di fornitori_json"
+    },
+    "fornitori_json": {
+      "type": "string",
+      "description": "Solo con a_chi elenco: JSON [{ id, nome }] dei fornitori dell'anagrafica. Un fornitore si riconosce per id o per nome normalizzato («GATIM» e «GATIM S.R.L.» sono lo stesso)"
+    },
+    "euro_t_passiva": {
+      "type": "number",
+      "description": "Quanto SMOCO paga in piu' al fornitore, euro a tonnellata. Vuoto = SMOCO non paga niente (surplus solo attivo). Costo: lo vede solo l'amministratore"
+    },
+    "euro_t_attiva": {
+      "type": "number",
+      "description": "Quanto SMOCO fattura in piu' a Ecotyre, euro a tonnellata. Vuoto = surplus solo passivo (un accordo commerciale che Ecotyre non riconosce)"
+    },
+    "data_inizio_validita": {
+      "type": "string",
+      "format": "date",
+      "description": "Primo giorno in cui vale, sul giorno italiano della fine del trasporto"
+    },
+    "data_fine_validita": {
+      "type": "string",
+      "format": "date",
+      "description": "Ultimo giorno in cui vale, compreso. Obbligatoria, e non oltre il 31/12 dell'anno di inizio"
+    },
+    "stato": {
+      "type": "string",
+      "enum": [
+        "attivo",
+        "non_attivo"
+      ],
+      "default": "attivo",
+      "description": "non_attivo non vale mai, nemmeno dentro le sue date. Per finire prima si cambia la data di fine"
+    },
+    "gruppo": {
+      "type": "string",
+      "description": "Lo stesso per i record dello stesso surplus sui diversi canali: si genera alla creazione"
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "nome",
+    "tipologia",
+    "prestazione",
+    "data_inizio_validita",
+    "data_fine_validita"
+  ],
+  "rls": {
+    "read": true,
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

@@ -31,9 +31,10 @@ import { comeOrdine, comeNumero, comeGiorno } from "./prefattura.ts";
 import { mappaFatturazione, fatturaA } from "./subfornitori.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { termineDi, testoScadenza, GIORNI_TERMINE_REGISTRAZIONE } from "./termineRegistrazione.ts";
-import { formatoKg } from "./formato.ts";
+import { formatoKg, formatoTonnellate } from "./formato.ts";
 import { distanzaFir, descriviDifferenzaFir } from "./numeroFir.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
+import { importoSurplus, testoEuroT, periodoSurplus, surplusNonDisattivati, valePerFornitore, euroTDi, NOMI_ORIGINE } from "./surplus.ts";
 
 const kgTondi = (v) => Math.round(Number(v) || 0);
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -314,11 +315,23 @@ export function righeDaStampa(celle, nome = '') {
   return { righe, note };
 }
 
+// LA RIGA DEL SURPLUS NON E' UN CARICO (il surplus sulle tariffe, 13/10/2026).
+// Da ottobre 2026 i raccoglitori fatturano anche il Fuel Surcharge del consorzio,
+// +5 €/t sulle stesse tonnellate del mese, e nel consuntivo lo scrivono come una
+// riga in piu' («Fuel Surcharge  255,78 t  5,00  1.278,90»): senza formulario e
+// senza ordine, quindi non e' un carico e non si abbina. Prima finiva fra le
+// righe «non leggibili», che fanno pensare a un file storto; adesso si dice che
+// e' il surplus, e il suo importo si confronta col surplus che la passiva
+// riconosce (l'imponibile del riquadro dei totali lo comprende).
+const RIGA_SURPLUS = /fuel|surcharge|surplus|carburant/i;
+
 export function leggiRigheConsuntivo(tabelle) {
   const righe = [];
   const note = [];
   const colonneLette = [];
   let scartate = 0;
+  // le righe del surplus riconosciute, per dirle (non sono carichi)
+  const righeSurplus = [];
   // L'imponibile che il fornitore si aspetta, dal riquadro dei costi in fondo.
   let importoTotale = null;
 
@@ -406,7 +419,12 @@ export function leggiRigheConsuntivo(tabelle) {
       const riga = r || [];
       const fir = pulisci(prendi(riga, col.numero_fir));
       const ord = pulisci(prendi(riga, col.id_ordine));
-      if (!chiaveFir(fir) && !pareOrdine(ord)) { if (riga.some(c => pulisci(c))) scartate++; continue; }
+      if (!chiaveFir(fir) && !pareOrdine(ord)) {
+        const testo = riga.map(c => pulisci(c)).filter(Boolean);
+        if (testo.some(c => RIGA_SURPLUS.test(c))) righeSurplus.push({ foglio: nome, testo: testo.join(' · ').slice(0, 200) });
+        else if (testo.length) scartate++;
+        continue;
+      }
       const kgLetti = comeNumero(prendi(riga, col.kg));
       // Un peso in tonnellate si riconosce dall'ordine di grandezza: un carico di
       // PFU pesa migliaia di chili, non tre.
@@ -428,7 +446,10 @@ export function leggiRigheConsuntivo(tabelle) {
   }
 
   if (scartate) note.push(`${scartate} righe non avevano ne' un formulario ne' un numero d'ordine leggibile: non si possono abbinare e non sono state lette.`);
-  return { righe, note, colonne: colonneLette, scartate, importo_totale: importoTotale };
+  for (const s of righeSurplus) {
+    note.push(`Foglio "${s.foglio}": la riga «${s.testo}» è il surplus sulle tariffe, non un carico: non si abbina ai formulari, e il suo importo si confronta col surplus che la fatturazione passiva riconosce.`);
+  }
+  return { righe, note, colonne: colonneLette, scartate, importo_totale: importoTotale, righe_surplus: righeSurplus };
 }
 
 /**
@@ -1171,6 +1192,15 @@ export function avvisiDate(confronto) {
  * Restituisce anche da QUALE blocco viene, perche' un soggetto che raccoglie e ha
  * il piazzale compare in due blocchi con due importi diversi, e confonderli
  * sarebbe pagarlo due volte o una volta sola.
+ *
+ * IL SURPLUS SULLE TARIFFE (13/10/2026). Il fornitore fattura anche il surplus
+ * (il Fuel Surcharge del consorzio, da ottobre 2026), come riga a parte nella
+ * stessa fattura e nello stesso consuntivo: importo e' quindi standard piu'
+ * surplus, cioe' il totale_euro della passiva, e accanto ci sono le due parti
+ * (importo_standard, importo_surplus) e le righe del surplus. Le tonnellate
+ * restano quelle delle righe standard: il surplus sta sulle stesse, e il
+ * controllo sui chili non cambia. Un conto congelato prima del surplus non ha
+ * questi campi: lo standard e' allora l'importo intero.
  */
 export function costoAttesoDallaPassiva(passiva, fornitore, ruolo) {
   if (!passiva) return null;
@@ -1184,14 +1214,183 @@ export function costoAttesoDallaPassiva(passiva, fornitore, ruolo) {
       motivo: `Nella fatturazione passiva di questo mese, nel blocco ${blocco.replace(/_/g, ' ')}, non c'e' nessuna riga per questo fornitore: o non gli spetta niente in questo canale, o manca la tariffa.`,
     };
   }
+  const cent = Math.round(righe.reduce((s, f) => s + centesimi(f.totale_euro), 0));
+  const centSurplus = Math.round(righe.reduce((s, f) => s + centesimi(f.totale_surplus), 0));
   return {
     trovato: true,
     blocco,
     tonnellate: righe.reduce((s, f) => s + (Number(f.totale_tonnellate) || 0), 0),
-    importo: Math.round(righe.reduce((s, f) => s + centesimi(f.totale_euro), 0)) / 100,
+    importo: cent / 100,
+    importo_standard: (cent - centSurplus) / 100,
+    importo_surplus: centSurplus / 100,
+    surplus: righe.flatMap(f => f.surplus || []),
     interno: righe.every(f => f.interno === true),
     righe: righe.flatMap(f => f.righe || []),
   };
+}
+
+// Il ruolo del consuntivo e le prestazioni su cui un surplus gli si paga.
+const PRESTAZIONI_DEL_RUOLO = {
+  raccoglitore: ['RACCOLTA'],
+  impianto: ['TRATTAMENTO', 'CONFERIMENTO_STOCCAGGIO'],
+  trasportatore: ['TRASPORTO_SECONDARIA'],
+};
+const codice = (v) => String(v || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+
+/**
+ * I surplus che potrebbero spiegare un importo del consuntivo che non torna: quelli
+ * del canale, delle prestazioni del ruolo, con una parte ai fornitori, che valgono
+ * per quel fornitore, in qualunque periodo. Servono a esitoConsuntivo per
+ * riconoscere un fornitore che mette il Fuel Surcharge in un mese in cui non vale
+ * (o su tutto il mese quando vale solo da un certo giorno): lo scarto e' allora
+ * proprio t x €/t, e lo si dice con il suo nome invece che come uno scarto qualunque.
+ * Pura: l'archivio lo legge chi chiama, che lo ha gia' per il conto della passiva.
+ */
+export function surplusPerIlConfronto(surplusAll, { fornitore, ruolo, canale }) {
+  const prestazioni = PRESTAZIONI_DEL_RUOLO[String(ruolo || '').trim().toLowerCase()] || [];
+  const can = codice(canale);
+  return surplusNonDisattivati(surplusAll)
+    .filter(s => codice(s.tipologia) === can && prestazioni.includes(codice(s.prestazione)) && euroTDi(s, 'PASSIVA') !== null
+      && valePerFornitore(s, { nomi: [fornitore] }))
+    .map(s => ({
+      surplus_id: s.id || '',
+      nome: String(s.nome || '').trim() || 'Surplus',
+      origine: NOMI_ORIGINE[codice(s.origine)] || '',
+      euro_t: euroTDi(s, 'PASSIVA'),
+      dal: String(s.data_inizio_validita || '').slice(0, 10),
+      al: String(s.data_fine_validita || '').slice(0, 10),
+    }));
+}
+
+// Un istante della piattaforma puo' arrivare senza la Z finale: e' UTC lo stesso.
+const istanteUtc = (v) => {
+  if (!v) return null;
+  const s = String(v);
+  const ms = Date.parse(/T\d/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s) ? `${s}Z` : s);
+  return Number.isFinite(ms) ? ms : null;
+};
+
+/**
+ * Le righe del surplus che il ricalcolo di oggi ha in piu' del conto congelato
+ * PERCHE' IL SURPLUS E' STATO SCRITTO, O CAMBIATO, DOPO IL CONGELAMENTO.
+ *
+ * Non basta che oggi il surplus valga di piu' (revisione del 13/10/2026): il
+ * Fuel Surcharge che stava gia' nel conto congelato cresce anche solo perche'
+ * dopo il congelamento arriva un carico del mese chiuso in ritardo, o si corregge
+ * un peso, che e' proprio il caso per cui si congela. Contato come «scritto
+ * dopo», la pagina diceva «scritto il 13/10/2026 dopo il congelamento» di un
+ * surplus scritto prima di un congelamento del 05/11. Per ogni surplus:
+ * - c'era nel conto congelato, con gli stessi €/t e lo stesso periodo: la
+ *   differenza e' delle tonnellate, non del surplus, e qui non si conta (il
+ *   conto di allora e quello di oggi la pagina li mostra gia' tutti e due);
+ * - c'era, ma con altri €/t o un altro periodo: il conto congelato lo fotografa
+ *   com'era, quindi e' stato cambiato dopo. Si conta la differenza, segnata
+ *   «cambiato»; se nel frattempo sono cambiate anche le tonnellate del
+ *   fornitore, la differenza le comprende e lo si dice (anche_tonnellate);
+ * - non c'era: se e' stato scritto prima del congelamento esisteva gia', e a
+ *   questo fornitore mancavano solo le tonnellate, arrivate dopo: non si conta.
+ *   Se e' stato scritto dopo (o la data non si sa) si conta tutto: senza di lui
+ *   la riga non ci sarebbe.
+ * congelato_il: l'istante del congelamento (ChiusuraPassivaMese).
+ */
+export function surplusScrittiDopo(costoOggi, costoAllora, congelato_il = '') {
+  if (!costoOggi || !costoOggi.trovato || !costoAllora || !costoAllora.trovato) return [];
+  const raggruppa = (voci) => {
+    const gruppi = new Map();
+    for (const v of voci || []) {
+      const k = v.surplus_id || v.nome;
+      const g = gruppi.get(k) || { voci: [], cent: 0, kg: 0, termini: new Set() };
+      g.voci.push(v);
+      g.cent += centesimi(v.importo);
+      g.kg += Math.round((Number(v.tonnellate) || 0) * 1000);
+      g.termini.add(`${Number(v.euro_t)}|${v.dal || ''}|${v.al || ''}`);
+      gruppi.set(k, g);
+    }
+    return gruppi;
+  };
+  const allora = raggruppa(costoAllora.surplus);
+  const quandoCongelato = istanteUtc(congelato_il);
+  const kg = (c) => Math.round((Number(c.tonnellate) || 0) * 1000);
+  const dopo = [];
+  for (const [k, o] of raggruppa(costoOggi.surplus)) {
+    const a = allora.get(k);
+    const diff = o.cent - (a ? a.cent : 0);
+    if (diff <= 0) continue;
+    // la data di scrittura torna con la Z: chi la legge prende il giorno italiano giusto
+    const scritto = istanteUtc(o.voci[0].scritto_il);
+    const v = { ...o.voci[0], scritto_il: scritto !== null ? new Date(scritto).toISOString() : String(o.voci[0].scritto_il || '') };
+    const primaDelCongelamento = scritto !== null && quandoCongelato !== null && scritto <= quandoCongelato;
+    if (a) {
+      const stessiTermini = a.termini.size === o.termini.size && [...o.termini].every(t => a.termini.has(t));
+      // Stessi termini: sono le tonnellate. Termini diversi ma una data che dice
+      // «prima»: i conti non tornano con le date, e non si scrive una cosa falsa.
+      if (stessiTermini || primaDelCongelamento) continue;
+      dopo.push({ ...v, importo: diff / 100, tonnellate: null, cambiato: true, anche_tonnellate: kg(costoOggi) !== kg(costoAllora) });
+    } else {
+      if (primaDelCongelamento) continue;
+      dopo.push({ ...v, importo: diff / 100, tonnellate: o.kg / 1000, cambiato: false, anche_tonnellate: false });
+    }
+  }
+  return dopo;
+}
+
+// Le righe del surplus (della passiva o dei candidati) come le legge una persona:
+// «Fuel Surcharge 1.278,90 € (255,78 t a 5,00 €/t, dal 01/10/2026 al 31/12/2026)»,
+// o senza il nome quando la frase lo ha gia' detto.
+function testoVoceSurplus(v, conNome = true) {
+  const t = v.tonnellate !== null && v.tonnellate !== undefined ? `${formatoTonnellate(v.tonnellate)} t a ` : '';
+  const periodo = periodoSurplus({ data_inizio_validita: v.dal, data_fine_validita: v.al });
+  return `${conNome ? `${v.nome} ` : ''}${euroIt(v.importo)} € (${t}${testoEuroT(v.euro_t)}${periodo ? `, ${periodo}` : ''})`;
+}
+// Piu' voci in una frase: col nome di ciascuna; una sola: il nome lo dice la frase.
+const testoVociSurplus = (voci) => (voci.length === 1 ? testoVoceSurplus(voci[0], false) : voci.map(v => testoVoceSurplus(v)).join('; '));
+
+/**
+ * Lo scarto sull'importo e' esattamente un surplus? Tre casi, in centesimi interi:
+ * - MANCA: lo scarto e' meno il surplus che la passiva riconosce (tutto, o una
+ *   delle sue voci), cioe' il fornitore non lo ha messo nel consuntivo;
+ * - SCRITTO DOPO: il confronto usa il conto congelato, e lo scarto e' il surplus
+ *   scritto (o cambiato) dopo il congelamento, che il ricalcolo di oggi ha e il
+ *   congelato no: il fornitore ha ragione, e il conto di allora non lo sapeva.
+ *   Non e' il surplus delle tonnellate arrivate dopo (surplusScrittiDopo);
+ * - NON DOVUTO: lo scarto e' t x €/t di un surplus che in questo mese non vale (o
+ *   la parte che manca per arrivare a tutto il mese, quando vale solo da un
+ *   certo giorno), cioe' il fornitore lo ha messo dove non va.
+ * Il verdetto resta quello che e' (l'importo non torna): cambia la frase, che dice
+ * il perche' con il nome del surplus. Un surplus che arriva a mese chiuso si
+ * segnala e non riapre niente da solo. null se lo scarto non e' un surplus.
+ */
+function scartoDaSurplus(scartoCent, costo, { candidati = [], dopo = [] }, tolleranzaCent) {
+  if (!scartoCent || !costo || !costo.trovato) return null;
+  const voci = costo.surplus || [];
+  const centSurplus = centesimi(costo.importo_surplus);
+  const torna = (atteso) => atteso > 0 && Math.abs(Math.abs(scartoCent) - atteso) <= tolleranzaCent;
+  if (scartoCent < 0 && centSurplus > 0) {
+    if (torna(centSurplus)) return { tipo: 'manca', importo: centSurplus / 100, voci };
+    for (const v of voci) {
+      if (torna(centesimi(v.importo))) return { tipo: 'manca', importo: Number(v.importo) || 0, voci: [v] };
+    }
+  }
+  if (scartoCent > 0 && dopo.length) {
+    const centDopo = dopo.reduce((s, v) => s + centesimi(v.importo), 0);
+    if (torna(centDopo)) return { tipo: 'scritto_dopo', importo: centDopo / 100, voci: dopo };
+    for (const v of dopo) {
+      if (torna(centesimi(v.importo))) return { tipo: 'scritto_dopo', importo: Number(v.importo) || 0, voci: [v] };
+    }
+  }
+  if (scartoCent > 0) {
+    const kg = Math.round((Number(costo.tonnellate) || 0) * 1000);
+    const giaDopo = new Set(dopo.map(v => v.surplus_id).filter(Boolean));
+    for (const c of candidati || []) {
+      if (c.surplus_id && giaDopo.has(c.surplus_id)) continue;
+      const dentro = voci.filter(v => c.surplus_id && v.surplus_id === c.surplus_id).reduce((s, v) => s + centesimi(v.importo), 0);
+      const atteso = centesimi(importoSurplus(kg, c.euro_t)) - dentro;
+      if (torna(atteso)) {
+        return { tipo: 'non_dovuto', importo: atteso / 100, voci: [{ ...c, tonnellate: kg / 1000, importo: atteso / 100 }], in_parte: dentro > 0 };
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -1202,7 +1401,13 @@ export function costoAttesoDallaPassiva(passiva, fornitore, ruolo) {
  * luglio 2026 usciva 226.692,48 da una parte e 226.692,49 dall'altra con le righe
  * identiche (e' la lezione di prefattura.ts).
  */
-export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, tolleranza_euro = 0.015 }) {
+/**
+ * surplus_candidati: i surplus del fornitore in qualunque periodo
+ * (surplusPerIlConfronto); surplus_dopo: le righe del surplus scritte o cambiate
+ * dopo il congelamento del conto usato per il confronto (surplusScrittiDopo).
+ * Tutti e due facoltativi: senza, lo scarto si dice come uno scarto qualunque.
+ */
+export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, tolleranza_euro = 0.015, surplus_candidati = [], surplus_dopo = [] }) {
   const kgPassiva = costo && costo.trovato ? Math.round(costo.tonnellate * 1000) : null;
   const scartoPassiva = kgPassiva === null ? null : confronto.totale_gestionale_kg - kgPassiva;
   const scartoImporto = importo_consuntivo === null || !costo || !costo.trovato
@@ -1210,6 +1415,10 @@ export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, t
     : (centesimi(importo_consuntivo) - centesimi(costo.importo)) / 100;
   const quadraPassiva = scartoPassiva === null ? null : scartoPassiva === 0;
   const quadraImporto = scartoImporto === null ? null : Math.abs(scartoImporto) <= tolleranza_euro;
+  // Lo scarto e' un surplus messo o tolto? (il surplus sulle tariffe, 13/10/2026)
+  const daSurplus = quadraImporto === false
+    ? scartoDaSurplus(centesimi(importo_consuntivo) - centesimi(costo.importo), costo, { candidati: surplus_candidati, dopo: surplus_dopo }, Math.floor(tolleranza_euro * 100 + 1e-9))
+    : null;
   return {
     quadra_quantita: confronto.quadra,
     // I chili che paghiamo devono essere quelli che abbiamo: se la passiva ne conta
@@ -1217,9 +1426,15 @@ export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, t
     quadra_con_passiva: quadraPassiva,
     scarto_passiva_kg: scartoPassiva,
     importo_previsto: costo && costo.trovato ? costo.importo : null,
+    // di cui lo standard e il surplus (13/10/2026): il previsto e' la loro somma
+    importo_previsto_standard: costo && costo.trovato ? (costo.importo_standard ?? costo.importo) : null,
+    importo_previsto_surplus: costo && costo.trovato ? (costo.importo_surplus ?? 0) : null,
     importo_consuntivo,
     scarto_importo: scartoImporto,
     quadra_importo: quadraImporto,
+    // Lo scarto spiegato da un surplus: { tipo: 'manca' | 'scritto_dopo' |
+    // 'non_dovuto', importo, voci, in_parte }. Il verdetto non cambia, cambia la frase.
+    scarto_surplus: daSurplus,
     // Un fornitore interno non manda fattura: la passiva lo riporta a zero e non e'
     // una difformita'.
     interno: !!(costo && costo.interno),
@@ -1304,7 +1519,27 @@ export function testoEsitoConsuntivo(confronto, esito) {
     parti.push(`I chili che la fatturazione passiva conta per questo fornitore sono ${Math.abs(esito.scarto_passiva_kg)} kg ${esito.scarto_passiva_kg > 0 ? 'in meno' : 'in piu'}' dei nostri movimenti del mese: di solito vuol dire che una tratta non ha una tariffa, o che una riga sta in un altro blocco.`);
   }
   if (esito.importo_consuntivo !== null && esito.quadra_importo === false) {
-    parti.push(`L'importo del consuntivo si scosta di ${esito.scarto_importo > 0 ? '+' : ''}${esito.scarto_importo.toFixed(2)} euro da quello previsto.`);
+    // Uno scarto che e' esattamente un surplus si dice col suo nome (13/10/2026):
+    // «manca il Fuel Surcharge» si capisce, «-1278.90 euro» no. Gli importi
+    // all'italiana, anche nello scarto qualunque.
+    const s = esito.scarto_surplus;
+    if (s && s.tipo === 'manca') {
+      const nomi = [...new Set(s.voci.map(v => v.nome))];
+      parti.push(`Il consuntivo non porta ${nomi.length === 1 ? `il ${nomi[0]}` : 'i surplus'}: ${testoVociSurplus(s.voci)}. Il resto torna al centesimo.`);
+    } else if (s && s.tipo === 'scritto_dopo') {
+      const quando = [...new Set(s.voci.map(v => istanteIt(v.scritto_il)).filter(Boolean))];
+      // scritto, o cambiato (altri €/t o un altro periodo), dopo il congelamento
+      const verbo = s.voci.every(v => v.cambiato) ? 'cambiato' : s.voci.some(v => v.cambiato) ? 'scritto o cambiato' : 'scritto';
+      parti.push(`L'importo del consuntivo è più alto di ${euroIt(s.importo)} € del conto congelato, e la differenza è il surplus ${verbo}${quando.length ? ` il ${quando.join(', ')}` : ''} dopo il congelamento: ${s.voci.map(v => testoVoceSurplus(v)).join('; ')}. Il ricalcolo di oggi lo comprende: il fornitore lo fattura a ragione, e il conto congelato non lo sapeva. Il resto torna al centesimo.`);
+    } else if (s && s.tipo === 'non_dovuto') {
+      const v = s.voci[0];
+      const periodo = periodoSurplus({ data_inizio_validita: v.dal, data_fine_validita: v.al });
+      parti.push(s.in_parte
+        ? `L'importo del consuntivo è più alto di ${euroIt(s.importo)} €: il fornitore ha messo il ${v.nome} (${testoEuroT(v.euro_t)}) su tutte le ${formatoTonnellate(v.tonnellate)} t del mese, ma vale ${periodo || 'solo in una parte del mese'}: sui trasporti finiti fuori da quel periodo non si paga. Il resto torna al centesimo.`
+        : `L'importo del consuntivo è più alto di ${euroIt(s.importo)} €: è il ${v.nome} (${formatoTonnellate(v.tonnellate)} t a ${testoEuroT(v.euro_t)}), che in questo mese non vale${periodo ? ` (vale ${periodo})` : ''}. Il resto torna al centesimo.`);
+    } else {
+      parti.push(`L'importo del consuntivo si scosta di ${esito.scarto_importo > 0 ? '+' : ''}${euroIt(esito.scarto_importo)} euro da quello previsto.`);
+    }
   }
   if (esito.interno) parti.push('E\' un fornitore interno: la passiva lo riporta a zero perche\' non fattura, e la differenza sull\'importo non e\' una difformita\'.');
   // Quello che non si e' potuto controllare va detto: un verdetto che tace su un

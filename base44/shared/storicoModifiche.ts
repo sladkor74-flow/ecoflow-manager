@@ -37,6 +37,10 @@ const NOMI_ARCHIVI = {
   // segnaMesiChiusiFuori): senza il nome EcoTyna diceva «DocumentoFatturazione»,
   // il nome interno dell'archivio (revisione del 13/10/2026).
   DocumentoFatturazione: 'documento della fatturazione attiva',
+  // Il surplus sulle tariffe (il Fuel Surcharge del consorzio, 13/10/2026):
+  // senza il nome EcoTyna diceva «SurplusTariffa», come prima
+  // «DocumentoFatturazione».
+  SurplusTariffa: 'surplus sulle tariffe',
 };
 const OPERAZIONI = { create: 'inserito', update: 'modificato', delete: 'eliminato' };
 
@@ -49,7 +53,11 @@ const CAMPI_TARGET_COMMESSA = ['target_annuo_t', 'regioni_json', 'target_mensile
 const COSE = [
   { parole: ['target', 'obiettiv', 'capacit'], prende: (r) => TARGET.includes(r.entita) || (r.entita === 'CommessaEcotyre' && CAMPI_TARGET_COMMESSA.includes(r.campo)) },
   { parole: ['apertur', 'giacenz', 'riferiment'], prende: (r) => r.entita === 'GiacenzaSito' },
-  { parole: ['tariff', 'prezz', 'listin'], prende: (r) => r.entita === 'Tariffa' || (r.entita === 'VocePassivaAmministrazione' && r.campo === 'prezzo') || (r.entita === 'ExtraRaccolta' && r.campo === 'prezzo_attivo_t') },
+  // Il surplus sulle tariffe sta coi prezzi: «chi ha cambiato le tariffe?» lo
+  // comprende, e ha anche le sue parole, che prendono ogni suo campo (date,
+  // stato, elenco), non solo gli importi (13/10/2026).
+  { parole: ['tariff', 'prezz', 'listin'], prende: (r) => r.entita === 'Tariffa' || r.entita === 'SurplusTariffa' || (r.entita === 'VocePassivaAmministrazione' && r.campo === 'prezzo') || (r.entita === 'ExtraRaccolta' && r.campo === 'prezzo_attivo_t') },
+  { parole: ['surplus', 'fuel', 'surcharg', 'carburant'], prende: (r) => r.entita === 'SurplusTariffa' },
   { parole: ['commess', 'contratt', 'budget'], prende: (r) => r.entita === 'CommessaEcotyre' },
   { parole: ['dichiar'], prende: (r) => r.entita === 'DichiarazioneSito' },
   { parole: ['extra'], prende: (r) => r.entita === 'ExtraRaccolta' },
@@ -151,7 +159,7 @@ export async function storicoModifiche(archivi, p = {}, { vedeCosti = false, cos
       // solo la nota del record e non lascia righe: la nota non deve dire al
       // presente «da confermare» di un valore che puo' essere gia' confermato
       // (revisione delle migliorie, 11/10/2026).
-      nota: "Lo storico registra le modifiche fatte a mano (target, aperture, tariffe, commessa, dichiarazioni, costi e prezzi dell'extra raccolta, voci della passiva, mesi della fatturazione attiva segnati come chiusi fuori dal gestionale) dall'ottobre 2026: prima non c'e' niente, quindi «nessuna modifica» non vuol dire che il valore non sia mai cambiato. Anche le copie dell'anno nuovo lasciano le loro righe (inserito, motivo «copia dal <anno prima>, da confermare»): la copia di Target & Status e le tariffe preparate per l'anno. Il motivo dice com'era al momento della copia, valori dell'anno prima allora da confermare sul contratto nuovo; la conferma invece non lascia righe qui, perche' toglie solo il segno «da confermare» dal record. Da queste righe quindi non si sa se un valore copiato e' stato confermato dopo: lo dice la pagina (Target & Status, o la nota della tariffa), e non si deve dire che e' ancora da confermare solo per il motivo di queste righe. Le modifiche precedenti ai target dei raccoglitori e alla commessa restano nello storico della loro riga in Target & Status. I caricamenti dei file non passano da qui: il loro storico e' quello dei caricamenti. Ogni valore e' nell'unita' indicata accanto (unita). Nelle differenze delle tabelle della commessa ogni numero porta la sua: t i target mensili, i budget e i target per regione o destinazione; €/t il prezzo della previsione ACI; % la ripartizione per classe, gia' in percentuale (35 vuol dire 35%). Una differenza senza unita' e' un testo (il criterio di una voce della passiva). Una riga di tabella aggiunta o tolta senza nessun valore ha solo il nome (voce), con riga «aggiunta» o «tolta» e valori «nessuno».",
+      nota: "Lo storico registra le modifiche fatte a mano (target, aperture, tariffe e surplus sulle tariffe, commessa, dichiarazioni, costi e prezzi dell'extra raccolta, voci della passiva, mesi della fatturazione attiva segnati come chiusi fuori dal gestionale) dall'ottobre 2026: prima non c'e' niente, quindi «nessuna modifica» non vuol dire che il valore non sia mai cambiato. Anche le copie dell'anno nuovo lasciano le loro righe (inserito, motivo «copia dal <anno prima>, da confermare»): la copia di Target & Status e le tariffe preparate per l'anno. Il motivo dice com'era al momento della copia, valori dell'anno prima allora da confermare sul contratto nuovo; la conferma invece non lascia righe qui, perche' toglie solo il segno «da confermare» dal record. Da queste righe quindi non si sa se un valore copiato e' stato confermato dopo: lo dice la pagina (Target & Status, o la nota della tariffa), e non si deve dire che e' ancora da confermare solo per il motivo di queste righe. Le modifiche precedenti ai target dei raccoglitori e alla commessa restano nello storico della loro riga in Target & Status. I caricamenti dei file non passano da qui: il loro storico e' quello dei caricamenti. Ogni valore e' nell'unita' indicata accanto (unita). Nelle differenze delle tabelle della commessa ogni numero porta la sua: t i target mensili, i budget e i target per regione o destinazione; €/t il prezzo della previsione ACI; % la ripartizione per classe, gia' in percentuale (35 vuol dire 35%). Una differenza senza unita' e' un testo (il criterio di una voce della passiva). Una riga di tabella aggiunta o tolta senza nessun valore ha solo il nome (voce), con riga «aggiunta» o «tolta» e valori «nessuno».",
     },
   };
 }

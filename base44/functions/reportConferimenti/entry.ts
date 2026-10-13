@@ -80,21 +80,32 @@ export default async function(req) {
         // invocazione.
         const gia = { [scelta.entita]: records };
         const leggi = (nome) => (gia[nome] ? Promise.resolve(gia[nome]) : fetchAll(svc[nome]));
-        const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
+        // SurplusTariffa si legge come ogni chiamante del calcolo (il surplus sulle
+        // tariffe, 13/10/2026). La quadratura e' sui chili delle tratte e il
+        // surplus non ne aggiunge: importo_passiva resta quello delle righe delle
+        // tratte, perche' il surplus e' una voce del fornitore e non di una
+        // tratta. Se un surplus del trasporto delle secondarie vale nel mese, lo
+        // si dice a parte (surplus_del_mese), cosi' chi confronta gli euro con la
+        // fattura del trasportatore sa che c'e' anche quella riga.
+        const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll] = await Promise.all([
           leggi('PrimariaRete'),
           leggi('PrimariaAci'),
           leggi('Secondaria'),
           leggi('ExtraRaccolta'),
           fetchAll(svc.Tariffa, { direzione: 'PASSIVA' }),
           fetchAll(svc.Fornitore, { stato: 'attivo' }),
+          fetchAll(svc.SurplusTariffa),
         ]);
         const nomeMese = Object.keys(MESI_PASSIVA).find(k => MESI_PASSIVA[k] === mese - 1 && k.length > 3) || String(mese);
         const passiva = calcolaPassivaMese(
-          { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll },
+          { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll },
           anno, mese - 1, nomeMese, canale,
         );
         quadratura = quadraturaPassiva(report, passiva);
         quadratura.mese_passiva = nomeMese;
+        quadratura.surplus_del_mese = (passiva.surplus_del_mese || [])
+          .filter(s => s.prestazione === 'TRASPORTO_SECONDARIA')
+          .map(s => ({ nome: s.nome, euro_t: s.euro_t, tonnellate: s.tonnellate_pagate, importo: s.importo, nota: s.nota }));
       }
     }
 

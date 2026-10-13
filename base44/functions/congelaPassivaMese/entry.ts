@@ -51,17 +51,24 @@ export default async function(req) {
     const controllo = await controlloCaricamenti(base44, 'il congelamento della passiva', tipiDeiCanali(TIPI_RINVIO.passiva, [can]));
     if (controllo.rinvio) return controllo.rinvio;
 
-    const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
+    // Anche SurplusTariffa (il surplus sulle tariffe, 13/10/2026): il conto
+    // congelato e' quello che i fornitori fatturano, Fuel Surcharge compreso, e
+    // totale_euro e' il totale complessivo con il surplus dentro. passiva_json
+    // porta le righe del surplus di ogni fornitore e surplus_del_mese, cosi' il
+    // confronto di un consuntivo sa dire quale parte di una differenza e' un
+    // surplus scritto dopo il congelamento.
+    const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll] = await Promise.all([
       fetchAll(svc.PrimariaRete),
       fetchAll(svc.PrimariaAci),
       fetchAll(svc.Secondaria),
       fetchAll(svc.ExtraRaccolta),
       fetchAll(svc.Tariffa, { direzione: 'PASSIVA' }),
       fetchAll(svc.Fornitore, { stato: 'attivo' }),
+      fetchAll(svc.SurplusTariffa),
     ]);
     const nomeMese = Object.keys(MESI_PASSIVA).find(k => MESI_PASSIVA[k] === meseNum - 1 && k.length > 3) || String(meseNum);
     const passiva = calcolaPassivaMese(
-      { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll },
+      { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll },
       annoNum, meseNum - 1, nomeMese, can,
     );
 
@@ -90,6 +97,11 @@ export default async function(req) {
         impianti_stoccaggi: (passiva.impianti_stoccaggi || []).length,
         trasporti_secondaria: (passiva.trasporti_secondaria || []).length,
         totale_euro: campi.totale_euro,
+        // di cui lo standard e il surplus: chi congela vede che il Fuel
+        // Surcharge e' dentro il numero che ha appena fissato
+        totale_standard: (passiva.totali && passiva.totali.standard && passiva.totali.standard.totale) || 0,
+        totale_surplus: (passiva.totali && passiva.totali.surplus && passiva.totali.surplus.totale) || 0,
+        surplus: (passiva.surplus_del_mese || []).map(s => ({ nome: s.nome, euro_t: s.euro_t, tonnellate: s.tonnellate_pagate, importo: s.importo, nota: s.nota })),
         anomalie: (passiva.anomalie || []).length,
       },
     });

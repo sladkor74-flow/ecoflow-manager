@@ -10,7 +10,7 @@ import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts
 import {
   movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, leggiRigheConsuntivo,
   periodoSospetto, righeCheParonoTotali,
-  esitoConsuntivo, testoEsitoConsuntivo,
+  esitoConsuntivo, testoEsitoConsuntivo, surplusPerIlConfronto, surplusScrittiDopo,
   chiaviDelGestionale, avvisiDate,
   consuntivoGiaCaricato, notaSostituzione,
 } from "../../shared/consuntivoFornitore.ts";
@@ -54,20 +54,28 @@ async function archiviMovimenti(svc) {
   return { primarieRete, primarieAci, secondarie, extraRaccolta };
 }
 
+// IL SURPLUS SULLE TARIFFE (13/10/2026). Il fornitore fattura anche il surplus (il
+// Fuel Surcharge del consorzio, da ottobre 2026) come riga a parte nello stesso
+// consuntivo: il costo previsto e' quindi standard piu' surplus, e il conto della
+// passiva si fa leggendo anche SurplusTariffa, come in ogni chiamante del calcolo.
+// L'archivio si tiene anche per dire, quando l'importo non torna, se lo scarto e'
+// proprio un surplus: mancante, messo in un mese in cui non vale, o scritto dopo
+// che il mese era stato congelato.
 async function contoPassiva(svc, anno, mese, canale) {
-  const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
+  const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll] = await Promise.all([
     fetchAll(svc.PrimariaRete),
     fetchAll(svc.PrimariaAci),
     fetchAll(svc.Secondaria),
     fetchAll(svc.ExtraRaccolta),
     fetchAll(svc.Tariffa, { direzione: 'PASSIVA' }),
     fetchAll(svc.Fornitore, { stato: 'attivo' }),
+    fetchAll(svc.SurplusTariffa),
   ]);
   const passiva = calcolaPassivaMese(
-    { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll },
+    { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll },
     anno, mese - 1, nomeMeseDi(mese), canale,
   );
-  return { passiva, archivi: { primarieRete, primarieAci, secondarie: secondarieAll, extraRaccolta: extraRaccoltaAll } };
+  return { passiva, surplusAll, archivi: { primarieRete, primarieAci, secondarie: secondarieAll, extraRaccolta: extraRaccoltaAll } };
 }
 
 export default async function(req) {
@@ -185,9 +193,9 @@ export default async function(req) {
     // riservato, e non si calcola nemmeno la passiva: sarebbero sei archivi interi
     // letti per un numero che poi va nascosto.
     const puoVedereICosti = user.role === 'admin';
-    const { passiva, archivi } = puoVedereICosti
+    const { passiva, archivi, surplusAll } = puoVedereICosti
       ? await contoPassiva(svc, anno, mese, canale)
-      : { passiva: null, archivi: await archiviMovimenti(svc) };
+      : { passiva: null, surplusAll: [], archivi: await archiviMovimenti(svc) };
     // I fornitori servono a sapere CHI FATTURA per chi: senza, un subfornitore e il
     // suo principale risultano due soggetti diversi qui e uno solo nella passiva.
     const fornitoriTutti = await fetchAll(svc.Fornitore, { stato: 'attivo' });
@@ -246,6 +254,8 @@ export default async function(req) {
     // se si e' mosso lo si dice.
     let congelato = null;
     let costo = costoOggi;
+    // le righe del surplus che il ricalcolo di oggi ha e il conto congelato no
+    let surplusDopo = [];
     const congelati = puoVedereICosti ? await svc.ChiusuraPassivaMese.filter({ anno, mese, canale }, '-congelato_il', 1) : [];
     if (congelati && congelati.length) {
       const c = congelati[0];
@@ -253,6 +263,9 @@ export default async function(req) {
       try { contoAllora = JSON.parse((await leggiCampo(base44, 'ChiusuraPassivaMese', c, 'passiva_json')) || 'null'); } catch { /* resta il conto di oggi */ }
       const costoAllora = contoAllora ? costoAttesoDallaPassiva(contoAllora, fornitore, ruolo) : null;
       if (costoAllora) costo = costoAllora;
+      // Con l'istante del congelamento: il surplus che c'era gia' e cresce per le
+      // tonnellate arrivate dopo non e' «scritto dopo» (revisione del 13/10/2026).
+      surplusDopo = costoAllora ? surplusScrittiDopo(costoOggi, costoAllora, c.congelato_il) : [];
       congelato = {
         congelato_il: c.congelato_il,
         congelato_da: c.congelato_da || '',
@@ -261,6 +274,14 @@ export default async function(req) {
         importo_oggi: costoOggi && costoOggi.trovato ? costoOggi.importo : null,
         cambiato: !!(costoAllora && costoAllora.trovato && costoOggi && costoOggi.trovato
           && Math.round(costoAllora.importo * 100) !== Math.round(costoOggi.importo * 100)),
+        // La parte della differenza che e' un surplus scritto (o cambiato) dopo
+        // il congelamento (13/10/2026): una differenza vera, che non e' un errore
+        // del conto e non riapre il mese da sola. Ogni voce dice se e' stata
+        // scritta o cambiata, e se la cifra comprende anche tonnellate nuove.
+        surplus_dopo: surplusDopo.length ? {
+          importo: Math.round(surplusDopo.reduce((s, v) => s + Math.round(Number(v.importo) * 100), 0)) / 100,
+          voci: surplusDopo.map(v => ({ nome: v.nome, euro_t: v.euro_t, importo: v.importo, scritto_il: v.scritto_il || '', cambiato: !!v.cambiato, anche_tonnellate: !!v.anche_tonnellate })),
+        } : null,
       };
     }
 
@@ -271,9 +292,29 @@ export default async function(req) {
     const importoConsuntivo = body.importo_consuntivo !== undefined && body.importo_consuntivo !== null
       ? Number(body.importo_consuntivo)
       : (importoSalvato !== null ? importoSalvato : importoDalFoglio);
-    const esito = esitoConsuntivo({ confronto, costo, importo_consuntivo: importoConsuntivo });
+    const esito = esitoConsuntivo({
+      confronto, costo, importo_consuntivo: importoConsuntivo,
+      surplus_candidati: surplusPerIlConfronto(surplusAll, { fornitore, ruolo, canale }),
+      surplus_dopo: surplusDopo,
+    });
 
-    const esitoCompleto = { confronto, costo, esito, congelato, note_lettura: noteLettura, testo: testoEsitoConsuntivo(confronto, esito) };
+    // Il conto si e' mosso dal congelamento anche per un surplus scritto (o
+    // cambiato) dopo: si dice nel testo, che la pagina mostra, con quanto e quando
+    // (13/10/2026). Ogni voce col suo verbo e la sua data; quella che comprende
+    // anche le tonnellate cambiate da allora lo dice. Il surplus che c'era gia' e
+    // cresce solo per le tonnellate qui non c'e': la pagina mostra gia' il conto
+    // di allora e quello di oggi.
+    let testo = testoEsitoConsuntivo(confronto, esito);
+    if (congelato && congelato.cambiato && congelato.surplus_dopo && !(esito.scarto_surplus && esito.scarto_surplus.tipo === 'scritto_dopo')) {
+      const euro = (v) => Number(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' });
+      const voce = (v) => {
+        const quando = giornoRoma(v.scritto_il);
+        return `${v.nome} ${euro(v.importo)} €, ${v.cambiato ? 'cambiato' : 'scritto'}${quando ? ` il ${quando.split('-').reverse().join('/')}` : ''} dopo il congelamento${v.anche_tonnellate ? ' (la cifra comprende anche le tonnellate cambiate da allora)' : ''}`;
+      };
+      testo = `${testo} Dal congelamento il conto di oggi si è mosso: di cui ${congelato.surplus_dopo.voci.map(voce).join('; ')}.`.trim();
+    }
+
+    const esitoCompleto = { confronto, costo, esito, congelato, note_lettura: noteLettura, testo };
 
     // Si salva solo se c'e' un record e chi chiede e' l'amministratore: a tutti gli
     // altri il confronto si mostra e basta.

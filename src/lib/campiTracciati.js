@@ -19,6 +19,8 @@
  * fornitori li vede solo l'amministratore, anche in EcoTyna. celle e colonne,
  * solo sui campi json: l'unita' dei numeri dentro la tabella (celle per i
  * dodici mesi, colonne per le righe con regione, classe o destinazione).
+ * elenco, solo sui campi json che sono un elenco di fornitori: il campo delle
+ * righe che porta il nome, e la differenza si dice coi nomi di prima e di dopo.
  */
 export const CAMPI_TRACCIATI = {
   ImpiantoTargetSecondaria: {
@@ -63,6 +65,25 @@ export const CAMPI_TRACCIATI = {
     data_fine_validita: { nome: 'valida fino al', unita: 'giorno' },
     stato: { nome: 'stato', unita: 'testo', predefinito: 'attivo' },
     comprensiva_trattamento: { nome: 'prezzo comprensivo del trattamento', unita: 'si_no', predefinito: false },
+  },
+  // Il surplus sulle tariffe (13/10/2026): il Fuel Surcharge del consorzio
+  // Ecotyre e gli accordi commerciali cambiano attiva, passiva e margine come un
+  // prezzo, quindi si tracciano come le tariffe. L'importo ai fornitori e' un
+  // costo, e lo vede solo l'amministratore; quello da Ecotyre no, come
+  // l'attiva. Un surplus senza importo da Ecotyre e' invece tutto un costo, e
+  // si riserva in ogni campo (campoRiservato). I fornitori dell'elenco si
+  // dicono per nome, non come JSON.
+  SurplusTariffa: {
+    nome: { nome: 'nome', unita: 'testo' },
+    tipologia: { nome: 'canale', unita: 'testo' },
+    prestazione: { nome: 'prestazione', unita: 'testo' },
+    euro_t_passiva: { nome: 'surplus ai fornitori', unita: '€/t', riservato: true },
+    euro_t_attiva: { nome: 'surplus da Ecotyre', unita: '€/t' },
+    data_inizio_validita: { nome: 'valido dal', unita: 'giorno' },
+    data_fine_validita: { nome: 'valido fino al', unita: 'giorno' },
+    stato: { nome: 'stato', unita: 'testo', predefinito: 'attivo' },
+    a_chi: { nome: 'a chi vale', unita: 'testo', predefinito: 'tutti' },
+    fornitori_json: { nome: "fornitori dell'elenco", unita: 'json', elenco: 'nome' },
   },
   // Le tabelle della commessa con l'unita' dei loro numeri, come nella scheda:
   // i dodici mesi e i target in tonnellate, il prezzo della previsione ACI in
@@ -174,7 +195,10 @@ function normalizza(spec, v) {
   if (spec.unita === 'json') {
     try {
       const dato = typeof x === 'string' ? JSON.parse(x) : x;
-      return jsonVuoto(dato) ? null : testoJson(dato);
+      if (jsonVuoto(dato)) return null;
+      // Un elenco di fornitori non ha un ordine: gli stessi fornitori scelti in
+      // un altro ordine sono lo stesso elenco (13/10/2026).
+      return spec.elenco && Array.isArray(dato) ? testoJson(dato.map(testoJson).sort()) : testoJson(dato);
     } catch { return String(x).trim(); }
   }
   return String(x).trim();
@@ -228,6 +252,13 @@ export function campoRiservato(entita, campo, record) {
   // Una tariffa senza direzione e' passiva: e' stata scritta prima che il campo
   // esistesse (gestisciAnagrafiche la legge cosi').
   if (entita === 'Tariffa') return String((record && record.direzione) || 'PASSIVA').toUpperCase() !== 'ATTIVA';
+  // Un surplus senza importo da Ecotyre (un accordo commerciale con un
+  // fornitore, pagato solo da SMOCO) e' tutto un costo dei fornitori, come una
+  // tariffa passiva: nome, fornitori, prestazione e periodo dell'accordo li vede
+  // solo l'amministratore, in pagina e in EcoTyna. Con l'importo da Ecotyre e'
+  // anche una voce dell'attiva, e resta riservato solo l'importo ai fornitori
+  // (revisione del surplus, 13/10/2026). Un importo che non si legge vale vuoto.
+  if (entita === 'SurplusTariffa') return !(Number(record && record.euro_t_attiva) > 0);
   return false;
 }
 
@@ -258,6 +289,10 @@ export function etichettaDi(entita, record) {
         r.classe_materiale ? `classe ${r.classe_materiale}` : '', r.regione, r.provincia, r.destinazione, tratta,
         r.data_inizio_validita ? `dal ${String(r.data_inizio_validita).slice(0, 10).split('-').reverse().join('/')}` : '');
     }
+    // «Fuel Surcharge · EXTRA RACCOLTA · RACCOLTA · dal 01/10/2026»: un record per
+    // canale, e il canale e' la prima cosa da sapere di una modifica.
+    case 'SurplusTariffa': return unisci(r.nome || 'surplus', parte(r.tipologia).replace(/_/g, ' '), parte(r.prestazione).replace(/_/g, ' '),
+      r.data_inizio_validita ? `dal ${String(r.data_inizio_validita).slice(0, 10).split('-').reverse().join('/')}` : '');
     case 'CommessaEcotyre': return `Commessa Ecotyre ${anno}`.trim();
     case 'DichiarazioneSito': return unisci(r.sito, [parte(r.canale) || 'RETE', parte(r.provenienza)].filter(Boolean).join(' '), [parte(r.mese), anno].filter(Boolean).join(' '));
     case 'ExtraRaccolta': return unisci(r.id_ordine || r.numero_fir, r.produttore || r.ragione_sociale || r.punto_di_raccolta, anno);
@@ -266,12 +301,12 @@ export function etichettaDi(entita, record) {
   }
 }
 
-/** L'anno a cui si riferisce il record: il suo campo anno, o per una tariffa il primo giorno di validita'. */
+/** L'anno a cui si riferisce il record: il suo campo anno, o per una tariffa e un surplus il primo giorno di validita'. */
 export function annoDi(entita, record) {
   const r = record || {};
   const a = Number(r.anno);
   if (Number.isInteger(a) && a > 2000) return a;
-  if (entita === 'Tariffa') {
+  if (entita === 'Tariffa' || entita === 'SurplusTariffa') {
     const d = Number(String(r.data_inizio_validita || '').slice(0, 4));
     if (Number.isInteger(d) && d > 2000) return d;
   }
@@ -306,7 +341,8 @@ export function modificheDelRecord(entita, { prima = null, dopo = null, patch = 
   const lato = operazione === 'delete' ? a : b;
   const conValore = campi.filter(c => !vuoto(lato[c]) && !stessoValore(entita, c, null, lato[c])).map(una);
   if (conValore.length) return conValore;
-  return [{ campo: '', prima: null, dopo: null, unita: 'testo', riservato: ENTITA_RISERVATE.includes(entita) || (entita === 'Tariffa' && campoRiservato(entita, 'valore', record)) }];
+  return [{ campo: '', prima: null, dopo: null, unita: 'testo', riservato: ENTITA_RISERVATE.includes(entita) || (entita === 'Tariffa' && campoRiservato(entita, 'valore', record))
+    || (entita === 'SurplusTariffa' && campoRiservato(entita, 'nome', record)) }];
 }
 
 /**
@@ -349,6 +385,17 @@ const leggiJson = (testo) => { if (testo === null || testo === undefined || test
 export function differenzeJson(testoPrima, testoDopo, spec = null) {
   const a = leggiJson(testoPrima);
   const b = leggiJson(testoDopo);
+  // Un elenco di fornitori (quelli di un surplus «solo questi», 13/10/2026):
+  // conta chi c'e', non l'ordine, e si dice coi nomi di prima e di dopo,
+  // «GATIM S.R.L. → GATIM S.R.L., EMMESSE SRLS». Come tabella di righe sarebbe
+  // uscito l'id dell'anagrafica di ogni fornitore aggiunto.
+  if (spec && spec.elenco) {
+    const nomi = (v) => (Array.isArray(v) ? v : []).map(x => parte(x && typeof x === 'object' ? x[spec.elenco] : x)).filter(Boolean);
+    const na = nomi(a);
+    const nb = nomi(b);
+    if ([...na].sort().join('\n') === [...nb].sort().join('\n')) return [];
+    return [{ voce: '', prima: na.length ? na.join(', ') : null, dopo: nb.length ? nb.join(', ') : null }];
+  }
   const colonne = (spec && spec.colonne) || {};
   const valore = (v) => (v === undefined || v === null || v === '' ? null : typeof v === 'object' ? testoJson(v) : v);
   const diverso = (x, y) => JSON.stringify(valore(x)) !== JSON.stringify(valore(y));

@@ -22,12 +22,16 @@ export default async function(req) {
     const finoAlMese = annoNum === Number(oggi.slice(0, 4)) ? Number(oggi.slice(5, 7)) - 1 : 11;
 
     const svc = base44.asServiceRole.entities;
-    const [reteAll, aciAll, extraAll, secondarieAll, fornitori, tariffe] = await Promise.all([
+    // I surplus sulle tariffe (il Fuel Surcharge, 13/10/2026) si leggono tutti,
+    // come le tariffe, e vanno ai due calcoli: il ricavo comprende la riga del
+    // surplus dell'attiva, il costo quella della passiva.
+    const [reteAll, aciAll, extraAll, secondarieAll, fornitori, tariffe, surplusAll] = await Promise.all([
       fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.ExtraRaccolta),
       fetchAll(svc.Secondaria), fetchAll(svc.Fornitore), fetchAll(svc.Tariffa),
+      fetchAll(svc.SurplusTariffa),
     ]);
     return Response.json({
-      ...calcolaMargineAnno({ reteAll, aciAll, extraAll, secondarieAll, fornitori, tariffe }, annoNum, finoAlMese),
+      ...calcolaMargineAnno({ reteAll, aciAll, extraAll, secondarieAll, fornitori, tariffe, surplusAll }, annoNum, finoAlMese),
       calcolato_il: new Date().toISOString(),
     });
   } catch (error) {

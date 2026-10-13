@@ -16,6 +16,9 @@
 //      (la voce 300 -> 90 del 10/10 avrebbe la sua);
 //   6. lo strumento storico_modifiche di EcoTyna risponde a «chi ha cambiato il
 //      target di Irigom» e tiene i costi all'amministratore.
+//   8. il surplus sulle tariffe (13/10/2026, il Fuel Surcharge) si traccia come
+//      un prezzo: l'importo ai fornitori riservato, quello da Ecotyre no, i
+//      fornitori dell'elenco per nome e senza contare l'ordine.
 //
 // Revisione delle migliorie (11/10/2026), i rilievi dei revisori:
 //   - un impianto cancellato: EcoTyna diceva in «kg» un target gia' in
@@ -506,6 +509,104 @@ export const disegna = (props) => renderToStaticMarkup(React.createElement(Dialo
     const prova = disegna({ azione: { tipo: 'copia', fase: 'conferma', errore: null, dati: { conteggi: { impianti: 16 } } } });
     verifica('e prima di confermare non dice niente dello storico', prova.includes('Se confermi, copio') && !prova.includes('storico delle modifiche'), prova.slice(0, 600));
   }
+}
+
+console.log('8. IL SURPLUS SULLE TARIFFE SI TRACCIA COME UN PREZZO (13/10/2026)');
+{
+  // Il Fuel Surcharge del consorzio Ecotyre (+5 €/t dal 01/10 al 31/12/2026)
+  // cambia attiva, passiva e margine come una tariffa: chi lo scrive, lo cambia
+  // o lo chiude deve lasciare la riga. L'importo ai fornitori e' un costo e lo
+  // vede solo l'amministratore; quello da Ecotyre no.
+  const fuel = {
+    nome: 'Fuel Surcharge', origine: 'CONSORZIO', tipologia: 'RETE', prestazione: 'RACCOLTA', a_chi: 'tutti',
+    euro_t_passiva: 5, euro_t_attiva: 5, data_inizio_validita: '2026-10-01', data_fine_validita: '2026-12-31', stato: 'attivo', gruppo: 'g1',
+  };
+  const nato = modificheDelRecord('SurplusTariffa', { dopo: fuel, operazione: 'create' });
+  verifica('un surplus nuovo registra nome, canale, prestazione, i due importi e le date, non i valori di default (tutti, attivo)',
+    nato.map(m => m.campo).sort().join(',') === 'data_fine_validita,data_inizio_validita,euro_t_attiva,euro_t_passiva,nome,prestazione,tipologia', J(nato));
+  const pas = nato.find(m => m.campo === 'euro_t_passiva');
+  const att = nato.find(m => m.campo === 'euro_t_attiva');
+  verifica('il surplus ai fornitori e\' un costo riservato, in €/t', pas && pas.riservato === true && pas.unita === '€/t' && pas.dopo === '5', J(pas));
+  verifica('quello da Ecotyre no', att && att.riservato === false && att.unita === '€/t', J(att));
+  verifica('e il campo lo dice anche da solo', campoRiservato('SurplusTariffa', 'euro_t_passiva', fuel) && !campoRiservato('SurplusTariffa', 'euro_t_attiva', fuel) && !campoRiservato('SurplusTariffa', 'nome', fuel));
+
+  const righe = righeDiModifica('SurplusTariffa', { record_id: 's1', prima: fuel, dopo: { euro_t_attiva: 7 }, patch: { euro_t_attiva: 7 } }, { utente: 'Mario', origine: 'Tariffe & Anagrafiche', il: '2026-10-13T08:00:00.000Z' });
+  verifica('l\'etichetta dice nome, canale, prestazione e inizio; l\'anno e\' quello dell\'inizio',
+    righe.length === 1 && righe[0].etichetta === 'Fuel Surcharge · RETE · RACCOLTA · dal 01/10/2026' && righe[0].anno === 2026 && righe[0].prima === '5' && righe[0].dopo === '7' && righe[0].riservato === false, J(righe));
+  verifica('l\'extra raccolta si legge senza trattino basso', etichettaDi('SurplusTariffa', { ...fuel, tipologia: 'EXTRA_RACCOLTA' }) === 'Fuel Surcharge · EXTRA RACCOLTA · RACCOLTA · dal 01/10/2026');
+
+  // Un valore che mancava non e' zero: un surplus solo passivo che diventa
+  // anche attivo ha il «prima» vuoto.
+  const soloPassivo = { ...fuel, euro_t_attiva: null };
+  const diventa = modificheDelRecord('SurplusTariffa', { prima: soloPassivo, dopo: { ...soloPassivo, euro_t_attiva: 5 }, patch: { euro_t_attiva: 5 } });
+  verifica('da Ecotyre: da vuoto a 5 €/t, col prima vuoto', diventa.length === 1 && diventa[0].prima === null && diventa[0].dopo === '5', J(diventa));
+  verifica('«tutti» scritto su un record che non l\'aveva non e\' una modifica',
+    modificheDelRecord('SurplusTariffa', { prima: { id: 's1', nome: 'X' }, dopo: { id: 's1', nome: 'X', a_chi: 'tutti' }, patch: { a_chi: 'tutti' } }).length === 0);
+  const chiuso = modificheDelRecord('SurplusTariffa', { prima: fuel, dopo: { ...fuel, data_fine_validita: '2026-11-30' }, patch: { data_fine_validita: '2026-11-30' } });
+  verifica('chiudere il periodo prima si registra', chiuso.length === 1 && chiuso[0].campo === 'data_fine_validita' && chiuso[0].unita === 'giorno', J(chiuso));
+
+  // L'elenco dei fornitori: conta chi c'e', non l'ordine, e si dice per nome.
+  const gatim = { id: 'f1', nome: 'GATIM S.R.L.' };
+  const emmesse = { id: 'f2', nome: 'EMMESSE SRLS' };
+  const elenco = { ...fuel, a_chi: 'elenco', fornitori_json: J([gatim, emmesse]) };
+  verifica('gli stessi fornitori in un altro ordine non sono una modifica',
+    modificheDelRecord('SurplusTariffa', { prima: elenco, dopo: { ...elenco, fornitori_json: J([emmesse, gatim]) }, patch: { fornitori_json: J([emmesse, gatim]) } }).length === 0);
+  const aggiunto = modificheDelRecord('SurplusTariffa', { prima: { ...elenco, fornitori_json: J([gatim]) }, dopo: elenco, patch: { fornitori_json: elenco.fornitori_json } });
+  verifica('un fornitore aggiunto si registra', aggiunto.length === 1 && aggiunto[0].campo === 'fornitori_json' && aggiunto[0].unita === 'json', J(aggiunto));
+  const diff = differenzeJson(J([gatim]), J([gatim, emmesse]), campoTracciato('SurplusTariffa', 'fornitori_json'));
+  verifica('e la differenza si dice coi nomi, senza l\'id dell\'anagrafica',
+    diff.length === 1 && diff[0].prima === 'GATIM S.R.L.' && diff[0].dopo === 'GATIM S.R.L., EMMESSE SRLS' && !J(diff).includes('f2'), J(diff));
+  verifica('l\'elenco svuotato dice «—» dopo', J(differenzeJson(J([gatim]), '[]', campoTracciato('SurplusTariffa', 'fornitori_json'))) === J([{ voce: '', prima: 'GATIM S.R.L.', dopo: null }]));
+
+  const { testoModifica } = await caricaLibPagine('lib/storicoModifiche');
+  const t1 = testoModifica({ entita: 'SurplusTariffa', campo: 'euro_t_passiva', unita: '€/t', prima: '5', dopo: '7', operazione: 'update' });
+  verifica('a video: il surplus ai fornitori in €/t, all\'italiana', t1 === 'surplus ai fornitori: 5,00 €/t → 7,00 €/t', t1);
+  const t2 = testoModifica({ entita: 'SurplusTariffa', campo: 'fornitori_json', unita: 'json', prima: J([gatim]), dopo: J([gatim, emmesse]), operazione: 'update' });
+  verifica('a video: l\'elenco di prima e quello di dopo', t2 === "fornitori dell'elenco: GATIM S.R.L. → GATIM S.R.L., EMMESSE SRLS", t2);
+  const t3 = testoModifica({ entita: 'SurplusTariffa', campo: 'data_fine_validita', unita: 'giorno', prima: '2026-12-31', dopo: '2026-11-30', operazione: 'update' });
+  verifica('a video: le date gg/mm/aaaa', t3 === 'valido fino al: 31/12/2026 → 30/11/2026', t3);
+
+  // Il motore: la creazione dalla funzione (gestisciAnagrafiche) lascia le righe.
+  const a = archivioFinto({});
+  const esito = await traccia(a.archivi, 'SurplusTariffa', null, fuel, { utente: 'Mario', origine: 'Tariffe & Anagrafiche' });
+  verifica('la creazione scrive il surplus e lo storico, col costo riservato',
+    a.db.SurplusTariffa.length === 1 && esito.traccia.scritta === true && esito.traccia.righe === 7
+    && a.db.ModificaDato.some(r => r.campo === 'euro_t_passiva' && r.riservato === true && r.entita === 'SurplusTariffa')
+    && a.db.ModificaDato.every(r => r.record_id === a.db.SurplusTariffa[0].id), J(a.db.ModificaDato));
+
+  // Revisione del 13/10/2026: un surplus senza importo da Ecotyre (un accordo
+  // commerciale con un fornitore, pagato solo da SMOCO) e' tutto un costo dei
+  // fornitori, come una tariffa passiva. Prima era riservato solo l'importo ai
+  // fornitori, e chi non e' amministratore leggeva in pagina e in EcoTyna nome,
+  // fornitore, prestazione e periodo dell'accordo: 7 righe su 8.
+  const accordo = {
+    nome: 'Accordo Gatim', origine: 'ACCORDO_COMMERCIALE', tipologia: 'RETE', prestazione: 'RACCOLTA', a_chi: 'elenco',
+    fornitori_json: J([gatim]), euro_t_passiva: 2, euro_t_attiva: null,
+    data_inizio_validita: '2026-10-15', data_fine_validita: '2026-12-31', stato: 'attivo',
+  };
+  const opz = { utente: 'Mario', origine: 'Tariffe & Anagrafiche', il: '2026-10-13T08:00:00.000Z' };
+  const righeAccordo = righeDiModifica('SurplusTariffa', { record_id: 's2', dopo: accordo, operazione: 'create' }, opz);
+  verifica('un surplus solo passivo e\' riservato in ogni riga, come una tariffa passiva',
+    righeAccordo.length === 8 && righeAccordo.every(r => r.riservato === true), J(righeAccordo.map(r => [r.campo, r.riservato])));
+  verifica('e il campo lo dice anche da solo, con l\'importo da Ecotyre vuoto, zero o illeggibile',
+    ['', null, undefined, 0, 'cinque'].every(v => campoRiservato('SurplusTariffa', 'nome', { ...accordo, euro_t_attiva: v }))
+    && !campoRiservato('SurplusTariffa', 'nome', { ...accordo, euro_t_attiva: 2 }) && !campoRiservato('SurplusTariffa', 'nome', { ...accordo, euro_t_attiva: '2' }));
+  verifica('cancellarlo lascia righe riservate',
+    righeDiModifica('SurplusTariffa', { record_id: 's2', prima: accordo, operazione: 'delete' }, opz).every(r => r.riservato === true));
+  const accorciato = righeDiModifica('SurplusTariffa', { record_id: 's2', prima: accordo, dopo: { ...accordo, data_fine_validita: '2026-11-30' }, patch: { data_fine_validita: '2026-11-30' } }, opz);
+  verifica('anche una data cambiata', accorciato.length === 1 && accorciato[0].riservato === true, J(accorciato));
+  const spento = righeDiModifica('SurplusTariffa', { record_id: 's1', prima: fuel, dopo: { ...fuel, euro_t_attiva: null }, patch: { euro_t_attiva: null } }, opz);
+  verifica('il Fuel Surcharge che perde l\'importo da Ecotyre diventa riservato', spento.length === 1 && spento[0].riservato === true, J(spento));
+  const fuelChiuso = righeDiModifica('SurplusTariffa', { record_id: 's1', prima: fuel, dopo: { ...fuel, data_fine_validita: '2026-11-30' }, patch: { data_fine_validita: '2026-11-30' } }, opz);
+  verifica('il Fuel Surcharge, che ha la parte attiva, resta visibile', fuelChiuso.length === 1 && fuelChiuso[0].riservato === false, J(fuelChiuso));
+  const soloDefault = modificheDelRecord('SurplusTariffa', { dopo: { stato: 'attivo', a_chi: 'tutti' }, operazione: 'create' });
+  verifica('la riga senza campi di un surplus senza importo da Ecotyre e\' riservata', soloDefault.length === 1 && soloDefault[0].campo === '' && soloDefault[0].riservato === true, J(soloDefault));
+  const vistaAccordo = { asServiceRole: { entities: archivioFinto({ ModificaDato: righeAccordo.map((r, i) => ({ id: `acc${i}`, ...r })) }).archivi } };
+  const ecoAccordo = await eseguiStrumento(vistaAccordo, 'storico_modifiche', {}, { amministratore: false });
+  verifica('EcoTyna a chi non e\' amministratore non dice niente dell\'accordo, e dice che ci sono righe riservate',
+    ecoAccordo.dati.modifiche.righe.length === 0 && ecoAccordo.dati.riservate_non_dette === 8, J(ecoAccordo.dati));
+  const ecoAdmin = await eseguiStrumento(vistaAccordo, 'storico_modifiche', {}, { amministratore: true });
+  verifica('all\'amministratore tutte e otto', ecoAdmin.dati.modifiche.righe.length === 8, J(ecoAdmin.dati && ecoAdmin.dati.modifiche && ecoAdmin.dati.modifiche.righe.length));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

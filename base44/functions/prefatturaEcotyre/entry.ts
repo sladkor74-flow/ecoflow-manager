@@ -147,12 +147,17 @@ export default async function(req) {
     const prefattura = valide[0] || null;
     if (!prefattura) return Response.json({ prefattura: null, confronto: null });
 
-    const [reteAll, aciAll, extraAll, fornitori, tariffe, terziarie] = await Promise.all([
+    const [reteAll, aciAll, extraAll, fornitori, tariffe, terziarie, surplus] = await Promise.all([
       fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.ExtraRaccolta),
       // le tariffe tutte, come l'anteprima e il documento: con una pagina sola il confronto poteva usare prezzi diversi
       fetchAll(svc.Fornitore), fetchAll(svc.Tariffa, { direzione: 'ATTIVA' }), fetchAll(svc.Terziaria),
+      // I surplus sulle tariffe (il Fuel Surcharge, 13/10/2026), tutti come le
+      // tariffe: il confronto riconosce il surplus nella prefattura nelle forme in
+      // cui puo' arrivare (nel prezzo, una riga per ordine, una riga sola) e lo
+      // mette accanto a quello del gestionale, canale per canale.
+      fetchAll(svc.SurplusTariffa),
     ]);
-    const { righe, anomalie } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese });
+    const { righe, anomalie, surplus_del_mese } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno: annoNum, mese, surplus });
     // Le date obbligatorie dei formulari del mese, canale per canale (regola
     // dell'utente del 22/09/2026): i terminati confrontati con la prefattura a cui
     // manca l'immissione o l'inizio, o con date incoerenti, e i senza fine
@@ -184,7 +189,7 @@ export default async function(req) {
     const { righe: _righe, ...meta } = prefattura;
     return Response.json({
       prefattura: { ...meta, numero_righe: (prefattura.righe || []).length },
-      confronto: confrontaPrefattura(prefattura.righe || [], righe, altrove),
+      confronto: confrontaPrefattura(prefattura.righe || [], righe, altrove, surplus_del_mese),
       anomalie_date: anomalieDate,
       annotato_nel_registro: annotatiNelRegistro,
     });

@@ -77,8 +77,18 @@
         "ACI",
         "TERZIARIE",
         "EXTRA_RACCOLTA",
-        "MANUALE"
-      ]
+        "MANUALE",
+        "SURPLUS"
+      ],
+      "description": "Da dove viene la riga. SURPLUS (13/10/2026) e' la riga di un surplus sulle tariffe, come il Fuel Surcharge del consorzio: una per canale e per surplus, sotto le righe dei formulari del mese"
+    },
+    "surplus_id": {
+      "type": "string",
+      "description": "Solo sulla riga di un surplus: l'id del record di SurplusTariffa da cui viene (13/10/2026)"
+    },
+    "kg_riferimento": {
+      "type": "number",
+      "description": "Solo sulla riga di un surplus: i chili del mese su cui si paga, gli stessi dei formulari qui sopra. La quantita' della riga e' zero apposta, perche' nessuna somma di chili li conti due volte (13/10/2026)"
     },
     "record_ids": {
       "type": "array",

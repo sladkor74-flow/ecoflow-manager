@@ -7,6 +7,12 @@ import { calcolaPassivaMese, indiceMesePassiva } from "../../shared/passivaCalco
 // Fatturazione passiva di un mese e di un canale. Il calcolo sta in
 // base44/shared/passivaCalcolo.ts, condiviso col margine: qui si leggono gli
 // archivi e si risponde.
+//
+// Si legge anche SurplusTariffa, tutto (il surplus sulle tariffe, 13/10/2026): e'
+// un archivio a parte e non un campo della tariffa, e chi chiama il calcolo senza
+// passarlo ottiene una passiva senza il Fuel Surcharge, cioe' sbagliata da
+// ottobre a dicembre 2026. I disattivati li toglie il calcolo, come per le
+// tariffe: niente { stato: 'attivo' }.
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -21,16 +27,17 @@ export default async function(req) {
     const meseNum = indiceMesePassiva(mese);
     if (meseNum < 0) return Response.json({ error: 'Mese non riconosciuto' }, { status: 400 });
 
-    const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
+    const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.Secondaria),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
       fetchAll(base44.asServiceRole.entities.Tariffa, { direzione: 'PASSIVA' }),
       fetchAll(base44.asServiceRole.entities.Fornitore, { stato: 'attivo' }),
+      fetchAll(base44.asServiceRole.entities.SurplusTariffa),
     ]);
 
-    return Response.json(calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll }, annoNum, meseNum, mese, tipologia));
+    return Response.json(calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll }, annoNum, meseNum, mese, tipologia));
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

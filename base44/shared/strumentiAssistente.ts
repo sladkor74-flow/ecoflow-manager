@@ -37,7 +37,7 @@ import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } 
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { documentoDelRequisito } from "./qualificaFornitori.ts";
 import { applicaControlloClasse, targetAnnuoSoggetto } from "./classeAlbo.ts";
-import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
+import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eRigaSurplus, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 import { piuGiorni } from "./predittivita.ts";
 import { calcolaPassivaMese, indiceMesePassiva, movimentiDateDelCanale } from "./passivaCalcolo.ts";
 import { anomaliaSenzaFineAnno } from "./filtroPeriodo.ts";
@@ -46,6 +46,8 @@ import { datiFinoAl } from "./statoArchivi.ts";
 import { tariffaNonDisattivata, tariffaValeIl } from "./validitaTariffa.ts";
 import { storicoModifiche } from "./storicoModifiche.ts";
 import { provinciaChiesta } from "./province.ts";
+import { statoSurplus, euroTDi, periodoSurplus, surplusDellaTariffa, fornitoriDelSurplus, testoEuroT, NOMI_ORIGINE, DESTINATARI } from "./surplus.ts";
+import { formatoTonnellate } from "./formato.ts";
 
 export { oggiRoma };
 
@@ -412,6 +414,127 @@ function perChiave(righe, campo) {
 
 const euro2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
+// ─── il surplus sulle tariffe ───
+//
+// IL SURPLUS SULLE TARIFFE IN EcoTyna (13/10/2026). Richiesta dell'utente del
+// 12/10/2026: accanto alle tariffe un surplus in €/t, con le sue date, che in
+// attiva e in passiva fa una riga a parte accanto a quella standard, sulle
+// stesse tonnellate del mese. Il primo e' il Fuel Surcharge del consorzio
+// Ecotyre, +5 €/t dal 01/10 al 31/12/2026 su rete, ACI ed extra raccolta, ognuno
+// con la sua riga. EcoTyna lo dice come il modulo: il totale lo comprende (e'
+// quello che si fattura e si paga), e accanto c'e' quanto e' lo standard e
+// quanto il surplus, perche' «quanto ci spetta da Ecotyre a ottobre» detto senza
+// la riga del Fuel Surcharge e' un numero che in fattura non si riconosce. Le
+// tonnellate del surplus sono le stesse del mese: non si sommano mai una seconda
+// volta, e la riga del surplus non e' un ordine. L'importo ai fornitori
+// (euro_t_passiva) e' un costo: a chi non e' amministratore niente passiva, e dei
+// surplus solo quelli che Ecotyre paga, col solo importo da Ecotyre.
+
+// La riga del surplus nell'attiva (eRigaSurplus di attivaCalcolo.ts): una per
+// canale e per surplus, con quantita 0 e le tonnellate del mese in
+// kg_riferimento. Non porta chili e non e' un ordine.
+// La chiave di una riga nella riconciliazione col documento salvato, come la
+// scrive riconciliaAttiva: ordine, formulario e descrizione.
+const chiaveRiconciliazione = (r) => `${String((r && r.ordine) || '').trim()}|${String((r && r.numero_fir) || '').trim()}|${(r && r.descrizione) || ''}`;
+// Gli euro di un testo, all'italiana e senza dipendere dalle impostazioni del server.
+const euroTesto = (v) => {
+  const n = euro2(v);
+  const [intero, dec] = Math.abs(n).toFixed(2).split('.');
+  return (n < 0 ? '-' : '') + intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
+};
+// «consorzio Ecotyre» o «accordo commerciale»: il codice dell'archivio a parole;
+// un'origine gia' a parole resta com'e'.
+const origineAParole = (o) => NOMI_ORIGINE[String(o || '').trim().toUpperCase()] || String(o || '').trim();
+const giornoDelSurplus = (v) => String(v || '').trim().slice(0, 10);
+
+// Le note che accompagnano i conti col surplus: cosa sono i campi, e le due
+// cose da non sbagliare (le tonnellate non si sommano, i canali nemmeno).
+const NOTA_SURPLUS_ATTIVA = "Il surplus sulle tariffe (per esempio il Fuel Surcharge del consorzio Ecotyre) e' gia' negli euro di ogni canale e di ogni mese: euro_standard ed euro_surplus sono le due righe della fattura, e nota_surplus le dice gia' all'italiana. Le tonnellate del surplus sono quelle del mese, gia' contate nella riga standard: non si sommano una seconda volta, e la riga del surplus non e' un ordine. Ogni canale ha il suo surplus: non si sommano nemmeno quelli.";
+const NOTA_SURPLUS_PASSIVA = "Il surplus sulle tariffe (per esempio il Fuel Surcharge) e' gia' negli euro di ogni fornitore e di ogni mese: euro_standard ed euro_surplus sono le due righe che il fornitore fattura, sulle stesse tonnellate, che non si contano due volte. Un fornitore interno (SMOCO) non lo riceve: le sue tonnellate sono in tonnellate_interni_non_pagate. Ogni canale ha il suo surplus: non si sommano.";
+
+/**
+ * Le righe di surplus di un conto, sommate per surplus: lo stesso surplus (nome,
+ * origine, €/t) in piu' mesi o su piu' fornitori diventa una riga sola, con le
+ * tonnellate e gli euro di tutti; due importi diversi restano due righe. Il
+ * periodo e' quello del surplus, dalle sue date. Sempre dentro un canale solo:
+ * chi chiama tiene una raccolta per canale.
+ */
+function aggiungiSurplus(raccolta, v) {
+  const nome = String(v.nome || '').trim() || 'Surplus';
+  const origine = origineAParole(v.origine);
+  const euro_t = Number(v.euro_t) || 0;
+  const chiave = `${nome.toLowerCase()}|${origine}|${euro_t}`;
+  const x = raccolta.get(chiave) || { nome, origine, euro_t, kg: 0, euro: 0, dal: '', al: '', ordini: null, kg_interni: null };
+  x.kg += Number(v.kg) || 0;
+  x.euro += Number(v.euro) || 0;
+  const dal = giornoDelSurplus(v.dal);
+  const al = giornoDelSurplus(v.al);
+  if (dal && (!x.dal || dal < x.dal)) x.dal = dal;
+  if (al && (!x.al || al > x.al)) x.al = al;
+  if (v.ordini !== null && v.ordini !== undefined && v.ordini !== '') x.ordini = (x.ordini || 0) + (Number(v.ordini) || 0);
+  if (v.kg_interni !== null && v.kg_interni !== undefined && v.kg_interni !== '') x.kg_interni = (x.kg_interni || 0) + (Number(v.kg_interni) || 0);
+  raccolta.set(chiave, x);
+}
+
+// Un numero che puo' mancare: vuoto non e' zero.
+const numeroOppure = (v, altrimenti) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? altrimenti : Number(v));
+
+/**
+ * Il surplus di un fornitore nel conto della passiva (passivaCalcolo.ts): le sue
+ * righe (una per surplus, sulle sue tonnellate del mese), quanto fanno e quanto
+ * e' lo standard. Il totale_euro del fornitore li comprende gia'. null senza
+ * surplus.
+ */
+function surplusDelFornitore(f) {
+  const righe = Array.isArray(f && f.surplus) ? f.surplus.filter(Boolean) : [];
+  if (!righe.length) return null;
+  const euro = numeroOppure(f.totale_surplus, righe.reduce((s, x) => s + (Number(x.importo) || 0), 0));
+  return {
+    euro,
+    standard: numeroOppure(f.totale_standard, (Number(f.totale_euro) || 0) - euro),
+    righe: righe.map(x => ({
+      nome: x.nome, origine: x.origine, euro_t: x.euro_t,
+      kg: numeroOppure(x.kg, (Number(x.tonnellate) || 0) * 1000),
+      euro: numeroOppure(x.importo, Number(x.euro) || 0),
+      dal: x.dal, al: x.al,
+    })),
+  };
+}
+
+/** Le righe sommate, per la risposta: le tonnellate sono quelle del mese, gia' contate nelle righe standard. */
+function righeDelSurplus(raccolta) {
+  return [...raccolta.values()]
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'it') || a.euro_t - b.euro_t)
+    .map(x => ({
+      nome: x.nome,
+      ...(x.origine ? { origine: x.origine } : {}),
+      euro_t: x.euro_t,
+      tonnellate: t3(x.kg),
+      euro: euro2(x.euro),
+      ...(x.ordini !== null ? { ordini: x.ordini } : {}),
+      ...(x.kg_interni ? { tonnellate_interni_non_pagate: t3(x.kg_interni) } : {}),
+      periodo: periodoSurplus({ data_inizio_validita: x.dal, data_fine_validita: x.al }),
+    }));
+}
+
+/**
+ * La frase che accompagna un totale col surplus: «Il totale di 231.889,68 €
+ * comprende la riga «Fuel Surcharge» (consorzio Ecotyre) di 5.601,20 €
+ * (1.120,24 t a 5,00 €/t) ...». Scritta qui, all'italiana, perche' e' la cosa
+ * da dire per prima e non si deve ricostruire dai campi.
+ * @param periodo 'del mese' o 'dei mesi': di chi sono le tonnellate
+ * @param passiva vero per la passiva: le righe le fattura ogni fornitore, non SMOCO a Ecotyre
+ */
+function fraseSurplus(totale, standard, righe, periodo = 'del mese', passiva = false) {
+  if (!righe.length) return '';
+  const una = righe.length === 1;
+  const parti = righe.map(s => `«${s.nome}»${s.origine ? ` (${s.origine})` : ''} di ${euroTesto(s.euro)} € (${formatoTonnellate(s.tonnellate)} t a ${testoEuroT(s.euro_t)})`);
+  const dove = passiva
+    ? `ogni fornitore la fattura come riga a parte, accanto a quella standard (in tutto ${euroTesto(standard)} €)`
+    : `in fattura ${una ? "e' una riga" : 'sono righe'} a parte, accanto a quella standard di ${euroTesto(standard)} €`;
+  return `Il totale di ${euroTesto(totale)} € comprende ${una ? 'la riga' : 'le righe'} ${parti.join(' e ')}: ${dove}, sulle stesse tonnellate ${periodo}, che non si contano due volte.`;
+}
+
 /**
  * Quanto ci spetta da Ecotyre, calcolato sui dati di oggi con le righe del
  * modulo (attivaCalcolo.ts) e messo accanto al documento salvato di ogni mese.
@@ -421,11 +544,30 @@ const euro2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
  */
 async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, tipologia, fornitore, mesiLista = [] }) {
   const svc = base44.asServiceRole.entities;
-  const [reteAll, aciAll, extraAll, fornitori, tariffe, documenti] = await Promise.all([
+  // I surplus si leggono tutti, come le tariffe: quando valgono lo decide il
+  // calcolo (surplus.ts), e un disattivato non vale mai. Senza, il totale di un
+  // mese col Fuel Surcharge sarebbe senza la sua riga: e' un numero della
+  // fattura, e si legge come le tariffe, senza ripiego (13/10/2026).
+  const [reteAll, aciAll, extraAll, fornitori, tariffe, documenti, surplusAll] = await Promise.all([
     fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.ExtraRaccolta),
     fetchAll(svc.Fornitore), fetchAll(svc.Tariffa, { direzione: 'ATTIVA' }),
     fetchAll(svc.DocumentoFatturazione, { tipo: 'ATTIVA', anno }),
+    fetchAll(svc.SurplusTariffa),
   ]);
+  const surplusPerId = new Map((surplusAll || []).filter(s => s && s.id).map(s => [s.id, s]));
+  // La riga del surplus come la dice EcoTyna: nome, origine e periodo dal
+  // surplus, tonnellate, €/t, euro e ordini dalla riga (le tonnellate del mese
+  // del canale, gli ordini su cui vale).
+  const surplusDellaRiga = (r) => {
+    const s = surplusPerId.get(r.surplus_id) || {};
+    const valore = Number(r.tariffa_valore);
+    return {
+      nome: s.nome || r.descrizione, origine: s.origine,
+      euro_t: Number.isFinite(valore) && valore > 0 ? valore : euroTDi(s, 'ATTIVA'),
+      kg: Number(r.kg_riferimento) || 0, euro: Number(r.totale) || 0,
+      ordini: r.record_count, dal: s.data_inizio_validita, al: s.data_fine_validita,
+    };
+  };
   const chiesta = canaleChiesto(tipologia);
   const canaleIgnorato = tipologia && !chiesta ? String(tipologia) : '';
   const canali = TIPOLOGIE_ATTIVA.filter(c => !chiesta || c === chiesta);
@@ -445,17 +587,24 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
   const ultimo = anno < annoOggi ? 11 : anno === annoOggi ? Number(oggi.slice(5, 7)) - 1 : -1;
   const mesi = meseChiesto ? [meseChiesto] : mesiLista.length ? mesiLista : MESI.slice(0, ultimo + 1);
 
-  const perCanale = new Map(canali.map(c => [c, { canale: c, kg: 0, ordini: 0, euro: 0, senza_prezzo: 0, kg_senza_prezzo: 0, mesi: [] }]));
+  const perCanale = new Map(canali.map(c => [c, { canale: c, kg: 0, ordini: 0, euro: 0, senza_prezzo: 0, kg_senza_prezzo: 0, euro_surplus: 0, surplus: new Map(), mesi: [] }]));
   const anomalie = [];
   for (const mese of mesi) {
-    const { righe, anomalie: an } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno, mese });
+    const { righe, anomalie: an } = calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, surplus: surplusAll, anno, mese });
     for (const a of an) if (canali.includes(a.tipologia)) anomalie.push({ mese, ...a });
     const docsMese = documenti.filter(d => String(d.mese || '').toLowerCase() === mese.toLowerCase());
     for (const c of canali) {
       const lista = righe[c] || [];
-      const x = { kg: 0, ordini: 0, euro: 0, senza_prezzo: 0, kg_senza_prezzo: 0 };
+      const x = { kg: 0, ordini: 0, euro: 0, senza_prezzo: 0, kg_senza_prezzo: 0, euro_surplus: 0, surplus: new Map() };
       for (const r of lista) {
         x.euro += Number(r.totale) || 0;
+        // La riga del surplus e' un importo sulle tonnellate gia' contate: va
+        // nel totale (si fattura), non fra i chili ne' fra gli ordini.
+        if (eRigaSurplus(r)) {
+          x.euro_surplus += Number(r.totale) || 0;
+          aggiungiSurplus(x.surplus, surplusDellaRiga(r));
+          continue;
+        }
         // Un sovracosto a corpo e' un importo, non un movimento: niente chili ne' ordini.
         if (eRigaACorpo(r)) continue;
         x.kg += Number(r.quantita) || 0;
@@ -482,6 +631,20 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
             arrivati_dopo: elenco(conGiorno(ric.nuovi), 20), cambiati: elenco(conGiorno(ric.cambiati), 20), non_piu_nel_mese: elenco(conGiorno(ric.spariti), 20),
             differenza_kg: ric.delta_kg, differenza_euro: ric.delta_euro,
           });
+          // Il surplus fra le differenze: la sua riga non ha ordine ne'
+          // formulario, e la chiave e' il suo nome. Arrivata, cambiata o sparita
+          // dopo l'elaborazione vuol dire che il surplus e' stato scritto o
+          // cambiato dopo: va detto come tale, non come un errore del documento.
+          const chiaviSurplus = new Set(lista.filter(eRigaSurplus).map(chiaveRiconciliazione));
+          const nomiSurplus = new Set((surplusAll || []).map(s => String((s && s.nome) || '').trim()).filter(Boolean));
+          const delSurplus = (v) => v.surplus === true || chiaviSurplus.has(chiaveRiconciliazione(v));
+          const sparitoSurplus = (v) => v.surplus === true
+            || (!String(v.ordine || '').trim() && !String(v.numero_fir || '').trim() && nomiSurplus.has(String(v.descrizione || '').trim()));
+          const scarto = ric.nuovi.filter(delSurplus).reduce((s, v) => s + (Number(v.totale) || 0), 0)
+            + ric.cambiati.filter(delSurplus).reduce((s, v) => s + (Number(v.totale_oggi) || 0) - (Number(v.totale_documento) || 0), 0)
+            - ric.spariti.filter(sparitoSurplus).reduce((s, v) => s + (Number(v.totale) || 0), 0);
+          const toccato = ric.nuovi.some(delSurplus) || ric.cambiati.some(delSurplus) || ric.spariti.some(sparitoSurplus);
+          if (toccato) documento.differenza_del_surplus_euro = euro2(scarto);
         } else {
           // Senza il mese si confrontano i totali, non le righe. Gli euro da
           // soli non bastano: una riga arrivata dopo a zero euro (senza tariffa,
@@ -492,18 +655,44 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
           documento.righe_documento = righeDoc;
           documento.righe_oggi = lista.length;
           documento.allineato = Math.abs(documento.differenza_euro) < 0.005 && (righeDoc === null || righeDoc === lista.length);
+          // Sul totale si riconosce solo il caso netto: la differenza e'
+          // esattamente il surplus del mese, cioe' il documento e' stato
+          // elaborato prima che il surplus fosse scritto.
+          if (!documento.allineato && x.surplus.size && Math.abs(documento.differenza_euro - euro2(x.euro_surplus)) < 0.005) {
+            documento.differenza_del_surplus_euro = euro2(x.euro_surplus);
+          }
         }
         if (!documento.allineato) {
           documento.avviso = doc.stato === 'chiusa'
             ? 'Il documento e\' indietro rispetto ai dati caricati e il periodo e\' chiuso: va riaperto, oppure la differenza si fattura con un\'integrazione.'
             : 'Il documento e\' indietro rispetto ai dati caricati: va rielaborato (Elabora Mese nel modulo Fatturazione).';
         }
+        // UN SURPLUS SCRITTO DOPO L'ELABORAZIONE (13/10/2026). La differenza e'
+        // vera, ma non e' un errore del documento: e' il surplus arrivato dopo.
+        // A periodo chiuso non si riapre niente da soli: il surplus si fattura a
+        // parte, con un'integrazione del solo surplus.
+        if (documento.differenza_del_surplus_euro !== undefined) {
+          const tutta = Math.abs(documento.differenza_del_surplus_euro - (Number(documento.differenza_euro) || 0)) < 0.005;
+          documento.avviso_surplus = `${tutta ? 'La differenza col documento e\' tutta' : `Della differenza col documento, ${euroTesto(documento.differenza_del_surplus_euro)} € sono`} il surplus sulle tariffe (${[...x.surplus.values()].map(s => s.nome).join(', ') || 'surplus'}), scritto o cambiato dopo l'elaborazione: non e' un errore del documento. `
+            + (doc.stato === 'chiusa'
+              ? 'Il periodo e\' chiuso: il surplus si fattura a parte, con una fattura integrativa del solo surplus, senza riaprire il mese.'
+              : 'Rielaborando il mese (Elabora Mese) il documento lo comprende.');
+          // Spiegata tutta col surplus, la differenza non ha altro da dire: l'avviso
+          // generico («va riaperto») direbbe il contrario.
+          if (tutta) delete documento.avviso;
+        }
       }
       const tot = perCanale.get(c);
-      for (const campo of ['kg', 'ordini', 'euro', 'senza_prezzo', 'kg_senza_prezzo']) tot[campo] += x[campo];
+      for (const campo of ['kg', 'ordini', 'euro', 'senza_prezzo', 'kg_senza_prezzo', 'euro_surplus']) tot[campo] += x[campo];
+      for (const s of x.surplus.values()) aggiungiSurplus(tot.surplus, s);
       if (lista.length || doc) {
+        const righeSurplus = righeDelSurplus(x.surplus);
         tot.mesi.push({
           mese, tonnellate: t3(x.kg), ordini: x.ordini, euro: euro2(x.euro),
+          ...(righeSurplus.length ? {
+            euro_standard: euro2(x.euro - x.euro_surplus), euro_surplus: euro2(x.euro_surplus), surplus: righeSurplus,
+            nota_surplus: fraseSurplus(x.euro, x.euro - x.euro_surplus, righeSurplus),
+          } : {}),
           ...(x.senza_prezzo ? { righe_senza_prezzo: x.senza_prezzo, tonnellate_senza_prezzo: t3(x.kg_senza_prezzo) } : {}),
           documento,
         });
@@ -511,16 +700,25 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
     }
   }
 
+  const conSurplus = [...perCanale.values()].some(x => x.surplus.size);
   return {
     fonte: `Fatturazione attiva verso Ecotyre, calcolata sui dati di oggi${chiesta ? `, canale ${chiesta}` : ', un canale per volta'}`,
     periodo: meseChiesto ? `${meseChiesto} ${anno}` : mesiLista.length ? `${mesiLista.join(', ')} ${anno}` : ultimo >= 0 ? `anno ${anno}, da ${MESI[0]} a ${MESI[ultimo]}` : `anno ${anno}`,
     dati_al: oggi,
     dati: {
-      canali: [...perCanale.values()].map(x => ({
-        canale: x.canale, tonnellate: t3(x.kg), ordini: x.ordini, euro: euro2(x.euro),
-        ...(x.senza_prezzo ? { righe_senza_prezzo: x.senza_prezzo, tonnellate_senza_prezzo: t3(x.kg_senza_prezzo) } : {}),
-        mesi: x.mesi,
-      })),
+      canali: [...perCanale.values()].map(x => {
+        const righeSurplus = righeDelSurplus(x.surplus);
+        const piuMesi = x.mesi.length > 1;
+        return {
+          canale: x.canale, tonnellate: t3(x.kg), ordini: x.ordini, euro: euro2(x.euro),
+          ...(righeSurplus.length ? {
+            euro_standard: euro2(x.euro - x.euro_surplus), euro_surplus: euro2(x.euro_surplus), surplus: righeSurplus,
+            nota_surplus: fraseSurplus(x.euro, x.euro - x.euro_surplus, righeSurplus, piuMesi ? 'dei mesi' : 'del mese'),
+          } : {}),
+          ...(x.senza_prezzo ? { righe_senza_prezzo: x.senza_prezzo, tonnellate_senza_prezzo: t3(x.kg_senza_prezzo) } : {}),
+          mesi: x.mesi,
+        };
+      }),
       anomalie: elenco(anomalie, 30),
       ...(conDate.length ? { date_obbligatorie_da_sistemare: conDate.map(x => ({ canale: x.canale, ...x.date })) } : {}),
       ...(ultimo < 0 && !meseChiesto && !mesiLista.length ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
@@ -528,7 +726,7 @@ async function attivaSuiDatiDiOggi(base44, { anno, meseChiesto, meseIgnorato, ti
       ...(meseIgnorato ? { avviso_periodo: meseChiesto || mesiLista.length ? `"${meseIgnorato}" non e' un mese: ho preso ${meseChiesto || mesiLista.join(', ')} ${anno}.` : `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
       ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: ci sono tutti e tre, separati.` } : {}),
       ...(fornitore ? { avviso_fornitore: 'Nell\'attiva il cliente e\' uno solo, Ecotyre: il filtro sul fornitore non si applica.' } : {}),
-      nota: `Conto fatto adesso sui movimenti terminati, per fine trasporto, con le stesse righe dell'anteprima e di "Elabora Mese". Accanto a ogni mese c'e' il documento salvato: una differenza vuol dire che dopo l'elaborazione sono arrivati o cambiati dei movimenti, e il documento va aggiornato.${meseChiesto ? '' : ' Senza il mese il documento si confronta sul totale in euro e sul numero di righe: una riga cambiata di peso con lo stesso importo si vede solo chiedendo il mese, che confronta riga per riga.'} Rete, ACI ed extra raccolta non si sommano.`,
+      nota: `Conto fatto adesso sui movimenti terminati, per fine trasporto, con le stesse righe dell'anteprima e di "Elabora Mese". Accanto a ogni mese c'e' il documento salvato: una differenza vuol dire che dopo l'elaborazione sono arrivati o cambiati dei movimenti, e il documento va aggiornato.${meseChiesto ? '' : ' Senza il mese il documento si confronta sul totale in euro e sul numero di righe: una riga cambiata di peso con lo stesso importo si vede solo chiedendo il mese, che confronta riga per riga.'} Rete, ACI ed extra raccolta non si sommano.${conSurplus ? ` ${NOTA_SURPLUS_ATTIVA}` : ''}`,
     },
   };
 }
@@ -585,11 +783,14 @@ function fornitoreDellaPassiva(risultati, chiesto, anagrafica = []) {
  */
 async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, fornitore, mesiLista = [] }) {
   const svc = base44.asServiceRole.entities;
-  const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll] = await Promise.all([
+  // I surplus sulle tariffe (13/10/2026) si leggono come le tariffe, tutti: il
+  // conto della passiva li aggiunge ai fornitori del mese in cui valgono.
+  const [primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll] = await Promise.all([
     fetchAll(svc.PrimariaRete), fetchAll(svc.PrimariaAci), fetchAll(svc.Secondaria), fetchAll(svc.ExtraRaccolta),
     fetchAll(svc.Tariffa, { direzione: 'PASSIVA' }), fetchAll(svc.Fornitore, { stato: 'attivo' }),
+    fetchAll(svc.SurplusTariffa),
   ]);
-  const archivi = { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll };
+  const archivi = { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll };
   const chiesta = canaleChiesto(tipologia);
   const canaleIgnorato = tipologia && !chiesta ? String(tipologia) : '';
   const canali = ['RETE', 'ACI', 'EXTRA_RACCOLTA'].filter(c => !chiesta || c === chiesta);
@@ -624,15 +825,18 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
     const anomalie = new Map();
     const perMese = [];
     const pagatoA = new Set();
-    const somma = { raccoglitori: 0, impianti_stoccaggi: 0, trasporti_secondaria: 0, tonnellate_raccolte: 0 };
+    const somma = { raccoglitori: 0, impianti_stoccaggi: 0, trasporti_secondaria: 0, tonnellate_raccolte: 0, surplus: 0 };
+    const surplusCanale = new Map();
     for (const { mese, d } of calcoli.get(canale)) {
       const delMese = { raccoglitori: 0, impianti_stoccaggi: 0, trasporti_secondaria: 0 };
+      let surplusMese = 0;
+      let conSurplusMese = false;
       for (const [sezione, campo] of SEZIONI) {
         for (const f of d[campo] || []) {
           if (forn && !forn.tieni(f)) continue;
           if (forn && forn.tramite(f)) pagatoA.add(f.fornitore);
           const chiave = `${sezione}|${normalizzaRagioneSociale(f.fornitore)}`;
-          if (!perFornitore.has(chiave)) perFornitore.set(chiave, { sezione, fornitore: f.fornitore, interno: !!f.interno, tonnellate: 0, euro: 0, mesi: [], di_cui: new Map() });
+          if (!perFornitore.has(chiave)) perFornitore.set(chiave, { sezione, fornitore: f.fornitore, interno: !!f.interno, tonnellate: 0, euro: 0, euro_surplus: 0, surplus: new Map(), mesi: [], di_cui: new Map() });
           const x = perFornitore.get(chiave);
           x.tonnellate += Number(f.totale_tonnellate) || 0;
           x.euro += Number(f.totale_euro) || 0;
@@ -640,8 +844,26 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
           for (const c of f.di_cui || []) x.di_cui.set(c.fornitore, (x.di_cui.get(c.fornitore) || 0) + (Number(c.tonnellate) || 0));
           delMese[campo] += Number(f.totale_euro) || 0;
           if (campo === 'raccoglitori') somma.tonnellate_raccolte += Number(f.totale_tonnellate) || 0;
+          // Il surplus del fornitore e' gia' nel suo totale_euro: qui si tiene
+          // a parte per dire le due righe che fattura.
+          const sur = surplusDelFornitore(f);
+          if (sur) {
+            x.euro_surplus += sur.euro;
+            surplusMese += sur.euro;
+            conSurplusMese = true;
+            for (const s of sur.righe) { aggiungiSurplus(x.surplus, s); aggiungiSurplus(surplusCanale, s); }
+          }
         }
       }
+      // Le tonnellate di un interno (SMOCO) non prendono il surplus: si dicono a
+      // parte, perche' spiegano la differenza col surplus dell'attiva.
+      if (!k) {
+        for (const s of d.surplus_del_mese || []) {
+          const interni = Number(s && s.tonnellate_interni) || 0;
+          if (interni > 0) aggiungiSurplus(surplusCanale, { nome: s.nome, origine: s.origine, euro_t: s.euro_t, kg: 0, euro: 0, dal: s.dal, al: s.al, kg_interni: interni * 1000 });
+        }
+      }
+      somma.surplus += surplusMese;
       // La stessa anomalia torna in tutti i mesi (una tariffa che manca): si dice
       // una volta, coi mesi in cui c'e' e le tonnellate di tutti, non solo del
       // primo. I terminati senza fine trasporto si dicono dopo, una volta per
@@ -665,6 +887,7 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
       if (!k || euroMese) {
         perMese.push({
           mese, euro: euro2(euroMese),
+          ...(conSurplusMese ? { euro_standard: euro2(euroMese - surplusMese), euro_surplus: euro2(surplusMese) } : {}),
           ...(k ? {} : {
             raccoglitori_euro: euro2(delMese.raccoglitori), impianti_stoccaggi_euro: euro2(delMese.impianti_stoccaggi), trasporti_secondaria_euro: euro2(delMese.trasporti_secondaria),
             ...(d.quadratura && !d.quadratura.coincidente ? { quadratura: d.quadratura } : {}),
@@ -683,13 +906,22 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
     }
     const fornitori = [...perFornitore.values()]
       .map(x => ({
-        sezione: x.sezione, fornitore: x.fornitore, interno: x.interno, tonnellate: r3(x.tonnellate), euro: euro2(x.euro), mesi: x.mesi.length,
+        sezione: x.sezione, fornitore: x.fornitore, interno: x.interno, tonnellate: r3(x.tonnellate), euro: euro2(x.euro),
+        ...(x.surplus.size ? { euro_standard: euro2(x.euro - x.euro_surplus), euro_surplus: euro2(x.euro_surplus), surplus: righeDelSurplus(x.surplus) } : {}),
+        mesi: x.mesi.length,
         ...(x.di_cui.size ? { di_cui: [...x.di_cui.entries()].map(([nome, t]) => ({ fornitore: nome, tonnellate: r3(t) })) } : {}),
       }))
       .sort((a, b) => b.euro - a.euro);
+    const euroCanale = somma.raccoglitori + somma.impianti_stoccaggi + somma.trasporti_secondaria;
+    const righeSurplus = righeDelSurplus(surplusCanale);
+    const pagati = righeSurplus.filter(s => s.euro || s.tonnellate);
     return {
       canale,
-      euro: euro2(somma.raccoglitori + somma.impianti_stoccaggi + somma.trasporti_secondaria),
+      euro: euro2(euroCanale),
+      ...(righeSurplus.length ? {
+        euro_standard: euro2(euroCanale - somma.surplus), euro_surplus: euro2(somma.surplus), surplus: righeSurplus,
+        ...(pagati.length ? { nota_surplus: fraseSurplus(euroCanale, euroCanale - somma.surplus, pagati, mesi.length > 1 ? 'dei mesi' : 'del mese', true) } : {}),
+      } : {}),
       ...(k ? {} : {
         raccoglitori_euro: euro2(somma.raccoglitori), impianti_stoccaggi_euro: euro2(somma.impianti_stoccaggi), trasporti_secondaria_euro: euro2(somma.trasporti_secondaria),
         tonnellate_raccolte: r3(somma.tonnellate_raccolte),
@@ -701,12 +933,14 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
     };
   });
 
+  const conSurplus = conti.some(c => c.surplus);
   return {
     fonte: `Fatturazione passiva, calcolata sui dati di oggi${chiesta ? `, canale ${chiesta}` : ', un canale per volta'}`,
     periodo,
     dati_al: oggi,
     dati: {
       canali: conti,
+      ...(conSurplus ? { nota_surplus: NOTA_SURPLUS_PASSIVA } : {}),
       ...(k ? { fornitore_chiesto: fornitore, fornitore_riconosciuto: k } : {}),
       ...(ultimo < 0 && !mesiLista.length ? { avviso_periodo: `L'anno ${anno} non e' ancora cominciato.` } : {}),
       ...(meseIgnorato ? { avviso_periodo: mesiLista.length ? `"${meseIgnorato}" non e' un mese: ho preso ${mesiLista.join(', ')} ${anno}.` : `"${meseIgnorato}" non e' un mese: ho preso l'anno ${anno}.` } : {}),
@@ -2159,7 +2393,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'fatturazione',
-    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. La passiva fa lo stesso conto del modulo sui movimenti terminati: col mese indicato quel mese, senza mese tutti i mesi dell\'anno fino a quello in corso, uno per uno. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. I canali restano separati.',
+    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. La passiva fa lo stesso conto del modulo sui movimenti terminati: col mese indicato quel mese, senza mese tutti i mesi dell\'anno fino a quello in corso, uno per uno. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. Un surplus sulle tariffe (il Fuel Surcharge) e\' una riga a parte, gia\' compresa nei totali, con lo standard accanto. I canali restano separati.',
     parametri: { anno: 'numero', mese: 'nome del mese, opzionale: senza, tutto l\'anno mese per mese', mesi: 'elenco di nomi di mese, per una domanda su piu\' mesi ("da marzo a maggio": scrivili tutti)', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
     moduli: ['Fatturazione'],
     async esegui(base44, p, ctx) {
@@ -2247,13 +2481,20 @@ export const STRUMENTI = [
           };
         }
         const k = forn ? forn.nome : '';
+        // Col surplus sulle tariffe (13/10/2026) il fornitore fattura due righe:
+        // lo standard e il surplus, sulle stesse tonnellate. euro le comprende.
         const sezione = (nome, gruppi) => (gruppi || [])
           .filter(f => !forn || forn.tieni(f))
-          .map(f => ({
-            sezione: nome, fornitore: f.fornitore, interno: !!f.interno,
-            tonnellate: f.totale_tonnellate, euro: f.totale_euro,
-            ...(f.di_cui && f.di_cui.length ? { di_cui: f.di_cui.map(x => ({ fornitore: x.fornitore, tonnellate: x.tonnellate, viaggi: x.viaggi })) } : {}),
-          }));
+          .map(f => {
+            const sur = surplusDelFornitore(f);
+            const righeSur = sur ? righeDelSurplus(sur.righe.reduce((m, s) => { aggiungiSurplus(m, s); return m; }, new Map())) : [];
+            return {
+              sezione: nome, fornitore: f.fornitore, interno: !!f.interno,
+              tonnellate: f.totale_tonnellate, euro: f.totale_euro,
+              ...(sur ? { euro_standard: euro2(sur.standard), euro_surplus: euro2(sur.euro), surplus: righeSur } : {}),
+              ...(f.di_cui && f.di_cui.length ? { di_cui: f.di_cui.map(x => ({ fornitore: x.fornitore, tonnellate: x.tonnellate, viaggi: x.viaggi })) } : {}),
+            };
+          });
         const voci = [
           ...sezione('raccolta', d.raccoglitori),
           ...sezione('impianti e stoccaggi', d.impianti_stoccaggi),
@@ -2262,6 +2503,19 @@ export const STRUMENTI = [
         // I totali e la quadratura che arrivano dal modulo sono di tutto il mese:
         // se qui si e' chiesto un fornitore solo, rispondono a un'altra domanda.
         const suo = Math.round(voci.reduce((s, v) => s + (Number(v.euro) || 0), 0) * 100) / 100;
+        // Il surplus del mese nel canale: quanto si paga e a quante tonnellate,
+        // e le tonnellate degli interni, che non lo prendono.
+        const conSurplus = voci.some(v => v.surplus);
+        const suoSurplus = euro2(voci.reduce((s, v) => s + (Number(v.euro_surplus) || 0), 0));
+        const surplusDelMese = (d.surplus_del_mese || []).filter(Boolean).map(s => ({
+          nome: s.nome, origine: origineAParole(s.origine), ...(s.prestazione ? { prestazione: s.prestazione } : {}), euro_t: s.euro_t,
+          periodo: periodoSurplus({ data_inizio_validita: s.dal, data_fine_validita: s.al }),
+          tonnellate_pagate: s.tonnellate_pagate, euro: s.importo,
+          ...(Number(s.tonnellate_interni) > 0 ? { tonnellate_interni_non_pagate: s.tonnellate_interni } : {}),
+          ...(s.fornitori !== undefined ? { fornitori: s.fornitori } : {}),
+          ...(Array.isArray(s.senza_righe) && s.senza_righe.length ? { nell_elenco_senza_righe: s.senza_righe } : {}),
+          ...(s.nota ? { nota: s.nota } : {}),
+        }));
         return {
           fonte: `Fatturazione passiva, canale ${tipologia}`,
           periodo: `${meseChiesto} ${anno}`,
@@ -2269,8 +2523,9 @@ export const STRUMENTI = [
           dati: {
             fornitori: elenco(voci, 60),
             ...(k
-              ? { totale_del_fornitore_euro: suo, totali_del_mese_tutti_i_fornitori: d.totali }
-              : { totali: d.totali, quadratura: d.quadratura }),
+              ? { totale_del_fornitore_euro: suo, ...(conSurplus ? { di_cui_surplus_euro: suoSurplus } : {}), totali_del_mese_tutti_i_fornitori: d.totali }
+              : { totali: d.totali, quadratura: d.quadratura, ...(surplusDelMese.length ? { surplus_del_mese: surplusDelMese } : {}) }),
+            ...(conSurplus || surplusDelMese.length ? { nota_surplus: NOTA_SURPLUS_PASSIVA } : {}),
             anomalie: elenco(d.anomalie || [], 20),
             ...(sfPrimarie || sfSecondarie || dagliAlert.length ? {
               date_obbligatorie_da_sistemare: {
@@ -2315,7 +2570,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'tariffe',
-    descrizione: 'Le tariffe concordate con fornitori e clienti: quanto si paga o si incassa per raccolta, trasporto di secondaria, trattamento o conferimento, e per quale tratta.',
+    descrizione: 'Le tariffe concordate con fornitori e clienti: quanto si paga o si incassa per raccolta, trasporto di secondaria, trattamento o conferimento, e per quale tratta. In piu\' i surplus sulle tariffe (per esempio il Fuel Surcharge del consorzio Ecotyre): quanti €/t in piu\', su quale canale, per chi, da quando a quando.',
     parametri: { fornitore: 'opzionale', prestazione: 'RACCOLTA, TRASPORTO_SECONDARIA, TRATTAMENTO o CONFERIMENTO_STOCCAGGIO', direzione: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI, EXTRA_RACCOLTA o TUTTE' },
     moduli: ['Fatturazione', 'Tariffe'],
     async esegui(base44, p, ctx) {
@@ -2335,7 +2590,13 @@ export const STRUMENTI = [
       }
       if (soloAttive) filtro.direzione = 'ATTIVA';
       // Senza nessun filtro si legge l'archivio intero con list, come altrove.
-      const tutte = await fetchAll(svc.Tariffa, Object.keys(filtro).length ? filtro : null);
+      // I surplus sulle tariffe (13/10/2026) si leggono tutti, come le tariffe:
+      // se la lettura non riesce le tariffe si dicono lo stesso, e il surplus
+      // mancante si dichiara, perche' «nessun surplus» sarebbe falso.
+      const [tutte, surplusLetti] = await Promise.all([
+        fetchAll(svc.Tariffa, Object.keys(filtro).length ? filtro : null),
+        fetchAll(svc.SurplusTariffa).catch(() => null),
+      ]);
       const k = p.fornitore ? normalizzaRagioneSociale(p.fornitore) : '';
       // "TUTTE" e' una tipologia delle tariffe, non un canale: chiesta cosi', non filtra.
       const tipologia = canaleChiesto(p.tipologia);
@@ -2367,6 +2628,68 @@ export const STRUMENTI = [
       };
       const conValidita = righe.map(t => ({ t, v: validitaOggi(t) }))
         .sort((a, b) => ORDINE_VALIDITA.indexOf(a.v) - ORDINE_VALIDITA.indexOf(b.v));
+
+      // IL SURPLUS SULLE TARIFFE (13/10/2026). Un surplus in €/t con le sue date
+      // (il Fuel Surcharge del consorzio Ecotyre: +5 €/t dal 01/10 al 31/12/2026
+      // su rete, ACI ed extra raccolta) si aggiunge alla tariffa come riga a
+      // parte. Due cose: accanto a ogni tariffa quello che vale oggi o arriva su
+      // di lei (la colonna «Surplus» della pagina, surplusDellaTariffa), e in
+      // coda l'elenco dei surplus, un record per canale. L'importo ai fornitori
+      // e' un costo: a chi non e' amministratore restano solo i surplus che
+      // Ecotyre paga, col solo importo da Ecotyre; un surplus solo passivo e'
+      // tutto un costo e non si nomina nemmeno (campoRiservato, campiTracciati.ts).
+      const surplusVisibili = (surplusLetti || []).filter(s => !!s && (!soloAttive || euroTDi(s, 'ATTIVA') !== null));
+      const codiceDi = (v) => String(v || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+      const STATI_SURPLUS = { in_corso: 'in corso', in_arrivo: 'in arrivo', concluso: 'concluso', disattivato: 'disattivato, non vale mai' };
+      const ORDINE_SURPLUS = ['in_corso', 'in_arrivo', 'concluso', 'disattivato'];
+      const ORDINE_CANALI = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
+      const sceltiSurplus = surplusVisibili.filter(s => {
+        if (filtro.direzione && euroTDi(s, filtro.direzione) === null) return false;
+        if (filtro.prestazione && codiceDi(s.prestazione) !== codiceDi(filtro.prestazione)) return false;
+        if (tipologia && codiceDi(s.tipologia) !== tipologia) return false;
+        // «Tutti» vale per qualunque fornitore; un elenco solo per i suoi.
+        if (k && String(s.a_chi || 'tutti').trim().toLowerCase() === 'elenco'
+          && !fornitoriDelSurplus(s).some(f => normalizzaRagioneSociale(f.nome).includes(k))) return false;
+        return true;
+      });
+      const righeSurplus = sceltiSurplus
+        .map(s => ({ s, stato: statoSurplus(s, oggi) }))
+        .sort((a, b) => ORDINE_SURPLUS.indexOf(a.stato) - ORDINE_SURPLUS.indexOf(b.stato)
+          || String(a.s.nome || '').localeCompare(String(b.s.nome || ''), 'it')
+          || ORDINE_CANALI.indexOf(codiceDi(a.s.tipologia)) - ORDINE_CANALI.indexOf(codiceDi(b.s.tipologia)))
+        .map(({ s, stato }) => {
+          const prestazione = codiceDi(s.prestazione);
+          const passiva = euroTDi(s, 'PASSIVA');
+          const attiva = euroTDi(s, 'ATTIVA');
+          const elencoFornitori = fornitoriDelSurplus(s);
+          return {
+            stato: STATI_SURPLUS[stato] || stato,
+            nome: String(s.nome || '').trim(),
+            origine: origineAParole(s.origine),
+            canale: codiceDi(s.tipologia),
+            prestazione,
+            vale_per: String(s.a_chi || 'tutti').trim().toLowerCase() === 'elenco'
+              ? `solo: ${elencoFornitori.map(f => f.nome).join(', ') || 'elenco vuoto'}`
+              : `tutti i ${DESTINATARI[prestazione] || 'fornitori'}`,
+            // Il costo (ai fornitori) solo all'amministratore; vuoto vuol dire
+            // che in quella direzione il surplus non si paga, non zero.
+            ...(soloAttive ? {} : { ai_fornitori_euro_t: passiva }),
+            da_ecotyre_euro_t: attiva,
+            periodo: periodoSurplus(s),
+            ...(soloAttive ? {} : {
+              ...(passiva === null ? { solo: 'solo da Ecotyre: SMOCO non lo paga ai fornitori' } : attiva === null ? { solo: 'solo ai fornitori: Ecotyre non lo paga' } : {}),
+              ...(String(s.riferimento || '').trim() ? { riferimento: String(s.riferimento).trim() } : {}),
+              ...(String(s.note || '').trim() ? { note: String(s.note).trim() } : {}),
+            }),
+          };
+        });
+      // Accanto alla tariffa: in corso e in arrivo, con la regola della pagina.
+      const surplusSullaTariffa = (t) => {
+        const su = surplusDellaTariffa(t, surplusVisibili, oggi);
+        const voci = [...su.oggi.map(v => ({ v, quando: 'in corso' })), ...su.in_arrivo.map(v => ({ v, quando: 'in arrivo' }))]
+          .map(({ v, quando }) => ({ nome: v.nome, euro_t: v.euro_t, quando, periodo: periodoSurplus({ data_inizio_validita: v.dal, data_fine_validita: v.al }) }));
+        return voci.length ? { surplus: voci } : {};
+      };
       return {
         fonte: 'Tariffe',
         periodo: `tariffe in tabella, con la loro validita' al ${oggi}`,
@@ -2379,7 +2702,19 @@ export const STRUMENTI = [
             regione: t.regione, provincia: t.provincia, classe: t.classe_materiale,
             valore: t.valore, unita_misura: t.unita_misura,
             validita: `${soloData(t.data_inizio_validita)} - ${soloData(t.data_fine_validita) || 'senza scadenza'}`,
+            ...surplusSullaTariffa(t),
           })), 80),
+          ...(surplusLetti === null
+            ? { avviso_surplus: "Non sono riuscita a leggere i surplus sulle tariffe (come il Fuel Surcharge): le tariffe qui sopra sono giuste, ma un eventuale surplus in corso qui non si vede. Non dire che non ce ne sono: si vedono nella scheda Surplus di Tariffe & Anagrafiche." }
+            : !righeSurplus.length
+            ? { surplus: elenco(righeSurplus, 40), nota_surplus: 'Nessun surplus sulle tariffe (come il Fuel Surcharge) per questa domanda: le tariffe valgono come sono.' }
+            : {
+              surplus: elenco(righeSurplus, 40),
+              nota_surplus: "Il surplus si aggiunge alla tariffa, sempre in €/t, con le sue date (sul giorno italiano della fine del trasporto, estremi compresi): in fattura e' una riga a parte, sulle stesse tonnellate, non un prezzo diverso: il valore della tariffa resta quello, e il surplus si dice accanto. Un record per canale: rete, ACI ed extra raccolta hanno ciascuno il suo e non si sommano. Accanto a ogni tariffa, surplus dice quello che vale oggi su di lei o arriva."
+                + (soloAttive
+                  ? " Qui c'e' solo quanto SMOCO fattura in piu' a Ecotyre (da_ecotyre_euro_t)."
+                  : " ai_fornitori_euro_t e' quanto SMOCO paga in piu' ai fornitori, da_ecotyre_euro_t quanto fattura in piu' a Ecotyre: vuoto vuol dire che in quella direzione non si paga. Un fornitore interno (SMOCO) non lo riceve."),
+            }),
           ...(p.tipologia && !tipologia && String(p.tipologia).toUpperCase().trim() !== 'TUTTE'
             ? { avviso_canale: `"${p.tipologia}" non e' un canale: qui ci sono le tariffe di tutti i canali, ciascuna col suo.` } : {}),
           ...(soloAttive ? { nota_riservate: 'Qui ci sono solo le tariffe attive (quanto ci spetta). ' + COSTI_RISERVATI } : {}),
@@ -2394,7 +2729,7 @@ export const STRUMENTI = [
     // leggono (shared/storicoModifiche.ts). I costi dei fornitori passano da
     // vedeICosti come negli altri strumenti.
     nome: 'storico_modifiche',
-    descrizione: 'Chi ha cambiato a mano un numero che fa i conti, quando, da quale valore a quale e perche\': target di impianti e raccoglitori, aperture delle giacenze, tariffe, commessa Ecotyre, dichiarazioni degli impianti, costi e prezzi dell\'extra raccolta, voci della passiva. Per domande come «chi ha cambiato il target di Irigom e quando» o «quando e\' cambiato il prezzo di Emmesse». Le modifiche registrate cominciano a ottobre 2026; i caricamenti dei file non ci sono.',
+    descrizione: 'Chi ha cambiato a mano un numero che fa i conti, quando, da quale valore a quale e perche\': target di impianti e raccoglitori, aperture delle giacenze, tariffe e surplus sulle tariffe (Fuel Surcharge), commessa Ecotyre, dichiarazioni degli impianti, costi e prezzi dell\'extra raccolta, voci della passiva. Per domande come «chi ha cambiato il target di Irigom e quando» o «quando e\' cambiato il prezzo di Emmesse». Le modifiche registrate cominciano a ottobre 2026; i caricamenti dei file non ci sono.',
     parametri: { soggetto: 'opzionale: impianto, raccoglitore, fornitore o sito (per esempio Irigom)', cosa: 'opzionale: target, apertura, tariffa, prezzo, commessa, dichiarazione, extra raccolta, passiva, costi', anno: 'opzionale', chi: 'opzionale: chi ha fatto la modifica', dal: 'opzionale, AAAA-MM-GG', al: 'opzionale, AAAA-MM-GG' },
     moduli: ['Target & Status', 'Giacenze', 'Tariffe', 'Dichiarazioni Impianti', 'Extra Raccolta', 'Fatturazione'],
     async esegui(base44, p, ctx) {

@@ -47,6 +47,9 @@ const SPECCHI = [
   ['base44/shared/fontiConoscenza.ts', 'src/lib/fontiConoscenza.js'],
   ['base44/shared/segnapostiContratto.ts', 'src/lib/segnapostiContratto.js'],
   ['base44/shared/formulari.ts', 'src/lib/formulari.js'],
+  // Dal 13/10/2026 (il surplus sulle tariffe): quando vale un surplus, a chi e
+  // quanto fa una riga, uguale per il calcolo, il salvataggio e le pagine.
+  ['base44/shared/surplus.ts', 'src/lib/surplus.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa

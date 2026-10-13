@@ -30,7 +30,10 @@
 //   della passiva (formulariDoppi), e la riga resta: il ricavo lo decide
 //   l'amministrazione (segnalazione alta del 20/09, corretta il 12/10/2026);
 // - la regione di un ritiro e' quella di regioneDi, la regola unica
-//   dell'11/10/2026, e un ACI senza regione ne' provincia si segnala.
+//   dell'11/10/2026, e un ACI senza regione ne' provincia si segnala;
+// - un surplus sulle tariffe (il Fuel Surcharge del consorzio, 13/10/2026) e'
+//   UNA riga in piu' per canale, sotto le righe dei formulari, sulle stesse
+//   tonnellate del mese: vedi IL SURPLUS SULLE TARIFFE, piu' sotto.
 import { filtraPeriodo, meseToIndice, anomalieDateFormulari } from "./filtroPeriodo.ts";
 import {
   sortTariffe, resolveTariffa, calcolaTotale, fattoreConv, prezzoAttivoExtra, tariffeAttiveValide,
@@ -41,7 +44,11 @@ import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
 import { disattivateNelPeriodo } from "./validitaTariffa.ts";
 import { regioneDi } from "./regioneMovimento.ts";
 import { chiaveFormulario, formulariDoppi } from "./formulari.ts";
-import { formatoKg } from "./formato.ts";
+import { formatoKg, formatoKgInTonnellate } from "./formato.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
+import { surplusDelMovimento, valePerFornitore, surplusNonDisattivati, surplusNelPeriodo, importoSurplus, etichettaSurplus, testoEuroT, fornitoriDelSurplus, euroTDi, NOMI_ORIGINE } from "./surplus.ts";
+import { mappaFatturazione, fatturaA } from "./subfornitori.ts";
+import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 
 export const TIPOLOGIE_ATTIVA = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
 export const UNITA_A_CORPO = '€ a corpo';
@@ -84,7 +91,35 @@ export { tariffeAttiveValide, eSecondariaExtra, prezzoAttivoExtra };
 // conta fra gli ordini.
 export const eRigaACorpo = (riga) => riga.unita_misura === UNITA_A_CORPO;
 
-export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno, mese }) {
+// L'origine della riga di un surplus (VoceFatturazione.origine_dato).
+export const ORIGINE_SURPLUS = 'SURPLUS';
+/**
+ * La riga di un surplus (il Fuel Surcharge, 13/10/2026): una per canale e per
+ * surplus, sulle stesse tonnellate dei formulari del mese. Non e' un ordine e non
+ * porta chili (quantita 0, le tonnellate stanno in kg_riferimento): chi conta
+ * ordini, regioni o prezzi la salta, chi somma gli euro la prende.
+ */
+export const eRigaSurplus = (riga) => !!riga && (!!riga.surplus_id || riga.origine_dato === ORIGINE_SURPLUS);
+/**
+ * Una riga di un formulario: ne' a corpo (sovracosto) ne' di surplus. E' quella
+ * da contare fra gli ordini, le tonnellate, le regioni e i prezzi: prima bastava
+ * !eRigaACorpo, ma la riga del surplus ha un prezzo a tonnellata e si contava
+ * come un ordine in piu' (13/10/2026).
+ */
+export const eRigaDiMovimento = (riga) => !!riga && !eRigaACorpo(riga) && !eRigaSurplus(riga);
+
+/**
+ * calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno, mese, surplus })
+ *
+ * surplus: i record di SurplusTariffa, letti tutti (il disattivato si toglie qui,
+ * come per le tariffe). Facoltativo: chi non lo passa ottiene le righe di prima,
+ * senza la riga del surplus. Si accetta anche col nome surplusAll, quello della
+ * passiva.
+ *
+ * -> { righe: { RETE, ACI, EXTRA_RACCOLTA }, anomalie, extra_secondarie_escluse,
+ *      surplus_del_mese: { RETE: [...], ACI: [...], EXTRA_RACCOLTA: [...] } }
+ */
+export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tariffe, anno, mese, surplus = null, surplusAll = null }) {
   const annoNum = Number(anno);
   const rete = filtraPeriodo(reteAll, annoNum, mese);
   const aci = filtraPeriodo(aciAll, annoNum, mese);
@@ -165,9 +200,97 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
 
   const righe = { RETE: [], ACI: [], EXTRA_RACCOLTA: [] };
 
+  // IL SURPLUS SULLE TARIFFE (13/10/2026). Richiesta dell'utente del 12/10/2026:
+  // in attiva come in passiva «una riga con l'importo standard ed una per il
+  // surplus (sempre riferito alle stesse tonnellate raccolte o trattate nel
+  // mese)». Il primo caso e' il Fuel Surcharge del consorzio Ecotyre, +5 €/t dal
+  // 01/10/2026 al 31/12/2026, che SMOCO fattura a Ecotyre su rete, ACI ed extra
+  // raccolta, ognuno con la sua riga e mai sommati.
+  //
+  // Le regole (quando vale, per chi, quanto) stanno in surplus.ts, uguali per
+  // tutti: qui si guarda ogni formulario che si fattura, col giorno italiano
+  // della fine del trasporto (mai la chiusura a portale), e se ci vale un surplus
+  // con la parte attiva i suoi chili si sommano a quel surplus. Alla fine, sotto
+  // le righe del canale, una riga per surplus: i chili del mese per l'importo in
+  // €/t, arrotondati UNA volta al centesimo (importoSurplus). Una riga per
+  // formulario sbaglierebbe il centesimo: sui dati veri di settembre 2026 la rete
+  // farebbe 5.601,21 invece di 5.601,20, e la fattura di SMOCO avra' una riga
+  // sola «Fuel Surcharge t x 5».
+  //
+  // La riga ha quantita 0 e le tonnellate in kg_riferimento: tutto quello che
+  // somma i chili delle righe (margine, riepilogo, report, prefattura,
+  // riconciliazione) resta giusto senza contarle due volte, e tutto quello che
+  // somma gli euro prende il surplus, che e' quello che si fattura.
+  //
+  // La base e' la parte che si fattura a Ecotyre: le righe dei formulari col peso
+  // effettivo (le secondarie dell'extra raccolta gia' non ci sono), comprese le
+  // tonnellate raccolte da SMOCO (Ecotyre paga il surplus su tutto il canale; e'
+  // la passiva che non lo paga a un interno) e quelle «Trasp.» verso Tecnogum. Un
+  // surplus «solo questi fornitori» vale sulle righe dei fornitori dell'elenco:
+  // il raccoglitore per la raccolta, la destinazione per trattamento e
+  // stoccaggio, riconosciuti per nome normalizzato o per id, anche attraverso chi
+  // fattura per loro (la catena dei subfornitori, come nella passiva).
+  const tuttiSurplus = surplusNonDisattivati(surplus || surplusAll || []);
+  const perFattura = tuttiSurplus.length ? mappaFatturazione(fornitori) : null;
+  const idPerChiave = new Map();
+  if (tuttiSurplus.length) {
+    for (const f of fornitori || []) {
+      const k = normalizzaRagioneSociale(f && f.ragione_sociale);
+      if (k && f.id && !idPerChiave.has(k)) idPerChiave.set(k, String(f.id));
+    }
+  }
+  // Il fornitore di un movimento come lo vuole surplus.ts: l'id di chi fattura e i
+  // nomi con cui lo si puo' trovare in un elenco (chi e' scritto sul formulario e
+  // chi fattura per lui).
+  const fornitoreDi = (nome) => {
+    const originale = String(nome || '').trim();
+    if (!originale) return { id: '', nomi: [] };
+    const f = fatturaA(perFattura, originale);
+    return { id: idPerChiave.get(f.chiave) || idPerChiave.get(normalizzaRagioneSociale(originale)) || '', nomi: [...new Set([originale, f.nome].filter(Boolean))] };
+  };
+  const surplusPerCanale = { RETE: new Map(), ACI: new Map(), EXTRA_RACCOLTA: new Map() };
+  // I surplus «solo questi fornitori» con la parte attiva: per ognuno, i giorni
+  // dei formulari del mese che sono dei suoi fornitori, dentro o fuori dal suo
+  // periodo. Servono a dire perche' una riga di surplus manca (revisione del
+  // 13/10/2026): un fornitore che nel mese non ha lavorato e uno che ha lavorato
+  // solo prima che il surplus cominci non sono la stessa cosa.
+  const conElenco = tuttiSurplus.filter(s => fornitoriDelSurplus(s).length && euroTDi(s, 'ATTIVA') !== null);
+  const giorniDelFornitore = new Map();
+  const segnaSurplus = (tipologia, r, riga) => {
+    if (!tuttiSurplus.length) return;
+    const kg = Number(riga && riga.quantita) || 0;
+    if (!(kg > 0)) return;
+    const raccoglitore = fornitoreDi(r.trasportatore);
+    const impianto = fornitoreDi(r.destinazione);
+    for (const s of conElenco) {
+      if (String(s.tipologia || '').trim().toUpperCase().replace(/[\s-]+/g, '_') !== tipologia) continue;
+      const prestazione = String(s.prestazione || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+      const chi = prestazione === 'TRATTAMENTO' || prestazione === 'CONFERIMENTO_STOCCAGGIO' ? impianto : raccoglitore;
+      if (!valePerFornitore(s, chi)) continue;
+      const giorni = giorniDelFornitore.get(s) || [];
+      giorni.push(giornoRoma(r.trasporto_finito_il));
+      giorniDelFornitore.set(s, giorni);
+    }
+    const validi = surplusDelMovimento(tuttiSurplus, {
+      tipologia, prestazione: '', quando: r.trasporto_finito_il,
+      fornitore: raccoglitore,
+      fornitori: { RACCOLTA: raccoglitore, TRATTAMENTO: impianto, CONFERIMENTO_STOCCAGGIO: impianto },
+    }, 'ATTIVA');
+    for (const { surplus: s, euro_t } of validi) {
+      const chiave = String(s.id || '') || `${s.nome}|${s.data_inizio_validita}|${euro_t}`;
+      const acc = surplusPerCanale[tipologia].get(chiave) || { surplus: s, euro_t, kg: 0, righe: 0, ordini: new Set() };
+      acc.kg += kg;
+      acc.righe++;
+      if (riga.ordine) acc.ordini.add(String(riga.ordine));
+      surplusPerCanale[tipologia].set(chiave, acc);
+    }
+  };
+
   for (const r of rete) {
     if (!(r.peso_effettivo > 0)) continue;
-    righe.RETE.push(daTariffa(r, 'RETE', 'TERMINATI_RETE', '', regioneRitiro(r)));
+    const riga = daTariffa(r, 'RETE', 'TERMINATI_RETE', '', regioneRitiro(r));
+    righe.RETE.push(riga);
+    segnaSurplus('RETE', r, riga);
   }
   // Il prezzo ACI cambia con la regione (240 €/t Campania e Puglia, 230 €/t
   // Calabria nel 2026): un ritiro senza regione ne' provincia non puo' prendere
@@ -180,6 +303,7 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     const riga = daTariffa(r, 'ACI', 'ACI', regione, regione, { ticket_n: r.numero_ordine_interno || '' });
     if (!regione) aciSenzaRegione.push(riga);
     righe.ACI.push(riga);
+    segnaSurplus('ACI', r, riga);
   }
 
   for (const r of extra) {
@@ -221,14 +345,16 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     if (prezzo.unita_sconosciuta) {
       unitaNonLetta('EXTRA_RACCOLTA', regione, r.classe, r.cer, tipoServizio, kg, { id: prezzo.id, valore: prezzo.valore, unita_misura: (tariffeSorted.find(t => t.id === prezzo.id) || {}).unita_misura });
     }
-    righe.EXTRA_RACCOLTA.push({
+    const rigaExtra = {
       ...base, regione,
       quantita: kg, unita_quantita: 'kg',
       tariffa_id: prezzo.id, tariffa_valore: prezzo.valore,
       unita_misura: prezzo.unita, unita_prezzo: prezzo.unita, fattore_conversione: prezzo.fattore,
       totale: r2(prezzo.totale(kg)),
       stato_validazione: prezzo.valore && !prezzo.unita_sconosciuta ? 'verificato' : 'errore', note: prezzo.nota,
-    });
+    };
+    righe.EXTRA_RACCOLTA.push(rigaExtra);
+    segnaSurplus('EXTRA_RACCOLTA', r, rigaExtra);
     for (const [campo, etichetta] of SOVRACOSTI) {
       const importo = Number(r[campo] || 0);
       if (!importo) continue;
@@ -240,6 +366,62 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
         unita_misura: UNITA_A_CORPO, unita_prezzo: UNITA_A_CORPO, fattore_conversione: 1,
         totale: r2(importo),
         stato_validazione: 'verificato', note: `${etichetta} scritto sull'intervento`,
+      });
+    }
+  }
+
+  // Le righe dei surplus, in fondo al canale: una per surplus, ordinate per nome e
+  // poi per data di inizio (se un surplus cambia importo nel mese sono due record,
+  // e due righe). Una riga solo se il surplus ha preso dei chili: un canale senza
+  // formulari nel mese non ha niente da fatturare, nemmeno il surplus.
+  const surplus_del_mese = { RETE: [], ACI: [], EXTRA_RACCOLTA: [] };
+  for (const tipologia of TIPOLOGIE_ATTIVA) {
+    const accumulati = [...surplusPerCanale[tipologia].values()]
+      .filter(a => a.kg > 0)
+      .sort((a, b) => String(a.surplus.nome || '').localeCompare(String(b.surplus.nome || ''), 'it')
+        || String(a.surplus.data_inizio_validita || '').localeCompare(String(b.surplus.data_inizio_validita || '')));
+    for (const a of accumulati) {
+      const s = a.surplus;
+      const nome = String(s.nome || '').trim() || 'Surplus';
+      const kg = Math.round(a.kg * 1000) / 1000;
+      const totale = importoSurplus(kg, a.euro_t);
+      const dal = String(s.data_inizio_validita || '').slice(0, 10);
+      const al = String(s.data_fine_validita || '').slice(0, 10);
+      righe[tipologia].push({
+        tipologia, tipo: 'ATTIVA',
+        servizio_ecotyre: '',
+        fatturante: FATTURANTE_ATTIVA,
+        // non e' un formulario: niente ordine, FIR, data, classe ne' regione
+        ordine: '', data_fine_trasporto: null, numero_fir: '',
+        classe: '', eer_codice: '', regione: '',
+        descrizione: nome,
+        surplus_id: String(s.id || ''),
+        origine_dato: ORIGINE_SURPLUS, origine_record_id: String(s.id || ''),
+        sospesa: false, motivo_sospensione: '',
+        // ZERO chili: le tonnellate sono quelle dei formulari qui sopra
+        quantita: 0, unita_quantita: 'kg',
+        kg_riferimento: kg,
+        record_count: a.righe,
+        tariffa_id: `surplus|${String(s.id || '')}`, tariffa_valore: a.euro_t,
+        unita_misura: '€/t', unita_prezzo: '€/t', fattore_conversione: 1000,
+        totale,
+        stato_validazione: 'verificato',
+        note: `${etichettaSurplus(s)}, sulle stesse ${formatoKgInTonnellate(kg)} t del mese`,
+        anno: annoNum, mese,
+      });
+      surplus_del_mese[tipologia].push({
+        surplus_id: String(s.id || ''), gruppo: String(s.gruppo || ''), nome,
+        origine: NOMI_ORIGINE[String(s.origine || '').trim().toUpperCase()] || '',
+        riferimento: String(s.riferimento || '').trim(),
+        prestazione: String(s.prestazione || '').trim().toUpperCase(),
+        // solo la parte attiva: quanto si paga ai fornitori e' un costo, e
+        // l'attiva la leggono tutti (revisione del 13/10/2026); il margine lo
+        // legge dal record del surplus
+        euro_t: a.euro_t,
+        kg, ton: Math.round(kg) / 1000, ordini: a.righe, totale, dal, al,
+        // gli ordini su cui vale: servono al confronto con la prefattura, che
+        // cerca il surplus anche dentro il prezzo di ogni ordine
+        ordini_ids: [...a.ordini],
       });
     }
   }
@@ -312,6 +494,36 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
         descrizione: `Tariffa attiva ${t.tipologia} ${t.valore} ${t.unita_misura || ''}`.trimEnd() + ` 'non attiva' con la validita' fino al ${String(t.data_fine_validita).slice(0, 10).split('-').reverse().join('/')}: una tariffa non attiva non vale mai, nemmeno nella sua finestra. Se deve valere per questo mese, rimettila attiva dall'elenco delle tariffe.`,
       });
     }
+    // UN ELENCO SBAGLIATO NON DEVE TACERE (13/10/2026). Un surplus «solo questi
+    // fornitori» con la parte attiva, in corso nel mese, che non ha preso nessun
+    // formulario del canale: o quei fornitori nel mese non hanno lavorato, o
+    // l'elenco nomina qualcuno col nome sbagliato. Non e' un errore: si dice. Un
+    // surplus «a tutti» senza chili e' solo un canale senza formulari.
+    for (const s of surplusNelPeriodo(tuttiSurplus, `${annoNum}-${mm}-01`, `${annoNum}-${mm}-31`)) {
+      const tipologia = String(s.tipologia || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+      if (!TIPOLOGIE_ATTIVA.includes(tipologia) || euroTDi(s, 'ATTIVA') === null) continue;
+      const elenco = fornitoriDelSurplus(s);
+      if (!elenco.length || surplus_del_mese[tipologia].some(x => x.surplus_id === String(s.id || ''))) continue;
+      const nomi = elenco.map(f => f.nome || f.id).join(', ');
+      // I formulari dei suoi fornitori ci sono ma finiscono il trasporto fuori dal
+      // periodo del surplus (comincia o finisce a meta' mese): i nomi sono giusti,
+      // e' il periodo. Si dice quanti sono e di che giorni (revisione del
+      // 13/10/2026: prima la frase diceva «nessun formulario» e mandava a
+      // controllare un elenco che era giusto).
+      const giorni = [...new Set((giorniDelFornitore.get(s) || []).filter(Boolean))].sort();
+      const quanti = (giorniDelFornitore.get(s) || []).length;
+      const dataIt = (g) => `il ${g.split('-').reverse().join('/')}`;
+      const quando = giorni.length > 3 ? `fra ${dataIt(giorni[0])} e ${dataIt(giorni[giorni.length - 1])}`
+        : giorni.length > 1 ? `${giorni.slice(0, -1).map(dataIt).join(', ')} e ${dataIt(giorni[giorni.length - 1])}` : giorni.map(dataIt).join('');
+      const diChi = elenco.length === 1 ? 'di questo fornitore' : 'di questi fornitori';
+      const perche = quanti
+        ? `in ${String(mese).toLowerCase()} ${quanti === 1 ? `il formulario del canale ${diChi} finisce` : `i ${quanti} formulari del canale ${diChi} finiscono`} il trasporto ${quando}, fuori dal periodo del surplus: la riga del surplus non c'è, ed è giusto così.`
+        : `in ${String(mese).toLowerCase()} nessun formulario del canale è ${diChi}, e la riga del surplus non c'è. Se ${elenco.length === 1 ? 'ha lavorato' : 'hanno lavorato'}, controlla i nomi dell'elenco.`;
+      anomalie.push({
+        tipo: 'informazione', tipologia, regione: '', classe: '', eer_codice: '', servizio_ecotyre: '', tonnellate: 0,
+        descrizione: `${etichettaSurplus(s)}, ${testoEuroT(euroTDi(s, 'ATTIVA'))} da Ecotyre solo per ${nomi}: ${perche}`,
+      });
+    }
   }
   if (extraSecondarieEscluse > 0) {
     anomalie.push({
@@ -333,7 +545,7 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
       });
     }
   }
-  return { righe, anomalie, extra_secondarie_escluse: extraSecondarieEscluse };
+  return { righe, anomalie, extra_secondarie_escluse: extraSecondarieEscluse, surplus_del_mese };
 }
 
 // ─── Riconciliazione: il documento salvato contro i dati di oggi ───
@@ -351,9 +563,40 @@ function perChiave(righe) {
     const e = m.get(k) || { ordine: r.ordine || '', numero_fir: r.numero_fir || '', descrizione: r.descrizione || '', data_fine_trasporto: r.data_fine_trasporto || null, kg: 0, totale: 0 };
     e.kg += Number(r.quantita) || 0;
     e.totale += Number(r.totale) || 0;
+    // La riga di un surplus: chili zero, le tonnellate su cui vale a parte
+    if (eRigaSurplus(r)) {
+      e.surplus = true;
+      e.kg_riferimento = (e.kg_riferimento || 0) + (Number(r.kg_riferimento) || 0);
+      e.euro_t = Number(r.tariffa_valore) || 0;
+    }
     m.set(k, e);
   }
   return m;
+}
+
+// LA RIGA DEL SURPLUS NELLA RICONCILIAZIONE (13/10/2026). La sua chiave e'
+// «||Fuel Surcharge» (niente ordine, niente formulario): un ordine del mese
+// arrivato dopo l'elaborazione la fa cambiare, e la riconciliazione la mette
+// fra le cambiate con la differenza in euro. I chili restano zero, cosi' il
+// delta dei chili non conta due volte le tonnellate arrivate dopo; la frase dice
+// su quante tonnellate e perche'.
+const tIt = (kg) => formatoKgInTonnellate(Math.abs(Number(kg) || 0));
+const conSegno = (v) => `${v > 0 ? '+' : v < 0 ? '-' : ''}${euroIt(Math.abs(v))}`;
+function spiegaSurplus(caso, v, s) {
+  if (caso === 'nuovo') {
+    return `${v.descrizione}: ${conSegno(v.totale)} € sulle ${tIt(v.kg_riferimento)} t del mese, che il documento non ha. Il surplus è stato scritto, o vale su queste tonnellate, dopo l'elaborazione.`;
+  }
+  if (caso === 'sparito') {
+    return `${s.descrizione}: ${euroIt(s.totale)} € nel documento, che oggi il mese non ha più: il surplus è stato tolto, disattivato o non vale più su queste tonnellate.`;
+  }
+  const dEuro = r2(v.totale - s.totale);
+  const dKg = (Number(v.kg_riferimento) || 0) - (Number(s.kg_riferimento) || 0);
+  const prezzo = Math.abs((v.euro_t || 0) - (s.euro_t || 0)) > 0.0005;
+  const perche = [];
+  if (Math.round(dKg) > 0) perche.push(`sulle ${tIt(dKg)} t arrivate dopo`);
+  else if (Math.round(dKg) < 0) perche.push(`sulle ${tIt(dKg)} t uscite dal mese`);
+  if (prezzo) perche.push(`l'importo è passato da ${testoEuroT(s.euro_t)} a ${testoEuroT(v.euro_t)}`);
+  return `${v.descrizione}: ${conSegno(dEuro)} €${perche.length ? ` ${perche.join(', e ')}` : ''}.`;
 }
 
 export function riconciliaAttiva(righeVive, vociSalvate) {
@@ -362,12 +605,16 @@ export function riconciliaAttiva(righeVive, vociSalvate) {
   const nuovi = [], spariti = [], cambiati = [];
   for (const [k, v] of vive) {
     const s = salvate.get(k);
-    if (!s) { nuovi.push({ ...v, totale: r2(v.totale) }); continue; }
-    if (Math.round(v.kg) !== Math.round(s.kg) || Math.abs(v.totale - s.totale) > 0.005) {
-      cambiati.push({ ordine: v.ordine, numero_fir: v.numero_fir, descrizione: v.descrizione, data_fine_trasporto: v.data_fine_trasporto, kg_documento: s.kg, kg_oggi: v.kg, totale_documento: r2(s.totale), totale_oggi: r2(v.totale) });
+    if (!s) { nuovi.push({ ...v, totale: r2(v.totale), ...(v.surplus ? { spiegazione: spiegaSurplus('nuovo', v, null) } : {}) }); continue; }
+    const surplusCambiato = (v.surplus || s.surplus) && Math.round(v.kg_riferimento || 0) !== Math.round(s.kg_riferimento || 0);
+    if (Math.round(v.kg) !== Math.round(s.kg) || Math.abs(v.totale - s.totale) > 0.005 || surplusCambiato) {
+      cambiati.push({
+        ordine: v.ordine, numero_fir: v.numero_fir, descrizione: v.descrizione, data_fine_trasporto: v.data_fine_trasporto, kg_documento: s.kg, kg_oggi: v.kg, totale_documento: r2(s.totale), totale_oggi: r2(v.totale),
+        ...(v.surplus || s.surplus ? { surplus: true, kg_riferimento_documento: s.kg_riferimento || 0, kg_riferimento_oggi: v.kg_riferimento || 0, spiegazione: spiegaSurplus('cambiato', v, s) } : {}),
+      });
     }
   }
-  for (const [k, s] of salvate) if (!vive.has(k)) spariti.push({ ...s, totale: r2(s.totale) });
+  for (const [k, s] of salvate) if (!vive.has(k)) spariti.push({ ...s, totale: r2(s.totale), ...(s.surplus ? { spiegazione: spiegaSurplus('sparito', null, s) } : {}) });
   const somma = (m, campo) => { let t = 0; for (const e of m.values()) t += e[campo]; return t; };
   const deltaKg = Math.round(somma(vive, 'kg') - somma(salvate, 'kg'));
   const deltaEuro = r2(somma(vive, 'totale') - somma(salvate, 'totale'));
