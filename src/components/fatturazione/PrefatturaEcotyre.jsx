@@ -28,9 +28,18 @@ const TONI = {
 // frase del calcolo; sotto, gli ordini su cui non torna. Le tonnellate e gli
 // importi della tabella dei canali restano quelli dei formulari: il surplus non
 // si somma agli ordini.
+//
+// Se la prefattura non porta nessun surplus, Ecotyre lo comunica a parte e si
+// fattura a parte (risposta dell'utente del 13/10/2026): il confronto lo scrive
+// e non lo conta (a_parte), e il cartellino e' un'osservazione, non l'ambra di
+// «c'e' qualcosa da chiarire».
+export const esitoDelSurplus = (s) => (s && s.a_parte
+  ? { testo: 'non in prefattura: si fattura a parte', tono: 'osservazione' }
+  : ESITI_SURPLUS[s && s.esito] || { testo: (s && s.esito) || '—', tono: 'neutro' });
+
 export function RiquadroSurplus({ canale, s }) {
   if (!s) return null;
-  const esito = ESITI_SURPLUS[s.esito] || { testo: s.esito, tono: 'neutro' };
+  const esito = esitoDelSurplus(s);
   const righe = s.gestionale?.righe || [];
   // senza righe nel gestionale (un surplus che c'e' solo nella prefattura) il nome non c'e'
   const nomi = [...new Set(righe.map(r => r.nome).filter(Boolean))].join(' e ') || 'non nel gestionale';
@@ -201,6 +210,14 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
               {!c.con_importi && ' · senza importi: confronto su ordini e pesi'}{!c.con_pesi && ' · senza pesi: confronto su ordini e importi'}
             </p>
             {p.note_lettura && <p className="text-xs mt-2 whitespace-pre-line flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span>{p.note_lettura}</span></p>}
+            {/* Il surplus che la prefattura non porta si fattura a parte: non e' una
+                differenza, ma si dice qui, dove si guarda l'esito (13/10/2026). */}
+            {(c.surplus_a_parte || []).map(x => (
+              <p key={x.canale} className={`text-xs mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md bg-background/70 px-2 py-1 ${STILE_SURPLUS.barretta}`}>
+                <span className={STILE_SURPLUS.etichetta}>Surplus</span>
+                <span><span className="font-medium">{NOMI[x.canale] || x.canale}:</span> {x.testo}</span>
+              </p>
+            ))}
           </div>
 
           {/* Le date obbligatorie dei formulari del mese (immissione, inizio e fine
@@ -259,7 +276,7 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
             <p className="text-xs -mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-muted-foreground">Gli importi qui sopra sono quelli dei formulari; il surplus si confronta a parte, in fondo a ogni canale:</span>
               {c.canali.filter(x => x.surplus).map(x => {
-                const e = ESITI_SURPLUS[x.surplus.esito] || { testo: x.surplus.esito, tono: 'neutro' };
+                const e = esitoDelSurplus(x.surplus);
                 return <span key={x.canale} className="inline-flex items-center gap-1"><span className="font-medium">{NOMI[x.canale]}</span><span className={`px-1.5 py-0.5 rounded ${TONI[e.tono] || TONI.neutro}`}>{e.testo}</span></span>;
               })}
             </p>

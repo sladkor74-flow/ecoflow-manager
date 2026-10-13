@@ -343,6 +343,15 @@ export function CorpoSurplusForm({ scheda = null, bozzaIniziale = null, surplus 
             <Input id="surplus-al" type="date" value={bozza.al} onChange={e => cambia({ al: e.target.value })} />
           </Campo>
         </div>
+        {/* Le date della scorciatoia del consorzio sono una proposta, da
+            confermare ogni anno (13/10/2026): si dice finche' Dal e Al restano
+            quelli proposti. */}
+        {bozza.proposta && bozza.dal === bozza.proposta.dal && bozza.al === bozza.proposta.al && (
+          <div role="note" className="flex items-start gap-2 rounded-md border border-dashed border-[hsl(var(--eco-surplus)/0.45)] bg-[hsl(var(--eco-surplus)/0.05)] px-3 py-2 text-xs leading-relaxed">
+            <Info className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${TINTA}`} aria-hidden="true" />
+            <p><span className={`font-semibold ${TINTA}`}>Date da confermare.</span> {bozza.proposta.testo}</p>
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">Sul giorno della fine del trasporto, estremi compresi. Al più fino al 31/12 dell'anno in cui comincia: i contratti sono annuali.</p>
         {schedaInModifica && !schedaInModifica.dateUguali && (
           <p className="text-xs text-amber-700 dark:text-amber-400">{testoDateDiverse(schedaInModifica)}</p>

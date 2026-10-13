@@ -10,6 +10,7 @@ import TariffeUnificate from '@/components/fatturazione/TariffeUnificate';
 import StoricoFatturazione from '@/components/fatturazione/StoricoFatturazione';
 import FatturazioneAttiva from '@/components/fatturazione/FatturazioneAttiva';
 import MargineCommessa from '@/components/fatturazione/MargineCommessa';
+import { sezioneDelCollegamento } from '@/components/fatturazione/surplusTariffe';
 import { useAuth } from '@/lib/AuthContext';
 
 // Le schede che chi guarda ha davvero: un collegamento a una scheda
@@ -29,6 +30,10 @@ export default function Fatturazione() {
   const [tab, setTab] = useState(arrivo.tab || 'passiva');
   const [periodo, setPeriodo] = useState(() => periodoDelCollegamento(arrivo, meseDiLavoro()));
   const [canalePassiva, setCanalePassiva] = useState(arrivo.canale || 'RETE');
+  // ?tab=tariffe&sezione=surplus apre i surplus sulle tariffe (13/10/2026): la
+  // linguetta dentro Tariffe & Anagrafiche, che dopo la pubblicazione l'utente
+  // non aveva trovato.
+  const sezioneTariffe = sezioneDelCollegamento(location.search);
   // Un collegamento nuovo con la pagina gia' aperta, o il ruolo che arriva dopo
   // la prima apertura (le schede dell'amministratore).
   useEffect(() => {
@@ -55,7 +60,9 @@ export default function Fatturazione() {
         <p className="text-muted-foreground mt-1">Gestione fatturazione passiva e attiva.</p>
       </div>
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        {/* A 375 px le sei linguette in una riga non ci stanno: vanno a capo,
+            e «Tariffe & Anagrafiche» resta a vista (13/10/2026). */}
+        <TabsList className="flex-wrap h-auto">
           {isAdmin && <TabsTrigger value="passiva"><FileText className="w-4 h-4 mr-1.5" /> Passiva</TabsTrigger>}
           <TabsTrigger value="attiva"><TrendingUp className="w-4 h-4 mr-1.5" /> Attiva</TabsTrigger>
           {isAdmin && <TabsTrigger value="margine"><Scale className="w-4 h-4 mr-1.5" /> Margine</TabsTrigger>}
@@ -78,7 +85,7 @@ export default function Fatturazione() {
         <TabsContent value="attiva" className="mt-4"><FatturazioneAttiva isAdmin={isAdmin} onVaiTariffe={() => setTab('tariffe')} periodoIniziale={periodoDelCollegamento(arrivo, null)} /></TabsContent>
         {isAdmin && <TabsContent value="margine" className="mt-4"><MargineCommessa /></TabsContent>}
         {isAdmin && <TabsContent value="fornitori" className="mt-4"><FornitoriManager /></TabsContent>}
-        {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeUnificate /></TabsContent>}
+        {isAdmin && <TabsContent value="tariffe" className="mt-4"><TariffeUnificate sezione={sezioneTariffe} /></TabsContent>}
         {isAdmin && <TabsContent value="storico" className="mt-4"><StoricoFatturazione onOpen={openPeriod} /></TabsContent>}
       </Tabs>
     </div>

@@ -13,8 +13,10 @@
 // 5. il cambio d'importo da una data chiude il surplus di prima il giorno
 //    prima, con la sua traccia;
 // 6. la modifica e l'eliminazione di tutti i canali insieme (il gruppo);
-// 7. i mesi gia' chiusi (attiva fatturata, passiva congelata) si dicono con la
-//    stima, sul giorno italiano della fine del trasporto, senza riaprire niente;
+// 7. i mesi gia' chiusi (attiva approvata, esportata o chiusa, passiva
+//    congelata) si dicono con la stima, sul giorno italiano della fine del
+//    trasporto, senza riaprire niente (approvata ed esportata dal 13/10/2026,
+//    risposta dell'utente);
 // 8. un salvataggio che si ferma a meta' dice che cosa ha scritto e che cosa no
 //    (e, se si ferma al primo passo, che non ha scritto niente);
 // 9. il gruppo della creazione e' quello scritto, anche in cima al payload, e
@@ -296,8 +298,26 @@ await sezione('7. I MESI GIA\' CHIUSI SI DICONO, CON LA STIMA, E NON SI RIAPRE N
     corpo: crea({ ...FUEL, data_inizio_validita: '2026-08-01', data_fine_validita: '2026-08-31', tipologia: 'RETE' }),
   });
   verifica('agosto, fatturato fuori dal gestionale: si dice, senza stima', fuori.stato === 200 && fuori.j.mesi_chiusi[0].attiva.stima === 'non_stimabile' && /fatturato fuori dal gestionale/.test(fuori.j.mesi_chiusi[0].messaggio), J(fuori.j.mesi_chiusi));
-  const approvata = await chiama(modulo, { db: { ...ottobre, DocumentoFatturazione: [{ ...ottobre.DocumentoFatturazione[0], stato: 'esportata' }], ChiusuraPassivaMese: [] }, corpo: crea({ ...FUEL, tipologia: 'RETE' }) });
-  verifica('un documento esportato ma non chiuso non e\' un mese chiuso', approvata.stato === 200 && !approvata.j.mesi_chiusi, J(approvata.j));
+  // L'attiva approvata o esportata e' gia' fatturata anche se non e' chiusa
+  // (risposta dell'utente del 13/10/2026): l'avviso scatta, con lo stato vero e
+  // la stessa stima; elaborata o verificata no, si rielabora e il surplus entra.
+  for (const stato of ['esportata', 'approvata']) {
+    const r = await chiama(modulo, { db: { ...ottobre, DocumentoFatturazione: [{ ...ottobre.DocumentoFatturazione[0], stato, fattura_numero: '' }], ChiusuraPassivaMese: [] }, corpo: crea({ ...FUEL, tipologia: 'RETE' }) });
+    const x = (r.j.mesi_chiusi || [])[0] || {};
+    verifica(`un documento ${stato} ma non chiuso: il mese e' gia' fatturato, e si dice con la stima (60,00 t, 300,00 €)`, r.stato === 200 && (r.j.mesi_chiusi || []).length === 1
+      && x.attiva && x.attiva.stato === stato && x.attiva.dopo.euro === 300 && x.attiva.dopo.tonnellate === 60 && x.attiva.stima === 'esatta' && x.passiva === null, J(r.j));
+    verifica(`...la frase dice «${stato}» e che rielaborando, se la fattura non e' emessa, il surplus entra`,
+      x.messaggio === `Ottobre 2026, rete: la fatturazione attiva è ${stato}: il surplus vale 300,00 € da Ecotyre (60,00 t a 5,00 €/t). Il gestionale non riapre niente da solo: la differenza si gestisce a parte. Se la fattura a Ecotyre non è ancora emessa, rielaborando il mese il surplus entra nel documento.`
+      && (r.j.avvisi || []).includes(x.messaggio), x.messaggio);
+    verifica(`...e in anteprima si ferma per la conferma, senza scrivere`, await chiama(modulo, { db: { ...ottobre, DocumentoFatturazione: [{ ...ottobre.DocumentoFatturazione[0], stato }], ChiusuraPassivaMese: [] }, corpo: crea({ ...FUEL, tipologia: 'RETE' }, { anteprima: true }) })
+      .then(p => p.stato === 200 && p.scritte.length === 0 && (p.j.mesi_chiusi || []).length === 1));
+  }
+  for (const stato of ['elaborata', 'verificata']) {
+    const r = await chiama(modulo, { db: { ...ottobre, DocumentoFatturazione: [{ ...ottobre.DocumentoFatturazione[0], stato }], ChiusuraPassivaMese: [] }, corpo: crea({ ...FUEL, tipologia: 'RETE' }) });
+    verifica(`un documento ${stato} non e' ancora fatturato: niente da dire`, r.stato === 200 && !r.j.mesi_chiusi, J(r.j));
+  }
+  // chiusa resta come prima: la frase senza la riga della rielaborazione
+  verifica('chiusa: la frase di prima, senza «rielaborando»', !/rielaborando/.test(m.messaggio) && /la fatturazione attiva è chiusa \(fattura 123\/2026\)/.test(m.messaggio), m.messaggio);
 });
 
 await sezione('8. UN SALVATAGGIO CHE SI FERMA A META\' DICE CHE COSA HA SCRITTO', async () => {

@@ -1,13 +1,15 @@
 import React from 'react';
 import { formatNumber } from '@/lib/utils';
 import { testoEuroT } from '@/lib/surplus';
-import { EtichettaSurplus, OrigineSurplus, RIGA_SURPLUS, TonnellateSurplus, TotaleStandardSurplus } from './PassivaSurplus';
+import { AvvisoSurplus, EtichettaSurplus, OrigineSurplus, RIGA_SURPLUS, TonnellateSurplus, TotaleStandardSurplus } from './PassivaSurplus';
 
 // Il surplus sulle tariffe (13/10/2026): sotto le righe standard di ogni
 // fornitore e prima del suo totale, una riga per surplus (il Fuel Surcharge del
 // consorzio Ecotyre), sulle stesse tonnellate del mese. Il totale del fornitore
 // in tonnellate resta quello delle righe; in euro comprende il surplus, e sotto
 // si legge come si compone. Un interno non ha la riga: a se stessi non si fattura.
+// Un raccoglitore senza la tariffa del mese riceve lo stesso il surplus, e la
+// riga lo dice nel Dettaglio (AvvisoSurplus, risposta dell'utente del 13/10/2026).
 export default function PassivaRaccoglitoriTable({ data }) {
   if (!data || data.length === 0) {
     return <div className="text-sm text-muted-foreground py-4 text-center">Nessun raccoglitore per questo periodo.</div>;
@@ -71,7 +73,7 @@ export default function PassivaRaccoglitoriTable({ data }) {
                     <td className="px-3 py-1.5 text-right text-muted-foreground" title="Il surplus è a tonnellata">—</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{testoEuroT(s.euro_t)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatNumber(s.importo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="px-3 py-1.5 text-xs text-muted-foreground">sulle stesse tonnellate del mese</td>
+                    <td className="px-3 py-1.5 text-xs text-muted-foreground">sulle stesse tonnellate del mese<AvvisoSurplus s={s} /></td>
                   </tr>
                 ))}
                 <tr className="border-t bg-muted/30 font-semibold">

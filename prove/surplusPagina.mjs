@@ -21,7 +21,12 @@
 // 4. la frase che dice che cosa succede;
 // 5. le schede e la fascia; sui dati veri il Fuel Surcharge tocca 29 tariffe
 //    (22 di raccolta, 7 attive);
-// 6. la scorciatoia del consorzio prende l'anno di oggi, mai uno scritto;
+// 6. la scorciatoia del consorzio (risposta 5 dell'utente del 13/10/2026): nel
+//    2026 dal 01/10 al 31/12, la comunicazione vera; negli anni dopo le date
+//    dell'ultimo Fuel Surcharge del consorzio spostate all'anno, o l'anno
+//    intero; sempre da confermare, mai copiata da sola nell'anno nuovo; gli
+//    importi canale per canale, mai quelli di un canale portati sugli altri
+//    (revisione del 13/10/2026);
 // 7. il colore: un token, chiaro e scuro, e niente ambra per un surplus;
 // 8. il disegno: le sezioni vere disegnate con React lato server dicono i
 //    numeri all'italiana, i costi solo all'amministratore, «non letto» e non
@@ -32,6 +37,11 @@
 //    ogni canale fino al suo giorno e non nomina quelli conclusi (la rete non
 //    sembra prendere 5 + 6 €/t), la frase del modulo da' le date di ogni
 //    canale, la chiusura nomina il canale che si chiude.
+// 10. la sezione dei surplus si trova (13/10/2026: dopo la pubblicazione
+//    l'utente non l'ha trovata): senza surplus in corso la fascia breve in cima
+//    alle tariffe, il collegamento ?tab=tariffe&sezione=surplus, le date da
+//    confermare nel modulo della scorciatoia. La pagina montata (la scheda che
+//    si apre subito, la fascia, la linguetta) e' in prove/tariffeSiApreSubito.mjs.
 // node prove/surplusPagina.mjs
 import { build } from 'esbuild';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -265,12 +275,93 @@ await sezione('5. LE SCHEDE E LA FASCIA', async () => {
   }
 });
 
-await sezione('6. LA SCORCIATOIA DEL CONSORZIO PRENDE L\'ANNO DI OGGI', async () => {
-  const b27 = v('bozzaFuelSurcharge')('2027-02-10');
-  verifica('aperta nel 2027 propone dal 01/10/2027 al 31/12/2027', b27.dal === '2027-10-01' && b27.al === '2027-12-31' && b27.nome === 'Fuel Surcharge' && b27.origine === 'CONSORZIO' && J(b27.canali) === J(['RETE', 'ACI', 'EXTRA_RACCOLTA']) && b27.a_chi === 'tutti', J(b27));
-  const anni = [src.sezione, src.modulo, src.vista].map(senzaCommenti).join('\n').match(/\b20\d\d\b/g) || [];
-  verifica('nessun anno scritto nel codice delle tre parti nuove', anni.length === 0, J(anni));
-  verifica('la scorciatoia c\'e\', accanto a «Nuovo surplus»', /Fuel Surcharge del consorzio<\/Button>/.test(src.sezione) && /bozzaFuelSurcharge\(oggi\)/.test(src.sezione) && /Nuovo surplus<\/Button>/.test(src.sezione));
+await sezione('6. LA SCORCIATOIA DEL CONSORZIO: LE DATE DELL\'ANNO DI OGGI, DA CONFERMARE', async () => {
+  // Risposta 5 dell'utente del 13/10/2026: la scorciatoia vale anche negli anni
+  // dopo, con le date da confermare ogni anno; mai copiata da sola nell'anno
+  // nuovo, perche' i contratti sono annuali. Nel 2026, il caso vero, dal 01/10
+  // al 31/12; dopo, l'ultimo Fuel Surcharge del consorzio spostato all'anno, o
+  // l'anno intero.
+  const fuel = (oggi, surplus) => v('bozzaFuelSurcharge')(oggi, surplus) || {};
+  const tre = J(['RETE', 'ACI', 'EXTRA_RACCOLTA']);
+  const b26 = fuel(OGGI, []);
+  verifica('nel 2026 propone dal 01/10/2026 al 31/12/2026, 5,00 e 5,00 €/t, i tre canali, a tutti i raccoglitori',
+    b26.dal === '2026-10-01' && b26.al === '2026-12-31' && b26.passiva === '5,00' && b26.attiva === '5,00' && b26.uguale === true
+      && b26.nome === 'Fuel Surcharge' && b26.origine === 'CONSORZIO' && J(b26.canali) === tre && b26.a_chi === 'tutti' && b26.prestazione === 'RACCOLTA', J(b26));
+  verifica('e dice che le date vanno confermate con la comunicazione',
+    !!b26.proposta && b26.proposta.dal === '2026-10-01' && b26.proposta.al === '2026-12-31'
+      && b26.proposta.testo === 'Dal 01/10/2026 al 31/12/2026, come la comunicazione del consorzio per il 2026: confrontale con la comunicazione prima di salvare.', J(b26.proposta));
+  verifica('nel 2026 le date sono quelle della comunicazione anche con altri surplus scritti', fuel('2026-12-20', [{ ...FUEL[0], data_inizio_validita: '2026-11-01' }]).dal === '2026-10-01');
+  const vuoto27 = fuel('2027-02-10', []);
+  verifica('nel 2027, senza un Fuel Surcharge prima, propone l\'anno intero e dice di scrivere le date della comunicazione',
+    vuoto27.dal === '2027-01-01' && vuoto27.al === '2027-12-31' && J(vuoto27.canali) === tre && vuoto27.passiva === '5,00'
+      && /^Tutto il 2027, dal 01\/01\/2027 al 31\/12\/2027: il consorzio decide il periodo ogni anno\./.test((vuoto27.proposta || {}).testo || ''), J(vuoto27));
+  const da26 = fuel('2027-02-10', FUEL);
+  verifica('nel 2027, col Fuel Surcharge del 2026 scritto, le sue date spostate al 2027 (01/10 - 31/12), coi suoi canali e importi',
+    da26.dal === '2027-10-01' && da26.al === '2027-12-31' && J(da26.canali) === tre && da26.passiva === '5,00' && da26.attiva === '5,00' && da26.uguale === true && !da26.perCanale
+      && (da26.proposta || {}).testo === 'Dal 01/10/2027 al 31/12/2027: sono le date del Fuel Surcharge del 2026 spostate al 2027, con i suoi importi. Il consorzio decide date e importi ogni anno: confrontali con la sua comunicazione prima di salvare.', J(da26));
+  // Gli importi che si scriverebbero salvando la proposta com'e': [canale, ai raccoglitori, da Ecotyre].
+  const scritti = (b) => v('pianoDelSalvataggio')(b, {}).cambi.map(c => [c.canale, c.dopo.euro_t_passiva, c.dopo.euro_t_attiva]);
+  verifica('e salvata com\'e\' scrive 5 e 5 €/t su tutti e tre i canali', J(scritti(da26)) === J([['RETE', 5, 5], ['ACI', 5, 5], ['EXTRA_RACCOLTA', 5, 5]]), J(scritti(da26)));
+  // Il 2026 col cambio d'importo sulla sola rete dal 01/11 (sezione 9): il
+  // periodo e' quello di tutti i canali, gli importi quelli di ogni canale.
+  // Revisione del 13/10/2026: la proposta metteva l'importo della rete (6) su
+  // tutti i canali, e salvata com'era pagava e fatturava 1 €/t in piu' su ACI
+  // ed extra raccolta; il testo diceva «con i suoi importi».
+  const conSei = [{ ...FUEL[0], data_fine_validita: '2026-10-31' }, FUEL[1], FUEL[2], { ...FUEL[0], id: 's6', gruppo: 'g-sei', euro_t_passiva: 6, euro_t_attiva: 6, data_inizio_validita: '2026-11-01' }];
+  const da26sei = fuel('2027-03-01', conSei);
+  verifica('col 2026 a due importi: il periodo di tutti i canali (01/10 - 31/12), i canali, il modulo con gli importi per canale',
+    da26sei.dal === '2027-10-01' && da26sei.al === '2027-12-31' && J(da26sei.canali) === tre && da26sei.perCanale === true
+      && J(da26sei.importi) === J({ RETE: { passiva: '6,00', attiva: '6,00' }, ACI: { passiva: '5,00', attiva: '5,00' }, EXTRA_RACCOLTA: { passiva: '5,00', attiva: '5,00' } }), J(da26sei));
+  verifica('salvata com\'e\', la rete prende 6 €/t, ACI ed extra raccolta i loro 5 (non quelli della rete)',
+    J(scritti(da26sei)) === J([['RETE', 6, 6], ['ACI', 5, 5], ['EXTRA_RACCOLTA', 5, 5]]), J(scritti(da26sei)));
+  verifica('e la nota dice l\'ultimo importo di ogni canale, uno per uno',
+    (da26sei.proposta || {}).testo === 'Dal 01/10/2027 al 31/12/2027: sono le date del Fuel Surcharge del 2026 spostate al 2027, con l\'ultimo importo di ogni canale: Rete 6,00 €/t, ACI ed Extra raccolta 5,00 €/t. Il consorzio decide date e importi ogni anno: confrontali con la sua comunicazione prima di salvare.', (da26sei.proposta || {}).testo);
+  const esitiSei = v('esitiDelModulo')(da26sei, v('pianoDelSalvataggio')(da26sei, {}).cambi, conSei);
+  verifica('la proposta per canale si salva: nessun errore, nessun conflitto col 2026', esitiSei.errori === 0 && !esitiSei.conflitti.length, J(esitiSei));
+  // Sulla funzione vera: la richiesta porta gli importi di ogni canale.
+  const pianoSei = v('pianoDelSalvataggio')(da26sei, { motivo: 'comunicazione del consorzio 2027' });
+  const scrittoSei = await chiama(await caricaFunzione('gestisciAnagrafiche'), { db: { SurplusTariffa: conSei }, corpo: pianoSei.richiesta });
+  const nuovi27 = (scrittoSei.db.SurplusTariffa || []).filter(x => String(x.data_inizio_validita).startsWith('2027'));
+  verifica('e la funzione vera scrive Rete 6, ACI 5, Extra raccolta 5 dal 01/10/2027',
+    scrittoSei.stato === 200 && J(nuovi27.map(x => [x.tipologia, x.euro_t_passiva, x.euro_t_attiva, x.data_inizio_validita, x.data_fine_validita]))
+      === J([['RETE', 6, 6, '2027-10-01', '2027-12-31'], ['ACI', 5, 5, '2027-10-01', '2027-12-31'], ['EXTRA_RACCOLTA', 5, 5, '2027-10-01', '2027-12-31']]), J(scrittoSei.j).slice(0, 400));
+  // Rete e ACI con importi diversi dallo stesso giorno: ognuno il suo.
+  const reteCinqueAciQuattro = [FUEL[0], { ...FUEL[1], euro_t_passiva: 4, euro_t_attiva: 4 }];
+  const da26quattro = fuel('2027-02-10', reteCinqueAciQuattro);
+  verifica('Rete 5 e ACI 4 dallo stesso giorno: la proposta tiene 5 e 4, e lo dice',
+    da26quattro.perCanale === true && J(da26quattro.canali) === J(['RETE', 'ACI']) && J(scritti(da26quattro)) === J([['RETE', 5, 5], ['ACI', 4, 4]])
+      && /con l'ultimo importo di ogni canale: Rete 5,00 €\/t, ACI 4,00 €\/t\./.test((da26quattro.proposta || {}).testo || ''), J([scritti(da26quattro), (da26quattro.proposta || {}).testo]));
+  // Tutti i canali saliti a 6 dal 01/11: un importo solo, ma la nota dice che e' l'ultimo.
+  const tuttiSei = [...FUEL.map(x => ({ ...x, data_fine_validita: '2026-10-31' })), ...FUEL.map(x => ({ ...x, id: `${x.id}-6`, gruppo: 'g-sei', euro_t_passiva: 6, euro_t_attiva: 6, data_inizio_validita: '2026-11-01' }))];
+  const da26tuttiSei = fuel('2027-02-10', tuttiSei);
+  verifica('tutti i canali saliti a 6 €/t durante il 2026: un importo solo (6,00), e la nota dice che e\' l\'ultimo',
+    !da26tuttiSei.perCanale && da26tuttiSei.passiva === '6,00' && da26tuttiSei.attiva === '6,00' && J(scritti(da26tuttiSei)) === J([['RETE', 6, 6], ['ACI', 6, 6], ['EXTRA_RACCOLTA', 6, 6]])
+      && /con l'ultimo importo di ogni canale: Rete, ACI ed Extra raccolta 6,00 €\/t\./.test((da26tuttiSei.proposta || {}).testo || ''), J([scritti(da26tuttiSei), (da26tuttiSei.proposta || {}).testo]));
+  // Ai raccoglitori e da Ecotyre diversi su un canale: la nota li dice tutti e due.
+  const attivaDiversa = fuel('2027-02-10', [{ ...FUEL[0], euro_t_attiva: 5.5 }, FUEL[1]]);
+  verifica('ai raccoglitori 5 e da Ecotyre 5,50 sulla rete: la nota li dice tutti e due, e si scrivono così',
+    attivaDiversa.perCanale === true && J(scritti(attivaDiversa)) === J([['RETE', 5, 5.5], ['ACI', 5, 5]])
+      && /con l'ultimo importo di ogni canale: Rete 5,00 €\/t ai raccoglitori e 5,50 €\/t da Ecotyre, ACI 5,00 €\/t\./.test((attivaDiversa.proposta || {}).testo || ''), J([scritti(attivaDiversa), (attivaDiversa.proposta || {}).testo]));
+  verifica('un «Fuel Surcharge» da accordo commerciale non conta: e\' la scorciatoia del consorzio',
+    fuel('2027-02-10', FUEL.map(x => ({ ...x, origine: 'ACCORDO_COMMERCIALE' }))).dal === '2027-01-01');
+  verifica('un Fuel Surcharge disattivato non conta', fuel('2027-02-10', FUEL.map(x => ({ ...x, stato: 'non_attivo' }))).dal === '2027-01-01');
+  verifica('il nome si confronta normalizzato, come i conflitti', fuel('2027-02-10', FUEL.map(x => ({ ...x, nome: ' FUEL  surcharge ' }))).dal === '2027-10-01');
+  const gia27 = fuel('2027-08-01', [...FUEL, ...FUEL.map(x => ({ ...x, id: `${x.id}-27`, gruppo: 'g-27', data_inizio_validita: '2027-03-01', data_fine_validita: '2027-06-30' }))]);
+  verifica('nel 2027 con il 2027 gia\' scritto: le sue date, e lo dice',
+    gia27.dal === '2027-03-01' && gia27.al === '2027-06-30' && /^Dal 01\/03\/2027 al 30\/06\/2027: sono le date del Fuel Surcharge già scritto per il 2027\./.test((gia27.proposta || {}).testo || ''), J(gia27));
+  verifica('un surplus scritto per l\'anno dopo non conta', fuel('2027-02-10', FUEL.map(x => ({ ...x, data_inizio_validita: '2028-01-01', data_fine_validita: '2028-03-31' }))).dal === '2027-01-01');
+  const bisestile = fuel('2029-01-10', [{ ...FUEL[0], data_inizio_validita: '2028-02-29', data_fine_validita: '2028-03-31' }]);
+  verifica('il 29/02 in un anno che non lo ha diventa il 28/02', bisestile.dal === '2029-02-28' && bisestile.al === '2029-03-31', J([bisestile.dal, bisestile.al]));
+  // Le date proposte del 2027 passano i controlli, e sui record del 2026 non c'e' conflitto.
+  const esiti27 = v('esitiDelModulo')(da26, v('pianoDelSalvataggio')(da26, {}).cambi, FUEL);
+  verifica('il 2027 proposto si salva: nessun errore, nessun conflitto col 2026', esiti27.errori === 0 && !esiti27.conflitti.length, J(esiti27));
+
+  const codiceNuovo = [src.sezione, src.modulo, src.vista].map(senzaCommenti);
+  const anni = codiceNuovo.join('\n').match(/\b20\d\d\b/g) || [];
+  verifica('un anno solo scritto nel codice delle tre parti: il 2026 della comunicazione, nella sua costante',
+    J(anni) === J(['2026']) && /export const FUEL_SURCHARGE_CONSORZIO = \{ anno: 2026, dal: '10-01', al: '12-31', euro_t: '5,00' \};/.test(codiceNuovo[2]), J(anni));
+  verifica('la scorciatoia c\'e\', accanto a «Nuovo surplus», e guarda i surplus gia\' scritti',
+    /Fuel Surcharge del consorzio<\/Button>/.test(src.sezione) && /bozzaFuelSurcharge\(oggi, surplus \|\| \[\]\)/.test(src.sezione) && /onClick=\{apriFuel\}/.test(src.sezione) && /Nuovo surplus<\/Button>/.test(src.sezione));
 });
 
 await sezione('7. IL COLORE DEL SURPLUS', async () => {
@@ -363,7 +454,11 @@ export const disegna = (nome, props) => renderToStaticMarkup(React.createElement
   const fascia = testo(d('FasciaSurplus', { schede, conti, conCosti: true, onVai: () => {} }));
   verifica('la fascia: «In corso Fuel Surcharge +5,00 €/t ai raccoglitori e da Ecotyre consorzio Ecotyre · Rete, ACI ed Extra raccolta · fino al 31/12/2026 · 3 tariffe interessate (2 di raccolta, 1 attiva)»',
     fascia.startsWith('In corso Fuel Surcharge +5,00 €/t ai raccoglitori e da Ecotyre consorzio Ecotyre · Rete, ACI ed Extra raccolta · fino al 31/12/2026 · 3 tariffe interessate (2 di raccolta, 1 attiva)') && fascia.includes('Vedi i surplus'), fascia);
-  verifica('senza surplus in corso o in arrivo la fascia non c\'e\'', d('FasciaSurplus', { schede: v('schedeSurplus')([{ ...FUEL[0], data_fine_validita: '2026-10-12' }], OGGI), conti: new Map() }) === '');
+  // Senza surplus in corso o in arrivo resta la fascia breve (13/10/2026: prima
+  // si nascondeva, e l'utente non ha trovato la sezione dei surplus).
+  const conclusa = testo(d('FasciaSurplus', { schede: v('schedeSurplus')([{ ...FUEL[0], data_fine_validita: '2026-10-12' }], OGGI), conti: new Map(), onVai: () => {} }));
+  verifica('con i soli surplus conclusi la fascia breve dice «nessuno in corso o in arrivo»', conclusa === 'Surplus sulle tariffe (es. Fuel Surcharge): nessuno in corso o in arrivo Apri la sezione Surplus', conclusa);
+  verifica('se i surplus non si sono letti la fascia non c\'e\' (parla l\'avviso della lettura)', d('FasciaSurplus', { schede: [], conti: new Map(), letti: false, onVai: () => {} }) === '');
 
   const modulo = testo(d('CorpoSurplusForm', { bozzaIniziale: v('bozzaFuelSurcharge')(OGGI), surplus: [], fornitori: [], oggi: OGGI, onClose() {}, onSalvato() {} }));
   verifica('il modulo: i quattro blocchi col loro titolo', ['1 Che cosa', '2 Su che cosa', '3 Quanto', '4 Quando'].every(x => modulo.includes(x)), modulo.slice(0, 500));
@@ -453,6 +548,73 @@ await sezione('9. I CANALI CON DATE DIVERSE: LA FASCIA E IL MODULO DICONO IL PER
   verifica('il modulo vero della scheda di prima: la frase con le date di ogni canale e l\'avviso che dice di chi sono quelle nei campi',
     form.includes('Che cosa succede Sulla Rete dal 01/10/2026 al 31/10/2026 e su ACI ed Extra raccolta dal 01/10/2026 al 31/12/2026: ogni raccoglitore') && form.includes(avviso)
       && !form.includes('Dal 01/10/2026 al 31/10/2026, su Rete, ACI ed Extra raccolta'), form);
+});
+
+await sezione('10. LA SEZIONE DEI SURPLUS SI TROVA: LA FASCIA BREVE, IL COLLEGAMENTO, LE DATE DA CONFERMARE NEL MODULO', async () => {
+  // Dopo la pubblicazione del 13/10/2026 l'utente: «non ho trovato la voce
+  // 'surplus'». Senza un surplus in corso la fascia in cima alle tariffe si
+  // nascondeva, e della sezione restava solo la linguetta «Surplus».
+  const vuota = (schede) => v('fasciaVuota')(schede);
+  verifica('nessun surplus scritto: «nessuno scritto»', J(vuota([])) === J({ testo: 'nessuno scritto' }), J(vuota([])));
+  verifica('solo conclusi o disattivati: «nessuno in corso o in arrivo»',
+    J(vuota(v('schedeSurplus')([{ ...FUEL[0], data_fine_validita: '2026-09-30', data_inizio_validita: '2026-09-01' }, { ...FUEL[1], gruppo: 'g2', stato: 'non_attivo' }], OGGI))) === J({ testo: 'nessuno in corso o in arrivo' }));
+  verifica('con un surplus in corso o in arrivo la fascia breve non serve', vuota(v('schedeSurplus')(FUEL, OGGI)) === null && vuota(v('schedeSurplus')(FUEL, '2026-09-20')) === null);
+
+  // Il collegamento ?tab=tariffe&sezione=surplus.
+  const sez = (s) => v('sezioneDelCollegamento')(s);
+  verifica('il collegamento apre la linguetta: surplus, tariffe, ruoli; il resto si ignora',
+    sez('?tab=tariffe&sezione=surplus') === 'surplus' && sez('?sezione=SURPLUS') === 'surplus' && sez('?tab=tariffe&sezione=ruoli') === 'ruoli'
+      && sez('?tab=tariffe&sezione=passiva') === null && sez('?tab=tariffe') === null && sez('') === null && sez(null) === null);
+  const fa = sorgente('src/pages/Fatturazione.jsx');
+  verifica('Fatturazione legge la sezione dal collegamento e la passa a Tariffe & Anagrafiche',
+    /const sezioneTariffe = sezioneDelCollegamento\(location\.search\);/.test(fa) && /<TariffeUnificate sezione=\{sezioneTariffe\} \/>/.test(fa));
+  verifica('a 375 px le linguette della Fatturazione e di Tariffe & Anagrafiche vanno a capo',
+    /<TabsList className="flex-wrap h-auto">\s*\{isAdmin && <TabsTrigger value="passiva">/.test(fa) && /<TabsList className="flex-wrap h-auto">\s*<TabsTrigger value="tariffe">/.test(src.tariffe));
+  const codice = senzaCommenti(src.tariffe);
+  verifica('la scheda Tariffe parte dalla linguetta del collegamento, e la segue se cambia',
+    /useState\(SEZIONI_TARIFFE\.includes\(sezione\) \? sezione : 'tariffe'\)/.test(codice) && /useEffect\(\(\) => \{ if \(SEZIONI_TARIFFE\.includes\(sezione\)\) setTab\(sezione\); \}, \[sezione\]\);/.test(codice));
+  verifica('la fascia sa se i surplus sono letti, e all\'amministratore offre «Scrivi il Fuel Surcharge»',
+    /<FasciaSurplus schede=\{schede\}[^\n]*letti=\{surplus !== null\}[^\n]*onScrivi=\{isAdmin \? scriviFuel : null\} \/>/.test(codice));
+  verifica('la linguetta «Surplus» porta il conto dei surplus in corso', /surplusInCorso = schede\.filter\(s => s\.stato === 'in_corso'\)\.length/.test(codice) && /\{surplusInCorso > 0 && <span[^>]*>\{surplusInCorso\}/.test(codice));
+
+  if (!PAGINA) { verifica('le sezioni impacchettate dalla 8 ci sono', false); return; }
+  const disegna = (nome, props) => testoDi(PAGINA.disegna(nome, props));
+  const fun = () => {};
+  verifica('la fascia breve all\'amministratore: «Surplus sulle tariffe (es. Fuel Surcharge): nessuno scritto», scrivi il Fuel Surcharge, apri la sezione',
+    disegna('FasciaSurplus', { schede: [], conti: new Map(), conCosti: true, onVai: fun, onScrivi: fun }) === 'Surplus sulle tariffe (es. Fuel Surcharge): nessuno scritto Scrivi il Fuel Surcharge Apri la sezione Surplus',
+    disegna('FasciaSurplus', { schede: [], conti: new Map(), conCosti: true, onVai: fun, onScrivi: fun }));
+  verifica('a chi non scrive, solo «Apri la sezione Surplus»',
+    disegna('FasciaSurplus', { schede: [], conti: new Map(), conCosti: false, onVai: fun }) === 'Surplus sulle tariffe (es. Fuel Surcharge): nessuno scritto Apri la sezione Surplus');
+  const html = PAGINA.disegna('FasciaSurplus', { schede: [], conti: new Map(), onVai: fun, onScrivi: fun });
+  verifica('la fascia breve ha il colore del surplus e va a capo a 375 px', /border-l-\[hsl\(var\(--eco-surplus\)\)\]/.test(html) && /flex flex-col[^"]*sm:flex-row/.test(html) && !/amber|red-|destructive/.test(html), html.slice(0, 300));
+  verifica('con il Fuel Surcharge in corso resta la fascia piena', disegna('FasciaSurplus', { schede: v('schedeSurplus')(FUEL, OGGI), conti: new Map(), onVai: fun, onScrivi: fun }).startsWith('In corso Fuel Surcharge +5,00 €/t'));
+
+  // Il modulo della scorciatoia dice che le date vanno confermate, finche' sono quelle proposte.
+  const b27 = v('bozzaFuelSurcharge')('2027-02-10', FUEL);
+  const modulo27 = disegna('CorpoSurplusForm', { bozzaIniziale: b27, surplus: FUEL, fornitori: [], oggi: '2027-02-10', onClose: fun, onSalvato: fun });
+  verifica('il modulo del 2027: «Date da confermare.» con la frase della proposta, e la frase di che cosa succede con le date del 2027',
+    modulo27.includes('Date da confermare. Dal 01/10/2027 al 31/12/2027: sono le date del Fuel Surcharge del 2026 spostate al 2027, con i suoi importi.')
+      && modulo27.includes('Che cosa succede Dal 01/10/2027 al 31/12/2027, su Rete, ACI ed Extra raccolta'), modulo27.slice(0, 1500));
+  // Il 2026 con la sola rete a 6 dal 01/11: il modulo del 2027 si apre con gli
+  // importi per canale (Rete 6,00, ACI ed Extra raccolta 5,00) e la nota li dice.
+  const conSei = [{ ...FUEL[0], data_fine_validita: '2026-10-31' }, FUEL[1], FUEL[2], { ...FUEL[0], id: 's6', gruppo: 'g-sei', euro_t_passiva: 6, euro_t_attiva: 6, data_inizio_validita: '2026-11-01' }];
+  const b27sei = v('bozzaFuelSurcharge')('2027-02-10', conSei);
+  const propsSei = { bozzaIniziale: b27sei, surplus: conSei, fornitori: [], oggi: '2027-02-10', onClose: fun, onSalvato: fun };
+  const moduloSei = disegna('CorpoSurplusForm', propsSei);
+  const htmlSei = PAGINA.disegna('CorpoSurplusForm', propsSei);
+  const valore = (id) => ((htmlSei.match(new RegExp(`id="${id}"[^>]*value="([^"]*)"`)) || htmlSei.match(new RegExp(`value="([^"]*)"[^>]*id="${id}"`)) || [])[1]);
+  verifica('il modulo del 2027 col 2026 a due importi: i campi per canale con 6,00 sulla rete e 5,00 su ACI ed Extra raccolta',
+    valore('surplus-passiva-RETE') === '6,00' && valore('surplus-passiva-ACI') === '5,00' && valore('surplus-passiva-EXTRA_RACCOLTA') === '5,00'
+      && valore('surplus-attiva-RETE') === '6,00' && valore('surplus-attiva-ACI') === '5,00' && !/id="surplus-passiva"/.test(htmlSei),
+    J(['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(c => [c, valore(`surplus-passiva-${c}`), valore(`surplus-attiva-${c}`)])));
+  verifica('e la nota dice gli importi canale per canale',
+    moduloSei.includes('Date da confermare. Dal 01/10/2027 al 31/12/2027: sono le date del Fuel Surcharge del 2026 spostate al 2027, con l\'ultimo importo di ogni canale: Rete 6,00 €/t, ACI ed Extra raccolta 5,00 €/t.'), moduloSei.slice(0, 1500));
+  const toccato = disegna('CorpoSurplusForm', { bozzaIniziale: { ...b27, dal: '2027-11-01' }, surplus: FUEL, fornitori: [], oggi: '2027-02-10', onClose: fun, onSalvato: fun });
+  verifica('scritte altre date, l\'avviso se ne va', !toccato.includes('Date da confermare') && toccato.includes('Dal 01/11/2027 al 31/12/2027'));
+  const modulo26 = disegna('CorpoSurplusForm', { bozzaIniziale: v('bozzaFuelSurcharge')(OGGI, []), surplus: [], fornitori: [], oggi: OGGI, onClose: fun, onSalvato: fun });
+  verifica('e nel 2026 dice la comunicazione del consorzio', modulo26.includes('Date da confermare. Dal 01/10/2026 al 31/12/2026, come la comunicazione del consorzio per il 2026'));
+  const nuovo = disegna('CorpoSurplusForm', { bozzaIniziale: v('bozzaVuota')(), surplus: [], fornitori: [], oggi: OGGI, onClose: fun, onSalvato: fun });
+  verifica('un surplus nuovo, scritto a mano, non ha l\'avviso', !nuovo.includes('Date da confermare'));
 });
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

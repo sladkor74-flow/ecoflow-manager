@@ -178,6 +178,38 @@ export function testoTariffe(conto) {
 export const haSurplus = (col) => !!col && ((col.oggi || []).length > 0 || (col.in_arrivo || []).length > 0);
 
 /**
+ * La fascia breve in cima alle tariffe quando nessun surplus e' in corso o in
+ * arrivo (il surplus sulle tariffe, 13/10/2026). Dopo la pubblicazione l'utente
+ * non ha trovato la sezione dei surplus: la fascia c'era solo con un surplus in
+ * corso, e senza surplus della sezione restava la linguetta «Surplus» accanto a
+ * «Tariffe». Ora la fascia c'e' sempre, appena i surplus sono letti, e dice da
+ * dove si scrivono.
+ * -> null se un surplus e' in corso o in arrivo (allora c'e' la fascia piena);
+ *    altrimenti { testo }: «nessuno scritto», o «nessuno in corso o in arrivo»
+ *    se ci sono solo surplus conclusi o disattivati.
+ */
+export function fasciaVuota(schede) {
+  const tutte = (schede || []).filter(Boolean);
+  if (tutte.some(s => s.stato === 'in_corso' || s.stato === 'in_arrivo')) return null;
+  return { testo: tutte.length ? 'nessuno in corso o in arrivo' : 'nessuno scritto' };
+}
+
+/** Le linguette di Tariffe & Anagrafiche, nell'ordine in cui stanno a video. */
+export const SEZIONI_TARIFFE = ['tariffe', 'surplus', 'ruoli'];
+
+/**
+ * La linguetta di Tariffe & Anagrafiche da un collegamento:
+ * /fatturazione?tab=tariffe&sezione=surplus apre i surplus (13/10/2026), per
+ * chi arriva dalla dashboard, da EcoTyna o dalla prefattura. Come in
+ * src/lib/collegamenti.js, un valore che non si capisce si ignora (null): la
+ * scheda si apre sulle tariffe, come sempre.
+ */
+export function sezioneDelCollegamento(search) {
+  const s = String(new URLSearchParams(search || '').get('sezione') || '').trim().toLowerCase();
+  return SEZIONI_TARIFFE.includes(s) ? s : null;
+}
+
+/**
  * Gli importi di una scheda a parole, per la fascia: «+5,00 €/t ai raccoglitori
  * e da Ecotyre». A chi non e' amministratore si dice solo la parte da Ecotyre,
  * e gli importi sono «diversi per canale» solo se e' quella a cambiare: prima
@@ -286,21 +318,149 @@ export function bozzaVuota() {
 }
 
 /**
- * La scorciatoia «Fuel Surcharge del consorzio»: il modulo compilato come la
- * comunicazione di Ecotyre del 2026 (+5 €/t a tutti i raccoglitori, su rete, ACI
- * ed extra raccolta, da ottobre a dicembre). Le date sono dell'anno di oggi, sul
- * giorno italiano, mai scritte nel codice: il modulo le propone e chi salva le
- * conferma.
+ * La comunicazione del consorzio Ecotyre del 2026, il caso vero: +5 €/t a tutti
+ * i raccoglitori dal 01/10 al 31/12, su rete, ACI ed extra raccolta. E' l'unico
+ * anno scritto nel codice della pagina: le date degli anni dopo le decide il
+ * consorzio, e la scorciatoia le propone senza indovinarle (bozzaFuelSurcharge).
  */
-export function bozzaFuelSurcharge(oggi) {
-  const anno = (giorno10(oggi) || oggiRoma()).slice(0, 4);
+export const FUEL_SURCHARGE_CONSORZIO = { anno: 2026, dal: '10-01', al: '12-31', euro_t: '5,00' };
+
+// Il nome come lo confronta conflittiSurplus (chiaveNome di src/lib/surplus.js,
+// che non si esporta): senza accenti, minuscolo, solo lettere e cifre.
+const chiaveNome = (v) => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const annoDi = (g) => Number(String(g || '').slice(0, 4));
+
+// Lo stesso giorno e mese in un altro anno; il 29/02 in un anno che non lo ha
+// diventa il 28/02.
+function nellAnno(giorno, anno) {
+  const g = `${anno}-${String(giorno).slice(5, 10)}`;
+  const d = new Date(`${g}T12:00:00Z`);
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === g ? g : `${anno}-02-28`;
+}
+
+// Gli importi di un record come li scrive il campo del modulo.
+const importiNelCampo = (s) => ({ passiva: importoNelCampo(euroTDi(s, 'PASSIVA')), attiva: importoNelCampo(euroTDi(s, 'ATTIVA')) });
+const chiaveImporti = (i) => `${(i && i.passiva) || ''}|${(i && i.attiva) || ''}`;
+
+/**
+ * L'ultimo Fuel Surcharge del consorzio scritto fino all'anno dato: i record con
+ * lo stesso nome (normalizzato) e origine consorzio, non disattivati, dell'anno
+ * piu' recente che ne ha. -> null, o { anno, dal, al (il periodo di tutti i suoi
+ * canali), canali, importi: { canale: { passiva, attiva } } (di ogni canale
+ * quelli del suo record che comincia per ultimo, gia' scritti come nel campo),
+ * uguali (tutti i canali con gli stessi importi), cambiati (un canale ha
+ * cambiato importo durante l'anno), passiva, attiva (quelli del primo canale) }.
+ *
+ * Revisione del 13/10/2026: gli importi erano quelli del canale che comincia
+ * per ultimo, messi su tutti. Col caso della regola 7 del progetto (la sola
+ * rete a 6 €/t dal 01/11/2026, ACI ed extra raccolta a 5 fino al 31/12) la
+ * proposta del 2027 dava 6 anche ad ACI ed extra raccolta: salvata com'era,
+ * 1 €/t in piu' pagato e fatturato su due canali. Ora ogni canale tiene i suoi.
+ */
+export function ultimoFuelSurcharge(surplusAll, finoAllAnno) {
+  const fuel = (surplusAll || []).filter(s => s && chiaveNome(s.nome) === 'fuel surcharge' && codice(s.origine) === 'CONSORZIO'
+    && String(s.stato || 'attivo') !== 'non_attivo' && giorno10(s.data_inizio_validita) && annoDi(s.data_inizio_validita) <= finoAllAnno);
+  if (!fuel.length) return null;
+  const anno = Math.max(...fuel.map(s => annoDi(s.data_inizio_validita)));
+  const suoi = fuel.filter(s => annoDi(s.data_inizio_validita) === anno)
+    .sort((a, b) => giorno10(a.data_inizio_validita).localeCompare(giorno10(b.data_inizio_validita)) || ordineCanale(a.tipologia) - ordineCanale(b.tipologia));
+  const fini = suoi.map(s => giorno10(s.data_fine_validita)).filter(g => g && annoDi(g) === anno).sort();
+  const canali = [...new Set(suoi.map(s => codice(s.tipologia)).filter(c => CANALI_SURPLUS.includes(c)))].sort((a, b) => ordineCanale(a) - ordineCanale(b));
+  const importi = {};
+  let cambiati = false;
+  for (const c of canali) {
+    const delCanale = suoi.filter(s => codice(s.tipologia) === c);
+    importi[c] = importiNelCampo(delCanale[delCanale.length - 1]);
+    if (new Set(delCanale.map(s => chiaveImporti(importiNelCampo(s)))).size > 1) cambiati = true;
+  }
+  const primo = canali.length ? importi[canali[0]] : importiNelCampo(suoi[suoi.length - 1]);
   return {
+    anno,
+    dal: giorno10(suoi[0].data_inizio_validita),
+    al: fini.length ? fini[fini.length - 1] : `${anno}-12-31`,
+    canali,
+    importi,
+    uguali: new Set(canali.map(c => chiaveImporti(importi[c]))).size <= 1,
+    cambiati,
+    passiva: primo.passiva,
+    attiva: primo.attiva,
+  };
+}
+
+/**
+ * Gli importi a parole, canale per canale, raggruppati: «Rete 6,00 €/t, ACI ed
+ * Extra raccolta 5,00 €/t»; se la parte ai raccoglitori e quella da Ecotyre
+ * sono diverse le dice tutte e due.
+ */
+function importiDeiCanaliAParole(canali, importi) {
+  const gruppi = new Map();
+  for (const c of canali) {
+    const k = chiaveImporti(importi[c]);
+    if (!gruppi.has(k)) gruppi.set(k, { ...importi[c], canali: [] });
+    gruppi.get(k).canali.push(c);
+  }
+  return [...gruppi.values()].map(g => {
+    const quanto = g.passiva === g.attiva
+      ? (g.passiva ? `${g.passiva} €/t` : 'senza importo')
+      : [g.passiva ? `${g.passiva} €/t ai raccoglitori` : '', g.attiva ? `${g.attiva} €/t da Ecotyre` : ''].filter(Boolean).join(' e ');
+    return `${canaliAParole(g.canali)} ${quanto}`;
+  }).join(', ');
+}
+
+/**
+ * La scorciatoia «Fuel Surcharge del consorzio»: il modulo compilato come il
+ * Fuel Surcharge del consorzio Ecotyre (a tutti i raccoglitori, su rete, ACI ed
+ * extra raccolta), con le date dell'anno di oggi, sul giorno italiano.
+ *
+ * Vale anche negli anni dopo, con le date da confermare ogni anno (risposta
+ * dell'utente del 13/10/2026): i contratti sono annuali, e il Fuel Surcharge
+ * non si copia da solo nell'anno nuovo. Le date proposte:
+ * - nel 2026 quelle della comunicazione (FUEL_SURCHARGE_CONSORZIO);
+ * - negli anni dopo quelle dell'ultimo Fuel Surcharge del consorzio scritto,
+ *   spostate all'anno di oggi, coi suoi canali e i suoi importi canale per
+ *   canale: se i canali hanno importi diversi, o un canale li ha cambiati
+ *   durante l'anno, il modulo si apre con gli importi per canale e la nota li
+ *   dice uno per uno (revisione del 13/10/2026);
+ * - se non ce n'e' nessuno, l'anno intero.
+ * Sempre da confermare: bozza.proposta { dal, al, testo } lo dice nel modulo
+ * finche' Dal e Al restano quelli proposti.
+ */
+export function bozzaFuelSurcharge(oggi, surplusAll = []) {
+  const anno = annoDi(giorno10(oggi) || oggiRoma());
+  const F = FUEL_SURCHARGE_CONSORZIO;
+  const base = {
     ...bozzaVuota(),
     nome: 'Fuel Surcharge', origine: 'CONSORZIO',
     canali: [...CANALI_SURPLUS], prestazione: 'RACCOLTA', a_chi: 'tutti',
-    passiva: '5,00', attiva: '5,00', uguale: true,
-    dal: `${anno}-10-01`, al: `${anno}-12-31`,
+    passiva: F.euro_t, attiva: F.euro_t, uguale: true,
   };
+  const conProposta = (bozza, testo) => ({ ...bozza, proposta: { dal: bozza.dal, al: bozza.al, testo } });
+  if (anno === F.anno) {
+    const dal = `${anno}-${F.dal}`, al = `${anno}-${F.al}`;
+    return conProposta({ ...base, dal, al },
+      `Dal ${dataIt(dal)} al ${dataIt(al)}, come la comunicazione del consorzio per il ${anno}: confrontale con la comunicazione prima di salvare.`);
+  }
+  const prima = ultimoFuelSurcharge(surplusAll, anno);
+  if (!prima) {
+    const dal = `${anno}-01-01`, al = `${anno}-12-31`;
+    return conProposta({ ...base, dal, al },
+      `Tutto il ${anno}, dal ${dataIt(dal)} al ${dataIt(al)}: il consorzio decide il periodo ogni anno. Scrivi le date e gli importi della sua comunicazione.`);
+  }
+  const dal = nellAnno(prima.dal, anno), al = nellAnno(prima.al, anno);
+  const passiva = prima.passiva || '';
+  const attiva = prima.attiva || '';
+  const canali = prima.canali.length ? prima.canali : base.canali;
+  const importi = IMPORTI_VUOTI();
+  for (const c of canali) importi[c] = { passiva: (prima.importi[c] || {}).passiva || '', attiva: (prima.importi[c] || {}).attiva || '' };
+  const bozza = { ...base, dal, al, canali, passiva, attiva, uguale: !!passiva && passiva === attiva, perCanale: !prima.uguali, importi };
+  if (prima.anno === anno) {
+    return conProposta(bozza, `Dal ${dataIt(dal)} al ${dataIt(al)}: sono le date del Fuel Surcharge già scritto per il ${anno}. Se il consorzio ne ha comunicato un altro, scrivi le sue date.`);
+  }
+  const conImporti = prima.uguali && !prima.cambiati
+    ? 'con i suoi importi'
+    : `con l'ultimo importo di ogni canale: ${importiDeiCanaliAParole(canali, importi)}`;
+  return conProposta(bozza,
+    `Dal ${dataIt(dal)} al ${dataIt(al)}: sono le date del Fuel Surcharge del ${prima.anno} spostate al ${anno}, ${conImporti}. Il consorzio decide date e importi ogni anno: confrontali con la sua comunicazione prima di salvare.`);
 }
 
 // Il canale con l'articolo: «della Rete», «dell'ACI».

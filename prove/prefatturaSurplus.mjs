@@ -16,6 +16,14 @@
 // si chiede. Le terziarie (Prodotto vuoto) e un produttore che si chiama
 // «Carburanti» non sono surplus.
 //
+// LA FORMA d NON E' UNA DIFFERENZA (risposta dell'utente del 13/10/2026). Se
+// Ecotyre comunica il Fuel Surcharge fuori dalla prefattura, il confronto lo
+// scrive («Fuel Surcharge, 1,55 €, non è nella prefattura: si fattura a parte»),
+// non lo conta fra le differenze, e il mese coincide: l'esportazione non chiede
+// conferma per lui. Prima contava una differenza per canale, ogni mese. Conta
+// ancora quando la prefattura un surplus lo porta, ma non su quel canale (su un
+// altro, o in una riga che non si sa di chi sia): li' e' un surplus mancato.
+//
 // LA TOLLERANZA (revisione del 13/10/2026). Era mezzo centesimo per ordine:
 // sulla rete di luglio 2026 fino a 2,05 €, e ci passavano per «arrotondamento»
 // una riga sola sbagliata di 2,00 €, un ordine senza la sua riga di surplus e un
@@ -76,7 +84,10 @@ verifica('una riga per ordine: 1,56 contro 1,55, arrotondamento, coincide', rB.s
 const cD = confrontaPrefattura(leggiCelle(ordini.map(o => rigaPre(o, 103, 0.202))), piccolo.righe, new Map(), piccolo.surplus_del_mese);
 const rD = cD.canali.find(c => c.canale === 'RETE');
 verifica('niente surplus nella prefattura: nessun «solo nel gestionale» con l\'ordine vuoto', rD.solo_gestionale.length === 0 && rD.gestionale.ordini === 3, JSON.stringify(rD.solo_gestionale));
-verifica('niente surplus nella prefattura: il riquadro lo dice e conta una differenza', rD.surplus?.esito === 'assente' && rD.surplus?.conta === true && cD.differenze === 1 && /non lo porta/.test(rD.surplus?.testo || '') && /1,55 € nel gestionale \(0,309 t × 5,00 €\/t\)/.test(rD.surplus?.testo || ''), JSON.stringify(rD.surplus));
+verifica('niente surplus nella prefattura: il riquadro lo scrive, si fattura a parte, e NON conta (il mese coincide)', rD.surplus?.esito === 'assente' && rD.surplus?.conta === false && rD.surplus?.a_parte === true && cD.differenze === 0 && cD.coincide === true
+  && /^Fuel Surcharge, 1,55 € \(0,309 t × 5,00 €\/t\), non è nella prefattura: si fattura a parte\./.test(rD.surplus?.testo || ''), JSON.stringify({ d: cD.differenze, s: rD.surplus }));
+verifica('...e il confronto lo dice in surplus_a_parte, col canale e l\'importo', JSON.stringify((cD.surplus_a_parte || []).map(x => [x.canale, x.nome, x.euro])) === JSON.stringify([['RETE', 'Fuel Surcharge', 1.55]]) && cD.surplus_a_parte[0].testo === rD.surplus?.testo, JSON.stringify(cD.surplus_a_parte));
+verifica('...mentre dove la prefattura lo porta surplus_a_parte e\' vuoto', JSON.stringify(cA.surplus_a_parte) === '[]' && JSON.stringify(cB.surplus_a_parte) === '[]' && rA.surplus?.a_parte === false, JSON.stringify([cA.surplus_a_parte, cB.surplus_a_parte]));
 const cX = confrontaPrefattura(leggiCelle([...ordini.map(o => rigaPre(o, 103, 0.202)), [3716, 'SMOCO Srl', 46204, 'Ecotyre Scrl', 'Fuel Surcharge', null, null, null, '', 309, 0.005, 1.6]]), piccolo.righe, new Map(), piccolo.surplus_del_mese);
 const rX = cX.canali.find(c => c.canale === 'RETE');
 verifica('una riga sola con un importo sbagliato (1,60): non torna, si dice quanto', rX.surplus?.esito === 'non_torna' && rX.surplus?.scarto === 0.05 && rX.surplus?.conta === true && /0,05 € in più/.test(rX.surplus?.testo || ''), JSON.stringify(rX.surplus));
@@ -90,6 +101,10 @@ const cI = confrontaPrefattura(leggiCelle(ordini.map((o, i) => rigaPre(o, 1010 +
 const rI = cI.canali.find(c => c.canale === 'RETE');
 verifica('lo stesso €/t in piu\' su tutti gli ordini senza surplus nel gestionale: importi diversi, e l\'ipotesi detta', rI.importo_diverso.length === 3 && rI.surplus?.esito === 'ipotesi' && rI.surplus?.conta === false && cI.differenze === 3 && /5,00 €\/t in più/.test(rI.surplus?.testo || ''), JSON.stringify(rI.surplus));
 verifica('senza surplus da nessuna parte: nessun riquadro, come prima', confrontaPrefattura(leggiCelle(ordini.map(o => rigaPre(o, 103, 0.202))), senzaGest.righe).canali.every(c => c.surplus === null));
+{
+  const nessuno = confrontaPrefattura(leggiCelle(ordini.map(o => rigaPre(o, 103, 0.202))), senzaGest.righe);
+  verifica('...il mese coincide e niente si fattura a parte', nessuno.coincide === true && nessuno.differenze === 0 && JSON.stringify(nessuno.surplus_a_parte) === '[]', JSON.stringify({ d: nessuno.differenze, a: nessuno.surplus_a_parte }));
+}
 
 console.log('1b. ORDINE PER ORDINE: QUELLO CHE L\'ARROTONDAMENTO NON COPRE');
 const rete = (c) => c.canali.find(x => x.canale === 'RETE');
@@ -218,16 +233,55 @@ else {
   verifica('c. una riga sola per rete e ACI insieme: si dice, e torna per ciascuno', insieme.coincide === true && canale(insieme, 'RETE').surplus?.prefattura.forme.includes('insieme') && /insieme a ACI/.test(canale(insieme, 'RETE').surplus?.testo || ''), JSON.stringify(canale(insieme, 'RETE').surplus));
   const boh = confronta([...corpo, sola(1000)]);
   verifica('c. una riga sola che non si sa di chi sia: si chiede, e conta', (boh.surplus_da_attribuire || []).length === 1 && /non si capisce di quale canale/.test(boh.surplus_da_attribuire[0].spiegazione) && boh.differenze === 3, JSON.stringify({ d: boh.differenze, x: boh.surplus_da_attribuire }));
-  // d. niente
+  // d. niente: si fattura a parte, e non e' una differenza (13/10/2026)
   const d = confronta(corpo);
-  verifica('d. la prefattura non lo porta: niente «solo nel gestionale» con l\'ordine vuoto, il riquadro lo dice per rete e ACI', d.canali.every(x => !x.solo_gestionale.some(s => !s.id_ordine)) && canale(d, 'RETE').surplus?.esito === 'assente' && canale(d, 'ACI').surplus?.esito === 'assente' && d.differenze === 2
-    && /5\.611,20 € nel gestionale \(1\.122,24 t × 5,00 €\/t\)/.test(canale(d, 'RETE').surplus?.testo || ''), JSON.stringify(canale(d, 'RETE').surplus));
+  verifica('d. la prefattura non lo porta: niente «solo nel gestionale» con l\'ordine vuoto, il riquadro lo scrive per rete e ACI, e il mese coincide', d.canali.every(x => !x.solo_gestionale.some(s => !s.id_ordine)) && canale(d, 'RETE').surplus?.esito === 'assente' && canale(d, 'ACI').surplus?.esito === 'assente'
+    && d.differenze === 0 && d.coincide === true && canale(d, 'RETE').surplus?.conta === false && canale(d, 'ACI').surplus?.conta === false
+    && canale(d, 'RETE').surplus?.testo.startsWith('Fuel Surcharge, 5.611,20 € (1.122,24 t × 5,00 €/t), non è nella prefattura: si fattura a parte.'), JSON.stringify({ d: d.differenze, s: canale(d, 'RETE').surplus }));
+  verifica('d. surplus_a_parte: rete 5.611,20 e ACI 96,60, uno per canale, mai sommati', JSON.stringify((d.surplus_a_parte || []).map(x => [x.canale, x.euro])) === JSON.stringify([['RETE', 5611.2], ['ACI', 96.6]]), JSON.stringify(d.surplus_a_parte));
+  // ...ma se la prefattura un surplus lo porta, il canale dove manca e' un surplus mancato, e conta
+  const soloRete = confronta([...corpo, sola(5611.2, 'Rete')]);
+  verifica('d. la prefattura porta la riga della rete e non quella dell\'ACI: l\'ACI conta, e il testo lo dice', canale(soloRete, 'RETE').surplus?.esito === 'torna' && canale(soloRete, 'ACI').surplus?.esito === 'assente'
+    && canale(soloRete, 'ACI').surplus?.conta === true && canale(soloRete, 'ACI').surplus?.a_parte === false && soloRete.differenze === 1 && soloRete.coincide === false
+    && /96,60 € nel gestionale \(19,32 t × 5,00 €\/t\), ma la prefattura su questo canale non lo porta/.test(canale(soloRete, 'ACI').surplus?.testo || '') && JSON.stringify(soloRete.surplus_a_parte) === '[]', JSON.stringify({ d: soloRete.differenze, s: canale(soloRete, 'ACI').surplus }));
+  verifica('d. una riga di surplus che non si sa di chi sia: rete e ACI, dove manca, contano ancora (3 differenze, come prima)', boh.differenze === 3 && canale(boh, 'RETE').surplus?.conta === true && canale(boh, 'ACI').surplus?.conta === true && JSON.stringify(boh.surplus_a_parte) === '[]', JSON.stringify({ d: boh.differenze }));
   verifica('d. gli ordini restano quelli di oggi', canale(d, 'RETE').gestionale.ordini === 410 && canale(d, 'RETE').gestionale.euro === canale(oggi, 'RETE').gestionale.euro && canale(d, 'RETE').prefattura.euro === canale(oggi, 'RETE').prefattura.euro);
 }
 
 console.log('4. LA FUNZIONE');
 const src = leggi('../base44/functions/prefatturaEcotyre/entry.ts');
 verifica('prefatturaEcotyre passa al confronto il surplus del mese', /confrontaPrefattura\([^)]*surplus_del_mese\)/.test(src) && /surplus_del_mese \} = calcolaRigheAttiva\(\{[^}]*\bsurplus\b/.test(src));
+
+console.log('5. LA PAGINA DELLA PREFATTURA: IL SURPLUS A PARTE SI SCRIVE, IN AZZURRO E NON IN AMBRA');
+// La scheda «Prefattura Ecotyre» montata senza browser (prove/dati/paginaFinta.mjs):
+// la pagina gira coi suoi effetti e chiede il confronto a un client finto, che
+// risponde col confronto vero del mese costruito qui sopra (forma d).
+{
+  const { caricaPagina, clienteFinto, aspetta, testo } = await import('./dati/paginaFinta.mjs');
+  const { Componente, modulo, monta } = await caricaPagina('components/fatturazione/PrefatturaEcotyre.jsx');
+  const piano = (x) => testo(x).replace(/\s+/g, ' ').trim();
+  // la pagina di prima non ha esitoDelSurplus: la prova fallisce, non si ferma
+  const esitoDi = (x) => (typeof modulo.esitoDelSurplus === 'function' ? modulo.esitoDelSurplus(x) : {});
+  const apri = async (confronto) => {
+    const cf = clienteFinto({ funzioni: { prefatturaEcotyre: async () => ({ prefattura: { id: 'p7', nome_file: 'luglio.xlsx', numero_righe: 3, caricata_il: '2026-08-05T10:00:00Z', caricata_da: 'prova' }, confronto }) } });
+    globalThis.__CLIENTE_FINTO = cf.cliente;
+    const r = monta(Componente, { periodo: { anno: 2026, mese: 'Luglio' }, isAdmin: true });
+    await aspetta();
+    return piano(r.albero);
+  };
+  const tD = await apri(cD);
+  verifica('d: in testa «La prefattura coincide», e sotto «Rete: Fuel Surcharge, 1,55 € (0,309 t × 5,00 €/t), non è nella prefattura: si fattura a parte.»',
+    tD.includes('La prefattura coincide con il gestionale, ordine per ordine.') && /Surplus ?Rete: Fuel Surcharge, 1,55 € \(0,309 t × 5,00 €\/t\), non è nella prefattura: si fattura a parte\./.test(tD), tD.slice(0, 600));
+  verifica('d: la riga dell\'esito dice «non in prefattura: si fattura a parte»', /Rete ?non in prefattura: si fattura a parte/.test(tD), tD.slice(0, 900));
+  const e = esitoDi(rD.surplus);
+  verifica('d: il cartellino e\' un\'osservazione (azzurro), non «attenzione» (ambra)', e && e.tono === 'osservazione' && e.testo === 'non in prefattura: si fattura a parte', JSON.stringify(e));
+  const riq = piano(modulo.RiquadroSurplus({ canale: 'RETE', s: rD.surplus }));
+  verifica('d: il riquadro del canale lo dice con le parole del confronto', riq.includes('non in prefattura: si fattura a parte') && riq.includes('non è nella prefattura: si fattura a parte'), riq);
+  const tA = await apri(cA);
+  verifica('a: col surplus nel prezzo nessuna frase «a parte», e il cartellino di prima', !/si fattura a parte/.test(tA) && esitoDi(rA.surplus).testo === 'torna, arrotondamento', tA.slice(0, 400));
+  const tX = await apri(cX);
+  verifica('una riga sola sbagliata: «differenze da chiarire», e il cartellino resta «non torna»', /1 differenza fra la prefattura e il gestionale/.test(tX) && esitoDi(rX.surplus).tono === 'errore', tX.slice(0, 300));
+}
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

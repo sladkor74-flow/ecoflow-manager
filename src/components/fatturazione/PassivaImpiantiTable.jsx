@@ -1,7 +1,7 @@
 import React from 'react';
 import { formatNumber } from '@/lib/utils';
 import { testoEuroT } from '@/lib/surplus';
-import { EtichettaSurplus, OrigineSurplus, RIGA_SURPLUS, SULLA_PRESTAZIONE, TonnellateSurplus, TotaleStandardSurplus } from './PassivaSurplus';
+import { AvvisoSurplus, EtichettaSurplus, OrigineSurplus, RIGA_SURPLUS, SULLA_PRESTAZIONE, TonnellateSurplus, TotaleStandardSurplus } from './PassivaSurplus';
 
 // Il "di cui" dice chi ha portato materialmente il carico al sito. Si mostra
 // quando aggiunge qualcosa: se a conferire sono stati in piu' d'uno, oppure se
@@ -97,6 +97,9 @@ export default function PassivaImpiantiTable({ data }) {
                     <td className="px-3 py-1.5" colSpan={3}>
                       <OrigineSurplus s={s} />
                       {SULLA_PRESTAZIONE[s.prestazione] && <span className="text-xs text-muted-foreground"> · {SULLA_PRESTAZIONE[s.prestazione]}</span>}
+                      {/* impianto o stoccaggio senza la tariffa del mese: il surplus c'e', la
+                          riga standard no, come per i raccoglitori (13/10/2026) */}
+                      <AvvisoSurplus s={s} />
                     </td>
                     <td className="px-3 py-1.5 text-right"><TonnellateSurplus t={s.tonnellate} /></td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{testoEuroT(s.euro_t)}</td>

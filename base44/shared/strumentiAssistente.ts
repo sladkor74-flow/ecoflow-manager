@@ -517,6 +517,34 @@ function righeDelSurplus(raccolta) {
     }));
 }
 
+// IL SURPLUS SU UNA TARIFFA CHE MANCA, NELL'ANNO (13/10/2026). Il surplus si
+// paga anche a chi nel mese non ha la tariffa (risposta dell'utente), e
+// l'anomalia della tariffa che manca lo dice in avviso_surplus, con le
+// tonnellate del mese: «Tariffa del mese mancante: il surplus c'è (Fuel
+// Surcharge) su 4,00 t delle 10,00, la riga standard no.» (passivaCalcolo.ts).
+// Nell'anno la stessa anomalia unisce i mesi, e prima teneva l'avviso del primo
+// mese soltanto: col Fuel Surcharge da ottobre e la tariffa che manca da
+// gennaio, l'avviso non c'era affatto. Ora si riscrive sulle tonnellate di
+// tutti i mesi, coi nomi dei surplus di tutti; un'anomalia di un mese solo
+// tiene la frase del mese, parola per parola.
+const AVVISO_ANOMALIA_SURPLUS = /^Tariffa del mese mancante: il surplus c'è \((.+)\)(?: su [\d.,]+ t delle [\d.,]+)?, la riga standard no\.$/;
+/** I nomi dei surplus dentro l'avviso di un mese (vuoto se la frase e' un'altra). */
+function nomiDellAvvisoSurplus(avviso) {
+  const m = String(avviso || '').match(AVVISO_ANOMALIA_SURPLUS);
+  return m ? m[1].split(' e ').map(s => s.trim()).filter(Boolean) : [];
+}
+/**
+ * L'avviso del surplus di un'anomalia unita su piu' mesi. x: { tonnellate (del
+ * surplus, di tutti i mesi), nomi, avvisi (quelli dei mesi) }; tonnellate:
+ * quelle dell'anomalia nell'anno. Se la frase di un mese non si riconosce resta
+ * quella dell'ultimo mese, che almeno dice che il surplus c'e'.
+ */
+function avvisoSurplusDellAnno(x, tonnellate) {
+  if (!x.nomi.length) return x.avvisi[x.avvisi.length - 1];
+  const su = x.tonnellate + 0.0005 < tonnellate ? ` su ${formatoTonnellate(x.tonnellate)} t delle ${formatoTonnellate(tonnellate)}` : '';
+  return `Tariffa del mese mancante: il surplus c'è (${x.nomi.join(' e ')})${su}, la riga standard no.`;
+}
+
 /**
  * La frase che accompagna un totale col surplus: «Il totale di 231.889,68 €
  * comprende la riga «Fuel Surcharge» (consorzio Ecotyre) di 5.601,20 €
@@ -823,6 +851,8 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
   const conti = canali.map((canale) => {
     const perFornitore = new Map();
     const anomalie = new Map();
+    // il surplus pagato sulle tariffe che mancano, anomalia per anomalia (13/10/2026)
+    const surplusDelleAnomalie = new Map();
     const perMese = [];
     const pagatoA = new Set();
     const somma = { raccoglitori: 0, impianti_stoccaggi: 0, trasporti_secondaria: 0, tonnellate_raccolte: 0, surplus: 0 };
@@ -875,10 +905,20 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
         // che differiscono solo per classe sono due pesi, non uno.
         const chiave = `${a.descrizione}|${a.fornitore}|${a.prestazione}|${a.classe}|${a.ambito}`;
         const prima = anomalie.get(chiave);
-        if (!prima) { anomalie.set(chiave, { dal_mese: mese, mesi: [mese], ...a }); continue; }
-        if (!prima.mesi.includes(mese)) prima.mesi.push(mese);
-        prima.tonnellate = r3((Number(prima.tonnellate) || 0) + (Number(a.tonnellate) || 0));
-        prima.occorrenze = (Number(prima.occorrenze) || 1) + (Number(a.occorrenze) || 1);
+        if (!prima) anomalie.set(chiave, { dal_mese: mese, mesi: [mese], ...a });
+        else {
+          if (!prima.mesi.includes(mese)) prima.mesi.push(mese);
+          prima.tonnellate = r3((Number(prima.tonnellate) || 0) + (Number(a.tonnellate) || 0));
+          prima.occorrenze = (Number(prima.occorrenze) || 1) + (Number(a.occorrenze) || 1);
+        }
+        // l'avviso del surplus di ogni mese, che nell'anno si riscrive (13/10/2026)
+        if (a.avviso_surplus) {
+          const x = surplusDelleAnomalie.get(chiave) || { tonnellate: 0, nomi: [], avvisi: [] };
+          x.tonnellate += Number(a.tonnellate_surplus) || 0;
+          for (const n of nomiDellAvvisoSurplus(a.avviso_surplus)) if (!x.nomi.includes(n)) x.nomi.push(n);
+          x.avvisi.push(a.avviso_surplus);
+          surplusDelleAnomalie.set(chiave, x);
+        }
       }
       for (const c of Object.keys(delMese)) somma[c] += delMese[c];
       const euroMese = delMese.raccoglitori + delMese.impianti_stoccaggi + delMese.trasporti_secondaria;
@@ -894,6 +934,14 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
           }),
         });
       }
+    }
+    // L'avviso del surplus di un'anomalia di piu' mesi, sulle tonnellate di
+    // tutti; quella di un mese solo tiene la frase del mese (13/10/2026).
+    for (const [chiave, x] of surplusDelleAnomalie) {
+      const a = anomalie.get(chiave);
+      if (!a || !(a.mesi.length > 1)) continue;
+      a.tonnellate_surplus = r3(x.tonnellate);
+      a.avviso_surplus = avvisoSurplusDellAnno(x, Number(a.tonnellate) || 0);
     }
     const ultimoMese = Math.max(-1, ...mesi.map(m => MESI.indexOf(m)));
     const senzaFine = anomaliaSenzaFineAnno(movimentiDateDelCanale(archivi, canale), anno, ultimoMese, canale);

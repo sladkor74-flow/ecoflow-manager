@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { formatNumber } from '@/lib/utils';
 import { ChevronDown, AlertTriangle } from 'lucide-react';
 
+// Il surplus sulle tariffe (13/10/2026): su una tariffa che manca il surplus si
+// paga lo stesso (risposta dell'utente), e il calcolo lo dice in avviso_surplus,
+// accanto alla descrizione e non dentro: la descrizione e' la chiave con cui la
+// stessa anomalia si dice una volta sola. Qui si scrive sotto, come la riga del
+// surplus nel Dettaglio (AvvisoSurplus di PassivaSurplus.jsx).
 export default function PassivaAnomalie({ anomalie }) {
   const [expanded, setExpanded] = useState(false);
   if (!anomalie || anomalie.length === 0) return null;
@@ -27,6 +32,7 @@ export default function PassivaAnomalie({ anomalie }) {
               <span className="text-muted-foreground">— {a.descrizione}</span>
               {a.tonnellate > 0 && <span className="text-muted-foreground ml-1">({formatNumber(a.tonnellate)} t)</span>}
               {a.occorrenze > 1 && <span className="text-muted-foreground ml-1">— {a.occorrenze} righe</span>}
+              {a.avviso_surplus && <span className="block text-xs font-medium text-destructive">{a.avviso_surplus}</span>}
             </div>
           ))}
         </div>

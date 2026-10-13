@@ -65,14 +65,16 @@ const CALCOLI = {
 //   toglie la voce da qui.
 // Un'eccezione che non serve piu' fa fallire la prova: rimasta li', coprirebbe la
 // prossima chiamata senza surplus nello stesso punto.
+//
+// Il 13/10/2026 sera l'unico debito e' stato saldato: i file Excel e PDF
+// dell'elenco dell'extra raccolta hanno la riga del Fuel Surcharge (risposta
+// dell'utente), la pagina passa loro lo stesso contesto della pagina, coi
+// surplus, e il contesto dei soli prezzi (contestoFile) non c'e' piu'. Restano
+// le chiamate per natura.
 const SENZA_SURPLUS = [
   {
     file: 'src/lib/extraRaccoltaCalc.js', nome: 'contestoPrezzi', riga: /\bCONTESTO_VUOTO\s*=\s*contestoPrezzi\s*\(/, debito: false,
     motivo: "il contesto vuoto di chi non ha letto niente: senza tariffe e senza surplus restano i due gradini del prezzo che non hanno bisogno di letture (il prezzo scritto e la base dell'anno)",
-  },
-  {
-    file: 'src/pages/ExtraRaccolta.jsx', nome: 'contestoPrezzi', riga: /\bcontestoFile\s*=\s*useMemo\s*\(\s*\(\)\s*=>\s*contestoPrezzi\s*\(/, debito: true,
-    motivo: "i file Excel e PDF dell'elenco degli interventi (src/lib/extraRaccoltaExport.js) non hanno ancora la riga del surplus: ricevono i soli prezzi, cosi' i loro totali restano quelli delle loro righe, e accanto ai pulsanti la pagina dice che i file riportano gli importi standard e che il surplus sta nella fattura attiva e nella passiva del mese (13/10/2026). Si toglie da qui quando extraRaccoltaExport.js scrive la riga del surplus",
   },
 ];
 

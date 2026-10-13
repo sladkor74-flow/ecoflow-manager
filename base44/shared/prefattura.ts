@@ -58,7 +58,9 @@ export const comeServizio = (v) => { const t = pulisci(v).toUpperCase(); return 
 //   a. nel prezzo: ogni ordine a 0,207 €/kg invece di 0,202;
 //   b. una riga per ordine, col Tipo o il Prodotto «Fuel Surcharge»;
 //   c. una riga sola, senza ordine;
-//   d. niente: il surplus arriva con una comunicazione a parte.
+//   d. niente: il surplus arriva con una comunicazione a parte, e si fattura a
+//      parte (risposta dell'utente del 13/10/2026): il confronto lo scrive, non
+//      lo conta fra le differenze e l'esportazione non chiede conferma per lui.
 // Una riga di surplus si riconosce dalle parole, nel Tipo o nel Prodotto (su una
 // riga senza ordine, in qualunque cella): mai dal Prodotto vuoto, che hanno
 // anche le terziarie.
@@ -487,8 +489,19 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
 
   // IL RIQUADRO DEL SURPLUS DI OGNI CANALE: gestionale, prefattura (con la forma
   // riconosciuta), scarto, esito. Il riquadro conta fra le differenze che fermano
-  // l'esportazione solo se non torna (anche quando la prefattura non lo porta:
-  // va saputo prima di fatturare). Senza surplus ne' di qua ne' di la' non c'e'.
+  // l'esportazione solo se non torna. Senza surplus ne' di qua ne' di la' non c'e'.
+  //
+  // UNA PREFATTURA SENZA IL SURPLUS NON E' UNA DIFFERENZA (risposta dell'utente
+  // del 13/10/2026). Se Ecotyre comunica il Fuel Surcharge fuori dalla
+  // prefattura, la prefattura non lo porta mai: contarlo fra le differenze
+  // voleva dire una conferma a ogni esportazione, ogni mese, per una cosa gia'
+  // saputa. Ora il confronto lo SCRIVE soltanto («Fuel Surcharge, 1.609,15 €,
+  // non è nella prefattura: si fattura a parte»), nel riquadro del canale e in
+  // surplus_a_parte, e non lo conta. Solo quando la prefattura non porta nessun
+  // surplus (surplusNelFile): se lo porta su una parte degli ordini resta «non
+  // torna», e se lo porta su un altro canale, o in una riga che non si sa di
+  // chi sia, il canale dove manca conta ancora, perche' allora non e' una
+  // comunicazione a parte ma un surplus mancato.
   //
   // QUANDO UNO SCARTO E' ARROTONDAMENTO (revisione del 13/10/2026). Nelle forme a
   // e b la prefattura porta il surplus ordine per ordine: ogni ordine si controlla
@@ -505,6 +518,31 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
   const elencoOrdini = (ids) => (ids.length <= 3 ? ids.join(', ') : `${ids.slice(0, 3).join(', ')} e altri ${ids.length - 3}`);
   const suOrdini = (n) => (n === 1 ? 'un ordine' : `${n} ordini`);
   const senzaNumero = (v) => v === null || v === undefined;
+  // Le forme in cui la prefattura porta il surplus di un canale.
+  const formeDi = (s) => [
+    s.nelPrezzo.ordini ? 'nel_prezzo' : '',
+    s.perOrdine.length ? 'riga_per_ordine' : '',
+    s.sole.length ? 'riga_sola' : '',
+    s.insieme.length ? 'insieme' : '',
+  ].filter(Boolean);
+  // Nessun surplus nel gestionale ma lo stesso €/t in piu' su tanti ordini:
+  // e' probabilmente un surplus che il gestionale non ha ancora. Gli ordini
+  // restano «importo diverso»; il riquadro lo dice.
+  const ipotesiDi = (c) => {
+    if (centGest(c.canale) || formeDi(surplusDi.get(c.canale)).length || c.importo_diverso.length < 3 || !c.importo_diverso.every(x => x.kg > 0)) return null;
+    // l'€/t si legge sull'ordine piu' pesante (il centesimo pesa meno), e ogni
+    // ordine deve tornarci entro il suo arrotondamento
+    const grande = c.importo_diverso.reduce((a, x) => (x.kg > a.kg ? x : a));
+    const euroT = (grande.importo_prefattura - grande.importo_gestionale) / (grande.kg / 1000);
+    if (!(euroT > 0) || !c.importo_diverso.every(x => Math.abs((x.importo_prefattura - x.importo_gestionale) - euroT * x.kg / 1000) <= 0.015)) return null;
+    return { euro_t: r2(euroT), ordini: c.importo_diverso.length, euro: r2(c.importo_diverso.reduce((x, d) => x + d.importo_prefattura - d.importo_gestionale, 0)) };
+  };
+  // La prefattura porta un surplus da qualche parte: una riga (anche di un
+  // canale che non si capisce), un prezzo con dentro il surplus, o lo stesso €/t
+  // in piu' su tanti ordini. Allora un canale dove non c'e' non vuol dire «lo
+  // comunica fuori»: e' un surplus mancato, e resta una differenza. Si fattura a
+  // parte senza contarlo solo quando la prefattura non ne porta nessuno.
+  const surplusNelFile = preSurplus.length > 0 || canali.some(c => formeDi(surplusDi.get(c.canale)).length > 0 || !!ipotesiDi(c));
   for (const c of canali) {
     const s = surplusDi.get(c.canale);
     const gestCent = centGest(c.canale);
@@ -522,24 +560,8 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     const centPerOrdine = [...perId.values()].reduce((x, e) => x + e.cent, 0);
     const centSole = s.sole.reduce((x, v) => x + centesimi(v.importo), 0);
     const centInsieme = s.insieme.reduce((x, v) => x + v.quota_cent, 0);
-    const forme = [];
-    if (s.nelPrezzo.ordini) forme.push('nel_prezzo');
-    if (s.perOrdine.length) forme.push('riga_per_ordine');
-    if (s.sole.length) forme.push('riga_sola');
-    if (s.insieme.length) forme.push('insieme');
-    // Nessun surplus nel gestionale ma lo stesso €/t in piu' su tanti ordini:
-    // e' probabilmente un surplus che il gestionale non ha ancora. Gli ordini
-    // restano «importo diverso»; il riquadro lo dice.
-    let ipotesi = null;
-    if (!gestCent && !forme.length && c.importo_diverso.length >= 3 && c.importo_diverso.every(x => x.kg > 0)) {
-      // l'€/t si legge sull'ordine piu' pesante (il centesimo pesa meno), e ogni
-      // ordine deve tornarci entro il suo arrotondamento
-      const grande = c.importo_diverso.reduce((a, x) => (x.kg > a.kg ? x : a));
-      const euroT = (grande.importo_prefattura - grande.importo_gestionale) / (grande.kg / 1000);
-      if (euroT > 0 && c.importo_diverso.every(x => Math.abs((x.importo_prefattura - x.importo_gestionale) - euroT * x.kg / 1000) <= 0.015)) {
-        ipotesi = { euro_t: r2(euroT), ordini: c.importo_diverso.length, euro: r2(c.importo_diverso.reduce((x, d) => x + d.importo_prefattura - d.importo_gestionale, 0)) };
-      }
-    }
+    const forme = formeDi(s);
+    const ipotesi = ipotesiDi(c);
     if (!gestCent && !forme.length && !ipotesi) continue;
     // Tutte le righe di surplus senza importo (una prefattura senza la colonna
     // dell'importo): il surplus c'e', quanto non si sa, e non si confronta.
@@ -585,9 +607,13 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
                   : Math.abs(scarto) <= Math.abs(s.arrotondamento) + 1 ? 'arrotondamento'
                     : 'non_torna';
     const nomi = [...new Set(s.righe.map(r => r.descrizione).filter(Boolean))].join(' e ') || 'Surplus';
-    const quanto = s.righe.length === 1
-      ? `${euroIt(gestCent / 100)} € nel gestionale (${tIt(gestKg)} t × ${euroTIt(s.righe[0].tariffa_valore)})`
-      : `${euroIt(gestCent / 100)} € nel gestionale (${s.righe.map(r => `${tIt(r.kg_riferimento)} t × ${euroTIt(r.tariffa_valore)}`).join(' + ')})`;
+    // non nella prefattura, che non ne porta nessuno: si fattura a parte
+    const aParte = esito === 'assente' && !surplusNelFile;
+    // su che cosa si conta: «1.122,24 t × 5,00 €/t», o le righe una per una
+    const base = s.righe.length === 1
+      ? `${tIt(gestKg)} t × ${euroTIt(s.righe[0].tariffa_valore)}`
+      : s.righe.map(r => `${tIt(r.kg_riferimento)} t × ${euroTIt(r.tariffa_valore)}`).join(' + ');
+    const quanto = `${euroIt(gestCent / 100)} € nel gestionale (${base})`;
     const come = [
       s.nelPrezzo.ordini ? `nel prezzo di ${suOrdini(s.nelPrezzo.ordini)}` : '',
       s.perOrdine.length ? `con ${s.perOrdine.length === 1 ? 'una riga' : `${s.perOrdine.length} righe`} per ordine` : '',
@@ -612,7 +638,9 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     const testo = esito === 'ipotesi'
       ? `${ipotesi.ordini} ordini hanno ${euroTIt(ipotesi.euro_t)} in più del gestionale, tutti uguali (${euroIt(ipotesi.euro)} €): se è un surplus del consorzio, come il Fuel Surcharge, scrivilo nella scheda Surplus delle tariffe con le sue date, e il confronto lo riconoscerà nel prezzo.`
       : esito === 'fuori_prefattura' ? `${nomi}: ${quanto}. L'extra raccolta non passa dalla prefattura: il surplus si fattura col canale.`
-        : esito === 'assente' ? `${nomi}: ${quanto}, ma la prefattura non lo porta, né nei prezzi né in una riga. Va fatturato secondo la comunicazione del consorzio: controlla che ci sia, prima di esportare.`
+        : esito === 'assente' ? (aParte
+          ? `${nomi}, ${euroIt(gestCent / 100)} € (${base}), non è nella prefattura: si fattura a parte. Non è una differenza: la prefattura non porta nessun surplus, né nei prezzi né in una riga.`
+          : `${nomi}: ${quanto}, ma la prefattura su questo canale non lo porta, mentre altrove un surplus lo porta: va chiarito prima di fatturare.`)
           : esito === 'senza_importo' ? `${gestCent ? `${nomi}: ${quanto}; la prefattura lo porta` : 'La prefattura porta un surplus'} ${come}, ma senza importo (—): non si può confrontare${conImporti ? ', e va chiarito prima di fatturare.' : ' (il file non ha la colonna degli importi).'}`
             : esito === 'solo_prefattura' ? `La prefattura porta un surplus di ${euroIt(preCent / 100)} € ${come}, che il gestionale non ha: se vale, scrivilo nella scheda Surplus delle tariffe con le sue date.`
               : `${nomi}: ${quanto}; la prefattura lo porta ${come}, ${euroIt(preCent / 100)} €. ${conclusione}`;
@@ -627,8 +655,11 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
       ordini,
       // conta fra le differenze se non torna; l'ipotesi no, perche' i suoi ordini
       // sono gia' fra gli importi diversi; un surplus senza importo si', se il
-      // resto del file gli importi li ha
-      conta: ['assente', 'solo_prefattura', 'non_torna'].includes(esito) || (esito === 'senza_importo' && conImporti),
+      // resto del file gli importi li ha. Quello che la prefattura non porta
+      // affatto no: si fattura a parte, e si scrive (13/10/2026, vedi sopra).
+      conta: ['solo_prefattura', 'non_torna'].includes(esito) || (esito === 'senza_importo' && conImporti) || (esito === 'assente' && !aParte),
+      // vero quando si fattura a parte: la prefattura non porta nessun surplus
+      a_parte: aParte,
       ipotesi,
       testo,
     };
@@ -690,6 +721,15 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
   const differenze = soloPrefattura.length + daAttribuire.length
     + canali.reduce((s, c) => s + (c.fuori_prefattura ? 0 : c.solo_gestionale.length) + c.peso_diverso.length + c.importo_diverso.length + c.fir_diverso.length + (c.surplus && c.surplus.conta ? 1 : 0), 0);
   const diciture_diverse = canali.reduce((s, c) => s + c.servizio_diverso.length, 0);
+  // Il surplus che la prefattura non porta e si fattura a parte, canale per
+  // canale: non e' una differenza, ma la pagina delle esportazioni lo dice
+  // accanto all'esito del confronto (13/10/2026).
+  const surplus_a_parte = canali.filter(c => c.surplus && c.surplus.a_parte).map(c => ({
+    canale: c.canale,
+    nome: [...new Set(c.surplus.gestionale.righe.map(r => r.nome).filter(Boolean))].join(' e ') || 'Surplus',
+    euro: c.surplus.gestionale.euro,
+    testo: c.surplus.testo,
+  }));
   return {
     coincide: differenze === 0 && pre.size > 0,
     differenze,
@@ -700,5 +740,7 @@ export function confrontaPrefattura(righePrefattura, righeVive, altrove = new Ma
     canali, solo_prefattura: soloPrefattura, terziarie,
     // le righe di surplus della prefattura che non si sa a quale canale dare
     surplus_da_attribuire: daAttribuire,
+    // il surplus che la prefattura non porta: si fattura a parte, non conta
+    surplus_a_parte,
   };
 }

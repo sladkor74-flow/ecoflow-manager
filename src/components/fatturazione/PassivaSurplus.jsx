@@ -67,6 +67,18 @@ export function OrigineSurplus({ s }) {
   );
 }
 
+/**
+ * L'avviso della riga del surplus quando la tariffa del mese manca (risposta
+ * dell'utente del 13/10/2026): il surplus si paga lo stesso sulle tonnellate,
+ * la riga standard resta «senza tariffa». E' un problema da sistemare, quindi
+ * nel colore dei problemi della pagina, non nell'indaco del surplus. La frase
+ * viene dal calcolo (s.avviso), la stessa del foglio e dei file.
+ */
+export function AvvisoSurplus({ s }) {
+  if (!s || !s.avviso) return null;
+  return <span className="block text-xs font-medium text-destructive">{s.avviso}</span>;
+}
+
 /** Sotto il totale di un fornitore che ha un surplus: come si compone. */
 export function TotaleStandardSurplus({ f }) {
   if (!(Number(f && f.totale_surplus) > 0)) return null;
@@ -134,6 +146,13 @@ export function FasceSurplus({ surplus }) {
               {(s.interni || []).map((f, k) => (
                 <div key={k} className="text-muted-foreground tabular-nums">
                   {f.fornitore} (interno) {formatNumber(f.tonnellate)} t: non si paga, a se stessi non si fattura.
+                </div>
+              ))}
+              {/* Chi lo riceve senza la tariffa del mese (13/10/2026): il surplus
+                  si paga, la riga standard no, e va detto. */}
+              {(s.senza_tariffa || []).map((f, k) => (
+                <div key={`st${k}`} className="text-xs font-medium text-destructive tabular-nums">
+                  {f.fornitore}, {String(f.avviso || '').charAt(0).toLowerCase()}{String(f.avviso || '').slice(1)}
                 </div>
               ))}
               {s.riferimento && <div className="text-xs text-muted-foreground">Riferimento: {s.riferimento}</div>}

@@ -143,9 +143,9 @@ async function riferimentiPrimaDiEliminare(base44, entita, id) {
 // Due surplus con nomi diversi sulle stesse tonnellate si pagano tutti e due: e'
 // un avviso, non un errore.
 //
-// I MESI GIA' CHIUSI (regola 10 del progetto, domanda D7 ancora aperta). Se il
-// surplus nuovo, cambiato o eliminato cambia un mese con l'attiva chiusa
-// (fattura emessa) o la passiva congelata, la risposta lo dice mese per mese,
+// I MESI GIA' CHIUSI (regola 10 del progetto, domanda D7). Se il surplus nuovo,
+// cambiato o eliminato cambia un mese con l'attiva gia' fatturata o la passiva
+// congelata, la risposta lo dice mese per mese,
 // con la stima di quanto vale li': non si riapre niente da soli. La stima
 // dell'attiva e' sulle righe del documento chiuso (i chili dei formulari, sul
 // giorno italiano della fine del trasporto); quella della passiva sul conto
@@ -153,7 +153,15 @@ async function riferimentiPrimaDiEliminare(base44, entita, id) {
 // SMOCO resta a SMOCO, D2). Con anteprima: true si fanno tutti i controlli e si
 // risponde senza scrivere niente: la pagina lo usa per chiedere conferma prima
 // di salvare quando un mese chiuso cambia.
+//
+// L'ATTIVA GIA' FATTURATA NON E' SOLO QUELLA CHIUSA (risposta dell'utente del
+// 13/10/2026). Un documento approvato o esportato e' gia' andato, o sta
+// andando, all'amministrazione per la fattura: l'avviso scatta anche li', come
+// per «chiusa» (STATI_GIA_FATTURATI), e la frase dice lo stato vero. Un
+// documento solo elaborato o verificato no: si rielabora e il surplus entra.
 const CANALE_A_PAROLE = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra raccolta' };
+// Gli stati dell'attiva in cui il mese e' gia' fatturato, o in fattura.
+const STATI_GIA_FATTURATI = ['approvata', 'esportata', 'chiusa'];
 // La prestazione nella frase del conflitto: «per la raccolta», «per lo stoccaggio».
 const CON_ARTICOLO = { RACCOLTA: 'la raccolta', TRATTAMENTO: 'il trattamento', CONFERIMENTO_STOCCAGGIO: 'lo stoccaggio', TRASPORTO_SECONDARIA: 'il trasporto delle secondarie' };
 // Il canale e la prestazione scritti in un modo solo, come in shared/surplus.ts.
@@ -372,13 +380,19 @@ function fraseMeseChiuso(x) {
     return `il surplus ${chi} passa da ${euroIt(p.prima.euro)} € a ${euroIt(p.dopo.euro)} € (${conSegno(p.differenza)} €)${stima}`;
   };
   const parti = [];
-  if (x.attiva) parti.push(`la fatturazione attiva è chiusa${x.attiva.fattura_numero ? ` (fattura ${x.attiva.fattura_numero})` : ''}: ${quanto(x.attiva, 'da Ecotyre')}`);
+  if (x.attiva) parti.push(`la fatturazione attiva è ${x.attiva.stato}${x.attiva.fattura_numero ? ` (fattura ${x.attiva.fattura_numero})` : ''}: ${quanto(x.attiva, 'da Ecotyre')}`);
   if (x.passiva) parti.push(`la passiva è congelata${x.passiva.congelato_il ? ` dal ${dataIt(giornoRoma(x.passiva.congelato_il))}` : ''}: ${quanto(x.passiva, 'ai fornitori')}`);
-  return `${x.mese_nome} ${x.anno}, ${CANALE_A_PAROLE[x.canale] || x.canale}: ${parti.join('; ')}. Il gestionale non riapre niente da solo: la differenza si gestisce a parte.`;
+  // Approvata o esportata non e' ancora chiusa: se la fattura non e' stata
+  // emessa, la rielaborazione del mese mette il surplus nel documento.
+  const nonChiusa = x.attiva && x.attiva.stato !== 'chiusa'
+    ? ' Se la fattura a Ecotyre non è ancora emessa, rielaborando il mese il surplus entra nel documento.'
+    : '';
+  return `${x.mese_nome} ${x.anno}, ${CANALE_A_PAROLE[x.canale] || x.canale}: ${parti.join('; ')}. Il gestionale non riapre niente da solo: la differenza si gestisce a parte.${nonChiusa}`;
 }
 
 /**
- * I mesi con l'attiva chiusa o la passiva congelata che i cambi cambiano.
+ * I mesi con l'attiva gia' fatturata (approvata, esportata o chiusa) o la
+ * passiva congelata che i cambi cambiano.
  * cambi: [{ prima, dopo }] di record SurplusTariffa (null quando manca: un
  * surplus nuovo non ha prima, uno eliminato non ha dopo). Si guardano solo i
  * mesi fino a quello di oggi (uno dopo non puo' essere chiuso), e si leggono
@@ -428,8 +442,9 @@ async function mesiChiusiDelSurplus(base44, cambi, oggi = oggiRoma()) {
     if (t.attiva) {
       const delMese = documenti.filter(x => x && Number(x.anno) === t.anno && x.mese === meseNome && !x.superato && x.stato !== 'bozza');
       const doc = documentoDelCanale(delMese, t.canale);
-      if (doc && doc.stato === 'chiusa') {
-        const base = { stato: 'chiusa', documento_id: doc.id, fattura_numero: String(doc.fattura_numero || '') };
+      // approvata, esportata o chiusa: il mese e' gia' fatturato (13/10/2026)
+      if (doc && STATI_GIA_FATTURATI.includes(doc.stato)) {
+        const base = { stato: doc.stato, documento_id: doc.id, fattura_numero: String(doc.fattura_numero || '') };
         if (chiusoFuoriDalGestionale(doc)) {
           attiva = { ...base, fuori_dal_gestionale: true, prima: null, dopo: null, differenza: null, stima: 'non_stimabile' };
         } else {

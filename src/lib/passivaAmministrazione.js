@@ -453,9 +453,86 @@ export function notaDelSurplus(s) {
   return `${testa ? `${testa}: ` : ''}surplus sulle stesse tonnellate del mese, che non si sommano una seconda volta`;
 }
 
-/** Una riga 'surplus' del foglio: dal calcolo, oppure a zero per un soggetto senza movimenti. */
-function rigaSurplus(soggetto, s, tonnellate, totale) {
+// Le tonnellate all'italiana dentro una frase: due decimali, tre se i chili non
+// sono tondi (come il calcolo della passiva).
+const tTesto = (t) => {
+  const kg = Math.round((Number(t) || 0) * 1000);
+  const [i, d] = (kg / 1000).toFixed(kg % 10 === 0 ? 2 : 3).split('.');
+  return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${d}`;
+};
+
+// IL FOGLIO NON E' IL CALCOLO, SULLE TONNELLATE SENZA TARIFFA (revisione del
+// 13/10/2026). Il calcolo della passiva lascia a zero la riga standard di un
+// movimento senza la tariffa del mese, e la riga del surplus lo dice: «il
+// surplus c'è, la riga standard no». Il foglio pero' quelle tonnellate le
+// prezza lo stesso quando la voce un prezzo ce l'ha: dal modello (13 t x 70 =
+// 910 €, «il prezzo arriva dal modello»), dal tariffario per la voce, o con la
+// tariffa degli altri movimenti della stessa voce (GAMMA: Napoli a 70, Salerno
+// senza tariffa, la voce prende tutte le 6 t a 70). Nello stesso documento la
+// riga standard era pagata e quella del surplus diceva che non c'era. Qui si
+// dice quello che il foglio fa davvero; la frase del calcolo resta quando nel
+// foglio la riga standard e' davvero a zero (prezzo zero, tariffe diverse, o
+// chili che nessuna voce prende).
+const PREZZO_SENZA_TARIFFA = {
+  modello: 'il prezzo del modello',
+  tariffario: 'il prezzo che il tariffario dà alla voce',
+  movimenti: 'la tariffa degli altri movimenti della voce',
+};
+const rigaStandardSenzaTariffa = (r) => /senza tariffa/i.test(String(r && r.note || '')) && !rigaInterna(r) && !rigaCompresa(r);
+
+/**
+ * Quanto delle tonnellate senza tariffa di una prestazione il foglio prezza lo
+ * stesso: { tutte, prezzate, fonti }. `voci` e' l'elenco { righe, fonte,
+ * prezzata } delle voci del soggetto, `fuori` le righe che nessuna voce prende.
+ */
+function coperturaSenzaTariffa(blocco, prestazione, voci, fuori) {
+  let tutte = 0;
+  let prezzate = 0;
+  const fonti = [];
+  const conta = (r, voce) => {
+    if (!rigaStandardSenzaTariffa(r)) return;
+    const p = blocco === 'raccoglitori' ? 'RACCOLTA' : prestazioneChiave(r.prestazione);
+    if (p !== prestazione) return;
+    const t = Number(r.tonnellate) || 0;
+    tutte += t;
+    if (voce && voce.prezzata) {
+      prezzate += t;
+      if (!fonti.includes(voce.fonte)) fonti.push(voce.fonte);
+    }
+  };
+  for (const v of voci || []) for (const r of v.righe || []) conta(r, v);
+  for (const r of fuori || []) conta(r, null);
+  return { tutte: n3(tutte), prezzate: n3(prezzate), fonti };
+}
+
+/**
+ * L'avviso della riga del surplus nel foglio: quello del calcolo, se nel foglio
+ * la riga standard di quelle tonnellate e' a zero; altrimenti quello che il
+ * foglio fa davvero, con le stesse tonnellate del calcolo.
+ */
+export function avvisoSurplusDelFoglio(s, copertura) {
+  const avviso = testo(s && s.avviso);
+  if (!avviso || !copertura || !(copertura.prezzate > 0)) return avviso;
+  const senza = n3(s.tonnellate_senza_tariffa);
+  const su = senza > 0 && senza < n3(s.tonnellate) ? ` su ${tTesto(senza)} t delle ${tTesto(s.tonnellate)}` : '';
+  const fonte = copertura.fonti.map(f => PREZZO_SENZA_TARIFFA[f]).filter(Boolean).join(' e ');
+  const parte = copertura.prezzate < copertura.tutte
+    ? ` su ${tTesto(copertura.prezzate)} t delle ${tTesto(copertura.tutte)} senza tariffa, le altre no`
+    : '';
+  return `Tariffa del mese mancante${su}: nel foglio la riga standard ha ${fonte}${parte}; il surplus c'è lo stesso.`;
+}
+
+/**
+ * Una riga 'surplus' del foglio: dal calcolo, oppure a zero per un soggetto senza movimenti.
+ * Se il fornitore non ha la tariffa del mese il calcolo lo dice sulla riga
+ * (s.avviso, risposta dell'utente del 13/10/2026): l'avviso va in testa alla
+ * nota, che il foglio Excel e il PDF scrivono, e resta anche nel suo campo.
+ * Chi costruisce il blocco puo' passare l'avviso del foglio (avvisoSurplusDelFoglio).
+ */
+function rigaSurplus(soggetto, s, tonnellate, totale, avvisoDelFoglio = null) {
   const prestazione = testo(s.prestazione).toUpperCase();
+  const avviso = avvisoDelFoglio !== null ? testo(avvisoDelFoglio) : testo(s.avviso);
+  const nota = notaDelSurplus(s);
   return {
     tipo: 'surplus',
     soggetto,
@@ -473,7 +550,8 @@ function rigaSurplus(soggetto, s, tonnellate, totale) {
     dal: testo(s.dal),
     al: testo(s.al),
     etichetta: testo(s.etichetta),
-    note: notaDelSurplus(s),
+    note: avviso ? `${avviso} ${nota.charAt(0).toUpperCase()}${nota.slice(1)}` : nota,
+    ...(avviso ? { avviso, tonnellate_senza_tariffa: n3(s.tonnellate_senza_tariffa) } : {}),
   };
 }
 
@@ -548,14 +626,18 @@ function elencoNomina(s, k) {
  * sue tonnellate e il suo importo) e, per i surplus del mese che lo riguardano
  * e che il calcolo non gli ha dato perche' nel periodo non ha portato niente, la
  * riga a zero. In ordine di nome e di inizio, come nel calcolo.
+ *
+ * @param coperturaDi facoltativo: prestazione -> coperturaSenzaTariffa, per dire
+ *   l'avviso di una tariffa mancante come lo fa il foglio (13/10/2026)
  */
-function righeSurplusDelSoggetto(surplus, blocco, soggetto, vociSoggetto, righeSoggetto) {
+function righeSurplusDelSoggetto(surplus, blocco, soggetto, vociSoggetto, righeSoggetto, coperturaDi = null) {
   if (!surplus) return [];
   const k = nome(soggetto);
   const prestazioni = PRESTAZIONI_SURPLUS[blocco] || [];
   const dalCalcolo = ((surplus.perSoggetto && surplus.perSoggetto.get(k)) || [])
     .filter(s => prestazioni.includes(testo(s.prestazione).toUpperCase()));
-  const fuori = dalCalcolo.map(s => rigaSurplus(soggetto, s, s.tonnellate, s.importo));
+  const fuori = dalCalcolo.map(s => rigaSurplus(soggetto, s, s.tonnellate, s.importo,
+    testo(s.avviso) && coperturaDi ? avvisoSurplusDelFoglio(s, coperturaDi(testo(s.prestazione).toUpperCase())) : null));
   if (!(surplus.interni && surplus.interni.has(k))) {
     const sue = prestazioniDelSoggetto(blocco, vociSoggetto, righeSoggetto);
     for (const s of surplus.delMese || []) {
@@ -606,6 +688,9 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surpl
     const righeSoggetto = perSoggetto.get(nome(soggetto)) || [];
     soggettiUsati.add(nome(soggetto));
     const { quote, fuori } = assegnaRighe(sue, righeSoggetto, (v) => tariffaDellaVoce(tariffe, v, canale, blocco, giorno));
+    // Le voci con le loro righe, da dove viene il prezzo e se le tonnellate le
+    // paga: serve all'avviso del surplus di chi non ha la tariffa del mese.
+    const prezzate = [];
     const dettaglio = sue.map(v => {
       const q = quote.get(v);
       const p = prezzoDellaVoce(v, q.righe, tariffe, canale, blocco, giorno);
@@ -661,6 +746,7 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surpl
             : `La fatturazione passiva per questa voce calcola ${euro} €: la differenza va guardata.`);
         }
       }
+      prezzate.push({ righe: q.righe, fonte: p.fonte, prezzata: !!PREZZO_SENZA_TARIFFA[p.fonte] && Number(p.prezzo) > 0 && totale > 0 });
       return {
         tipo: 'voce',
         soggetto,
@@ -686,7 +772,8 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surpl
     const eStandard = n2(dettaglio.reduce((s, d) => s + d.totale, 0));
     // Il surplus: le sue righe vanno nell'importo del soggetto, non nelle sue
     // tonnellate (sono le stesse del mese, gia' contate nelle voci).
-    const sueSurplus = righeSurplusDelSoggetto(surplus, blocco, soggetto, sue, righeSoggetto);
+    const sueSurplus = righeSurplusDelSoggetto(surplus, blocco, soggetto, sue, righeSoggetto,
+      (prestazione) => coperturaSenzaTariffa(blocco, prestazione, prezzate, fuori));
     const eSurplus = n2(sueSurplus.reduce((s, d) => s + d.totale, 0));
     const eSoggetto = n2(eStandard + eSurplus);
     righe.push({ tipo: 'soggetto', soggetto, tonnellate: tSoggetto, totale: eSoggetto, totale_standard: eStandard, totale_surplus: eSurplus });

@@ -64,6 +64,15 @@ const ambitoImpianto = (r) => [r.prestazione === 'CONFERIMENTO_STOCCAGGIO' ? 'St
 /** Le tonnellate dentro un testo, all'italiana con le migliaia: «1.120,24». */
 const tIt = (v) => { const [i, d] = tTesto(v).split(','); return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${d}`; };
 const NOTA_SURPLUS = 'surplus sulle stesse tonnellate del mese: non si sommano una seconda volta';
+// LA TARIFFA DEL MESE CHE MANCA (13/10/2026). Il surplus si paga lo stesso
+// (risposta dell'utente), e il calcolo lo dice sulla riga del surplus (avviso)
+// e sull'anomalia della tariffa che manca (avviso_surplus), mai dentro la
+// descrizione, che e' la chiave con cui la stessa anomalia si dice una volta
+// sola. Il file lo scrive accanto: in testa alla nota della riga del surplus,
+// e dopo la descrizione dell'anomalia, nell'Excel e nelle note del PDF.
+const notaSurplus = (s) => (s && s.avviso ? `${s.avviso} ${NOTA_SURPLUS.charAt(0).toUpperCase()}${NOTA_SURPLUS.slice(1)}` : NOTA_SURPLUS);
+/** Un'anomalia a parole nel file: la descrizione e, se c'e', l'avviso del surplus. */
+export const anomaliaNelFile = (a) => (a && a.avviso_surplus ? `${a.descrizione}. ${a.avviso_surplus}` : a.descrizione);
 /** Il nome del surplus nei «di cui»: quello vero se nel mese ce n'e' uno solo. */
 export function nomeDelSurplus(result) {
   const nomi = [...new Set(((result && result.surplus_del_mese) || []).map(s => String((s && s.nome) || '').trim()).filter(Boolean))];
@@ -90,7 +99,7 @@ export function sezioniPassiva(result) {
         righe.push({ celle: [`   ${ambito(r)}`, r3(r.tonnellate), r.tariffa_valore || 0, unita(r.unita_misura), null, r2(r.importo), [r.note, conferenti && `di cui conferito da: ${conferenti}`].filter(Boolean).join(' — ') || null] });
       }
       for (const s of f.surplus || []) {
-        righe.push({ celle: [`   ${s.etichetta || s.nome}`, `(${tIt(s.tonnellate)})`, Number(s.euro_t) || 0, '€\\t', null, r2(s.importo), NOTA_SURPLUS] });
+        righe.push({ celle: [`   ${s.etichetta || s.nome}`, `(${tIt(s.tonnellate)})`, Number(s.euro_t) || 0, '€\\t', null, r2(s.importo), notaSurplus(s)] });
       }
       for (const d of f.di_cui || []) righe.push({ celle: [`   di cui ${d.fornitore}`, r3(d.tonnellate), null, null, null, null, 'subraccoglitore, fatturato dal principale'] });
     }
@@ -164,7 +173,7 @@ export function righePassiva(result, tipi = [], stili = []) {
   tipo = 'testa';
   if ((result.anomalie || []).length) {
     riga(['ANOMALIE DA GUARDARE PRIMA DI PAGARE'], 'avviso');
-    for (const a of result.anomalie) riga([a.descrizione, a.tonnellate ? r3(a.tonnellate) : null], 'avviso');
+    for (const a of result.anomalie) riga([anomaliaNelFile(a), a.tonnellate ? r3(a.tonnellate) : null], 'avviso');
   }
   return aoa;
 }
@@ -226,7 +235,7 @@ export async function exportFatturazionePassivaPdf(result, opzioni = {}) {
         : []),
     ],
     sezioni: sezioniPassiva(result),
-    note: (result.anomalie || []).map(a => a.descrizione),
+    note: (result.anomalie || []).map(anomaliaNelFile),
   });
   return nomeFile(result, 'pdf');
 }

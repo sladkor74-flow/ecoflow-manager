@@ -19,7 +19,12 @@
 //   3. che la pagina lo dica gia' prima di esportare, canale per canale, e che
 //      senza surplus non dica niente;
 //   4. che due record dello stesso surplus (un importo cambiato a meta' mese) si
-//      dicano una volta, col totale.
+//      dicano una volta, col totale;
+//   5. che il Fuel Surcharge che la prefattura non porta (Ecotyre lo comunica a
+//      parte) si scriva accanto all'esito del confronto e NON faccia chiedere
+//      conferma all'esportazione (risposta dell'utente del 13/10/2026). Il
+//      confronto e' quello vero (confrontaPrefattura), e gli effetti della
+//      pagina girano: la pagina lo legge come lo leggerebbe dal server.
 // La prova prima/dopo di prove/attivaReportSurplus.mjs (parte 7) guarda le
 // stesse righe sui dati veri; questa guarda le parole a video.
 //
@@ -29,6 +34,7 @@ import { build } from 'esbuild';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { calcolaRigheAttiva, eRigaSurplus } from '../base44/shared/attivaCalcolo.ts';
+import { leggiTabellePrefattura, confrontaPrefattura } from '../base44/shared/prefattura.ts';
 import { nomiImportati } from './dati/paginaFinta.mjs';
 
 const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
@@ -46,7 +52,8 @@ export function useState(iniziale) {
   const s = st;
   return [s.valori[i], (v) => { s.valori[i] = typeof v === 'function' ? v(s.valori[i]) : v; }];
 }
-export const useEffect = () => {};
+// gli effetti si tengono solo quando la prova li chiede (globalThis.__EFFETTI)
+export const useEffect = (f) => { if (globalThis.__EFFETTI) globalThis.__EFFETTI.push(f); };
 export const useMemo = (f) => f();
 export const useCallback = (f) => f;
 export const useRef = (v) => ({ current: v });
@@ -64,7 +71,8 @@ const MODULI = {
   '@/lib/formatAmministrazioneExport': registratore("export const exportAmministrazioneAttiva = r('amm-excel');\nexport const exportAmministrazioneAttivaPdf = r('amm-pdf');"),
   '@/lib/formatAmministrazione': 'export const nomeFileAmministrazione = (t, a, m, e) => `amministrazione ${t}.${e}`;',
 };
-const CLIENT = 'export const base44 = { functions: { invoke: async () => ({ data: {} }) }, entities: new Proxy({}, { get: () => ({ list: async () => [], filter: async () => [] }) }), auth: { me: async () => ({}) } };';
+// prefatturaEcotyre risponde col confronto che la prova mette in globalThis.__PREFATTURA
+const CLIENT = "export const base44 = { functions: { invoke: async (nome) => (nome === 'prefatturaEcotyre' && globalThis.__PREFATTURA ? { data: globalThis.__PREFATTURA } : { data: {} }) }, entities: new Proxy({}, { get: () => ({ list: async () => [], filter: async () => [] }) }), auth: { me: async () => ({}) } };";
 const ESTENSIONI = ['', '.js', '.jsx', '.ts'];
 const daAlias = (p) => { const base = qui('../src/' + p.slice(2)); return ESTENSIONI.map(e => base + e).find(f => existsSync(f) && /\.\w+$/.test(f)) || base; };
 
@@ -100,13 +108,30 @@ try {
   verifica('la pagina delle esportazioni si carica', false, String(e && e.message).slice(0, 300));
 }
 
-globalThis.window = { ...(globalThis.window || {}), confirm: () => true };
+// le conferme chieste a chi esporta, una per finestra
+globalThis.__CONFERME = [];
+globalThis.window = { ...(globalThis.window || {}), confirm: (m) => { globalThis.__CONFERME.push(m); return true; } };
 const PERIODO = { anno: 2026, mese: 'Ottobre' };
-/** Monta la pagina coi dati, preme i pulsanti [canale, testo] o quelli in fondo, e restituisce cosa e' arrivato ai file e cosa dice la pagina. */
-async function usa(data, premi = []) {
+/**
+ * Monta la pagina coi dati, preme i pulsanti [canale, testo] o quelli in fondo, e
+ * restituisce cosa e' arrivato ai file e cosa dice la pagina. Con prefattura (la
+ * risposta di prefatturaEcotyre) gli effetti della pagina girano una volta: il
+ * confronto arriva come dal server.
+ */
+async function usa(data, premi = [], { prefattura = null } = {}) {
   if (!M) return { prima: '', dopo: '', file: [], errore: 'pagina non caricata' };
   M.azzera();
+  globalThis.__CONFERME = [];
+  globalThis.__PREFATTURA = prefattura;
   const props = { periodo: PERIODO, data, onReload: async () => {}, onVaiPrefattura: () => {} };
+  if (prefattura) {
+    globalThis.__EFFETTI = [];
+    M.rendi(M.Pagina, props);
+    const effetti = globalThis.__EFFETTI;
+    globalThis.__EFFETTI = null;
+    for (const f of effetti) f();
+    for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0));
+  }
   const prima = M.rendi(M.Pagina, props);
   globalThis.__AI_FILE = [];
   let errore = null;
@@ -194,6 +219,38 @@ console.log('4. DUE RECORD DELLO STESSO SURPLUS SI DICONO UNA VOLTA');
   verifica('due importi a meta\' mese: ai file i due formulari, e la frase dice «Fuel Surcharge € 19,00» una volta',
     u.file.length === 1 && u.file[0].righe.length === 2 && u.dopo.includes('Il file ha le sole righe dei formulari: Fuel Surcharge € 19,00 si fattura con la sua riga a parte.') && u.prima.includes('Rete: Fuel Surcharge € 19,00'),
     `${JSON.stringify(u.file.map(x => x.righe.length))} ${u.dopo.slice(u.dopo.indexOf('attiva RETE'), u.dopo.indexOf('attiva RETE') + 200)}`);
+}
+
+console.log('5. IL FUEL SURCHARGE CHE LA PREFATTURA NON PORTA SI FATTURA A PARTE, SENZA CONFERMA');
+{
+  // La prefattura di ottobre coi due formulari della rete, e niente surplus: il
+  // confronto vero (confrontaPrefattura) col gestionale col Fuel Surcharge.
+  const TESTA = ['Tipo', 'Ordine', 'Numero FIR', 'Prodotto', 'Quantità (kg)', 'Prezzo Unitario (Euro/Kg)', 'Prezzo Totale'];
+  const preRete = leggiTabellePrefattura([{ nome: 'W', celle: [TESTA, ['Trasp+Tratt', 'ET26000001', 'F1', '.class1', 1000, 0.202, 202], ['Trasp+Tratt', 'ET26000002', 'F2', '.class1', 2000, 0.202, 404]] }]).righe;
+  const conf = (surplus) => {
+    const g = calcolaRigheAttiva({ reteAll: [mov(1, 1000, '10'), mov(2, 2000, '20')], aciAll: [], extraAll: [], fornitori: [], tariffe, anno: 2026, mese: 'Ottobre', surplus });
+    return { prefattura: { id: 'p10', nome_file: 'ottobre.xlsx', numero_righe: 2 }, confronto: confrontaPrefattura(preRete, g.righe, new Map(), g.surplus_del_mese) };
+  };
+  const conFS = conf([fs()]);
+  verifica('il confronto: la rete coincide ordine per ordine, e il Fuel Surcharge (15,00 €) e\' a parte, non fra le differenze',
+    conFS.confronto.coincide === true && conFS.confronto.differenze === 0 && JSON.stringify((conFS.confronto.surplus_a_parte || []).map(x => [x.canale, x.euro])) === JSON.stringify([['RETE', 15]]),
+    JSON.stringify({ d: conFS.confronto.differenze, a: conFS.confronto.surplus_a_parte }));
+  const u = await usa(dati(CON), [['RETE', 'Excel']], { prefattura: conFS });
+  verifica('la pagina: «coincide», e sotto «Rete: Fuel Surcharge, 15,00 € (3,00 t × 5,00 €/t), non è nella prefattura: si fattura a parte.»',
+    u.prima.includes('La prefattura Ecotyre coincide con il gestionale, ordine per ordine.') && u.frasi.some(f => f.startsWith('Rete: Fuel Surcharge, 15,00 € (3,00 t × 5,00 €/t), non è nella prefattura: si fattura a parte.')),
+    JSON.stringify(u.frasi.filter(f => /prefattura|Fuel/.test(f))));
+  verifica('...e l\'Excel della rete si esporta senza chiedere conferma', !u.errore && u.file.length === 1 && globalThis.__CONFERME.length === 0, u.errore || JSON.stringify(globalThis.__CONFERME));
+  // senza surplus: coincide, nessuna frase del surplus, nessuna conferma (come prima)
+  const s0 = await usa(dati(SENZA), [['RETE', 'Excel']], { prefattura: conf([]) });
+  verifica('senza surplus: coincide, nessuna frase del surplus, nessuna conferma', s0.prima.includes('La prefattura Ecotyre coincide con il gestionale') && !/Fuel Surcharge|si fattura a parte/.test(s0.prima) && globalThis.__CONFERME.length === 0 && s0.file.length === 1,
+    JSON.stringify(globalThis.__CONFERME));
+  // una differenza vera (un ordine con un altro peso) chiede ancora conferma, e la conta senza il surplus
+  const altroPeso = leggiTabellePrefattura([{ nome: 'W', celle: [TESTA, ['Trasp+Tratt', 'ET26000001', 'F1', '.class1', 1100, 0.202, 222.2], ['Trasp+Tratt', 'ET26000002', 'F2', '.class1', 2000, 0.202, 404]] }]).righe;
+  const gD = calcolaRigheAttiva({ reteAll: [mov(1, 1000, '10'), mov(2, 2000, '20')], aciAll: [], extraAll: [], fornitori: [], tariffe, anno: 2026, mese: 'Ottobre', surplus: [fs()] });
+  const d = await usa(dati(CON), [['RETE', 'Excel']], { prefattura: { prefattura: { id: 'p10' }, confronto: confrontaPrefattura(altroPeso, gD.righe, new Map(), gD.surplus_del_mese) } });
+  verifica('una differenza vera chiede ancora conferma, e la conta da sola: «1 differenze non chiarite»', globalThis.__CONFERME.length === 1 && /ha 1 differenze non chiarite/.test(globalThis.__CONFERME[0]),
+    JSON.stringify(globalThis.__CONFERME));
+  verifica('...e il surplus a parte si scrive lo stesso', d.frasi.some(f => f.startsWith('Rete: Fuel Surcharge, 15,00 €')), JSON.stringify(d.frasi.filter(f => /Fuel/.test(f))));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

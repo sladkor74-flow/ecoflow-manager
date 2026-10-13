@@ -65,6 +65,12 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
   // lo hanno (vedi surplusAParte).
   const surplusDelMese = TIPS.map(t => ({ label: t.label, voci: surplusDelCanale(data[t.key]?.righe) })).filter(c => c.voci.length);
 
+  // Il surplus che la prefattura non porta (Ecotyre lo comunica a parte): si
+  // fattura a parte, e non e' una differenza (risposta dell'utente del
+  // 13/10/2026). Il confronto non lo conta, quindi l'esportazione non chiede
+  // conferma per lui; qui si scrive, canale per canale, accanto all'esito.
+  const surplusFuoriPrefattura = (prefattura.confronto && prefattura.confronto.surplus_a_parte) || [];
+
   // L'esportazione non si blocca, ma chi esporta senza un confronto pulito lo fa sapendolo
   const consenso = () => {
     if (prefattura.stato === 'coincide') return true;
@@ -166,6 +172,16 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
             {onVaiPrefattura && prefattura.stato !== 'coincide' && (
               <button onClick={onVaiPrefattura} className="text-primary hover:underline inline-flex items-center gap-1">Vai alla prefattura <ArrowRight className="w-3.5 h-3.5" /></button>
             )}
+          </div>
+        )}
+        {surplusFuoriPrefattura.length > 0 && (
+          <div className={`mb-3 space-y-1 rounded-md px-3 py-2 text-sm ${STILE_SURPLUS.barretta} ${STILE_SURPLUS.fondo}`}>
+            {surplusFuoriPrefattura.map(x => (
+              <p key={`surplus-${x.canale}`} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className={STILE_SURPLUS.etichetta}>Surplus</span>
+                <span>{`${TIPS.find(t => t.key === x.canale)?.label || x.canale}: ${x.testo}`}</span>
+              </p>
+            ))}
           </div>
         )}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { notaTraccia } from '@/lib/scriviConTraccia';
 import { oggiRoma } from '@/lib/giornoItaliano';
@@ -11,7 +11,7 @@ import StoricoModifiche from '@/components/shared/StoricoModifiche';
 import { Plus, Fuel, Pencil, CalendarX, History, Trash2, Loader2, ChevronDown, ChevronRight, ArrowRight, AlertTriangle, X, RotateCcw } from 'lucide-react';
 import SurplusForm from './SurplusForm';
 import {
-  schedeSurplus, schedaNellaFascia, avanzamento, dataIt, dataBreve, piuEuroT, canaliAParole, importiAParole, testoTariffe,
+  schedeSurplus, schedaNellaFascia, fasciaVuota, avanzamento, dataIt, dataBreve, piuEuroT, canaliAParole, importiAParole, testoTariffe,
   NOMI_STATO, NOMI_PRESTAZIONE_MODULO, bozzaVuota, bozzaFuelSurcharge, chiusuraDelPeriodo, eliminazioneDellaScheda,
   toccaMesiPassati, scriviSurplus, erroreDellaRisposta, resocontoDelSalvataggio,
 } from './surplusTariffe';
@@ -106,15 +106,44 @@ export function PastiglieSurplus({ col, tariffa, onVai }) {
 
 /**
  * La fascia in cima alle tariffe: i surplus in corso (e quelli in arrivo), con
- * quante tariffe toccano. Si nasconde se non ce ne sono. Neutra e sottile: qui
- * l'ambra e il rosso vogliono dire «c'e' un problema», e un surplus non lo e'.
- * Di ogni surplus dice solo i canali vivi, ognuno fino al suo giorno
- * (schedaNellaFascia, revisione del 13/10/2026): un canale chiuso prima non
- * deve sembrare prendere due surplus.
+ * quante tariffe toccano. Neutra e sottile: qui l'ambra e il rosso vogliono dire
+ * «c'e' un problema», e un surplus non lo e'. Di ogni surplus dice solo i canali
+ * vivi, ognuno fino al suo giorno (schedaNellaFascia, revisione del 13/10/2026):
+ * un canale chiuso prima non deve sembrare prendere due surplus.
+ *
+ * Senza surplus in corso o in arrivo resta una fascia breve, dello stesso
+ * colore, che dice da dove si scrivono (13/10/2026: dopo la pubblicazione
+ * l'utente non ha trovato la sezione, perche' la fascia si nascondeva e restava
+ * solo la linguetta). letti e' falso se i surplus non si sono letti: allora la
+ * fascia non dice «nessuno», che sarebbe falso, e parla l'avviso della lettura.
+ * onScrivi (solo all'amministratore) apre il modulo del Fuel Surcharge.
  */
-export function FasciaSurplus({ schede, conti, conCosti = true, onVai }) {
+export function FasciaSurplus({ schede, conti, conCosti = true, letti = true, onVai, onScrivi }) {
   const vive = (schede || []).map(schedaNellaFascia).filter(Boolean);
-  if (!vive.length) return null;
+  if (!vive.length) {
+    const vuota = letti ? fasciaVuota(schede) : null;
+    if (!vuota) return null;
+    return (
+      <div className={`flex flex-col gap-1.5 rounded-lg border ${BARRETTA} bg-[hsl(var(--eco-surplus)/0.04)] px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3`}>
+        <p className="min-w-0">
+          <span className={`font-semibold ${TINTA}`}>Surplus sulle tariffe</span>
+          <span className="text-muted-foreground"> (es. Fuel Surcharge): {vuota.testo}</span>
+        </p>
+        <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs font-medium">
+          {onScrivi && (
+            <button type="button" onClick={onScrivi} className={`inline-flex items-center gap-1 ${TINTA} hover:underline`}>
+              <Fuel className="h-3.5 w-3.5" aria-hidden="true" /> Scrivi il Fuel Surcharge
+            </button>
+          )}
+          {onVai && (
+            <button type="button" onClick={onVai} className={`inline-flex items-center gap-1 ${TINTA} hover:underline`}>
+              Apri la sezione Surplus <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`rounded-lg border ${BARRETTA} bg-[hsl(var(--eco-surplus)/0.04)] px-3 py-2.5 text-sm`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -419,8 +448,12 @@ function Resoconto({ resoconto, onChiudi }) {
  * La scheda «Surplus». surplus: i record di SurplusTariffa letti tutti (null se
  * la lettura non e' riuscita: erroreLettura dice perche'); onCambiato rilegge
  * i surplus dopo una scrittura, e solo quelli.
+ * richiesta: { cosa: 'fuel' } quando si arriva da «Scrivi il Fuel Surcharge»
+ * della fascia in cima alle tariffe: si apre il modulo della scorciatoia, una
+ * volta, e onRichiestaFatta lo dice a chi l'ha chiesto (la scheda si smonta e si
+ * rimonta a ogni cambio di linguetta, e non deve riaprirlo da sola).
  */
-export default function SurplusSezione({ surplus, erroreLettura = '', fornitori = [], isAdmin = false, oggi: oggiDato = '', onCambiato, onRiprova }) {
+export default function SurplusSezione({ surplus, erroreLettura = '', fornitori = [], isAdmin = false, oggi: oggiDato = '', onCambiato, onRiprova, richiesta = null, onRichiestaFatta }) {
   const oggi = oggiDato || oggiRoma();
   const schede = useMemo(() => schedeSurplus(surplus || [], oggi), [surplus, oggi]);
   const [mostraPassati, setMostraPassati] = useState(false);
@@ -434,6 +467,15 @@ export default function SurplusSezione({ surplus, erroreLettura = '', fornitori 
   const vive = schede.filter(s => s.stato === 'in_corso' || s.stato === 'in_arrivo');
   const passate = schede.filter(s => s.stato === 'concluso' || s.stato === 'disattivato');
   const apri = (m) => { setAperture(n => n + 1); setModulo(m); setResoconto(null); };
+  // La scorciatoia del consorzio propone le date dell'anno di oggi e, dal 2027,
+  // quelle dell'ultimo Fuel Surcharge scritto spostate all'anno: da confermare.
+  const apriFuel = () => apri({ bozza: bozzaFuelSurcharge(oggi, surplus || []), fuel: true });
+  // Solo quando arriva una richiesta: i surplus riletti non la ripetono.
+  useEffect(() => {
+    if (!richiesta) return;
+    if (richiesta.cosa === 'fuel' && isAdmin && surplus !== null) apriFuel();
+    if (onRichiestaFatta) onRichiestaFatta();
+  }, [richiesta]);
   const fatto = (titolo, righe) => {
     setModulo(null); setDaChiudere(null); setDaEliminare(null);
     setResoconto({ titolo, righe: righe || [] });
@@ -459,7 +501,7 @@ export default function SurplusSezione({ surplus, erroreLettura = '', fornitori 
         {isAdmin && (
           <div className="flex shrink-0 flex-wrap gap-2">
             <Button size="sm" onClick={() => apri({ bozza: bozzaVuota() })}><Plus className="mr-1 h-4 w-4" /> Nuovo surplus</Button>
-            <Button size="sm" variant="outline" onClick={() => apri({ bozza: bozzaFuelSurcharge(oggi), fuel: true })}><Fuel className="mr-1 h-4 w-4" /> Fuel Surcharge del consorzio</Button>
+            <Button size="sm" variant="outline" onClick={apriFuel}><Fuel className="mr-1 h-4 w-4" /> Fuel Surcharge del consorzio</Button>
           </div>
         )}
       </div>

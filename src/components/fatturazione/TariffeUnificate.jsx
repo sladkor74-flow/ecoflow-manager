@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { notaTraccia } from '@/lib/scriviConTraccia';
+import { useToast } from '@/components/ui/use-toast';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,7 +17,7 @@ import TariffeForm from './TariffeForm';
 import TariffeStorico from './TariffeStorico';
 import { surplusDellaTariffa } from '@/lib/surplus';
 import SurplusSezione, { PastiglieSurplus, FasciaSurplus } from './SurplusSezione';
-import { schedeSurplus, tariffeDelleSchede, haSurplus } from './surplusTariffe';
+import { schedeSurplus, tariffeDelleSchede, haSurplus, SEZIONI_TARIFFE } from './surplusTariffe';
 
 const PRESTAZIONI_LABEL = { RACCOLTA: 'Raccolta', TRASPORTO_SECONDARIA: 'Trasporto secondaria', TRATTAMENTO: 'Trattamento', CONFERIMENTO_STOCCAGGIO: 'Conferimento stoccaggio' };
 const TIPOLOGIA_LABEL = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra Raccolta', TUTTE: 'RETE + ACI' };
@@ -93,8 +94,23 @@ function calcolaDuplicate(tariffe) {
   return dupIds;
 }
 
-export default function TariffeUnificate() {
-  const [tab, setTab] = useState('tariffe');
+// Che cosa dice il modulo delle tariffe aperto prima che gli elenchi di province
+// e destinazioni siano arrivati (13/10/2026): funziona lo stesso, e le liste si
+// riempiono da sole.
+const AVVISO_ELENCHI = {
+  in_arrivo: { title: 'Province e destinazioni in arrivo', description: 'Il modulo funziona già: gli elenchi di province, destinazioni e stoccaggi si riempiono da soli appena letti i movimenti.' },
+  non_letti: { title: 'Province e destinazioni non lette', description: 'Si rileggono adesso. Intanto il modulo funziona: gli elenchi si riempiono appena arrivano.' },
+};
+
+/**
+ * Tariffe & Anagrafiche. sezione: la linguetta da aprire ('tariffe', 'surplus',
+ * 'ruoli'), dal collegamento ?tab=tariffe&sezione=surplus (13/10/2026).
+ */
+export default function TariffeUnificate({ sezione = null }) {
+  const [tab, setTab] = useState(SEZIONI_TARIFFE.includes(sezione) ? sezione : 'tariffe');
+  // Un collegamento nuovo con la scheda gia' aperta.
+  useEffect(() => { if (SEZIONI_TARIFFE.includes(sezione)) setTab(sezione); }, [sezione]);
+  const { toast } = useToast();
   const [tariffe, setTariffe] = useState([]);
   const [fornitori, setFornitori] = useState([]);
   const [province, setProvince] = useState([]);
@@ -108,6 +124,11 @@ export default function TariffeUnificate() {
   // letto» e non «—», che vorrebbe dire «nessun surplus».
   const [surplus, setSurplus] = useState(null);
   const [erroreSurplus, setErroreSurplus] = useState('');
+  // «Scrivi il Fuel Surcharge» dalla fascia: la scheda Surplus apre il modulo.
+  const [richiestaSurplus, setRichiestaSurplus] = useState(null);
+  // Gli elenchi del modulo delle tariffe: 'in_arrivo', 'pronti' o 'non_letti'.
+  const [elenchi, setElenchi] = useState('in_arrivo');
+  const elenchiChiesti = useRef(false);
   const [formState, setFormState] = useState({ open: false, editing: null, duplicating: null, excludePrestazione: '' });
   const [storico, setStorico] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -130,6 +151,14 @@ export default function TariffeUnificate() {
       setErroreSurplus(e?.response?.data?.error || e?.message || 'lettura non riuscita');
     }
   };
+  // LA SCHEDA SI MOSTRA SUBITO (13/10/2026). Prima la scheda aspettava anche
+  // tutte le primarie (10.487 l'11/10) e le secondarie, lette solo per gli
+  // elenchi di province, destinazioni e stoccaggi del modulo delle tariffe: circa
+  // 14 secondi di rotella a ogni apertura, e dopo la pubblicazione l'utente non
+  // ha trovato la sezione dei surplus. Ora la scheda aspetta tariffe, fornitori e
+  // surplus; gli elenchi si leggono dopo, una volta per apertura, senza tenere la
+  // pagina in attesa, e dopo un salvataggio non si rileggono (non cambiano con
+  // le tariffe): le letture sono le stesse di prima, e meno dopo ogni scrittura.
   const load = async () => {
     setLoading(true);
     // Tariffe e surplus sono due letture indipendenti (13/10/2026): se i
@@ -138,15 +167,25 @@ export default function TariffeUnificate() {
       Promise.all([
         fetchAllClient(base44.entities.Tariffa),
         base44.entities.Fornitore.filter({ stato: 'attivo' }),
-        fetchAllClient(base44.entities.PrimariaRete),
-        fetchAllClient(base44.entities.Secondaria),
       ]),
       caricaSurplus(),
     ]);
-    try {
-      if (esito.status !== 'fulfilled') throw esito.reason;
-      const [t, f, primarie, secondarie] = esito.value;
+    // Le tariffe non lette lasciano la tabella com'era.
+    if (esito.status === 'fulfilled') {
+      const [t, f] = esito.value;
       setTariffe(t); setFornitori(f);
+    }
+    setLoading(false);
+  };
+  const caricaElenchi = async () => {
+    if (elenchiChiesti.current) return;
+    elenchiChiesti.current = true;
+    setElenchi('in_arrivo');
+    try {
+      const [primarie, secondarie] = await Promise.all([
+        fetchAllClient(base44.entities.PrimariaRete),
+        fetchAllClient(base44.entities.Secondaria),
+      ]);
       const provSet = new Set(), destRacSet = new Set(), stocSet = new Set(), destSecSet = new Set();
       for (const r of primarie) {
         const p = (r.provincia || '').trim().toUpperCase();
@@ -164,13 +203,24 @@ export default function TariffeUnificate() {
       setDestRaccolta(Array.from(destRacSet).sort());
       setStoccaggi(Array.from(stocSet).sort());
       setDestSecondaria(Array.from(destSecSet).sort());
-    } catch { /* le tariffe non lette lasciano la tabella com'era */ }
-    setLoading(false);
+      setElenchi('pronti');
+    } catch {
+      // Si riprova alla prossima apertura del modulo: le liste restano vuote, e
+      // il modulo funziona con «Tutte le province» e «Qualsiasi destinazione».
+      elenchiChiesti.current = false;
+      setElenchi('non_letti');
+    }
   };
   useEffect(() => {
-    load();
+    load().then(() => caricaElenchi());
     base44.auth.me().then(u => setIsAdmin(u?.role === 'admin')).catch(() => {});
   }, []);
+  // Il modulo aperto prima degli elenchi lo dice, e si riempie quando arrivano.
+  const avvisaElenchi = () => {
+    if (elenchi === 'pronti') return;
+    if (elenchi === 'non_letti') caricaElenchi();
+    toast(AVVISO_ELENCHI[elenchi] || AVVISO_ELENCHI.in_arrivo);
+  };
 
   const handleImport2026 = async () => {
     setImport2026({ summary: null, loading: true, inserting: false, error: null });
@@ -324,9 +374,11 @@ export default function TariffeUnificate() {
     await closePeriod(t);
   };
 
-  const openCreate = () => setFormState({ open: true, editing: null, duplicating: null, excludePrestazione: '' });
-  const openEdit = (t) => setFormState({ open: true, editing: t, duplicating: null, excludePrestazione: '' });
-  const openDuplicate = (t) => setFormState({ open: true, editing: null, duplicating: t, excludePrestazione: t.prestazione });
+  const openCreate = () => { avvisaElenchi(); setFormState({ open: true, editing: null, duplicating: null, excludePrestazione: '' }); };
+  const openEdit = (t) => { avvisaElenchi(); setFormState({ open: true, editing: t, duplicating: null, excludePrestazione: '' }); };
+  const openDuplicate = (t) => { avvisaElenchi(); setFormState({ open: true, editing: null, duplicating: t, excludePrestazione: t.prestazione }); };
+  // «Scrivi il Fuel Surcharge» dalla fascia: la linguetta Surplus col modulo aperto.
+  const scriviFuel = () => { setRichiestaSurplus({ cosa: 'fuel' }); setTab('surplus'); };
   const closeForm = () => setFormState({ open: false, editing: null, duplicating: null, excludePrestazione: '' });
 
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>;
@@ -334,11 +386,12 @@ export default function TariffeUnificate() {
   return (
     <div className="space-y-4">
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="tariffe">Tariffe</TabsTrigger>
           <TabsTrigger value="surplus">
             Surplus
-            {surplusInCorso > 0 && <span className="ml-1.5 rounded-full bg-[hsl(var(--eco-surplus)/0.14)] px-1.5 text-[10px] font-semibold leading-4 text-[hsl(var(--eco-surplus))]">{surplusInCorso}</span>}
+            {/* Quanti surplus sono in corso oggi, nel colore del surplus */}
+            {surplusInCorso > 0 && <span className="ml-1.5 rounded-full bg-[hsl(var(--eco-surplus)/0.14)] px-1.5 text-[10px] font-semibold leading-4 text-[hsl(var(--eco-surplus))]">{surplusInCorso}<span className="sr-only"> in corso</span></span>}
           </TabsTrigger>
           <TabsTrigger value="ruoli">Ruoli fornitori</TabsTrigger>
         </TabsList>
@@ -359,8 +412,9 @@ export default function TariffeUnificate() {
               )}
             </div>
           </div>
-          {/* I surplus in corso e in arrivo, con le tariffe che toccano (13/10/2026) */}
-          <FasciaSurplus schede={schede} conti={contiSurplus} conCosti={isAdmin} onVai={() => setTab('surplus')} />
+          {/* I surplus in corso e in arrivo, con le tariffe che toccano; senza, la
+              fascia breve che dice da dove si scrivono (13/10/2026) */}
+          <FasciaSurplus schede={schede} conti={contiSurplus} conCosti={isAdmin} letti={surplus !== null} onVai={() => setTab('surplus')} onScrivi={isAdmin ? scriviFuel : null} />
           {surplus === null && erroreSurplus && (
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               I surplus non si sono letti ({erroreSurplus}): la colonna Surplus non dice niente finché non si rileggono. <button type="button" onClick={caricaSurplus} className="font-medium underline">Riprova</button>
@@ -496,7 +550,7 @@ export default function TariffeUnificate() {
           </div>
         </TabsContent>
         <TabsContent value="surplus" className="mt-4">
-          <SurplusSezione surplus={surplus} erroreLettura={erroreSurplus} fornitori={fornitori} isAdmin={isAdmin} oggi={oggi} onCambiato={caricaSurplus} onRiprova={caricaSurplus} />
+          <SurplusSezione surplus={surplus} erroreLettura={erroreSurplus} fornitori={fornitori} isAdmin={isAdmin} oggi={oggi} onCambiato={caricaSurplus} onRiprova={caricaSurplus} richiesta={richiestaSurplus} onRichiestaFatta={() => setRichiestaSurplus(null)} />
         </TabsContent>
         <TabsContent value="ruoli" className="mt-4"><TariffeRuoliFornitori /></TabsContent>
       </Tabs>

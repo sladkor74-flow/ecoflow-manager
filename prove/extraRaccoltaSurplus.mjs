@@ -22,11 +22,15 @@
 // 4. gli altri surplus (trattamento con la seconda prestazione, trasporto delle
 //    secondarie, un elenco per id attraverso il subraccoglitore) tornano uguali;
 // 5. la pagina lo dice: riquadri, fascia del surplus col centesimo del mese,
-//    costi solo all'amministratore, una lettura sola dei surplus;
+//    costi solo all'amministratore, una lettura sola dei surplus; e dal
+//    13/10/2026 sera i pulsanti dei file Excel e PDF passano il contesto coi
+//    surplus e i permessi (la riga del Fuel Surcharge nei file, risposta 4
+//    dell'utente: la prova dei file e' prove/extraRaccoltaExport.mjs);
 // 6. la scheda dell'intervento mostra la quota e dice che fa fede il mese;
 // 7. senza surplus niente cambia;
 // 8. sui dati veri (copia in ../dati-veri, se c'e'): pagina, fattura e passiva
-//    dicono gli stessi numeri ogni mese del 2026, con e senza un surplus.
+//    dicono gli stessi numeri ogni mese del 2026, con e senza un surplus, e il
+//    Totale imponibile dei file e' quello della fattura.
 //
 // node prove/extraRaccoltaSurplus.mjs
 import { existsSync, readdirSync, readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -202,11 +206,18 @@ await sezione('5. GLI ALTRI SURPLUS: TRATTAMENTO, TRASPORTO DELLE SECONDARIE, UN
 // La pagina montata davvero, senza browser (prove/dati/paginaFinta.mjs), con i
 // permessi sostituiti nella copia del sorgente: amministratore o no.
 const IMPORT_PERMESSI = "import { usePermessi } from '@/lib/permessi';";
+// I file Excel e PDF dell'elenco (13/10/2026): nella copia le due esportazioni
+// registrano con che cosa la pagina le chiama, invece di scrivere un file.
+const IMPORT_FILE = "import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRaccoltaExport';";
+const FILE_FINTI = 'const exportExtraRaccoltaExcel = async (...a) => { globalThis.__FILE_CHIESTI.push([\'excel\', ...a]); };\n'
+  + 'const exportExtraRaccoltaPDF = async (...a) => { globalThis.__FILE_CHIESTI.push([\'pdf\', ...a]); };';
+globalThis.__FILE_CHIESTI = [];
+const { datiExportExtra } = await caricaLibPagine('lib/extraRaccoltaExport');
 const SORGENTE_PAGINA = readFileSync(fileURLToPath(new URL('../src/pages/ExtraRaccolta.jsx', import.meta.url)), 'utf8').replace(/\r/g, '');
 const cartella = mkdtempSync(join(tmpdir(), 'extra-surplus-'));
 async function montaPagina({ admin = true, archivi = {}, rompiSurplus = false } = {}) {
   const copia = join(cartella, `ExtraRaccolta-${admin ? 'admin' : 'utente'}.jsx`);
-  writeFileSync(copia, SORGENTE_PAGINA.replace(IMPORT_PERMESSI, `const usePermessi = () => ({ isAdmin: ${admin}, soloLettura: ${!admin} });`));
+  writeFileSync(copia, SORGENTE_PAGINA.replace(IMPORT_PERMESSI, `const usePermessi = () => ({ isAdmin: ${admin}, soloLettura: ${!admin} });`).replace(IMPORT_FILE, FILE_FINTI));
   const p = await caricaPagina('pages/ExtraRaccolta', { file: copia });
   const c = clienteFinto({ archivi: { ExtraRaccolta: TUTTI, Tariffa: [], Fornitore: FORNITORI, SurplusTariffa: FS, ...archivi } });
   globalThis.__CLIENTE_FINTO = rompiSurplus
@@ -220,9 +231,19 @@ async function montaPagina({ admin = true, archivi = {}, rompiSurplus = false } 
 }
 const riquadro = (r, titolo) => trova(r.albero, el => el.type === 'div' && /border rounded-lg p-3 bg-card/.test(el.props.className || '') && testo(el).startsWith(titolo))[0];
 const fasce = (r) => trova(r.albero, el => el.type && el.type.name === 'FasciaSurplus');
+// Preme un pulsante dei file e restituisce con che cosa la pagina ha chiamato l'esportazione.
+const premi = async (r, scritta) => {
+  globalThis.__FILE_CHIESTI = [];
+  const b = trova(r.albero, el => el.props && typeof el.props.onClick === 'function' && testo(el).includes(scritta))[0];
+  if (!b) return null;
+  b.props.onClick();
+  await aspetta(20);
+  return globalThis.__FILE_CHIESTI[0] || null;
+};
 
 await sezione('6. LA PAGINA LO DICE: RIQUADRI, FASCIA, CENTESIMO DEL MESE', async () => {
   verifica('la pagina prende i permessi da usePermessi, come la copia si aspetta', SORGENTE_PAGINA.includes(IMPORT_PERMESSI));
+  verifica('e le esportazioni da extraRaccoltaExport.js, come la copia si aspetta', SORGENTE_PAGINA.includes(IMPORT_FILE));
   const { c, r, scegli } = await montaPagina({ admin: true });
   verifica('la pagina si monta senza errori', r.errori.length === 0, String(r.errori[0] || ''));
   const letture = c.letture('SurplusTariffa');
@@ -242,16 +263,28 @@ await sezione('6. LA PAGINA LO DICE: RIQUADRI, FASCIA, CENTESIMO DEL MESE', asyn
   verifica('e che il centesimo che fa fede e\' quello del mese, con le quote che fanno un centesimo in piu\'', fascia.includes('il centesimo che fa fede è quello del mese')
     && fascia.includes('le quote nella tabella fanno € 22,34 in fattura e € 20,04 in passiva'), fascia);
   verifica('e chi lo riceve e chi no', fascia.includes('EMMESSE SRLS 3,202 t, € 16,01') && fascia.includes('SMOCO S.R.L. è interno'), fascia);
+  // I FILE HANNO LA RIGA DEL SURPLUS (13/10/2026). Fino a oggi ricevevano il
+  // contesto dei soli prezzi e la pagina diceva «I file riportano gli importi
+  // standard». Ora i pulsanti passano il contesto della pagina, coi surplus, e i
+  // permessi: il Totale imponibile del file e' il Ricavi del riquadro.
+  verifica('accanto ai file c\'e\' scritto che il surplus ha la sua riga, e non piu\' che hanno gli importi standard',
+    testo(r.albero).includes('Nei file il surplus ha la sua riga prima del totale imponibile, col centesimo del mese come in fattura, e una riga sua nell\'analisi per produttore.')
+    && !testo(r.albero).includes('I file riportano gli importi standard'), '');
+  for (const [scritta, quale] of [['Esporta Excel', 'excel'], ['Esporta PDF', 'pdf']]) {
+    const chiesto = await premi(r, scritta);
+    const [tipo, interventi, mese, anno, contestoFile, opzioni] = chiesto || [];
+    verifica(`«${scritta}»: la pagina chiama il file di ottobre 2026 coi terminati del mese`, tipo === quale && mese === 'Ottobre' && String(anno) === '2026'
+      && J((interventi || []).map(x => x.id).sort()) === J(ottobre(TUTTI).map(x => x.id).sort()), J([tipo, mese, anno, (interventi || []).map(x => x.id)]));
+    verifica(`«${scritta}»: col contesto della pagina, che ha il Fuel Surcharge dell'extra raccolta`, !!contestoFile && J((contestoFile.surplus || []).map(s => s.id)) === J(['fs-extra']), J(contestoFile && contestoFile.surplus));
+    verifica(`«${scritta}»: e coi permessi dell'amministratore`, J(opzioni) === J({ isAdmin: true }), J(opzioni));
+    const dati = contestoFile ? datiExportExtra(interventi, contestoFile) : {};
+    verifica(`«${scritta}»: il Totale imponibile del file e' il Ricavi del riquadro (924,26), con la riga del Fuel Surcharge da 22,33`,
+      dati.totale_imponibile === 924.26 && ricavi.includes('€ 924,26') && J((dati.surplus || []).map(s => [s.nome, s.importo])) === J([['Fuel Surcharge', 22.33]]), J([dati.totale_imponibile, dati.surplus]));
+  }
   // un filtro che non e' il periodo: la fascia lo dice
   await scegli(3, 'EMMESSE SRLS');
   const filtrata = fasce(r)[0] ? testo(fasce(r)[0].type(fasce(r)[0].props)) : '';
   verifica('con un filtro sul trasportatore la fascia dice che il conto e\' sui soli interventi mostrati', filtrata.includes('il conto è sui soli interventi mostrati'), filtrata);
-  verifica('e accanto ai file c\'e\' scritto che i file hanno gli importi standard', testo(r.albero).includes('I file riportano gli importi standard'));
-  // I file non hanno ancora la riga del surplus: ricevono il contesto dei soli
-  // prezzi, cosi' il loro «Totale imponibile» torna con le loro righe.
-  verifica('ai file Excel e PDF va il contesto dei soli prezzi, senza il surplus',
-    /const contestoFile = useMemo\(\(\) => contestoPrezzi\(tariffeAttive, fornitori\), /.test(SORGENTE_PAGINA)
-    && /const contesto = contestoFile;\n\s*await exportExtraRaccoltaExcel\(/.test(SORGENTE_PAGINA) && /const contesto = contestoFile;\n\s*await exportExtraRaccoltaPDF\(/.test(SORGENTE_PAGINA));
 });
 
 await sezione('6b. CHI NON E\' AMMINISTRATORE NON VEDE LA PARTE DEI FORNITORI', async () => {
@@ -265,6 +298,13 @@ await sezione('6b. CHI NON E\' AMMINISTRATORE NON VEDE LA PARTE DEI FORNITORI', 
   verifica('una fascia sola: il surplus solo ai fornitori non si mostra', fs.length === 1 && fs[0].props.p.nome === 'Fuel Surcharge', J(fs.map(x => x.props.p && x.props.p.nome)));
   const fascia = fs[0] ? testo(fs[0].type(fs[0].props)) : '';
   verifica('la fascia dice la parte da Ecotyre e non quella dei fornitori', fascia.includes('€ 22,33') && !fascia.includes('€ 20,03') && !fascia.includes('in passiva') && !fascia.includes('interno'), fascia);
+  // I file (13/10/2026): la riga del surplus si', l'analisi coi costi no.
+  verifica('accanto ai file la nota non parla dell\'analisi per produttore', testo(r.albero).includes('Nei file il surplus ha la sua riga prima del totale imponibile, col centesimo del mese come in fattura.')
+    && !testo(r.albero).includes('analisi per produttore'), '');
+  for (const scritta of ['Esporta Excel', 'Esporta PDF']) {
+    const chiesto = await premi(r, scritta);
+    verifica(`«${scritta}»: la pagina dice al file che chi esporta non e' amministratore`, !!chiesto && J(chiesto[5]) === J({ isAdmin: false }), J(chiesto && chiesto[5]));
+  }
 });
 
 await sezione('6c. SE I SURPLUS NON SI LEGGONO, LA PAGINA LO DICE', async () => {
@@ -333,18 +373,24 @@ await sezione('9. SUI DATI VERI: PAGINA, FATTURA E PASSIVA OGNI MESE DEL 2026', 
   const righe = [];
   for (const [nome, s] of [['senza surplus', veri], ['Fuel Surcharge simulato su tutto il 2026', simulato], ['Fuel Surcharge vero, dall\'1/10', vero]]) {
     let tutti = true;
+    let file = true;
     const numeri = [];
     for (let m = 0; m < 12; m++) {
       const delMese = interventi.filter(r => String(r.stato || '').toLowerCase().trim() === 'terminato' && giornoRoma(r.trasporto_finito_il).slice(0, 7) === `2026-${String(m + 1).padStart(2, '0')}`);
-      const t = calc.totaliExtraRaccolta(delMese, calc.contestoPrezzi(tariffeAttive, fornitori, s, subfornitori));
+      const contestoMese = calc.contestoPrezzi(tariffeAttive, fornitori, s, subfornitori);
+      const t = calc.totaliExtraRaccolta(delMese, contestoMese);
+      // il Totale imponibile dei file Excel e PDF dell'elenco (13/10/2026): la fattura del mese
+      const imponibileFile = datiExportExtra(delMese, contestoMese).totale_imponibile;
       const f = calcolaRigheAttiva({ reteAll: [], aciAll: [], extraAll: interventi, fornitori, tariffe: tariffeAttive, anno: 2026, mese: MESI[m], surplus: s });
       const p = calcolaPassivaMese({ primarieRete: [], primarieAci: [], secondarieAll: [], extraRaccoltaAll: interventi, tariffeAll: tariffePassive, fornitoriAll: fornitori.filter(x => x.stato === 'attivo'), surplusAll: s }, 2026, m, MESI[m], 'EXTRA_RACCOLTA');
       const ricavoFattura = somma(f.righe.EXTRA_RACCOLTA, 'totale');
       const uguale = t.ricavi === ricavoFattura && t.costi === p.totali.totale_complessivo && t.surplus.totale_passivo === p.totali.surplus.totale;
       if (!uguale) { tutti = false; console.log(`    ${MESI[m]}: pagina ${t.ricavi}/${t.costi}, fattura ${ricavoFattura}, passiva ${p.totali.totale_complessivo}`); }
+      if (imponibileFile !== ricavoFattura) { file = false; console.log(`    ${MESI[m]}: file ${imponibileFile}, fattura ${ricavoFattura}`); }
       if (delMese.length) numeri.push(`${MESI[m]} ricavi ${t.ricavi} (surplus ${t.surplus.totale_attivo}), costi ${t.costi} (surplus ${t.surplus.totale_passivo})`);
     }
     verifica(`${nome}: ogni mese la pagina dice il ricavo della fattura e il costo della passiva`, tutti);
+    verifica(`${nome}: ogni mese il Totale imponibile dei file e' la fattura`, file);
     righe.push(`  ${nome}: ${numeri.join('; ') || 'nessun intervento'}`);
     if (copia === 'treadrider-dati-veri-2026-10-11.json.gz' && nome.startsWith('Fuel Surcharge simulato')) {
       verifica('aprile: GREEN TYRE 0,40 t, +2,00 da Ecotyre e +2,00 a GREEN TYRE; luglio: SMOCO 0,46 t, +2,30 da Ecotyre e niente pagato',

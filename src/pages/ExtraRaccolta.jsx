@@ -254,11 +254,6 @@ export default function ExtraRaccolta() {
   // passiva, con la catena dei subfornitori (il surplus di un subraccoglitore va
   // al principale, come la tariffa).
   const contesto = useMemo(() => contestoPrezzi(tariffeAttive, fornitori, surplusAll, subfornitori), [tariffeAttive, fornitori, surplusAll]);
-  // I file Excel e PDF della pagina (extraRaccoltaExport.js) non hanno ancora la
-  // riga del surplus: ricevono i soli prezzi, cosi' i loro totali restano quelli
-  // delle loro righe. Il surplus lo dicono la pagina, la fattura attiva e la
-  // passiva del mese, e accanto ai pulsanti c'e' scritto (13/10/2026).
-  const contestoFile = useMemo(() => contestoPrezzi(tariffeAttive, fornitori), [tariffeAttive, fornitori]);
 
   // I filtri si dividono in due, come negli altri elenchi: quelli di periodo
   // leggono giornoElenco, gli altri la scheda. Separati, per contare le date da
@@ -416,21 +411,21 @@ export default function ExtraRaccolta() {
   // che la pagina ha letto (contesto): senza, conoscevano solo il prezzo scritto
   // e la base dell'anno, e con la tabella a un altro valore dicevano un prezzo
   // diverso da pagina e fattura (chiusura dell'audit, 11/10/2026).
-  // Il surplus no (13/10/2026): il loro contesto e' quello dei soli prezzi,
-  // contestoFile, perche' i file non hanno ancora la riga del surplus e con le
-  // quote dentro i totali il «Totale imponibile» non tornerebbe con le righe.
+  // Col surplus (13/10/2026): il contesto e' lo stesso della pagina, e i file
+  // hanno la riga del Fuel Surcharge prima del Totale imponibile, col centesimo
+  // del mese come in fattura. L'analisi per produttore ha costi e margine: il
+  // file la porta solo all'amministratore, come la pagina (isAdmin; senza, il
+  // file la toglie).
   const exportExcel = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
-    const contesto = contestoFile;
-    await exportExtraRaccoltaExcel(terminati, mese, anno, contesto);
+    await exportExtraRaccoltaExcel(terminati, mese, anno, contesto, { isAdmin });
   };
 
   const exportPDF = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
-    const contesto = contestoFile;
-    await exportExtraRaccoltaPDF(terminati, mese, anno, contesto);
+    await exportExtraRaccoltaPDF(terminati, mese, anno, contesto, { isAdmin });
   };
 
   return (
@@ -641,15 +636,24 @@ export default function ExtraRaccolta() {
           fine trasporto nel file non ci sono, gli altri si', e chi manda la
           fatturazione deve saperlo prima. */}
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={exportExcel} disabled={terminati.length === 0}>
+        {/* SURPLUS NON LETTI, FILE FERMI (13/10/2026): senza i surplus il Totale
+            imponibile del file non avrebbe il Fuel Surcharge e non tornerebbe con
+            la fattura, in silenzio. Si esporta quando si sono letti. */}
+        <Button variant="outline" size="sm" onClick={exportExcel} disabled={terminati.length === 0 || surplusNonLetti}>
           <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Esporta Excel
         </Button>
-        <Button variant="outline" size="sm" onClick={exportPDF} disabled={terminati.length === 0}>
+        <Button variant="outline" size="sm" onClick={exportPDF} disabled={terminati.length === 0 || surplusNonLetti}>
           <FileText className="w-4 h-4 mr-1.5" /> Esporta PDF
         </Button>
+        {surplusNonLetti && <span className="self-center text-xs text-amber-700">I file si esportano quando i surplus sono letti: ricarica la pagina.</span>}
         <span className="self-center text-xs text-muted-foreground">Totali ed esportazioni comprendono solo i terminati.</span>
-        {(contoSurplus.totale_attivo > 0 || (isAdmin && contoSurplus.totale_passivo > 0)) && (
-          <span className="self-center text-xs text-muted-foreground">I file riportano gli importi standard: il surplus sta nella fattura attiva e nella passiva del mese.</span>
+        {/* Il surplus nei file (13/10/2026): fino a questa data i file avevano
+            gli importi standard e la nota lo diceva; ora hanno la sua riga. */}
+        {contoSurplus.totale_attivo > 0 && (
+          <span className="self-center text-xs text-muted-foreground">Nei file il surplus ha la sua riga prima del totale imponibile, col centesimo del mese come in fattura{isAdmin ? ', e una riga sua nell\'analisi per produttore' : ''}.</span>
+        )}
+        {isAdmin && !(contoSurplus.totale_attivo > 0) && contoSurplus.totale_passivo > 0 && (
+          <span className="self-center text-xs text-muted-foreground">Nei file il surplus ai fornitori ha una riga sua nell&apos;analisi per produttore.</span>
         )}
         <NotaDate righe={terminati} nomi={['intervento esportato', 'interventi esportati']} className="self-center" />
       </div>

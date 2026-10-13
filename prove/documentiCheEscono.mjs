@@ -461,7 +461,10 @@ await sezione('11. L\'EXTRA RACCOLTA', async () => {
   const interventi = [
     { ...base2, id: 'A', id_ordine: 'ER-A', numero_fir: 'FIR-A', peso_effettivo: 2000, prezzo_attivo_t: 202, sovracosto_raccolta: 50, trasporto_finito_il: '2026-09-30T23:30:00.000Z' },
   ];
-  await extra.exportExtraRaccoltaExcel(interventi, 'Settembre', 2026, undefined, { stato: statoPer('ExtraRaccolta') });
+  // isAdmin: l'analisi per produttore, coi costi e il margine, il file la porta
+  // solo all'amministratore (il surplus sulle tariffe, 13/10/2026); qui si
+  // guardano anche i suoi formati.
+  await extra.exportExtraRaccoltaExcel(interventi, 'Settembre', 2026, undefined, { stato: statoPer('ExtraRaccolta'), isAdmin: true });
   const { nome, wb } = await ultimoFile();
   const ws = wb.worksheets[0];
   verifica('il nome del file e del foglio', nome === 'SMOCO-Fatturazione EXTRA RACCOLTA Settembre 2026.xlsx' && ws.name === 'SETTEMBRE 2026', `${nome} / ${ws.name}`);

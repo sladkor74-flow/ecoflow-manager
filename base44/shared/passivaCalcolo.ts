@@ -419,6 +419,39 @@ const codiceSurplus = (v) => String(v || '').trim().toUpperCase().replace(/[\s-]
 const DESTINATARIO = { RACCOLTA: 'raccoglitore', TRATTAMENTO: 'impianto', CONFERIMENTO_STOCCAGGIO: 'stoccaggio', TRASPORTO_SECONDARIA: 'trasportatore delle secondarie' };
 const giornoSurplus = (v) => String(v || '').trim().slice(0, 10);
 
+// UN FORNITORE SENZA LA TARIFFA DEL MESE RICEVE LO STESSO IL SURPLUS (risposta
+// dell'utente del 13/10/2026). Il surplus si paga sulle tonnellate raccolte o
+// trattate, non sulla tariffa: la riga standard resta a zero «senza tariffa»
+// (l'anomalia c'e' gia'), quella del surplus no. Ma va detto, perche' un surplus
+// senza la sua riga standard e' una fattura del fornitore che non torna: la
+// riga del surplus porta l'avviso (`avviso`, e le tonnellate senza tariffa), la
+// fascia del mese lo ripete per fornitore (`senza_tariffa`), e l'anomalia della
+// tariffa che manca dice che il surplus c'e' lo stesso (`avviso_surplus`). La
+// frase e' una sola, la stessa nella pagina, nel foglio dell'amministrazione e
+// nei file. Non vale per il prezzo unico di Green Tyre (il trattamento compreso
+// nella raccolta non e' una tariffa che manca), ne' per l'extra raccolta, i cui
+// prezzi stanno sull'intervento; il trasporto delle secondarie senza tariffa non
+// ha la riga, e quindi nemmeno il surplus.
+export const AVVISO_TARIFFA_MANCANTE = "Tariffa del mese mancante: il surplus c'è, la riga standard no.";
+function avvisoTariffaMancante(kgSenza, kgTutti) {
+  if (!(kgSenza > 0)) return '';
+  if (kgSenza >= kgTutti) return AVVISO_TARIFFA_MANCANTE;
+  return `Tariffa del mese mancante su ${tTesto(kgSenza)} t delle ${tTesto(kgTutti)}: il surplus c'è, la riga standard no.`;
+}
+/**
+ * L'avviso di un'anomalia «senza tariffa» quando sulle stesse tonnellate un
+ * surplus si paga lo stesso, coi nomi dei surplus: «Tariffa del mese mancante:
+ * il surplus c'è (Fuel Surcharge), la riga standard no.», oppure «... (Fuel
+ * Surcharge) su 4,00 t delle 10,00, ...» se il surplus copre solo una parte
+ * delle tonnellate dell'anomalia (un surplus che comincia a meta' mese).
+ */
+function avvisoSurplusDellAnomalia(nomi, kgSurplus, kgTutti) {
+  if (!(nomi && nomi.length) || !(kgSurplus > 0)) return '';
+  // mezzo chilo di tolleranza: le tonnellate dell'anomalia sono arrotondate al chilo
+  const su = kgSurplus + 0.5 < kgTutti ? ` su ${tTesto(kgSurplus)} t delle ${tTesto(kgTutti)}` : '';
+  return `Tariffa del mese mancante: il surplus c'è (${nomi.join(' e ')})${su}, la riga standard no.`;
+}
+
 /**
  * Il conto dei surplus di un blocco della passiva: per ogni fornitore (la chiave
  * normalizzata di chi fattura la riga) i chili di ciascun surplus, e chi ha
@@ -439,7 +472,7 @@ function righeSurplusDi(conto, chiave) {
   if (!f || f.interno) return [];
   return [...f.voci.values()]
     .filter(v => v.kg > 0)
-    .map(({ s, euro_t, kg }) => ({
+    .map(({ s, euro_t, kg, kgSenzaTariffa }) => ({
       surplus_id: s.id || '',
       gruppo: s.gruppo || '',
       nome: String(s.nome || '').trim() || 'Surplus',
@@ -455,6 +488,12 @@ function righeSurplusDi(conto, chiave) {
       // quando e' stato scritto: serve a dire, confrontando un conto congelato
       // col ricalcolo, che una differenza e' un surplus arrivato dopo
       scritto_il: String(s.updated_date || s.created_date || ''),
+      // le tonnellate su cui la tariffa del mese manca, e l'avviso (13/10/2026);
+      // solo quando ci sono: una riga normale resta quella di prima
+      ...(kgSenzaTariffa > 0 ? {
+        tonnellate_senza_tariffa: round3(kgSenzaTariffa / 1000),
+        avviso: avvisoTariffaMancante(kgSenzaTariffa, kg),
+      } : {}),
     }))
     .sort((a, b) => a.nome.localeCompare(b.nome, 'it') || a.dal.localeCompare(b.dal) || a.euro_t - b.euro_t);
 }
@@ -533,10 +572,12 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
      * chiusura dell'ordine), e il fornitore che fattura la riga (dopo la catena
      * dei subfornitori) coi nomi con cui il movimento lo porta. I chili vanno al
      * fornitore che fattura, come la tariffa: il surplus delle tonnellate di un
-     * subraccoglitore si paga al principale.
+     * subraccoglitore si paga al principale. senzaTariffa: la riga standard di
+     * quel movimento non ha la tariffa del mese (i suoi chili si contano a
+     * parte, per l'avviso). Restituisce i surplus trovati ([] se nessuno).
      */
-    function segnaSurplus(prestazione, rec, chiave, nome, nomi, interno) {
-      if (!surplusMese.length) return;
+    function segnaSurplus(prestazione, rec, chiave, nome, nomi, interno, senzaTariffa = false) {
+      if (!surplusMese.length) return [];
       const conto = contoDellaPrestazione(prestazione);
       const id = String((fornitoreByNorm.get(chiave) || {}).id || '');
       if (!conto.visti.has(prestazione)) conto.visti.set(prestazione, { id: new Set(), nomi: new Set() });
@@ -544,15 +585,36 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       if (id) visti.id.add(id);
       for (const n of nomi) { const k = normalizzaRagioneSociale(n); if (k) visti.nomi.add(k); }
       const trovati = surplusDelMovimento(surplusMese, { tipologia, prestazione, quando: rec.trasporto_finito_il, fornitore: { id, nomi } }, 'PASSIVA');
-      if (!trovati.length) return;
+      if (!trovati.length) return [];
       if (!conto.fornitori.has(chiave)) conto.fornitori.set(chiave, { fornitore: nome, interno, voci: new Map() });
       const f = conto.fornitori.get(chiave);
       const kg = Number(rec.peso_effettivo || 0);
       for (const { surplus, euro_t } of trovati) {
-        if (!f.voci.has(surplus)) f.voci.set(surplus, { s: surplus, euro_t, kg: 0 });
-        f.voci.get(surplus).kg += kg;
+        if (!f.voci.has(surplus)) f.voci.set(surplus, { s: surplus, euro_t, kg: 0, kgSenzaTariffa: 0 });
+        const v = f.voci.get(surplus);
+        v.kg += kg;
+        if (senzaTariffa) v.kgSenzaTariffa += kg;
       }
+      return trovati;
     }
+    // L'anomalia della tariffa che manca, quando sulle stesse tonnellate un
+    // surplus si paga lo stesso: i nomi dei surplus e le tonnellate che coprono
+    // (13/10/2026). L'avviso si scrive dopo, in avviso_surplus, quando le
+    // anomalie uguali sono gia' unite.
+    //
+    // NON NELLA DESCRIZIONE (revisione del 13/10/2026). La frase stava in coda
+    // alla descrizione, che pero' e' la chiave con cui la stessa anomalia si dice
+    // una volta sola: qui sotto, nel mese, e nell'anno di EcoTyna, dove «la
+    // stessa anomalia torna in tutti i mesi (una tariffa che manca): si dice una
+    // volta» (revisione del 10/10/2026). Col Fuel Surcharge dal 01/10 la tariffa
+    // che manca a un raccoglitore da gennaio diventava due voci, una fino a
+    // settembre e una da ottobre, e cosi' in un mese con un surplus da meta'
+    // mese. La descrizione resta quella di sempre; avviso_surplus lo aggiunge
+    // accanto chi mostra l'anomalia (pagina, file, EcoTyna).
+    const surplusDellAnomalia = (trovati, kg) => {
+      const nomi = [...new Set((trovati || []).map(x => String((x.surplus && x.surplus.nome) || '').trim() || 'Surplus'))];
+      return nomi.length ? { _surplus_nomi: nomi, _kg_surplus: Number(kg) || 0 } : {};
+    };
 
     // Tariffe con prestazione vuota → anomalia
     const anomalie = [];
@@ -884,6 +946,14 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         }
       }
 
+      // Il surplus di raccolta sulle tonnellate raccolte: nell'extra raccolta
+      // solo sugli interventi primari, perche' una secondaria e' un
+      // trasferimento da uno stoccaggio, non una raccolta (13/10/2026). Anche
+      // senza la tariffa del mese: il surplus resta, con l'avviso.
+      const surplusQui = !(tipologia === 'EXTRA_RACCOLTA' && eSecondariaExtra(r))
+        ? segnaSurplus('RACCOLTA', r, trasKey, trasportatore, [trasportatore, raccoglitore], interno, !tariffa && !interno)
+        : [];
+
       if (!tariffa && !interno) {
         anomalie.push({
           descrizione: `Raccoglitore senza tariffa RACCOLTA: ${trasportatore}`,
@@ -892,14 +962,8 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           classe: classe || '—',
           ambito: `Prov: ${provincia || '—'}, Dest: ${r.destinazione || '—'}`,
           tonnellate: round3(peso / 1000),
+          ...surplusDellAnomalia(surplusQui, peso),
         });
-      }
-
-      // Il surplus di raccolta sulle tonnellate raccolte: nell'extra raccolta
-      // solo sugli interventi primari, perche' una secondaria e' un
-      // trasferimento da uno stoccaggio, non una raccolta (13/10/2026).
-      if (!(tipologia === 'EXTRA_RACCOLTA' && eSecondariaExtra(r))) {
-        segnaSurplus('RACCOLTA', r, trasKey, trasportatore, [trasportatore, raccoglitore], interno);
       }
 
       if (um === '€/viaggio') {
@@ -1179,7 +1243,15 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const tk = compresoNellaRaccolta ? '__COMPRESO__' : (tariffa ? tariffa.id : '__NESSUNA__');
       const um = tariffa ? tariffa.unita_misura : '';
 
-      if (!tariffa && !interno && !compresoNellaRaccolta) {
+      // Il surplus di trattamento o di stoccaggio su tutto quello che arriva al
+      // sito, come la tariffa: la prestazione e' quella della riga, e la seconda
+      // prestazione di un intervento di extra raccolta conta per la sua. Anche
+      // senza la tariffa del mese, con l'avviso (13/10/2026); il prezzo unico
+      // della raccolta non e' una tariffa che manca.
+      const senzaTariffaQui = !tariffa && !interno && !compresoNellaRaccolta;
+      const surplusQui = segnaSurplus(prestazione, r, destKey, destinazione, [destinazione], interno, senzaTariffaQui);
+
+      if (senzaTariffaQui) {
         anomalie.push({
           descrizione: `Impianto/stoccaggio senza tariffa ${prestazione}: ${destinazione}`,
           fornitore: destinazione,
@@ -1187,13 +1259,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           classe: classe || '—',
           ambito: `Prov: ${provenienza}`,
           tonnellate: round3(peso / 1000),
+          ...surplusDellAnomalia(surplusQui, peso),
         });
       }
-
-      // Il surplus di trattamento o di stoccaggio su tutto quello che arriva al
-      // sito, come la tariffa: la prestazione e' quella della riga, e la seconda
-      // prestazione di un intervento di extra raccolta conta per la sua.
-      segnaSurplus(prestazione, r, destKey, destinazione, [destinazione], interno);
 
       if (um === '€/viaggio') {
         const dkey = `${destKey}|${tk}`;
@@ -1783,8 +1851,19 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       if (!prima) { anomaliePerChiave.set(k, { ...a, occorrenze: 1 }); continue; }
       prima.tonnellate = round3(Number(prima.tonnellate || 0) + Number(a.tonnellate || 0));
       prima.occorrenze += 1;
+      // il surplus pagato su quelle tonnellate senza tariffa, se c'e', si somma anche lui
+      if (a._surplus_nomi) {
+        prima._surplus_nomi = [...new Set([...(prima._surplus_nomi || []), ...a._surplus_nomi])];
+        prima._kg_surplus = (prima._kg_surplus || 0) + a._kg_surplus;
+      }
     }
-    const anomalieUniche = [...anomaliePerChiave.values()];
+    // L'avviso del surplus sull'anomalia unita, in un campo suo (13/10/2026): la
+    // descrizione resta quella di sempre. Solo quando c'e': senza surplus
+    // l'anomalia e' quella di prima, campo per campo.
+    const anomalieUniche = [...anomaliePerChiave.values()].map(({ _surplus_nomi, _kg_surplus, ...a }) => {
+      const avviso = _surplus_nomi ? avvisoSurplusDellAnomalia(_surplus_nomi, _kg_surplus, Number(a.tonnellate || 0) * 1000) : '';
+      return avviso ? { ...a, avviso_surplus: avviso, tonnellate_surplus: round3(_kg_surplus / 1000) } : a;
+    });
 
     // ─── TOTALI ───
     // Le chiavi di sempre comprendono il surplus (sono la somma di totale_euro dei
@@ -1815,12 +1894,16 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const euro_t = euroTDi(s, 'PASSIVA');
       const pagati = [];
       const interni = [];
+      // chi lo riceve senza la tariffa del mese su tutte o parte delle sue tonnellate
+      const senzaTariffa = [];
       for (const f of conto.fornitori.values()) {
         const v = f.voci.get(s);
         if (!v || !(v.kg > 0)) continue;
         if (f.interno) interni.push({ fornitore: f.fornitore, tonnellate: round3(v.kg / 1000), kg: v.kg });
         else pagati.push({ fornitore: f.fornitore, tonnellate: round3(v.kg / 1000), importo: importoSurplus(v.kg, v.euro_t), kg: v.kg });
+        if (!f.interno && v.kgSenzaTariffa > 0) senzaTariffa.push({ fornitore: f.fornitore, tonnellate: round3(v.kgSenzaTariffa / 1000), avviso: avvisoTariffaMancante(v.kgSenzaTariffa, v.kg), kg: v.kgSenzaTariffa });
       }
+      senzaTariffa.sort((a, b) => b.kg - a.kg || a.fornitore.localeCompare(b.fornitore, 'it'));
       pagati.sort((a, b) => b.kg - a.kg || a.fornitore.localeCompare(b.fornitore, 'it'));
       interni.sort((a, b) => b.kg - a.kg || a.fornitore.localeCompare(b.fornitore, 'it'));
       const kgPagati = pagati.reduce((x, f) => x + f.kg, 0);
@@ -1840,6 +1923,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         ? `${canale}, ${quando}: ${tTesto(kgPagati)} t a ${pagati.length} ${pagati.length === 1 ? uno : chi}, ${euroTesto(importo)} €.`
         : `${canale}, ${quando}: nessuna tonnellata da pagare.`);
       for (const f of interni) frasi.push(`${f.fornitore} (interno) ${tTesto(f.kg)} t: non si paga.`);
+      for (const f of senzaTariffa) frasi.push(`${f.fornitore}, ${f.avviso.charAt(0).toLowerCase()}${f.avviso.slice(1)}`);
       if (senza_righe.length) {
         frasi.push(`Nell'elenco ${senza_righe.length === 1 ? `c'è ${senza_righe[0]}, che` : `ci sono ${senza_righe.join(', ')}, che`} in questo mese non ${senza_righe.length === 1 ? 'ha' : 'hanno'} righe di ${NOMI_PRESTAZIONE[prestazione] || 'questa prestazione'} in questo canale: controlla l'elenco del surplus.`);
       }
@@ -1862,6 +1946,8 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         tonnellate_interni: round3(kgInterni / 1000),
         interni: interni.map(({ kg: _kg, ...f }) => f),
         senza_righe,
+        // chi lo riceve senza la tariffa del mese (13/10/2026); solo se c'e'
+        ...(senzaTariffa.length ? { senza_tariffa: senzaTariffa.map(({ kg: _kg, ...f }) => f) } : {}),
         nota: frasi.join(' '),
       };
     });
