@@ -46,12 +46,18 @@ export default function OrdiniAttivita({ todo, isAdmin, onSalva }) {
     }
   };
 
-  if (!ids.length && !todo.riferimento_ordine && !isAdmin && !todo.chiusura_nota && !todo.avviso_ordini && !nota) return null;
+  // Un'attivita' completata sta nella sezione dei completati, che dice gia' quando
+  // e perche' si e' chiusa (src/lib/todoSezioni.js, 12/10/2026): qui restano gli
+  // ordini e gli avvisi, la nota della chiusura non si ripete, e senza un ordine
+  // scritto non si invita a scriverne uno.
+  const completata = todo.stato === 'completato';
+  if (completata && !ids.length && !todo.riferimento_ordine && !todo.avviso_ordini) return null;
+  if (!ids.length && !todo.riferimento_ordine && !isAdmin && !(todo.chiusura_nota && !completata) && !todo.avviso_ordini && !nota) return null;
 
   return (
     <div className="mt-1 space-y-1 text-xs">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-muted-foreground">Ordine da completare:</span>
+        <span className="text-muted-foreground">{completata ? (ids.length > 1 ? 'Ordini:' : 'Ordine:') : 'Ordine da completare:'}</span>
         {testo !== null ? (
           <input
             autoFocus
@@ -81,15 +87,12 @@ export default function OrdiniAttivita({ todo, isAdmin, onSalva }) {
         {avanzamento && <span className="text-muted-foreground">({avanzamento})</span>}
       </div>
 
-      {/* Perche' si e' chiusa, e quando: non si cancella, resta scritto. */}
-      {todo.chiusura_nota && (
+      {/* Perche' il gestionale l'aveva chiusa, su un'attivita' riaperta a mano: non
+          si cancella, resta scritto. Su una completata lo dice la sua sezione. */}
+      {todo.chiusura_nota && !completata && (
         <p className="flex items-start gap-1 text-green-700">
           <CheckCircle2 className="w-3.5 h-3.5 mt-px shrink-0" />
-          <span>
-            {todo.stato === 'completato'
-              ? todo.chiusura_nota
-              : `riaperta a mano: il gestionale l’aveva chiusa (${todo.chiusura_nota})`}
-          </span>
+          <span>{`riaperta a mano: il gestionale l’aveva chiusa (${todo.chiusura_nota})`}</span>
         </p>
       )}
 
@@ -107,7 +110,7 @@ export default function OrdiniAttivita({ todo, isAdmin, onSalva }) {
           riga aspetta una spunta a mano: testo neutro, non ambra. */}
       {nota && <p className="text-muted-foreground">{nota}</p>}
 
-      {todo.chiusa_dal_gestionale_il && !todo.chiusura_nota && (
+      {todo.chiusa_dal_gestionale_il && !todo.chiusura_nota && !completata && (
         <p className="text-muted-foreground">chiusa dal gestionale il {gg(todo.chiusa_dal_gestionale_il)}</p>
       )}
     </div>

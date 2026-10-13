@@ -79,6 +79,11 @@
       "format": "date",
       "description": "Giorno in cui il gestionale l ha chiusa"
     },
+    "completata_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Giorno italiano in cui l amministratore ha segnato a mano l attivita come completata (spunta o targhetta dello stato): lo scrive la pagina To-Do List e si toglie (null) quando la si riapre. Le chiusure del gestionale hanno il loro giorno in chiusa_dal_gestionale_il"
+    },
     "chiusura_nota": {
       "type": "string",
       "description": "Perche e quando si e chiusa: chiusa dal gestionale il GG/MM/AAAA, l ordine ET... risulta terminato"

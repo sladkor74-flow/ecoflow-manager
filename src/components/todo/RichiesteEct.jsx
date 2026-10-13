@@ -1,12 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, CheckSquare, Square, AlertTriangle, Mail, Search, Upload } from 'lucide-react';
+import { Loader2, CheckSquare, Square, AlertTriangle, Search, Upload } from 'lucide-react';
 import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine, testoOrdiniDateDaSistemare, testoAvanzamentoRichiesta } from '@/lib/richiesteEct';
+import { dividiRichieste, esitoDellaPagina } from '@/lib/todoSezioni';
+import RichiesteCompletate from '@/components/todo/RichiesteCompletate';
 
 // Richieste del consorzio arrivate via email: ci chiedono di anticipare certi
 // ritiri. L'ID ordine non sta nella richiesta e lo riconosce il gestionale fra
 // gli assegnati; quando quell'ordine risulta terminato l'evasione si propone da
 // sola e la spunta la mette chi poi risponde alla mail.
+//
+// DA FARE E COMPLETATE (richiesta dell'utente del 12/10/2026: «gli ordini della
+// 'to-do list' quando sono completati vanno spostati nella sezione completati e
+// non solo evidenziati come tali»). La tabella tiene solo le richieste ancora da
+// ritirare; un'evasa o un'annullata passa nella sezione delle completate, sotto
+// (RichiesteCompletate), e ci resta finche' una spunta tolta non la riapre.
+// Divide l'esito della pagina (esitoDellaPagina, src/lib/todoSezioni.js): quello
+// salvato, o statoRichiesta quando manca o e' il «da_confermare» di prima del
+// 29/09/2026. Non si scrive niente per dividerle, e i numeri dei filtri contano
+// solo le da fare.
 
 const OGGI = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
 const gg = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '—');
@@ -59,10 +71,13 @@ function DettaglioOrdini({ richiesta, ids }) {
   );
 }
 
-function Scadenza({ r }) {
+// Una richiesta a cui manca l'ID ordine: ne' riconosciuto ne' scritto a mano.
+const senzaOrdine = (r) => !r.id_ordine && !r.id_ordine_manuale;
+
+function Scadenza({ r, esito }) {
   if (!r.scadenza) return <span className="text-muted-foreground">—</span>;
   const g = giorniAllaScadenza(String(r.scadenza).slice(0, 10), OGGI());
-  const chiusa = r.esito === 'evasa' || r.esito === 'annullata';
+  const chiusa = esito === 'evasa' || esito === 'annullata';
   const colore = chiusa ? 'text-muted-foreground' : g < 0 ? 'text-red-700 font-medium' : g <= 7 ? 'text-amber-700 font-medium' : '';
   const quando = chiusa ? '' : g < 0 ? ` (in ritardo di ${-g} ${-g === 1 ? 'giorno' : 'giorni'})` : g === 0 ? ' (oggi)' : ` (fra ${g} ${g === 1 ? 'giorno' : 'giorni'})`;
   return <span className={colore}>{gg(r.scadenza)}{quando}</span>;
@@ -177,34 +192,36 @@ export default function RichiesteEct({ isAdmin }) {
     }
   };
 
+  // L'esito con cui si divide: quello salvato, o la regola di adesso se manca o
+  // e' di prima del 29/09/2026. Le richieste divise: la tabella ha le da fare,
+  // la sezione sotto le completate, gia' coi ritiri piu' recenti in alto.
+  const esitoDi = useCallback((r) => esitoDellaPagina(r, statoRichiesta), []);
+  const { daFare, completate } = useMemo(() => dividiRichieste(righe, esitoDi), [righe, esitoDi]);
+
+  // I numeri contano solo le da fare.
   const conteggi = useMemo(() => ({
-    da_fare: righe.filter(r => r.esito === 'aperta').length,
-    da_confermare: righe.filter(r => r.esito === 'da_confermare').length,
-    evasa: righe.filter(r => r.esito === 'evasa').length,
-    annullata: righe.filter(r => r.esito === 'annullata').length,
-    in_ritardo: righe.filter(r => r.esito === 'aperta' && r.scadenza && giorniAllaScadenza(String(r.scadenza).slice(0, 10), OGGI()) < 0).length,
-  }), [righe]);
+    da_fare: daFare.length,
+    senza_ordine: daFare.filter(senzaOrdine).length,
+    in_ritardo: daFare.filter(r => esitoDi(r) === 'aperta' && r.scadenza && giorniAllaScadenza(String(r.scadenza).slice(0, 10), OGGI()) < 0).length,
+  }), [daFare, esitoDi]);
+
+  const trovata = useCallback((r) => {
+    const q = cerca.trim().toLowerCase();
+    return !q || `${r.pdr_nome} ${r.provincia} ${r.id_ordine} ${r.id_ordine_manuale || ''} ${r.id_ordine_candidati || ''} ${r.trasportatore}`.toLowerCase().includes(q);
+  }, [cerca]);
 
   const viste = useMemo(() => {
-    let v = righe;
-    if (filtro === 'da_fare') v = v.filter(r => r.esito === 'aperta');
-    else if (filtro === 'da_confermare') v = v.filter(r => r.esito === 'da_confermare');
-    else if (filtro === 'chiuse') v = v.filter(r => r.esito === 'evasa' || r.esito === 'annullata');
-    else if (filtro === 'senza_ordine') v = v.filter(r => !r.id_ordine && !r.id_ordine_manuale);
-    const q = cerca.trim().toLowerCase();
-    if (q) v = v.filter(r => `${r.pdr_nome} ${r.provincia} ${r.id_ordine} ${r.id_ordine_manuale || ''} ${r.id_ordine_candidati || ''} ${r.trasportatore}`.toLowerCase().includes(q));
-    const peso = { aperta: 0, da_confermare: 1, evasa: 2, annullata: 3 };
-    return [...v].sort((a, b) => (peso[a.esito] ?? 9) - (peso[b.esito] ?? 9)
-      || String(a.scadenza || '9999').localeCompare(String(b.scadenza || '9999'))
+    let v = daFare;
+    if (filtro === 'senza_ordine') v = v.filter(senzaOrdine);
+    v = v.filter(trovata);
+    return [...v].sort((a, b) => String(a.scadenza || '9999').localeCompare(String(b.scadenza || '9999'))
       || String(b.mail_inviata_il || '').localeCompare(String(a.mail_inviata_il || '')));
-  }, [righe, filtro, cerca]);
+  }, [daFare, filtro, trovata]);
+  const completateViste = useMemo(() => completate.filter(trovata), [completate, trovata]);
 
   const FILTRI = [
     ['da_fare', 'Da ritirare', conteggi.da_fare],
-    ['da_confermare', 'Da spuntare', conteggi.da_confermare],
-    ['senza_ordine', 'Senza ID ordine', righe.filter(r => !r.id_ordine && !r.id_ordine_manuale).length],
-    ['chiuse', 'Chiuse', conteggi.evasa + conteggi.annullata],
-    ['tutte', 'Tutte', righe.length],
+    ['senza_ordine', 'Senza ID ordine', conteggi.senza_ordine],
   ];
 
   return (
@@ -212,9 +229,10 @@ export default function RichiesteEct({ isAdmin }) {
       <p className="text-sm text-muted-foreground max-w-3xl">
         Le richieste che il consorzio ci manda per email, fuori dal portale, per anticipare certi ritiri. L&apos;ID ordine non c&apos;è
         nella richiesta: lo riconosce il gestionale fra gli assegnati, dal nome del produttore e dalla data di immissione.
-        Quando quell&apos;ordine compare fra i terminati la riga passa a <strong>da spuntare</strong> con la data del ritiro:
-        la spunta la metti tu, e da lì puoi rispondere alla mail. Sull&apos;ID ordine puoi scrivere, e correggere,
-        anche più di un ordine separati da virgola: resta così anche ai caricamenti successivi.
+        Quando quell&apos;ordine compare fra i terminati la richiesta si chiude da sola ed esce dalla tabella: la trovi fra le
+        <strong> completate</strong>, in fondo, con la data del ritiro da comunicare al consorzio, e la spunta la metti tu quando
+        hai risposto alla mail. Sull&apos;ID ordine puoi scrivere, e correggere, anche più di un ordine separati da virgola: resta
+        così anche ai caricamenti successivi.
       </p>
 
       {isAdmin && (
@@ -245,7 +263,7 @@ export default function RichiesteEct({ isAdmin }) {
           </p>
           {esitoImport.da_confermare?.length > 0 && (
             <p className="text-emerald-800">
-              Risultano ritirate e aspettano la tua spunta: {esitoImport.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}.
+              Risultano ritirate e aspettano la tua spunta: {esitoImport.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}. Le trovi fra le completate.
             </p>
           )}
           {esitoImport.spostate > 0 && (
@@ -259,7 +277,7 @@ export default function RichiesteEct({ isAdmin }) {
 
       {ritiri?.da_confermare?.length > 0 && (
         <p className="text-sm border rounded-lg px-3 py-2 bg-muted/40 text-emerald-800">
-          Dai terminati caricati risultano ritirate e aspettano la tua spunta: {ritiri.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}.
+          Dai terminati caricati risultano ritirate e aspettano la tua spunta: {ritiri.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}. Le trovi fra le completate.
         </p>
       )}
 
@@ -320,7 +338,14 @@ export default function RichiesteEct({ isAdmin }) {
         </p>
       )}
 
-      {righe.length > 0 && (
+      {/* Tutte completate: la tabella vuota non serve, basta dire dove sono. */}
+      {!caricamento && righe.length > 0 && daFare.length === 0 && (
+        <p className="text-sm text-muted-foreground border rounded-lg px-3 py-6 text-center">
+          Niente da ritirare: le richieste sono tutte completate, le trovi qui sotto.
+        </p>
+      )}
+
+      {daFare.length > 0 && (
         <div className="border rounded-xl bg-card" data-scorre-lato>
           <table className="w-full text-sm">
             <thead>
@@ -340,7 +365,8 @@ export default function RichiesteEct({ isAdmin }) {
             </thead>
             <tbody>
               {viste.map(r => {
-                const e = ESITI[r.esito] || ESITI.aperta;
+                const esito = esitoDi(r);
+                const e = ESITI[esito] || ESITI.aperta;
                 const ids = listaOrdini(r);
                 return (
                   <tr key={r.id} className="border-b last:border-b-0 align-top">
@@ -408,7 +434,7 @@ export default function RichiesteEct({ isAdmin }) {
                     </td>
                     <td className="px-2 py-2 whitespace-nowrap">{gg(r.ordine_immesso_il)}</td>
                     <td className="px-2 py-2 whitespace-nowrap">{gg(r.mail_inviata_il)}</td>
-                    <td className="px-2 py-2 whitespace-nowrap"><Scadenza r={r} /></td>
+                    <td className="px-2 py-2 whitespace-nowrap"><Scadenza r={r} esito={esito} /></td>
                     <td className="px-2 py-2">{r.trasportatore || '—'}</td>
                     <td className="px-2 py-2 whitespace-nowrap">
                       {gg(r.evaso_il || r.evasione_rilevata_il)}
@@ -423,7 +449,7 @@ export default function RichiesteEct({ isAdmin }) {
                       {r.evasione_confermata_il && <span className="block text-[11px] text-muted-foreground mt-0.5">spuntata il {gg(r.evasione_confermata_il)}</span>}
                     </td>
                     <td className="px-2 py-2">
-                      {isAdmin && r.esito !== 'annullata' && (
+                      {isAdmin && esito !== 'annullata' && (
                         <button
                           onClick={() => spunta(r)}
                           disabled={occupato === r.id}
@@ -447,10 +473,17 @@ export default function RichiesteEct({ isAdmin }) {
         </div>
       )}
 
-      {conteggi.da_confermare > 0 && (
-        <p className="text-xs text-muted-foreground flex items-center gap-1">
-          <Mail className="w-3.5 h-3.5" /> Le righe «da spuntare» hanno il ritiro già fatto: spuntandole resta scritta la data da comunicare al consorzio.
-        </p>
+      {/* Le completate, chiuse all'apertura: evase e annullate, i ritiri piu'
+          recenti in alto. La ricerca vale anche qui. */}
+      {righe.length > 0 && (
+        <RichiesteCompletate
+          tutte={completate}
+          righe={completateViste}
+          esitoDi={esitoDi}
+          isAdmin={isAdmin}
+          occupato={occupato}
+          onSpunta={spunta}
+        />
       )}
     </div>
   );
