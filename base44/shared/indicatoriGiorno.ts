@@ -34,6 +34,49 @@ const tt = (v) => formatoTonnellate(t3(v));
 const canaleDi = (f) => String((f && f.canale) || 'RETE');
 
 /**
+ * Il canale di una voce della fotografia, per la quadratura col portale: un
+ * impianto e' della rete (il portale tiene la giacenza degli impianti solo per
+ * la rete); una riga di stoccaggio ha il canale in fondo alla chiave, come la
+ * scrive riepilogoDichiarazioni («nappi sud|RETE»). E' la regola di
+ * canaleDelSito in shared/cruscotto.ts, che conta le stesse righe.
+ */
+export const canaleDellaVoce = (v) => (v && v.ruolo === 'stoc'
+  ? ((String(v.chiave || '').match(/\|(RETE|ACI)$/) || [])[1] || null)
+  : 'RETE');
+
+/**
+ * I MESI ANCORA APERTI DI UN CANALE, dal piu' vecchio (12/10/2026).
+ *
+ * La chiusura del mese (shared/chiusuraMese.ts, passoDichiarazioni) li legge se
+ * ci sono: senza, su ACI ed extra raccolta dava per tutto il mese dopo un arrivo
+ * un rosso falso - un conferimento arrivato dopo il mese che si chiude sembrava
+ * una dichiarazione mancata. Sono il conto mese per mese della pagina
+ * Dichiarazioni, gia' fatto: il «Da dichiarare» di ogni mese della riga, e in
+ * testa la casella dall'anno prima, come la tratta la pagina («dall'anno prima»,
+ * il carico piu' vecchio, che il portale aggancia per primo). L'ACI dice la
+ * provenienza, perche' li' ogni dichiarazione e' della sua. Un mese che non ha
+ * niente da dichiarare non si scrive: la riga del giorno deve restare piccola.
+ * Una riga dei flussi senza i dodici mesi non dice quali sono aperti: null, non
+ * un elenco vuoto, che vorrebbe dire «niente da dichiarare».
+ */
+export function mesiAperti(flussi) {
+  const elenco = [];
+  for (const f of flussi || []) {
+    if (!f || f.non_dovuta) continue;
+    if (!Array.isArray(f.mesi)) return null;
+    const prov = canaleDi(f) === 'ACI' && f.provenienza ? { provenienza: f.provenienza } : {};
+    const prima = f.dall_anno_prima;
+    if (prima && num(prima.da_dichiarare_kg) > 0) elenco.push({ ordine: -1, voce: { mese: "dall'anno prima", da_dichiarare_t: t3(num(prima.da_dichiarare_kg) / 1000) } });
+    f.mesi.forEach((m, i) => {
+      if (m && num(m.da_dichiarare_kg) > 0) elenco.push({ ordine: i, voce: { mese: m.mese, ...prov, da_dichiarare_t: t3(num(m.da_dichiarare_kg) / 1000) } });
+    });
+  }
+  // Dal piu' vecchio: la casella, poi i mesi; a parita' di mese l'ordine delle
+  // righe, primaria prima della secondaria (sort e' stabile).
+  return elenco.sort((a, b) => a.ordine - b.ordine).map(x => x.voce);
+}
+
+/**
  * I NUMERI DI UN SITO IN UN GIORNO.
  *
  * Solo quello che si vuole poter rileggere fra sei mesi: la giacenza, il
@@ -60,6 +103,13 @@ export function vociSito(sito) {
     canali[c].resta_t = t3(num(canali[c].resta_t) + num(f.resta_t));
     canali[c].uscito_t = t3(num(canali[c].uscito_t) + num(f.uscito_t));
   }
+  // I mesi ancora aperti, canale per canale (mesiAperti): solo dove le righe
+  // portano i dodici mesi, cioe' sempre nel riepilogo vero.
+  for (const c of Object.keys(canali)) {
+    if (!('resta_t' in canali[c])) continue;
+    const aperti = mesiAperti(((sito && sito.flussi) || []).filter(f => f && canaleDi(f) === c));
+    if (aperti) canali[c].mesi_aperti = aperti;
+  }
   return {
     sito: (sito && sito.sito) || '',
     chiave: (sito && sito.chiave) || '',
@@ -81,7 +131,8 @@ export function vociSito(sito) {
  * Solo chi ha un confronto col portale: un impianto senza fotografia non si
  * scosta da niente, e chiamarlo «da guardare» sarebbe un avviso che non si puo'
  * chiudere. La tolleranza e' quella della quadratura, una sola per tutto il
- * gestionale (TOLLERANZA_QUADRATURA_T).
+ * gestionale (TOLLERANZA_QUADRATURA_T). Uno stoccaggio lo dice
+ * (`stoccaggio: true`), come lo dice il quadro della dashboard.
  */
 export function scostamenti(siti) {
   return (siti || [])
@@ -93,8 +144,23 @@ export function scostamenti(siti) {
       scarto_t: t3(s.scarto_t),
       calcolata_t: t3(s.giacenza_calcolata_t),
       portale_t: t3(s.giacenza_portale_t),
+      ...(s.ruolo === 'stoc' ? { stoccaggio: true } : {}),
     }))
     .sort((a, b) => Math.abs(b.scarto_t) - Math.abs(a.scarto_t));
+}
+
+/**
+ * «Un impianto», «uno stoccaggio», «2 impianti e uno stoccaggio»: chi si
+ * scosta, col nome giusto. Uno scostamento senza il segno dello stoccaggio e'
+ * un impianto, come nelle fotografie scritte prima del 12/10/2026.
+ */
+export function chiSiScosta(fuori) {
+  const stoc = (fuori || []).filter(x => x && (x.stoccaggio === true || /\|(RETE|ACI)$/.test(String(x.chiave || '')))).length;
+  const imp = (fuori || []).length - stoc;
+  const impianti = imp === 1 ? 'un impianto' : `${imp} impianti`;
+  const stoccaggi = stoc === 1 ? 'uno stoccaggio' : `${stoc} stoccaggi`;
+  const testo = imp && stoc ? `${impianti} e ${stoccaggi}` : stoc ? stoccaggi : impianti;
+  return { imp, stoc, testo, uno: imp + stoc === 1 };
 }
 
 /** I totali del giorno, canale per canale: mai un totale di tutti e tre. */
@@ -143,17 +209,24 @@ export function notaDoppioni(doppioni) {
  * roba sua. Oltre tre si contano gli altri, altrimenti la riga non e' piu' una
  * riga.
  */
-export function notaDelGiorno(fuori, quantiConfronto, doppioni) {
+export function notaDelGiorno(fuori, quantiConfronto, doppioni, stoccaggiConfronto = 0) {
   const dopp = notaDoppioni(doppioni);
   if (!fuori || !fuori.length) {
+    // Gli stoccaggi della rete col confronto a portale (Nappi Sud) si contano con
+    // gli impianti, come nella pagina e nella dashboard («6 su 6»): e si dice.
+    const chi = stoccaggiConfronto ? 'gli impianti e gli stoccaggi della rete' : 'gli impianti';
     const base = quantiConfronto
-      ? `Tutti gli impianti con un confronto a portale quadrano (${quantiConfronto}).`
+      ? `Tutti ${chi} con un confronto a portale quadrano (${quantiConfronto}).`
       : 'Nessun impianto ha un confronto col portale: niente da quadrare.';
     return dopp ? `${base} ${dopp}` : base;
   }
-  const primi = fuori.slice(0, 3).map(x => `${x.sito} ${x.scarto_t > 0 ? '+' : ''}${tt(x.scarto_t)} t`);
+  const quali = chiSiScosta(fuori);
+  // Il nome di uno stoccaggio porta il ruolo, se nella riga ci sono anche impianti.
+  const stoc = (x) => x.stoccaggio === true || /\|(RETE|ACI)$/.test(String(x.chiave || ''));
+  const primi = fuori.slice(0, 3).map(x => `${x.sito}${quali.imp && stoc(x) ? ' (stoccaggio)' : ''} ${x.scarto_t > 0 ? '+' : ''}${tt(x.scarto_t)} t`);
   const altri = fuori.length - primi.length;
-  const base = `${fuori.length === 1 ? 'Un impianto si scosta' : `${fuori.length} impianti si scostano`} dal portale: `
+  const soggetto = quali.testo.charAt(0).toUpperCase() + quali.testo.slice(1);
+  const base = `${soggetto} ${quali.uno ? 'si scosta' : 'si scostano'} dal portale: `
     + primi.join(', ') + (altri > 0 ? ` e altri ${altri}` : '') + '.';
   return dopp ? `${base} ${dopp}` : base;
 }
@@ -164,9 +237,15 @@ export function notaDelGiorno(fuori, quantiConfronto, doppioni) {
  */
 export function fotografiaDelGiorno(siti, { giorno, anno, doppioni } = {}) {
   const voci = (siti || []).map(vociSito);
-  // Il confronto col portale ce l'hanno gli impianti della rete: gli stoccaggi
-  // hanno la loro rilevazione, che e' un'altra cosa e si controlla altrove.
-  const conConfronto = voci.filter(v => v.ruolo === 'imp' && v.giacenza_portale_t !== null);
+  // IL CONFRONTO COL PORTALE E' DELLA RETE, IMPIANTI E STOCCAGGI (12/10/2026).
+  // Fino a questo giorno qui entravano i soli impianti: la pagina Dichiarazioni
+  // e la dashboard dicevano la quadratura su impianti E stoccaggi della rete (6
+  // su 6, con Nappi Sud), il guardiano su 5, e uno stoccaggio della rete che non
+  // quadrava lo diceva la sezione Impianti della dashboard e «Da gestire» no. Ora
+  // le righe sono le stesse della pagina: gli impianti, e gli stoccaggi con il
+  // loro canale di rete (canaleDellaVoce). L'ACI degli stoccaggi resta fuori dal
+  // verdetto, come nella dashboard, dove sta a parte.
+  const conConfronto = voci.filter(v => canaleDellaVoce(v) === 'RETE' && v.giacenza_portale_t !== null);
   const fuori = scostamenti(conConfronto);
   const dopp = doppioni || [];
   return {
@@ -176,7 +255,7 @@ export function fotografiaDelGiorno(siti, { giorno, anno, doppioni } = {}) {
     // numeri dipendono da quale modulo si guarda, e questo e' peggio di un
     // numero fuori di mezza tonnellata, perche' non si vede da nessuna parte.
     esito: (fuori.length || dopp.length) ? 'da_guardare' : 'in_linea',
-    nota: notaDelGiorno(fuori, conConfronto.length, dopp),
+    nota: notaDelGiorno(fuori, conConfronto.length, dopp, conConfronto.filter(v => v.ruolo === 'stoc').length),
     siti_json: JSON.stringify(voci),
     totali_json: JSON.stringify(totaliGiorno(voci)),
     scostamenti_json: JSON.stringify(fuori),

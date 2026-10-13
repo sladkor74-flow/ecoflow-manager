@@ -9,9 +9,11 @@
   // giorno e l'esito del controllo di coerenza.
   //
   // Serve a due cose diverse, e tutt'e due contano:
-  // - IL GUARDIANO: la quadratura di tutti gli impianti rifatta ogni notte, con
-  //   una riga di esito la mattina. Se qualcosa si scosta lo scopre il
-  //   gestionale, non il consorzio.
+  // - IL GUARDIANO: la quadratura di impianti e stoccaggi della rete rifatta
+  //   ogni notte, con una riga di esito la mattina. Se qualcosa si scosta lo
+  //   scopre il gestionale, non il consorzio. Fino all'11/10/2026 qui entravano
+  //   i soli impianti: la pagina e la dashboard ne contavano 6 (con Nappi Sud),
+  //   il guardiano 5 (revisione del 13/10/2026: i testi dicono chi si guarda).
   // - LO STORICO: una curva di dodici mesi invece di una tabella di oggi. Il suo
   //   valore e' il tempo che accumula, quindi comincia presto anche se i grafici
   //   arrivano dopo.
@@ -36,7 +38,7 @@
         "da_guardare"
       ],
       "default": "in_linea",
-      "description": "in_linea: ogni impianto con un confronto a portale quadra. da_guardare: almeno uno si scosta oltre la tolleranza"
+      "description": "in_linea: ogni impianto e ogni stoccaggio della rete con un confronto a portale quadra. da_guardare: almeno uno si scosta oltre la tolleranza. L'ACI degli stoccaggi resta fuori dal verdetto, come nella dashboard"
     },
     "nota": {
       "type": "string",
@@ -44,7 +46,7 @@
     },
     "siti_json": {
       "type": "string",
-      "description": "I numeri per sito, in JSON: sito, ruolo, giacenza, portale, scarto, quadra, conferito, dichiarato. Un canale per volta, mai sommati"
+      "description": "I numeri per sito, in JSON: sito, ruolo, giacenza, portale, scarto, quadra, conferito, dichiarato. Un canale per volta, mai sommati. Per canale anche mesi_aperti [{ mese, provenienza (solo ACI), da_dichiarare_t }], dal piu' vecchio, con «dall'anno prima» in testa: solo i mesi con qualcosa da dichiarare, e la loro somma e' la colonna «Da dichiarare». Il campo manca sulla rete non dovuta e dove il conto mese per mese non c'e': assente non vuol dire «niente da dichiarare», l'elenco vuoto si'"
     },
     "totali_json": {
       "type": "string",
@@ -52,7 +54,7 @@
     },
     "scostamenti_json": {
       "type": "string",
-      "description": "Gli impianti che non quadrano, in JSON: sito, scarto e di quanto. Vuoto quando tutto e' in linea"
+      "description": "Gli impianti e gli stoccaggi della rete che non quadrano, in JSON: sito, scarto e di quanto; uno stoccaggio porta stoccaggio: true. Vuoto quando tutto e' in linea"
     },
     // I DOPPIONI DELLE DICHIARAZIONI (10/10/2026).
     //

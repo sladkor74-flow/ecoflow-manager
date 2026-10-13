@@ -267,7 +267,7 @@ verifica('rete: critica, 3 ordini, dice il senza fine trasporto', vRete.gravita 
 verifica('secondarie ACI: da guardare, col canale nel titolo', vSec.gravita === 'attenzione' && /^Secondarie · ACI: 1 ordine terminato/.test(vSec.titolo), JSON.stringify(vSec));
 verifica('un alert senza conteggi si dice col suo titolo; l\'extra si corregge nella scheda', vExtra.titolo === 'Extra raccolta: ordini con date da sistemare' && /nella scheda/.test(vExtra.dettaglio), JSON.stringify(vExtra));
 const vAlert = rd.da_gestire.filter(v => v.area === 'Alert');
-verifica('la voce generica degli alert non li conta due volte: resta il ritardo SLA', vAlert.length === 1 && vAlert[0].titolo === '1 alert aperti' && /Ritardo SLA \(1\)/.test(vAlert[0].dettaglio) && rd.alert.totale === 4, vAlert.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
+verifica('la voce generica degli alert non li conta due volte: resta il ritardo SLA', vAlert.length === 1 && vAlert[0].titolo === 'Un alert aperto' && /Ritardo SLA \(1\)/.test(vAlert[0].dettaglio) && rd.alert.totale === 4, vAlert.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
 
 console.log('DICHIARAZIONI RICONOSCIUTE A PORTALE');
 // Rete e ACI caricate lo stesso giorno, a mezzanotte italiana (22:00Z del giorno prima)

@@ -3,12 +3,15 @@
 import { MESI, materialiDi, statoDichiarazione, caricatoDelMese, CANALI } from '@/lib/dichiarazioniImpianti';
 import { INTESTAZIONE_DATE, righeExcelDate } from '@/components/giacenze/DateDaSistemare';
 import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella } from '@/lib/fogliProfessionali';
+import { copertoDaInUnaCella, copreInUnaCella, sommaCopertura } from '@/lib/storiaRiepilogo';
 
 const nomeCanale = (f) => {
   const c = CANALI.find(x => x.chiave === f.canale);
   return `${c ? c.nome : f.canale}${f.provenienza ? ` ${f.provenienza}` : ''}`;
 };
 // Il punto delle migliaia, all'italiana, nelle note scritte (11/10/2026).
+// I giorni all'italiana, gg/mm/aaaa, nei fogli nuovi (12/10/2026).
+const giornoIt = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/') : '');
 const mig = (v) => String(Math.round(Number(v) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const STATO_PAROLE = { nessuna: '', non_dovuta: 'non dovuta', solo_metalli: 'solo metalli ferrosi', inserita: 'inserita', ricevuta: 'in mano', caricata: 'caricata a portale' };
 
@@ -47,7 +50,17 @@ export async function esportaDichiarazioni(dati, opzioni = {}) {
   // prima di gennaio. Senza, la somma dei mesi non faceva la giacenza finche'
   // l'apertura non era consumata, e il foglio ripeteva il difetto corretto.
   const riepilogo = [['Impianto', 'Canale', 'Operazione', 'Voce', "Dall'anno prima", ...MESI, 'Totale (t)']];
-  const dettaglio = [['Impianto', 'Canale', 'Operazione', 'Mese', 'Conferito (kg)', 'Uscito (kg)', 'Resta in giacenza (kg)', 'Dichiarato (kg)', 'Granulo (kg)', 'Fibre (kg)', 'Metalli (kg)', 'Ciabattato (kg)', 'Cippato (kg)', 'CSS-C (kg)', 'Altro (kg)', 'Stato', 'Ricevuta il', 'Caricata il', 'Note']];
+  // Le ultime tre colonne sono la storia del mese (12/10/2026): la giacenza a
+  // fine mese, che cosa ha coperto la dichiarazione caricata in quel mese e chi
+  // ha coperto gli arrivi del mese («20,62 t di marzo coperte dalla
+  // dichiarazione di giugno»). Da leggere: non sono conti.
+  const dettaglio = [['Impianto', 'Canale', 'Operazione', 'Mese', 'Conferito (kg)', 'Uscito (kg)', 'Resta in giacenza (kg)', 'Dichiarato (kg)', 'Granulo (kg)', 'Fibre (kg)', 'Metalli (kg)', 'Ciabattato (kg)', 'Cippato (kg)', 'CSS-C (kg)', 'Altro (kg)', 'Stato', 'Ricevuta il', 'Caricata il', 'Note', 'Giacenza a fine mese (kg)', 'La dichiarazione del mese ha coperto', 'Gli arrivi del mese coperti da']];
+  // LA STORIA DI OGNI RIGA, frase per frase, e le dichiarazioni caricate con i
+  // loro agganci (12/10/2026): come al tocco sulla pagina.
+  const storia = [['Impianto', 'Canale', 'N.', 'Racconto']];
+  const caricate = [['Impianto', 'Canale', 'Dichiarazione di', 'Caricata il', 'Caricato (kg)', 'Agganciato dal report (kg)', 'Anni prima (kg)', ...MESI.map(m => `${m} (kg)`), 'Agganci']];
+  // Le righe informative del Riepilogo: si dicono in fondo al foglio.
+  let conStoria = false;
   for (const s of dati.siti.filter(x => x.tipo_destinazione !== 'stoc')) {
     for (const f of s.flussi) {
       const prima = f.dall_anno_prima || null;
@@ -80,6 +93,46 @@ export async function esportaDichiarazioni(dati, opzioni = {}) {
         ...f.mesi.map(m => (f.non_dovuta ? null : m.resta_kg || null)),
         f.non_dovuta ? 'non dovuta per accordo' : f.resta_t,
       ]);
+      // LA GIACENZA A FINE MESE E LO STOCCAGGIO DELLO STESSO SITO (12/10/2026),
+      // come a video: righe da leggere, senza totale che si possa sommare agli
+      // altri. La giacenza a fine mese parte dalla casella dall'anno prima; dopo
+      // il mese di oggi e' vuota.
+      if (f.mesi.some(m => m && m.giacenza_fine_kg !== undefined)) {
+        conStoria = true;
+        const nonDovuta = f.non_dovuta || (f.canale === 'RETE' && s.dichiara_rete === false);
+        riepilogo.push([
+          s.sito, nomeCanale(f), s.operazione || '', 'Giacenza a fine mese (informativa)',
+          nonDovuta ? null : (f.giacenza_partenza_kg || null),
+          ...f.mesi.map(m => (nonDovuta || m.giacenza_fine_kg === null || m.giacenza_fine_kg === undefined ? null : m.giacenza_fine_kg)),
+          nonDovuta ? 'non dovuta per accordo' : null,
+        ]);
+      }
+      const st = f.stoccaggio_stesso_sito;
+      if (st) {
+        riepilogo.push([
+          s.sito, nomeCanale(f), s.operazione || '', 'In stoccaggio nel mese (tal quale, non si dichiara qui)', null,
+          ...st.entrato_kg.map(kg => kg || null),
+          st.entrato_kg.reduce((a, x) => a + x, 0) / 1000,
+        ]);
+        for (const v of st.verso) {
+          riepilogo.push([
+            s.sito, nomeCanale(f), s.operazione || '', `Ripartito in secondaria verso ${v.impianto}${v.dichiara ? '' : ' (non dichiara la rete, per accordo)'}`, null,
+            ...v.mesi_kg.map(kg => kg || null),
+            v.kg / 1000,
+          ]);
+        }
+      }
+      (f.racconto || []).forEach((frase, n) => storia.push([s.sito, nomeCanale(f), n + 1, frase]));
+      for (const m of f.mesi) {
+        if (!(m.caricato_kg > 0)) continue;
+        const c = m.dichiarazione_copre;
+        caricate.push([
+          s.sito, nomeCanale(f), m.mese, giornoIt(m.dichiarazione && m.dichiarazione.caricata_il), m.caricato_kg,
+          c ? c.kg : null, c && c.prima_kg ? c.prima_kg : null,
+          ...MESI.map(nome => { const x = c && c.mesi.find(y => y.mese === nome); return x ? x.kg : null; }),
+          c ? sommaCopertura(c) : (f.canale === 'RETE' ? 'il report del portale non la conosce ancora' : 'senza agganci a portale: vale per il suo mese'),
+        ]);
+      }
       if (prima && (prima.conferito_kg || prima.uscito_kg)) {
         dettaglio.push([
           s.sito, nomeCanale(f), s.operazione || '', "Dall'anno prima", prima.conferito_kg || null,
@@ -98,6 +151,8 @@ export async function esportaDichiarazioni(dati, opzioni = {}) {
           d ? d.quantita_kg : null, d ? d.granulo_kg : null, d ? d.fibre_kg : null, d ? d.metalli_kg : null,
           d ? d.ciabattato_kg : null, d ? d.cippato_kg : null, d ? d.cssc_kg : null, d ? d.altro_kg : null,
           STATO_PAROLE[statoDichiarazione(d, { canale: f.canale, dichiara_rete: s.dichiara_rete })], (d && d.ricevuta_il) || '', (d && d.caricata_il) || '', (d && d.note) || '',
+          f.non_dovuta || m.giacenza_fine_kg === null || m.giacenza_fine_kg === undefined ? null : m.giacenza_fine_kg,
+          copreInUnaCella(m), copertoDaInUnaCella(m),
         ]);
       }
     }
@@ -175,9 +230,9 @@ export async function esportaDichiarazioni(dati, opzioni = {}) {
   // Ogni foglio: la prima riga e' l'intestazione, i formati sono quelli detti
   // colonna per colonna (le altre colonne restano come sono: un conteggio non
   // si legge come un peso).
-  const aggiungi = (nome, righe, formati) => {
+  const aggiungi = (nome, righe, formati, stili = {}) => {
     foglioDaRighe(wb, nome, {
-      doc, righe,
+      doc, righe, stili,
       formati: (c) => (formati && formati[c]) || null,
       larghezze: righe[0].map(h => Math.min(28, Math.max(11, String(h).length + 2))),
     });
@@ -188,8 +243,19 @@ export async function esportaDichiarazioni(dati, opzioni = {}) {
   // I kg dalla casella dall'anno prima (colonna 4) a dicembre, poi il totale in
   // tonnellate. Gli indici partivano da 3, la colonna della voce: dicembre usciva
   // in tonnellate e il totale senza formato (11/10/2026).
-  aggiungi('Riepilogo', riepilogo, { ...Object.fromEntries(Array.from({ length: MESI.length + 1 }, (_, i) => [i + 4, '#,##0'])), [MESI.length + 5]: t2 });
-  aggiungi('Dettaglio', dettaglio, Object.fromEntries([4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => [i, '#,##0'])));
+  // Le righe informative si dicono in fondo, in una nota (12/10/2026).
+  const stiliRiepilogo = {};
+  if (conStoria) {
+    riepilogo.push([]);
+    stiliRiepilogo[riepilogo.length] = 'nota';
+    riepilogo.push(["Le righe «Giacenza a fine mese», «In stoccaggio nel mese» e «Ripartito in secondaria» sono da leggere: non entrano nel conferito, nel dichiarato, in ciò che resta né nei totali. La giacenza a fine mese è quello che è entrato, dall'anno prima compreso, meno le dichiarazioni caricate fino a quel mese, nella colonna in cui stanno: l'ultimo mese è la giacenza di oggi. Lo stoccaggio non si dichiara qui: lo dichiara l'impianto che lo riceve."]);
+  }
+  aggiungi('Riepilogo', riepilogo, { ...Object.fromEntries(Array.from({ length: MESI.length + 1 }, (_, i) => [i + 4, '#,##0'])), [MESI.length + 5]: t2 }, stiliRiepilogo);
+  aggiungi('Dettaglio', dettaglio, Object.fromEntries([4, 5, 6, 7, 8, 9, 10, 11, 12, 19].map(i => [i, '#,##0'])));
+  if (caricate.length > 1) aggiungi('Dichiarazioni caricate', caricate, Object.fromEntries([4, 5, 6, ...MESI.map((_, i) => i + 7)].map(i => [i, '#,##0'])));
+  if (storia.length > 1) {
+    foglioDaRighe(wb, 'Storia', { doc, righe: storia, formati: () => null, larghezze: [28, 18, 5, 140] });
+  }
   aggiungi('Quadratura', quadratura, { ...Object.fromEntries([3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => [i, t2])), ...Object.fromEntries([14, 15, 16, 17, 18, 19, 20, 21].map(i => [i, '#,##0'])) });
   aggiungi('Stoccaggi', stoccaggi, Object.fromEntries([3, 4, 5, 7, 8, 9].map(i => [i, t2])));
   if (date.length > 1) aggiungi('Date da sistemare', date, { 6: '#,##0' });

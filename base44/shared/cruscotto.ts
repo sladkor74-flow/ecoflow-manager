@@ -11,7 +11,7 @@
 // restano separati anche qui.
 import { giornoRoma } from "./giornoItaliano.ts";
 import { statoRichiesta } from "./richiesteEct.ts";
-import { giorniFa } from "./indicatoriGiorno.ts";
+import { giorniFa, chiSiScosta } from "./indicatoriGiorno.ts";
 import { formatoKg } from "./formato.ts";
 import { statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE_REGISTRO } from "./registroCaricamenti.ts";
 
@@ -301,6 +301,22 @@ function vociTarget(alerts) {
       const nonRaggiunti = m.righe.filter(r => /^Target non raggiunto/.test(String(r.a.titolo || ''))).length;
       const aRischio = n - nonRaggiunti;
       const nomi = [...new Set(m.righe.map(r => r.raccoglitore).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'it'));
+      // UN RACCOGLITORE IN PIU' REGIONI E' UN TARGET PER REGIONE (13/10/2026). Sul
+      // sito agosto diceva «5 raccoglitori» e poi tre nomi senza «e altri»: SMOCO
+      // aveva tre target, uno per regione. Il titolo conta i raccoglitori, dice i
+      // target quando sono di piu', e il nome porta le sue regioni.
+      const regioniDi = new Map();
+      for (const r of m.righe) {
+        if (!r.raccoglitore) continue;
+        if (!regioniDi.has(r.raccoglitore)) regioniDi.set(r.raccoglitore, new Set());
+        if (r.regione) regioniDi.get(r.raccoglitore).add(r.regione);
+      }
+      const etichetta = (nome) => {
+        const reg = [...(regioniDi.get(nome) || [])].sort((x, y) => x.localeCompare(y, 'it'));
+        return reg.length > 1 ? `${nome} (${reg.join(', ')})` : nome;
+      };
+      const quanti = nomi.length || n;
+      const target = quanti < n ? ` (${n} target, uno per regione)` : '';
       // «A RISCHIO» E' SOTTO IL 90%, NON SOTTO IL 70% (revisione delle migliorie,
       // 11/10/2026). checkTargetAlerts apre l'alert sotto il 70% della proiezione e
       // lo tiene aperto, aggiornato, finche' la proiezione resta sotto il 90%: un
@@ -311,8 +327,8 @@ function vociTarget(alerts) {
       return {
         area: 'Target raccoglitori',
         gravita: m.righe.some(r => r.a.severita === 'critico') ? 'critico' : 'attenzione',
-        titolo: `${n === 1 ? 'Un raccoglitore' : `${n} raccoglitori`} sotto il target di ${m.mese} ${m.anno}`,
-        dettaglio: `${parti}: ${nomi.slice(0, 3).join(', ')}${nomi.length > 3 ? ` e altri ${nomi.length - 3}` : ''}. Il dettaglio di ognuno è nell'alert.`,
+        titolo: `${quanti === 1 ? 'Un raccoglitore' : `${quanti} raccoglitori`} sotto il target di ${m.mese} ${m.anno}${target}`,
+        dettaglio: `${parti}: ${nomi.slice(0, 3).map(etichetta).join(', ')}${nomi.length > 3 ? ` e altri ${nomi.length - 3}` : ''}. Il dettaglio di ognuno è nell'alert.`,
         link: `/target-status?tab=andamento&anno=${m.anno}`,
         chiave: `target:${m.mese}|${m.anno}`,
         sezione: 'rete',
@@ -376,11 +392,23 @@ export function cruscotto(dati) {
   // altri, per non dire due volte la stessa cosa.
   const altri = (dati.alertAperti || []).filter(a => !eAlertDate(a) && !eAlertTarget(a));
   const altriCritici = altri.filter(a => a.severita === 'critico').length;
-  const altriPerRegola = new Map();
-  for (const a of altri) { const k = nomeRegola(a.regola_nome) || a.titolo || 'Senza regola'; altriPerRegola.set(k, (altriPerRegola.get(k) || 0) + 1); }
-  const principali = [...altriPerRegola.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([regola, quanti]) => `${regola} (${quanti})`).join(' · ');
-  if (altriCritici > 0) voce('Alert', 'critico', `${altriCritici} alert critici aperti`, principali, '/alert-engine', { chiave: 'alert:altri' });
-  else if (altri.length > 0) voce('Alert', 'attenzione', `${altri.length} alert aperti`, principali, '/alert-engine', { chiave: 'alert:altri' });
+  // IL DETTAGLIO CONTA QUELLO CHE DICE IL TITOLO (13/10/2026). Sul sito «18 alert
+  // critici aperti» era seguito dalle regole di tutti i 40 aperti: il conto per
+  // regola ora e' dei critici quando il titolo parla dei critici, gli altri si
+  // dicono a parte, e oltre le prime tre regole si dice quante ne restano.
+  const perRegolaDi = (lista) => {
+    const m = new Map();
+    for (const a of lista) { const k = nomeRegola(a.regola_nome) || a.titolo || 'Senza regola'; m.set(k, (m.get(k) || 0) + 1); }
+    const tutte = [...m.entries()].sort((a, b) => b[1] - a[1]);
+    const resto = tutte.slice(3).reduce((s, [, q]) => s + q, 0);
+    return tutte.slice(0, 3).map(([regola, quanti]) => `${regola} (${quanti})`).join(' · ') + (resto ? ` · altre regole (${resto})` : '');
+  };
+  if (altriCritici > 0) {
+    const nonCritici = altri.length - altriCritici;
+    voce('Alert', 'critico', `${altriCritici === 1 ? 'Un alert critico aperto' : `${altriCritici} alert critici aperti`}`,
+      perRegolaDi(altri.filter(a => a.severita === 'critico')) + (nonCritici ? `; e ${nonCritici === 1 ? 'uno non critico' : `${nonCritici} non critici`}` : ''),
+      '/alert-engine', { chiave: 'alert:altri' });
+  } else if (altri.length > 0) voce('Alert', 'attenzione', `${altri.length === 1 ? 'Un alert aperto' : `${altri.length} alert aperti`}`, perRegolaDi(altri), '/alert-engine', { chiave: 'alert:altri' });
   for (const v of vociTarget((dati.alertAperti || []).filter(eAlertTarget))) voci.push(v);
   for (const a of (dati.alertAperti || []).filter(eAlertDate)) {
     const v = voceDate(a);
@@ -495,10 +523,19 @@ export function cruscotto(dati) {
   // senza scostamenti avrebbe scritto «0 impianti non quadrano col portale»: un
   // avviso a zero, come quello dei file - e un avviso che grida al lupo a zero
   // e' il modo piu' sicuro di far ignorare quelli veri.
+  //
+  // IMPIANTI O STOCCAGGI (12/10/2026). Il guardiano contava i soli impianti,
+  // mentre la pagina Dichiarazioni e la sezione Impianti di questa dashboard
+  // dicono la quadratura su impianti e stoccaggi della rete (6 su 6, con Nappi
+  // Sud): uno stoccaggio della rete che non quadrava lo diceva la sezione, e qui
+  // niente. Ora la fotografia li porta tutti e due (indicatoriGiorno.ts), e il
+  // titolo dice chi si scosta: «Uno stoccaggio non quadra», «2 impianti e uno
+  // stoccaggio non quadrano».
   const scost = (fg && fg.scostamenti) || [];
   if (scost.length) {
+    const quali = chiSiScosta(scost);
     voce('Giacenze', 'attenzione',
-      `${scost.length === 1 ? 'Un impianto non quadra' : `${scost.length} impianti non quadrano`} col portale`,
+      `${quali.testo.charAt(0).toUpperCase()}${quali.testo.slice(1)} ${quali.uno ? 'non quadra' : 'non quadrano'} col portale`,
       `${fg.nota} Controllo del ${ilGiorno(fg.giorno)}.`,
       '/giacenze', { chiave: 'giacenze:scostamenti' });
   }

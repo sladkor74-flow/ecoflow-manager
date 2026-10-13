@@ -206,8 +206,11 @@ export default function Quadratura({ dati }) {
                         di cui − {t(kgCerti(s) / 1000)} t per formulari senza fine trasporto che il portale conta fra i non dichiarati: il resto dello scarto è {t(Math.round((s.scarto_t + kgCerti(s) / 1000) * 1000) / 1000)} t
                       </span>
                     )}
+                    {/* Su un anno chiuso il numero e' dei soli carichi di quell'anno: il
+                        file del portale e' di oggi (seconda revisione del 13/10/2026,
+                        sul 2025 c'erano 860,099 t di Nappi Sud, tutte del 2026). */}
                     {stoc && s.in_attesa_dichiarazione_t > 0 && (
-                      <span className="block text-[11px] text-muted-foreground">{t(s.in_attesa_dichiarazione_t)} t gia' partite che il portale attribuisce ancora allo stoccaggio, finche' l'impianto non dichiara</span>
+                      <span className="block text-[11px] text-muted-foreground">{t(s.in_attesa_dichiarazione_t)} t{dati.anno_chiuso ? ` di carichi del ${dati.anno}` : ''} gia' partite che il portale attribuisce ancora allo stoccaggio, finche' l'impianto non dichiara</span>
                     )}
                   </td>
                 </tr>

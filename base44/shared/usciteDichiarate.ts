@@ -301,6 +301,12 @@ export function chiudiFraIFlussi(allineati) {
  * peso al chilo, con la tolleranza di 2 kg che tutto il modulo usa. Senza
  * riscontro non si dice niente: meglio tacere che raccontare una copertura
  * inventata.
+ *
+ * Dal 13/10/2026 il riepilogo non la usa piu': guarda un giorno solo, e la
+ * dichiarazione di febbraio di Irigom, presa dal portale in due giorni, la
+ * vedeva per un quarto. La copertura di una casella viene da abbinaCaricamenti
+ * e copreDellaColonna (shared/storiaDichiarazioni.ts), la stessa della «i»; qui
+ * resta per la sua prova (prove/usciteDichiarate.mjs).
  */
 export function copertureDelCaricamento(caricamenti, dichiarazione, tolleranzaKg = 2) {
   const d = dichiarazione;

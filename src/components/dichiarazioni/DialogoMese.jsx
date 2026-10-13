@@ -10,6 +10,7 @@ import { materialiDi, sommaMateriali, controlliDichiarazione, CANALI, MOTIVI_ASS
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatKg } from '@/lib/utils';
+import { coperturaCaricata } from '@/lib/storiaRiepilogo';
 import LetturaAci from '@/components/dichiarazioni/LetturaAci';
 import { numeroKg } from '@/lib/dichiarazioneAci';
 import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
@@ -197,11 +198,13 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
                 {' '}e restano in giacenza <strong>{kg(mese.resta_kg || 0)} kg</strong>.
               </span>
             )}
-            {mese.copre && mese.copre.mesi && mese.copre.mesi.length > 0 && (
+            {/* Le stesse parole della «i» della casella, dallo stesso aggancio
+                (revisione del 13/10/2026): qui si leggeva `copre`, un giorno solo,
+                e su Irigom febbraio il dialogo diceva 174.400 kg caricati il
+                12/03/2026 mentre il portale ne ha presi 721.660 in due giorni. */}
+            {coperturaCaricata(mese) && (
               <span className="block mt-1">
-                La dichiarazione di questo mese è stata caricata a portale il{' '}
-                {String(mese.copre.giorno).split('-').reverse().join('/')} per {kg(mese.copre.kg)} kg e ha chiuso:{' '}
-                {mese.copre.mesi.map(x => `${x.mese} ${kg(x.kg)} kg`).join(', ')}.
+                La dichiarazione di questo mese è stata {coperturaCaricata(mese)}.
               </span>
             )}
           </DialogDescription>

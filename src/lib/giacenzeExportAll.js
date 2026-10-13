@@ -50,7 +50,11 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno, opzioni = {
   // rilevazione, un impianto senza il file degli ordini non dichiarati, la cui
   // giacenza a zero non e' un dato), non zero.
   const CLASSI = ['P', 'M', 'G1', 'G2', 'ACI'];
-  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza rete a portale (t)', 'Giacenza ACI (t)', 'Extra raccolta in piazzale, fuori portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento', 'Formulari con le date da sistemare'];
+  // Su un anno che non e' quello in corso l'attesa conta solo i carichi di
+  // quell'anno (calcolaGiacenze, revisione finale del 13/10/2026): lo dice
+  // l'intestazione, come la pagina, il PDF e la Quadratura delle Dichiarazioni.
+  const attesaDel = (data.totali && data.totali.in_attesa_dei_carichi_del) || null;
+  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza rete a portale (t)', 'Giacenza ACI (t)', 'Extra raccolta in piazzale, fuori portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', attesaDel ? `In attesa di dichiarazione, dei carichi del ${attesaDel} (t)` : 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento', 'Formulari con le date da sistemare'];
   const senzaFile = (r) => r.tipo_destinazione === 'imp' && !(r.fotografia && r.fotografia.del);
   const classi = (r) => CLASSI.map(c => (r.giacenza_classi_kg && !senzaFile(r) ? r.giacenza_classi_kg[c] || 0 : null));
   const vuotaSeManca = (v) => (v === null || v === undefined ? '' : v);

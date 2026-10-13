@@ -12,8 +12,9 @@ import { puntiDiPartenza, ancoraDellAnno, dopoLaRilevazione, kgReteDiRilevazione
 import { ingressoMovimento, eSecondariaExtra } from "../../shared/ingressoMovimento.ts";
 import { carichiNonNelFile } from "../../shared/riconciliazioneDaDichiarare.ts";
 import { confrontaConIlPortale } from "../../shared/agganciaDichiarazioni.ts";
-import { raccoglitoreUscite, allineaAllaGiacenza, chiudiFraIFlussi, copertureDelCaricamento } from "../../shared/usciteDichiarate.ts";
+import { raccoglitoreUscite, allineaAllaGiacenza, chiudiFraIFlussi } from "../../shared/usciteDichiarate.ts";
 import { fotografiaDelGiorno } from "../../shared/indicatoriGiorno.ts";
+import { giacenzaAFineMeseDelCanale, copreDellaColonna, agganciDellaRiga, stoccaggioDelSito, raccontoDellaRiga } from "../../shared/storiaDichiarazioni.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
 import { TIPI_GIACENZE } from "../../shared/registroCaricamenti.ts";
 import { controlloCaricamenti } from "../../shared/statoArchivi.ts";
@@ -95,6 +96,10 @@ async function riepilogoDelleDichiarazioni(req) {
     const annoDiOggi = Number(oggiRoma().slice(0, 4));
     const annoChiuso = annoNum < annoDiOggi;
     const fineAnno = `${annoNum}-12-31`;
+    // L'ULTIMO MESE CHE HA GIA' UNA FINE (12/10/2026): fin li' la riga «giacenza a
+    // fine mese» del riepilogo ha un numero, dopo «—». Per l'anno in corso e' il
+    // mese di oggi, per un anno chiuso dicembre. Serve solo a quella riga.
+    const ultimoMeseAnno = annoChiuso ? 11 : annoNum > annoDiOggi ? -1 : Number(oggiRoma().slice(5, 7)) - 1;
 
     // LA FOTOGRAFIA DEL GIORNO NON SI SCRIVE SU UN ARCHIVIO A META' (chiusura
     // dell'audit, 11/10/2026). Mentre un file si riscrive, o dopo un caricamento
@@ -252,7 +257,10 @@ async function riepilogoDelleDichiarazioni(req) {
     const canaleStoc = (ns, canale) => {
       if (!stoc.has(ns)) stoc.set(ns, new Map());
       const m = stoc.get(ns);
-      if (!m.has(canale)) m.set(canale, { entrato: new Array(12).fill(0), uscito: new Array(12).fill(0), verso: new Map() });
+      // versoMesi: le partenze verso ogni impianto, mese per mese (12/10/2026), per
+      // le righe dello stoccaggio di chi e' anche impianto nel riepilogo. Non
+      // entrano in nessun conto: verso resta il totale di prima.
+      if (!m.has(canale)) m.set(canale, { entrato: new Array(12).fill(0), uscito: new Array(12).fill(0), verso: new Map(), versoMesi: new Map() });
       return m.get(canale);
     };
 
@@ -506,6 +514,8 @@ async function riepilogoDelleDichiarazioni(req) {
         const c = canaleStoc(daStoc, canale);
         c.uscito[p.mese_idx] += peso(r);
         somma(c.verso, dest, peso(r));
+        if (!c.versoMesi.has(dest)) c.versoMesi.set(dest, new Array(12).fill(0));
+        c.versoMesi.get(dest)[p.mese_idx] += peso(r);
       }
       if (!alPiazzale) aggiungi(dest, canale, provenienza, p.mese, peso(r), r.stoccaggio || 'stoccaggio non indicato');
       return { dest, daStoc, p };
@@ -552,11 +562,19 @@ async function riepilogoDelleDichiarazioni(req) {
     // riga senza fine trasporto prende quella della primaria nel gestionale, mai la
     // chiusura. La regola sta in shared/giacenzaPortale.ts (collocaFotografia),
     // dove e' provata (prove/giacenzaPortale.mjs), 22/09/2026.
+    // L'ATTESA SULLO STOCCAGGIO DI UN ANNO CHE NON E' QUELLO IN CORSO (seconda
+    // revisione del 13/10/2026): il file e' di oggi, e sul 2025 la scheda
+    // Stoccaggi diceva 146,34 t partite verso Irigom «che il portale aspetta
+    // ancora», la Quadratura 860,099 t in attesa su Nappi Sud, tutti carichi del
+    // 2026. Su un altro anno l'attesa conta solo i carichi di quell'anno, come le
+    // Giacenze (nellAttesaDellAnno); la fotografia degli impianti non cambia.
     const collocata = collocaFotografia(nonDichiarati, {
       chiaveDi: norm,
       ruoloPrimaria: (id) => ordineTipo.get(id) || '',
       secondarie,
       finePrimaria: (id) => fineRete.get(id) || '',
+      anno: annoNum,
+      annoDiOggi,
     });
     const portale = collocata.portale;           // ns impianto -> t
     const inAttesa = collocata.inAttesa;         // ns stoccaggio -> t gia' partite che il portale attribuisce ancora allo stoccaggio
@@ -619,6 +637,8 @@ async function riepilogoDelleDichiarazioni(req) {
       ...(d.altre && d.altre.length ? { altre: d.altre } : {}),
       ...(d.ripetizioni > 1 ? { ripetizioni: d.ripetizioni } : {}),
     };
+    // Gli agganci di ogni riga, per il racconto che si scrive dopo gli stoccaggi.
+    const agganciDi = new Map(); // flusso -> agganciDellaRiga(...) o null
     const flussiDi = (ns, operazione) => {
       const chiavi = new Set();
       for (const k of conferito.keys()) {
@@ -789,7 +809,35 @@ async function riepilogoDelleDichiarazioni(req) {
         if (suoi.length < 2) continue;
         chiudiFraIFlussi(suoi.map(x => x.allineato)).forEach((a, i) => { suoi[i].allineato = a; });
       }
-      return calcolati.map(({ canale, provenienza, grezzi, dalReport, casella, allineato }) => {
+      // LA GIACENZA A FINE MESE SI CHIUDE SUL CANALE, COME IL «DA DICHIARARE»
+      // (revisione del 13/10/2026). Contata riga per riga, sull'ACI a due righe
+      // una dichiarazione scritta sulla provenienza sbagliata dava -1.800 kg su una
+      // riga e +1.800 sull'altra fino a ottobre, mentre la colonna diceva 0 su
+      // tutte e due. Ora ogni fine mese passa dalla stessa chiusura delle righe del
+      // canale (giacenzaAFineMeseDelCanale): con una riga sola e' il conto di
+      // prima, numero per numero. Le righe di un canale hanno anche lo stesso
+      // ultimo mese: la chiusura di un mese vale solo con tutte le righe dentro.
+      const fineDi = new Map(); // calcolato -> { fine, spostato, ultimo }
+      for (const canale of CANALI_GIACENZA) {
+        const suoi = calcolati.filter(x => x.canale === canale);
+        if (!suoi.length) continue;
+        let ultimo = ultimoMeseAnno;
+        for (const x of suoi) x.grezzi.forEach((m, i) => { if (m.conferito_kg || m.caricato_kg) ultimo = Math.max(ultimo, i); });
+        const { fine, spostato } = giacenzaAFineMeseDelCanale(suoi.map(x => ({
+          partenzaKg: x.casella ? x.allineato.prima.conferito : 0,
+          conferito: x.grezzi.map(m => m.conferito_kg),
+          caricato: x.grezzi.map(m => m.caricato_kg),
+        })), { ultimoMese: ultimo });
+        // La giacenza del canale a fine mese, le righe insieme: serve a dire su
+        // ogni riga perche' uno spostamento finisce (revisione finale del
+        // 13/10/2026). Solo dove le righe sono piu' d'una.
+        const delCanale = suoi.length > 1
+          ? MESI.map((_, i) => (fine.some(f => f[i] === null || f[i] === undefined) ? null : fine.reduce((s, f) => s + f[i], 0)))
+          : null;
+        suoi.forEach((x, k) => fineDi.set(x, { fine: fine[k], spostato: spostato[k], ultimo, canale: delCanale }));
+      }
+      return calcolati.map((calcolato) => {
+        const { canale, provenienza, grezzi, dalReport, casella, allineato } = calcolato;
         const nonDovutaFlusso = canale === 'RETE' && nonDichiaraRete.has(ns);
         // La casella dall'anno prima, se la riga ce l'ha: quanto e' entrato
         // (l'apertura netta), quanto ne e' uscito, quanto ne resta. La lettura del
@@ -809,6 +857,23 @@ async function riepilogoDelleDichiarazioni(req) {
           al: casella.al,
         } : null;
         const restoPrima = prima ? prima.resta_kg : 0;
+        // LA STORIA DELLA RIGA (12/10/2026, richiesta dell'utente sul caso T-Cycle):
+        // la giacenza alla fine di ogni mese e gli agganci di ogni dichiarazione
+        // caricata, letti dal report. Sono campi in piu', informativi: nessun
+        // numero qui sopra li usa, e nessuno di questi entra nei conti
+        // (shared/storiaDichiarazioni.ts). La giacenza a fine mese parte dalla
+        // casella dall'anno prima e toglie il caricato nella colonna in cui la
+        // pagina lo mette; il suo ultimo mese e' la giacenza di oggi. Su un canale
+        // con piu' righe e' gia' chiusa sul canale (fineDi, qui sopra).
+        const fineCanale = fineDi.get(calcolato);
+        const ultimoMese = fineCanale.ultimo;
+        const fineMeseKg = nonDovutaFlusso ? MESI.map(() => null) : fineCanale.fine;
+        const agganci = dalReport ? agganciDellaRiga({
+          caricamenti: dalReport.caricamenti,
+          dichiarazioni: grezzi.map((m, i) => ({ idx: i, giorno: giornoRoma(m.dichiarazione && m.dichiarazione.caricata_il), kg: m.caricato_kg })).filter(d => d.kg > 0),
+          anno: annoNum,
+          lettaIl: casella ? casella.al : `${annoNum - 1}-12-31`,
+        }) : null;
         const mesi = grezzi.map((m, i) => ({
           ...m,
           // Di questo mese e' uscito questo, con le dichiarazioni caricate a
@@ -826,9 +891,34 @@ async function riepilogoDelleDichiarazioni(req) {
           // quali mesi ha portato via. E' il processo che l'utente vuole leggere
           // («con la nave di marzo sono andati via gennaio, febbraio e parte di
           // marzo», 09/10/2026).
-          copre: dalReport ? copertureDelCaricamento(dalReport.caricamenti, m.dichiarazione) : null,
+          // UNA COPERTURA SOLA PER CASELLA (revisione del 13/10/2026): e' lo stesso
+          // aggancio di dichiarazione_copre, nel formato di prima. Era
+          // copertureDelCaricamento, un giorno solo: Irigom febbraio, che il
+          // portale ha preso in due giorni, diceva 174.400 kg qui e 721.660 nella
+          // «i» della stessa casella.
+          copre: dalReport ? copreDellaColonna(agganci && agganci.delMese[i]) : null,
+          // Quanto resta alla fine di questo mese (null dopo il mese di oggi).
+          giacenza_fine_kg: fineMeseKg[i],
+          // Quanto di quella giacenza la chiusura sul canale ha spostato da o verso
+          // le altre righe dello stesso canale (solo l'ACI ne ha due): c'e' solo
+          // dove non e' zero, e dice perche' il numero non e' entrato meno caricato.
+          ...(!nonDovutaFlusso && fineCanale.spostato[i] ? { spostato_dal_canale_kg: fineCanale.spostato[i] } : {}),
+          // E la giacenza del canale a fine mese, le righe insieme, dove uno
+          // spostamento c'e' o e' appena finito: dice se l'altra riga e' ancora
+          // in eccesso, cioe' perche' lo spostamento finisce, lo stesso su tutte e
+          // due le righe (revisione finale del 13/10/2026). La giacenza della riga
+          // da sola non lo dice: la secondaria di Gatim a 0 perche' a settembre
+          // aveva dichiarato le sue 1,80 t diceva «non resta niente da cui
+          // toglierlo», mentre lo spostamento l'avevano riassorbito gli arrivi
+          // della primaria.
+          ...(!nonDovutaFlusso && fineCanale.canale && fineCanale.canale[i] !== null && (fineCanale.spostato[i] || (i > 0 && fineCanale.spostato[i - 1]))
+            ? { giacenza_canale_fine_kg: fineCanale.canale[i] } : {}),
+          // La dichiarazione di questa colonna, che cosa ha coperto (anche quando il
+          // portale l'ha presa in due giorni), e chi ha coperto gli arrivi del mese.
+          ...(agganci && agganci.delMese[i] ? { dichiarazione_copre: agganci.delMese[i] } : {}),
+          ...(agganci && agganci.copertoDa[i].length ? { coperto_da: agganci.copertoDa[i] } : {}),
         }));
-        return {
+        const flusso = {
           canale, provenienza, operazione,
           // Il flusso di rete di chi non la dichiara: si vede quello che arriva, ma
           // un resto da dichiarare non esiste e la pagina scrive «—» col perche'.
@@ -852,7 +942,18 @@ async function riepilogoDelleDichiarazioni(req) {
           da_stoccaggi_t: t3(mesi.reduce((s, m) => s + m.da_stoccaggi.reduce((x, y) => x + y.kg, 0), 0) / 1000),
           dichiarato_caricato_t: t3(mesi.reduce((s, m) => s + kgCaricatiDi(m.dichiarazione), 0) / 1000),
           dichiarato_totale_t: t3(mesi.reduce((s, m) => s + (m.dichiarazione ? m.dichiarazione.quantita_kg : 0), 0) / 1000),
+          // La storia della riga (12/10/2026): da dove parte la giacenza a fine
+          // mese, fin dove arriva, che cosa la casella dall'anno prima ha visto
+          // uscire e quali caricamenti del portale qui non sono dichiarazioni.
+          // Il racconto e lo stoccaggio dello stesso sito si aggiungono piu' sotto,
+          // quando gli stoccaggi sono contati.
+          giacenza_partenza_kg: nonDovutaFlusso ? null : (prima ? prima.conferito_kg : 0),
+          ultimo_mese: ultimoMese,
+          ...(agganci && agganci.primaDa.length && prima ? { prima_coperta_da: agganci.primaDa } : {}),
+          ...(agganci && agganci.altri.length ? { caricamenti_non_nostri: agganci.altri } : {}),
         };
+        agganciDi.set(flusso, agganci);
+        return flusso;
       });
     };
 
@@ -1130,9 +1231,12 @@ async function riepilogoDelleDichiarazioni(req) {
               chiave: nsImp,
               t: t3(kg / 1000),
               // Per la rete, quanto di quello partito verso questo impianto il portale
-              // aspetta ancora che l'impianto dichiari.
+              // aspetta ancora che l'impianto dichiari. Su un anno che non e' quello
+              // in corso, dei soli carichi di quell'anno (attesaCoppia, qui sopra).
               in_attesa_t: canale === 'RETE' ? t3(attesaCoppia.get(`${ns}|${nsImp}`) || 0) : null,
               dichiara: canale !== 'RETE' || !imp || imp.dichiara_rete !== false,
+              // Le stesse partenze, mese per mese (12/10/2026): solo da leggere.
+              mesi_kg: (c.versoMesi.get(nsImp) || new Array(12).fill(0)).map(x => Math.round(x)),
             };
           }).sort((a, b) => b.t - a.t),
         };
@@ -1160,6 +1264,56 @@ async function riepilogoDelleDichiarazioni(req) {
         return di(b, 'RETE') - di(a, 'RETE') || di(b, 'ACI') - di(a, 'ACI') || a.sito.localeCompare(b.sito);
       });
 
+    // IL RACCONTO DI OGNI RIGA, E LO STOCCAGGIO DI CHI E' ANCHE IMPIANTO
+    // (12/10/2026, richiesta dell'utente sul caso T-Cycle: «per completezza e
+    // memoria storica... un rigo laddove c'e' una situazione come quella di
+    // T-CYCLE»). Chi nell'anno ha avuto, sullo stesso canale, anche il ruolo di
+    // stoccaggio ha sotto le sue righe quello che e' entrato in stoccaggio, tal
+    // quale, e verso chi e' ripartito; e ogni riga ha la sua storia in poche
+    // frasi, scritte dai numeri gia' calcolati qui sopra. Sono campi in piu':
+    // non entrano nel conferito, nel caricato, nel «Da dichiarare» ne' nei
+    // totali, e i canali restano separati.
+    const stoccaggioDi = new Map(stoccaggi.map(s => [s.chiave, s]));
+    for (const s of impianti) {
+      const st = stoccaggioDi.get(s.chiave);
+      for (const canale of CANALI_GIACENZA) {
+        const suoi = s.flussi.filter(f => f.canale === canale);
+        if (!suoi.length) continue;
+        const c = st ? st.canali.find(x => x.canale === canale) : null;
+        // L'ATTESA DEL PORTALE E' DEL FILE DI OGGI (revisione del 13/10/2026): il
+        // numero in attesa sullo stoccaggio non distingue l'anno dei carichi, e
+        // sul riepilogo del 2025 la storia di T-Cycle attribuiva a quell'anno
+        // 181,299 t di carichi del 2026. Dalla seconda revisione del 13/10/2026
+        // su un altro anno il numero e' dei soli carichi di quell'anno (qui
+        // sopra, collocaFotografia), lo stesso delle Giacenze, e la frase lo dice.
+        const qui = c ? stoccaggioDelSito({
+          sito: s.sito, canale,
+          entrato: c.mesi.map(m => m.entrato_kg), uscito: c.mesi.map(m => m.uscito_kg),
+          verso: c.verso.map(v => ({ impianto: v.impianto, chiave: v.chiave, kg: Math.round(v.t * 1000), dichiara: v.dichiara, mesi_kg: v.mesi_kg })),
+          inPiazzaleT: c.in_piazzale_t, inAttesaT: canale === 'RETE' ? st.in_attesa_portale_t : null,
+          annoCarichi: annoNum !== annoDiOggi ? annoNum : null, fotoIl: fotoPortale || '',
+        }) : null;
+        const ultima = suoi[suoi.length - 1];
+        if (qui) ultima.stoccaggio_stesso_sito = qui;
+        // Il numero del canale, quello delle Giacenze: per una riga che non e'
+        // l'unica del suo canale il racconto dice che lo fanno le righe insieme.
+        const gc = (s.giacenze_canale || []).find(x => x.canale === canale);
+        const giacenzaCanaleKg = gc && typeof gc.giacenza_t === 'number' ? Math.round(gc.giacenza_t * 1000) : null;
+        for (const f of suoi) {
+          f.racconto = raccontoDellaRiga({
+            anno: annoNum, sito: s.sito, canale, provenienza: f.provenienza, operazione: s.operazione,
+            non_dovuta: f.non_dovuta, mesi: f.mesi, dall_anno_prima: f.dall_anno_prima,
+            giacenza_fine_mese: f.mesi.map(m => m.giacenza_fine_kg), ultimo_mese: f.ultimo_mese,
+            agganci: agganciDi.get(f) || null, stoccaggio: f === ultima ? qui : null,
+            righe_del_canale: suoi.length, giacenza_canale_kg: giacenzaCanaleKg,
+            // Le altre righe del canale per nome, per dire chi riassorbe uno
+            // spostamento (seconda revisione del 13/10/2026).
+            altre_provenienze: suoi.filter(x => x !== f).map(x => x.provenienza || ''),
+          });
+        }
+      }
+    }
+
     // La quadratura degli stoccaggi puri, un canale per volta: la loro giacenza a
     // portale e' la rilevazione per classe, aggiornata con i movimenti dopo.
     const righeStoccaggio = stoccaggi.filter(s => !s.anche_impianto).flatMap(s => s.canali
@@ -1186,6 +1340,8 @@ async function riepilogoDelleDichiarazioni(req) {
             : (c.in_piazzale_da === 'rilevazione' ? c.in_piazzale_t : null),
           quadratura_anno_chiuso: annoChiuso ? quadraturaAnnoChiuso(ril31, senzaInizio) : null,
           rilevazione_il: annoChiuso ? (ril31 ? fineAnno : '') : s.rilevazione_il,
+          // Su un anno che non e' quello in corso, dei soli carichi di quell'anno:
+          // lo stesso numero delle Giacenze (seconda revisione del 13/10/2026).
           in_attesa_dichiarazione_t: c.canale === 'RETE' ? s.in_attesa_portale_t : 0,
           flussi: [],
           date_da_sistemare: dateCanale ? [dateCanale] : [],

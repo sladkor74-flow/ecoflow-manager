@@ -3,6 +3,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatTonnellate, formatKg } from '@/lib/utils';
 import { materialiDi, OPERAZIONI, CANALI, controlliDichiarazione, statoDichiarazione } from '@/lib/dichiarazioniImpianti';
+// La tendina dell'uscito dice che cosa ha coperto la dichiarazione del mese con
+// le stesse parole della «i» del Riepilogo, dallo stesso aggancio
+// (dichiarazione_copre; revisione del 13/10/2026): qui si leggeva `copre`, un
+// giorno solo, e su Irigom febbraio diceva 174.400 kg invece di 721,66 t.
+import { coperturaCaricata } from '@/lib/storiaRiepilogo';
 import { Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import DateDaSistemare from '@/components/giacenze/DateDaSistemare';
 
@@ -133,8 +138,8 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                         )}
                         <td className="px-2 py-1.5 text-right tabular-nums font-medium">{kg(d && d.quantita_kg)}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700"
-                          title={m.copre && m.copre.mesi && m.copre.mesi.length
-                            ? `La dichiarazione caricata il ${String(m.copre.giorno).split('-').reverse().join('/')} ha chiuso: ${m.copre.mesi.map(x => `${x.mese} ${formatKg(x.kg)} kg`).join(', ')}`
+                          title={coperturaCaricata(m)
+                            ? `La dichiarazione di ${String(m.mese || '').toLowerCase()}, ${coperturaCaricata(m)}`
                             : (m.uscito_stimato ? 'Ripartito dal gestionale: il report del portale non ha ancora questa dichiarazione' : '')}>
                           {m.uscito_kg > 0 ? `${m.uscito_stimato ? '~' : ''}${kg(m.uscito_kg)}` : '—'}
                         </td>

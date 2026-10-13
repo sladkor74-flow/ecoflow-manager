@@ -140,9 +140,34 @@ verifica('«a rischio» dice la soglia dell\'alert aperto, il 90%, mai «sotto i
 verifica('porta all\'Andamento di Target & Status, sull\'anno giusto, nella sezione della rete', set && set.link === '/target-status?tab=andamento&anno=2026' && set.sezione === 'rete', J(set));
 verifica('agosto: da guardare, al singolare', ago && ago.gravita === 'attenzione' && ago.titolo === 'Un raccoglitore sotto il target di Agosto 2026', J(ago));
 const vAlert = conTarget.da_gestire.filter(v => v.area === 'Alert');
-verifica('la voce generica degli alert non li conta: resta il ritardo SLA', vAlert.length === 1 && vAlert[0].titolo === '1 alert aperti' && vAlert[0].dettaglio === 'Ritardo SLA (1)', J(vAlert));
+verifica('la voce generica degli alert non li conta: resta il ritardo SLA', vAlert.length === 1 && vAlert[0].titolo === 'Un alert aperto' && vAlert[0].dettaglio === 'Ritardo SLA (1)', J(vAlert));
 verifica('il conto degli alert li conta tutti', conTarget.alert.totale === 4 && conTarget.alert.critici === 1, J(conTarget.alert));
 verifica('nascosta, torna se sale il conto (misure) o se c\'e\' un nome nuovo (elementi, con la regione); la firma non ha i nomi', set && J(set.misure) === J([1, 1]) && set.firma === 'Settembre|2026' && J(set.elementi) === J(['ALFA SRL (Campania)', 'BETA SRL (Puglia)']), set && J(set.elementi));
+
+// Visto sul sito il 12/10/2026: agosto diceva «5 raccoglitori» e poi tre nomi
+// senza «e altri», perche' SMOCO aveva tre target, uno per regione.
+{
+  const ag = C.cruscotto(base({ alertAperti: [
+    alertTarget('SMOCO SRL', 'Campania', 'Agosto', 2026, 'warning', true),
+    alertTarget('SMOCO SRL', 'Puglia', 'Agosto', 2026, 'warning', true),
+    alertTarget('SMOCO SRL', 'Basilicata', 'Agosto', 2026, 'warning', false),
+    alertTarget('DELTA SRL', 'Puglia', 'Agosto', 2026, 'warning', true),
+    alertTarget('EPSILON SRL', 'Sicilia', 'Agosto', 2026, 'warning', false),
+  ] })).da_gestire.find(v => v.chiave === 'target:Agosto|2026');
+  verifica('un raccoglitore in tre regioni: il titolo conta i raccoglitori e dice i target', ag && ag.titolo === '3 raccoglitori sotto il target di Agosto 2026 (5 target, uno per regione)', J(ag));
+  verifica('e il nome porta le sue regioni, senza perdere nessuno', ag && /^3 non raggiunti, 2 a rischio .*: DELTA SRL, EPSILON SRL, SMOCO SRL \(Basilicata, Campania, Puglia\)\. /.test(ag.dettaglio), ag && ag.dettaglio);
+}
+// Visto sul sito: «18 alert critici aperti» seguito dalle regole di tutti i 40.
+{
+  const al = (sev, regola) => ({ severita: sev, regola_nome: regola });
+  const voci = C.cruscotto(base({ alertAperti: [
+    al('critico', 'Ritardo SLA'), al('critico', 'Ritardo SLA'), al('critico', 'Peso anomalo'),
+    al('warning', 'Ritardo SLA'), al('warning', 'Mix classi'), al('warning', 'Mix classi'), al('info', 'Mix classi'),
+  ] })).da_gestire.filter(v => v.area === 'Alert');
+  verifica('il dettaglio dei critici conta solo i critici, gli altri a parte', voci.length === 1 && voci[0].titolo === '3 alert critici aperti' && voci[0].dettaglio === 'Ritardo SLA (2) · Peso anomalo (1); e 4 non critici', J(voci));
+  const molte = C.cruscotto(base({ alertAperti: ['A', 'B', 'C', 'D', 'E'].map(r => al('warning', 'Regola ' + r)) })).da_gestire.filter(v => v.area === 'Alert');
+  verifica('oltre tre regole si dice quanti ne restano', molte.length === 1 && molte[0].titolo === '5 alert aperti' && /· altre regole \(2\)$/.test(molte[0].dettaglio), J(molte));
+}
 
 console.log('3. OGNI VOCE HA LA SUA CHIAVE E LA SUA SEZIONE');
 const logs = [

@@ -1,5 +1,6 @@
 import React from 'react';
 import CellaMese from '@/components/dichiarazioni/CellaMese';
+import { RaccontoRiga, AngoloPerche, RigaGiacenzaFineMese, RigheStoccaggio } from '@/components/dichiarazioni/StoriaRiga';
 import { MESI_BREVI, CANALI, MOTIVI_ASSENZA } from '@/lib/dichiarazioniImpianti';
 import { formatTonnellate, formatKg } from '@/lib/utils';
 import { Check, Mail, Minus, Ship } from 'lucide-react';
@@ -134,6 +135,8 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
         <span className="flex items-center gap-1" title={MOTIVI_ASSENZA.non_dovuta.spiega}><span className="w-4 h-4 rounded bg-slate-50 border inline-flex items-center justify-center"><Minus className="w-3 h-3 text-slate-500" /></span> non dovuta</span>
         <span>Le quantità sono in kg; i totali in tonnellate contano solo le dichiarazioni caricate.</span>
         <span>Gli stoccaggi non compaiono perché non dichiarano: le secondarie che spediscono stanno sulla riga dell&apos;impianto che le riceve.</span>
+        {/* LE RIGHE DELLA STORIA (12/10/2026): si dicono una volta qui, come i colori. */}
+        <span>Sotto ogni riga, la giacenza a fine mese: quello che è entrato meno le dichiarazioni caricate fino a quel mese. Per chi è stato anche stoccaggio, in azzurro, quello che è passato dallo stoccaggio. Sono righe da leggere: non entrano nei totali. «storia» racconta la riga; la «i» nell&apos;angolo di una casella dice quali mesi ha coperto quella dichiarazione.</span>
         {nascoste > 0 && <span>Non compaiono {nascoste === 1 ? 'una riga' : `${nascoste} righe`} su cui non c'è mai stata una dichiarazione e su cui il portale non aspetta niente.</span>}
       </div>
       {fuoriDaiMesi.length > 0 && (
@@ -190,6 +193,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
               <tr className={`${i % 2 ? 'bg-muted/20' : ''}`}>
                 <td className="px-3 pt-1.5 sticky left-0 bg-inherit">
                   <span className="font-medium">{sito.sito}</span>
+                  <RaccontoRiga frasi={flusso.racconto} titolo={`${sito.sito} · ${nomeCanale(flusso)}`} />
                   <span className="block text-[11px] text-muted-foreground">
                     {nomeCanale(flusso)}{sito.operazione ? ` · ${sito.operazione}` : ''}
                     {flusso.da_stoccaggi_t > 0 ? ` · ${formatTonnellate(flusso.da_stoccaggi_t)} t da stoccaggi` : ''}
@@ -203,7 +207,10 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                     {/* Una dichiarazione la si aspetta se qualcosa e' arrivato
                         e non e' ancora dichiarato: lo dicono i nostri ingressi
                         (da_dichiarare_kg), non solo la fotografia del portale. */}
-                    <CellaMese mese={m} soloLettura={soloLettura} dove={{ canale: flusso.canale, dichiara_rete: sito.dichiara_rete }} onApri={() => onApri(sito, flusso, m)} />
+                    <div className="relative">
+                      <CellaMese mese={m} soloLettura={soloLettura} dove={{ canale: flusso.canale, dichiara_rete: sito.dichiara_rete }} onApri={() => onApri(sito, flusso, m)} />
+                      <AngoloPerche mese={m} />
+                    </div>
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>
@@ -291,7 +298,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   e basta, non un arretrato: si scrive in grigio, come la colonna
                   che tace. L'ambra qui farebbe sembrare un buco quello che un
                   buco non e' (Tecnogum, 09/10/2026). */}
-              <tr className={`border-b ${i % 2 ? 'bg-muted/20' : ''}`}>
+              <tr className={`${i % 2 ? 'bg-muted/20' : ''}`}>
                 {(() => {
                   // LA RETE NON DOVUTA NON HA UNA GIACENZA (utente, 10/10/2026: «“—” con la
                   // spiegazione, in tutti e due i moduli»). Qui si scrivevano in grigio i
@@ -329,6 +336,15 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   );
                 })()}
               </tr>
+              {/* LA QUARTA LINEA E LO STOCCAGGIO DELLO STESSO SITO (12/10/2026).
+                  Richiesta dell'utente sul caso T-Cycle: la giacenza di quello che
+                  resta dopo ogni dichiarazione, e per chi e' stato anche stoccaggio
+                  quello che dallo stoccaggio e' passato, «per completezza e memoria
+                  storica». Righe da leggere: non entrano nel conferito, nel
+                  «Caricato», nel «Da dichiarare» ne' nei totali (StoriaRiga.jsx). */}
+              <RigaGiacenzaFineMese flusso={flusso} nonDovuta={flusso.non_dovuta || (flusso.canale === 'RETE' && sito.dichiara_rete === false)} sfondo={i % 2 ? 'bg-muted/20' : ''} />
+              <RigheStoccaggio stoccaggio={flusso.stoccaggio_stesso_sito} sfondo={i % 2 ? 'bg-muted/20' : ''} />
+              <tr className="border-b"><td colSpan={16} className="p-0" /></tr>
               </React.Fragment>
             ))}
             {righe.length === 0 && (

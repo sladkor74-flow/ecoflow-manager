@@ -31,12 +31,16 @@ const giornoItaliano = (v) => (v ? String(v).slice(0, 10).split('-').reverse().j
 
 /** Scheda Situazione: giacenza a portale, per classe, e che cosa resta da dichiarare. */
 export function situazionePdf(anno, righe, totali) {
+  // Su un anno che non e' quello in corso l'attesa conta solo i carichi di
+  // quell'anno (calcolaGiacenze, revisione finale del 13/10/2026): lo dice
+  // l'etichetta, come la pagina e la Quadratura delle Dichiarazioni.
+  const attesaDel = (totali && totali.in_attesa_dei_carichi_del) || null;
   return {
     ...comune(anno, 'Situazione'),
     riepilogo: [
       { etichetta: 'Giacenza rete a portale', valore: totali.giacenza_portale_t, tipo: 't' },
       { etichetta: 'Giacenza ACI', valore: totali.giacenza_aci_t, tipo: 't' },
-      { etichetta: 'In attesa di dichiarazione', valore: totali.in_attesa_dichiarazione_t, tipo: 't' },
+      { etichetta: attesaDel ? `In attesa di dichiarazione, dei carichi del ${attesaDel}` : 'In attesa di dichiarazione', valore: totali.in_attesa_dichiarazione_t, tipo: 't' },
       { etichetta: 'Dichiarato nell’anno', valore: totali.dichiarato_t, tipo: 't' },
     ],
     sezioni: [{
@@ -50,7 +54,7 @@ export function situazionePdf(anno, righe, totali) {
         { titolo: 'G1 (kg)', tipo: 'intero', peso: 0.8 },
         { titolo: 'G2 (kg)', tipo: 'intero', peso: 0.8 },
         { titolo: 'ACI (kg)', tipo: 'intero', peso: 0.8 },
-        { titolo: 'In attesa dich.', tipo: 't', peso: 1 },
+        { titolo: attesaDel ? `In attesa dich., dei carichi del ${attesaDel}` : 'In attesa dich.', tipo: 't', peso: 1 },
         { titolo: 'Ordini da dich.', tipo: 'intero', peso: 0.8 },
         { titolo: 'Dichiarato', tipo: 't', peso: 1 },
       ],

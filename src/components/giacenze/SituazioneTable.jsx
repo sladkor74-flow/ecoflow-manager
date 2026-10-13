@@ -364,6 +364,8 @@ function DettaglioAci({ r }) {
 // all'occhio, e inventarne uno sarebbe peggio ancora.
 const SENZA_IN_ATTESA = "Il materiale in attesa di dichiarazione lo dice il file degli ordini non dichiarati del portale, che e' della rete: su questo canale non c'e' un dato, e il numero della rete non si ripete perche' i canali non si sommano.";
 const SENZA_ORDINI = "Gli ordini da dichiarare si contano sul file degli ordini non dichiarati del portale, che e' della rete: su questo canale non ce n'e' nessuno da contare.";
+// L'attesa di un anno che non e' quello in corso (revisione finale del 13/10/2026).
+const attesaDellAnnoTitolo = (anno) => `Il file degli ordini non dichiarati e' di oggi: per il ${anno} l'attesa degli stoccaggi conta solo i carichi arrivati al piazzale nel ${anno}, per fine trasporto, e cosi' i loro ordini da dichiarare. Lo stesso numero della Quadratura delle Dichiarazioni.`;
 const SENZA_DICHIARATO = "Il dichiarato dell'anno: per la rete viene dal report del portale, per ACI ed extra raccolta dalle righe mensili trascritte dall'amministratore nel modulo Dichiarazioni Impianti - le stesse che decurtano la giacenza. Un trattino vuol dire che il dato non c'e' ancora, non che e' zero.";
 // UN PIAZZALE NON DICHIARA, e il trattino sulla sua riga non e' un'attesa.
 // Dichiara chi tratta: il materiale che sta a terra qui finisce nella
@@ -464,6 +466,8 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
   const [aciAperto, setAciAperto] = useState('');
   const maxGiacenza = Math.max(...righe.map(r => r.giacenza_portale_t || 0), 0.01);
   const kg = (r, c) => (r.giacenza_classi_kg ? r.giacenza_classi_kg[c] || 0 : null);
+  // L'anno dei carichi dell'attesa, se non e' tutto il file (calcolaGiacenze).
+  const attesaDellAnno = (totali && totali.in_attesa_dei_carichi_del) || null;
 
   return (
     <div className="bg-card border rounded-lg overflow-hidden">
@@ -478,7 +482,13 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                   Affiancate, le tre colonne di prima si sommavano con l'occhio. */}
               <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title={TITOLO_GIACENZA}>Giacenza</th>
               <th className="px-3 pt-2 pb-0 font-semibold text-center border-l" colSpan={CLASSI.length} title={TITOLO_CLASSI}>Giacenza per classe (kg)</th>
-              <th className="px-3 py-2 font-semibold text-right border-l" rowSpan={2}>In attesa di dichiarazione</th>
+              {/* Su un anno che non e' quello in corso l'attesa conta solo i
+                  carichi di quell'anno, e la colonna lo dice (revisione finale
+                  del 13/10/2026), come la Quadratura delle Dichiarazioni. */}
+              <th className="px-3 py-2 font-semibold text-right border-l" rowSpan={2} title={attesaDellAnno ? attesaDellAnnoTitolo(attesaDellAnno) : undefined}>
+                In attesa di dichiarazione
+                {attesaDellAnno && <span className="block text-[11px] font-normal text-muted-foreground">dei carichi del {attesaDellAnno}</span>}
+              </th>
               <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Ordini da dichiarare</th>
               <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Dichiarato nell&apos;anno</th>
               <th className="px-3 py-2 font-semibold" rowSpan={2}>Tipologia trattamento</th>

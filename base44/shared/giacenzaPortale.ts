@@ -584,6 +584,9 @@ export function formulariDelFile() {
  *   ruoloPrimaria(id)  'stoc' se nel gestionale la primaria e' andata a uno stoccaggio
  *   secondarie         record Secondaria del gestionale
  *   finePrimaria(id)   fine trasporto ('AAAA-MM-GG') della primaria terminata nel gestionale, '' se non c'e'
+ *   anno, annoDiOggi   l'anno guardato e quello in corso: inAttesa e attesaCoppia
+ *                      contano solo i carichi di quell'anno se non e' quello in
+ *                      corso (nellAttesaDellAnno); senza, tutto il file
  * @returns {{ portale, inAttesa, attesaCoppia, aPortale, perMese, perGiorno, senzaGiorno }}
  *   portale       Map ns impianto -> t della fotografia
  *   inAttesa      Map ns stoccaggio -> t gia' partite che il portale attribuisce ancora allo stoccaggio
@@ -616,7 +619,41 @@ export function ruoloDellaRiga(r, ruoloPrimaria = () => '') {
   return ruoloPrimaria(String((r && r.ordine_primaria) || '').trim()) === 'stoc' ? 'stoc' : 'imp';
 }
 
-export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s || '').trim().toLowerCase(), ruoloPrimaria = () => '', secondarie = [], finePrimaria = () => '' } = {}) {
+/**
+ * IL GIORNO IN CUI UN CARICO IN ATTESA SULLO STOCCAGGIO E' ARRIVATO AL PIAZZALE:
+ * la fine trasporto della riga del file, se no quella della primaria nel
+ * gestionale. Sempre la fine trasporto, mai la chiusura; '' se non c'e'.
+ */
+export function giornoAlPiazzale(r, finePrimaria = () => '') {
+  return giornoRoma(r && r.fine_trasporto) || finePrimaria(String((r && r.ordine_primaria) || '').trim()) || '';
+}
+
+/**
+ * L'ATTESA DEL PORTALE DI UN ANNO (seconda revisione del 13/10/2026).
+ *
+ * L'«In attesa di dichiarazione» di uno stoccaggio viene dal file degli ordini
+ * non dichiarati, che e' di oggi e non distingue l'anno dei carichi. Sul 2025
+ * guardato oggi le Giacenze e la Quadratura delle Dichiarazioni dicevano che il
+ * portale attribuisce ancora 860,099 t allo stoccaggio di Nappi Sud e 181,299 a
+ * T-Cycle, e la scheda Stoccaggi 146,34 t partite nel 2025 verso Irigom che il
+ * portale aspetta ancora: sono tutti carichi del 2026. Per l'anno in corso vale
+ * tutto il file, come prima; per un altro anno solo i carichi di quell'anno, per
+ * il giorno italiano di fine trasporto (al piazzale per l'attesa sullo
+ * stoccaggio, all'impianto per quella verso un impianto). Una regola sola per i
+ * due moduli: calcolaGiacenze la chiede riga per riga, riepilogoDichiarazioni
+ * attraverso collocaFotografia.
+ *
+ * @returns true se un carico arrivato `giorno` conta nell'attesa dell'anno `anno`
+ */
+export function nellAttesaDellAnno(giorno, anno, annoDiOggi) {
+  if (Number(anno) === Number(annoDiOggi)) return true;
+  const g = giornoRoma(giorno);
+  return !!g && Number(g.slice(0, 4)) === Number(anno);
+}
+
+export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s || '').trim().toLowerCase(), ruoloPrimaria = () => '', secondarie = [], finePrimaria = () => '', anno = null, annoDiOggi = null } = {}) {
+  // L'attesa dell'anno guardato (nellAttesaDellAnno): senza anno, tutto il file.
+  const contaAttesa = (giorno) => anno === null || anno === undefined || nellAttesaDellAnno(giorno, anno, annoDiOggi);
   const somma = (mappa, chiave, valore) => mappa.set(chiave, (mappa.get(chiave) || 0) + valore);
   const fineSecondaria = new Map(); // id della secondaria -> giorno in cui e' arrivata all'impianto
   const secondarieSenzaFine = new Set(); // id delle secondarie terminate che nel gestionale non hanno la fine trasporto
@@ -641,12 +678,17 @@ export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s ||
     if (!ns || eAci({ prodotto: r.prodotto })) continue;
     esito.aPortale.add(ns);
     const kg = Number(r.peso_non_dichiarato_kg) || 0;
-    if (ruolo === 'stoc') { somma(esito.inAttesa, ns, kg / 1000); continue; }
+    if (ruolo === 'stoc') {
+      if (contaAttesa(giornoAlPiazzale(r, finePrimaria))) somma(esito.inAttesa, ns, kg / 1000);
+      continue;
+    }
     somma(esito.portale, ns, kg / 1000);
-    if (sec && r.destinazione) somma(esito.attesaCoppia, `${chiaveDi(r.destinazione)}|${ns}`, kg / 1000);
     const secId = String(r.ordine_secondaria || '').trim();
     const secondariaSenzaFine = !!(sec && secId && secondarieSenzaFine.has(secId));
     const g = secondariaSenzaFine ? '' : ((sec && secId && fineSecondaria.get(secId)) || giornoRoma(r.fine_trasporto) || finePrimaria(idPrimaria) || '');
+    // Partito dallo stoccaggio verso l'impianto: l'attesa e' dell'anno in cui e'
+    // arrivato all'impianto, come le partenze della scheda Stoccaggi.
+    if (sec && r.destinazione && contaAttesa(g)) somma(esito.attesaCoppia, `${chiaveDi(r.destinazione)}|${ns}`, kg / 1000);
     if (!g) {
       if (!esito.senzaGiorno.has(ns)) esito.senzaGiorno.set(ns, { n: 0, kg: 0, ordini: [] });
       const x = esito.senzaGiorno.get(ns);

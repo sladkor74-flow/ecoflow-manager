@@ -3,7 +3,7 @@
 //
 // Due cose nella stessa riga, scritta una volta per notte:
 //
-// - IL GUARDIANO. La quadratura di tutti gli impianti si rifa' ogni notte e la
+// - IL GUARDIANO. La quadratura di impianti e stoccaggi della rete si rifa' ogni notte e la
 //   mattina c'e' una riga sola. Finora un numero che non tornava lo scopriva
 //   l'utente aprendo una pagina, o non lo scopriva nessuno: meglio che se ne
 //   accorga il gestionale prima del consorzio.
@@ -15,12 +15,13 @@
 // Qui si prova la regola e le tre prudenze: una riga per giorno e non una per
 // apertura di pagina, nessun anno cablato in uno scheduler, e un guardiano che
 // smette di girare lo deve dire. npm run prove
-import { fotografiaDelGiorno, vociSito, scostamenti, totaliGiorno, notaDelGiorno, leggiFotografia, giorniFa } from '../base44/shared/indicatoriGiorno.ts';
+import { fotografiaDelGiorno, vociSito, scostamenti, totaliGiorno, notaDelGiorno, leggiFotografia, giorniFa, mesiAperti, chiSiScosta } from '../base44/shared/indicatoriGiorno.ts';
 import { cruscotto } from '../base44/shared/cruscotto.ts';
 import { readFileSync } from 'node:fs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
+const J = (x) => JSON.stringify(x);
 const sorgente = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 
 // I siti come li calcola riepilogoDichiarazioni, coi numeri veri del 10/10/2026.
@@ -48,9 +49,12 @@ console.log('UNA GIORNATA IN CUI TUTTO QUADRA');
   verifica('l esito e in linea', f.esito === 'in_linea', f.esito);
   verifica('e la nota conta solo chi ha un confronto col portale',
     f.nota === 'Tutti gli impianti con un confronto a portale quadrano (2).', f.nota);
-  // Tecnogum non ha fotografia a portale e Nappi Sud e' un piazzale: nessuno
-  // dei due si «scosta», e chiamarli da guardare sarebbe un avviso che non si
-  // puo' chiudere.
+  // Tecnogum non ha fotografia a portale: non si «scosta», e chiamarlo da
+  // guardare sarebbe un avviso che non si puo' chiudere. La riga di Nappi Sud qui
+  // non porta il canale nella chiave, come le righe di stoccaggio vere
+  // («nappi sud|RETE»): senza canale non e' della rete e resta fuori. Dal
+  // 12/10/2026 gli stoccaggi della rete col canale entrano nel verdetto: la
+  // sezione «GLI STOCCAGGI DELLA RETE NEL VERDETTO», piu' sotto.
   verifica('chi non ha un confronto non entra nel conto', !/TECNOGUM|NAPPI/.test(f.nota));
   verifica('ma i loro numeri restano scritti lo stesso',
     JSON.parse(f.siti_json).length === 4 && JSON.parse(f.siti_json).some(s => s.sito === 'TECNOGUM SRL'));
@@ -125,6 +129,81 @@ console.log('LA MATTINA, IN CIMA ALLE COSE DA GESTIRE');
   verifica('di ieri invece va bene', vociDi({ ...buona, giorno: '2026-10-09' }).filter(x => x.area === 'Manutenzione').length === 0);
   verifica('e senza nessuna fotografia la dashboard non grida: puo non essere ancora partito',
     cruscotto(base).da_gestire.filter(x => x.area === 'Manutenzione' || x.area === 'Giacenze').length === 0);
+}
+
+console.log('GLI STOCCAGGI DELLA RETE NEL VERDETTO (12/10/2026)');
+{
+  // La pagina Dichiarazioni e la dashboard dicono la quadratura su impianti E
+  // stoccaggi della rete (6 su 6, con Nappi Sud); il guardiano contava i soli
+  // impianti, e uno stoccaggio della rete fuori di 1,20 t non diventava una voce
+  // di «Da gestire». Le righe sono quelle vere di riepilogoDichiarazioni: un
+  // piazzale ha una riga per canale, col canale in fondo alla chiave.
+  const piazzale = (canale, p) => sito({ sito: 'NAPPI SUD SRL', chiave: `nappi sud|${canale}`, canale, tipo_destinazione: 'stoc', giacenza_portale_t: 25.88, giacenza_calcolata_t: 25.88, scarto_t: 0, quadra: true, ...p });
+  const DUE = SITI.filter(s => s.tipo_destinazione !== 'stoc');
+  const tutti = [...DUE, piazzale('RETE'), piazzale('ACI', { giacenza_portale_t: 0, giacenza_calcolata_t: 0 })];
+  const f = fotografiaDelGiorno(tutti, { giorno: '2026-10-12', anno: 2026 });
+  verifica('in linea: si contano gli impianti e lo stoccaggio della rete, non l ACI del piazzale',
+    f.esito === 'in_linea' && f.nota === 'Tutti gli impianti e gli stoccaggi della rete con un confronto a portale quadrano (3).', f.nota);
+  const storto = fotografiaDelGiorno([...DUE, piazzale('RETE', { giacenza_calcolata_t: 27.08, scarto_t: 1.2, quadra: false }), piazzale('ACI')], { giorno: '2026-10-12', anno: 2026 });
+  verifica('uno stoccaggio della rete che non quadra fa «da guardare»', storto.esito === 'da_guardare', storto.esito);
+  verifica('e la nota lo chiama stoccaggio, col nome e il numero', storto.nota === 'Uno stoccaggio si scosta dal portale: NAPPI SUD SRL +1,20 t.', storto.nota);
+  const sc = JSON.parse(storto.scostamenti_json);
+  verifica('lo scostamento porta il segno dello stoccaggio', sc.length === 1 && sc[0].stoccaggio === true && sc[0].chiave === 'nappi sud|RETE', J(sc));
+  const aciStorto = fotografiaDelGiorno([...DUE, piazzale('RETE'), piazzale('ACI', { giacenza_calcolata_t: 3, scarto_t: 3, quadra: false })], { giorno: '2026-10-12', anno: 2026 });
+  verifica("l'ACI del piazzale resta fuori dal verdetto, come nella dashboard dove sta a parte", aciStorto.esito === 'in_linea', aciStorto.nota);
+  const misto = fotografiaDelGiorno([
+    ...DUE.map(s => (s.chiave === 'tcycle' ? { ...s, giacenza_calcolata_t: 366, scarto_t: 1.2, quadra: false } : s)),
+    piazzale('RETE', { giacenza_calcolata_t: 25.08, scarto_t: -0.8, quadra: false }),
+  ], { giorno: '2026-10-12', anno: 2026 });
+  verifica('impianti e stoccaggi insieme: si dicono tutti e due, lo stoccaggio col suo ruolo',
+    misto.nota === 'Un impianto e uno stoccaggio si scostano dal portale: T-CYCLE INDUSTRIES SRL +1,20 t, NAPPI SUD SRL (stoccaggio) -0,80 t.', misto.nota);
+  // «Da gestire»: la voce degli scostamenti dice impianti o stoccaggi.
+  const base = { oggi: '2026-10-12', adessoMs: Date.UTC(2026, 9, 12, 6, 0, 0), anno: 2026, tipiFile: [], alertAperti: [], uploadLogs: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], riepilogoQualifica: null, richiesteEct: [] };
+  const voceDi = (riga) => cruscotto({ ...base, fotografiaGiorno: leggiFotografia(riga) }).da_gestire.find(x => x.chiave === 'giacenze:scostamenti');
+  const v1 = voceDi(storto);
+  verifica('lo stoccaggio che non quadra diventa una voce di «Da gestire»', !!v1 && v1.titolo === 'Uno stoccaggio non quadra col portale' && /NAPPI SUD SRL \+1,20 t/.test(v1.dettaglio), v1 && `${v1.titolo} | ${v1.dettaglio}`);
+  const v2 = voceDi(misto);
+  verifica('e con un impianto: «Un impianto e uno stoccaggio non quadrano col portale»', !!v2 && v2.titolo === 'Un impianto e uno stoccaggio non quadrano col portale', v2 && v2.titolo);
+  const v3 = voceDi(fotografiaDelGiorno(SITI.map(s => (s.chiave === 'tcycle' ? { ...s, giacenza_calcolata_t: 366, scarto_t: 1.2, quadra: false } : s)), { giorno: '2026-10-12', anno: 2026 }));
+  verifica('un impianto solo resta «Un impianto non quadra col portale»', !!v3 && v3.titolo === 'Un impianto non quadra col portale', v3 && v3.titolo);
+  // Una fotografia scritta prima del 12/10 (senza il segno) si legge lo stesso.
+  verifica('uno scostamento di una riga vecchia, senza il segno, e\' un impianto', chiSiScosta([{ sito: 'Gatim', chiave: 'gatim' }]).testo === 'un impianto' && chiSiScosta([{ sito: 'NAPPI SUD SRL', chiave: 'nappi sud|RETE' }]).testo === 'uno stoccaggio');
+}
+
+console.log('I MESI ANCORA APERTI, PER LA CHIUSURA DEL MESE (12/10/2026)');
+{
+  // La chiusura del mese li legge se ci sono (shared/chiusuraMese.ts): senza,
+  // su ACI ed extra dava un rosso falso per tutto il mese dopo un arrivo.
+  const mesi = (resti) => ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
+    .map((mese, i) => ({ mese, da_dichiarare_kg: resti[i] || 0, resta_kg: resti[i] || 0 }));
+  const tc = vociSito(sito({ sito: 'T-CYCLE INDUSTRIES SRL', chiave: 'tcycle', giacenze_canale: [{ canale: 'RETE', giacenza_t: 364.8, entrato_t: 707.44, dichiarato_caricato_t: 342.64 }],
+    flussi: [{ canale: 'RETE', provenienza: '', resta_t: 364.8, uscito_t: 342.64, dall_anno_prima: null, mesi: mesi({ 5: 41980, 6: 108680, 7: 48420, 8: 124800, 9: 40920 }) }] }));
+  verifica('T-Cycle rete: giugno 41,98 e poi luglio-ottobre, dal piu\' vecchio',
+    J(tc.canali.RETE.mesi_aperti) === J([{ mese: 'Giugno', da_dichiarare_t: 41.98 }, { mese: 'Luglio', da_dichiarare_t: 108.68 }, { mese: 'Agosto', da_dichiarare_t: 48.42 }, { mese: 'Settembre', da_dichiarare_t: 124.8 }, { mese: 'Ottobre', da_dichiarare_t: 40.92 }]), J(tc.canali.RETE.mesi_aperti));
+  const somma = tc.canali.RETE.mesi_aperti.reduce((s, m) => s + Math.round(m.da_dichiarare_t * 1000), 0);
+  verifica('e la loro somma e\' il resto della colonna', somma === 364800, String(somma));
+  const ap = mesiAperti([{ canale: 'RETE', dall_anno_prima: { da_dichiarare_kg: 30000 }, mesi: mesi({ 0: 5000 }) }]);
+  verifica("in testa la casella dall'anno prima, come la tratta la pagina", J(ap) === J([{ mese: "dall'anno prima", da_dichiarare_t: 30 }, { mese: 'Gennaio', da_dichiarare_t: 5 }]), J(ap));
+  const aci = mesiAperti([
+    { canale: 'ACI', provenienza: 'primaria', mesi: mesi({ 8: 5000 }) },
+    { canale: 'ACI', provenienza: 'secondaria', mesi: mesi({ 7: 3000, 8: 12820 }) },
+  ]);
+  verifica("l'ACI dice la provenienza, e i mesi vanno in ordine fra le due righe", J(aci) === J([
+    { mese: 'Agosto', provenienza: 'secondaria', da_dichiarare_t: 3 },
+    { mese: 'Settembre', provenienza: 'primaria', da_dichiarare_t: 5 },
+    { mese: 'Settembre', provenienza: 'secondaria', da_dichiarare_t: 12.82 }]), J(aci));
+  verifica('un canale tutto dichiarato ha l\'elenco vuoto: niente da dichiarare', J(mesiAperti([{ canale: 'RETE', mesi: mesi({}) }])) === '[]');
+  verifica('righe senza i dodici mesi non dicono quali sono aperti: null, non vuoto', mesiAperti([{ canale: 'RETE', resta_t: 5 }]) === null
+    && !('mesi_aperti' in JSON.parse(fotografiaDelGiorno(SITI, { giorno: '2026-10-10', anno: 2026 }).siti_json).find(s => s.chiave === 'irigom').canali.RETE));
+  const tg = vociSito(sito({ sito: 'TECNOGUM SRL', chiave: 'tecnogum', dichiara_rete: false, giacenze_canale: [{ canale: 'RETE', giacenza_t: null, non_dovuta: true, entrato_t: 1833.43, dichiarato_caricato_t: 0 }],
+    flussi: [{ canale: 'RETE', non_dovuta: true, resta_t: 1833.43, mesi: mesi({ 0: 100000 }) }] }));
+  verifica('la rete non dovuta non ha mesi aperti', !('mesi_aperti' in tg.canali.RETE), J(tg.canali.RETE));
+  // La chiusura del mese li legge: un resto ACI tutto di ottobre non apre settembre.
+  const { passoDichiarazioni, periodoDelMese } = await import('../base44/shared/chiusuraMese.ts');
+  const foto = leggiFotografia(fotografiaDelGiorno([sito({ sito: 'Gatim', chiave: 'gatim', giacenze_canale: [{ canale: 'ACI', giacenza_t: 5, entrato_t: 5, dichiarato_caricato_t: 0 }],
+    flussi: [{ canale: 'ACI', provenienza: 'primaria', resta_t: 5, mesi: mesi({ 9: 5000 }) }] })], { giorno: '2026-10-12', anno: 2026 }));
+  const p = passoDichiarazioni({ periodo: periodoDelMese(2026, 8), oggi: '2026-10-12', fotografia: foto, dichiarazioni: [] });
+  verifica('con i mesi aperti scritti dal guardiano, la chiusura di settembre non vede un rosso falso su un arrivo di ottobre', p.stato === 'fatto' && /niente da dichiarare fino a settembre/.test(p.voci[0] && p.voci[0].testo), JSON.stringify(p.voci));
 }
 
 console.log('LE TRE PRUDENZE DELLA SCRITTURA');

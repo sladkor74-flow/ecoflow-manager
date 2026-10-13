@@ -1,13 +1,13 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { targetRigaGiacenze, testoTargetDaPortare, ripartisciTargetPrimarie, conferitiPerRipartizione } from "../../shared/targetImpianti.ts";
-import { recordDellAnno, annoChiuso } from "../../shared/annoTarget.ts";
+import { recordDellAnno, annoChiuso, annoCorrenteRoma } from "../../shared/annoTarget.ts";
 import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza, kgReteDiRilevazione, kgAciDiRilevazione, PERCHE_PIAZZALE_SENZA_LETTURA } from "../../shared/giacenzaStoccaggi.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, nostraRiga, formulariDaSistemare, avvisoSenzaFine, ORDINE_GRUPPI, PERCHE_SENZA_FOTOGRAFIA } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, nostraRiga, formulariDaSistemare, avvisoSenzaFine, ORDINE_GRUPPI, PERCHE_SENZA_FOTOGRAFIA, giornoAlPiazzale, nellAttesaDellAnno } from "../../shared/giacenzaPortale.ts";
 import { ingressoMovimento } from "../../shared/ingressoMovimento.ts";
 import { carichiNonNelFile } from "../../shared/riconciliazioneDaDichiarare.ts";
 import { leggiDichiarazioni } from "../../shared/dichiarazioniImpianti.ts";
@@ -204,6 +204,9 @@ export default async function(req) {
       const g = isTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
       if (id && g) fineRete.set(id, g);
     }
+    // L'anno di oggi, per l'attesa del portale di un anno che non e' quello in
+    // corso (nellAttesaDellAnno): letto una volta.
+    const annoDiOggi = annoCorrenteRoma();
     for (const r of nonDichiarati) {
       portaleConosce.segna(r);
       const { sito, td, anomalia } = attribuisci(r);
@@ -215,14 +218,27 @@ export default async function(req) {
       if (anomalia) ordiniSenzaRiscontro.add(r.ordine_primaria);
       const kg = Number(r.peso_non_dichiarato_kg) || 0;
       const t = kg / 1000;
+      // Gli ordini della riga si contano con le sue tonnellate: sullo stoccaggio,
+      // solo quelli in attesa dell'anno guardato (qui sotto).
+      let contaOrdine = true;
       if (td === 'stoc') {
-        inAttesaMap.set(ns, (inAttesaMap.get(ns) || 0) + t);
+        // L'ATTESA SU UN ANNO CHE NON E' QUELLO IN CORSO (seconda revisione del
+        // 13/10/2026): il file e' di oggi, e le Giacenze del 2025 dicevano 860,099
+        // t in attesa su Nappi Sud e 181,299 su T-Cycle, tutti carichi del 2026.
+        // Su un altro anno contano solo i carichi arrivati al piazzale in
+        // quell'anno, come in riepilogoDichiarazioni (nellAttesaDellAnno).
+        // E GLI ORDINI CON LORO (revisione finale del 13/10/2026): accanto alle
+        // 0 t in attesa del 2025 la riga diceva «Ordini da dichiarare 397» su
+        // Nappi Sud e 72 su T-Cycle, gli ordini del file di oggi. Ora la stessa
+        // regola vale per le tonnellate e per il numero degli ordini.
+        contaOrdine = nellAttesaDellAnno(giornoAlPiazzale(r, (id) => fineRete.get(id) || ''), annoNum, annoDiOggi);
+        if (contaOrdine) inAttesaMap.set(ns, (inAttesaMap.get(ns) || 0) + t);
       } else {
         giacPortaleMap.set(key, (giacPortaleMap.get(key) || 0) + t);
         if (!classiImpiantoMap.has(key)) classiImpiantoMap.set(key, classiVuote());
         classiImpiantoMap.get(key)[classeDa(r.prodotto)] += kg;
       }
-      ordiniMap.set(key, (ordiniMap.get(key) || 0) + 1);
+      if (contaOrdine) ordiniMap.set(key, (ordiniMap.get(key) || 0) + 1);
 
       // Arretrato per anno di fine trasporto: mai per data di chiusura a portale.
       const fineFile = giornoRoma(r.fine_trasporto);
@@ -804,6 +820,7 @@ export default async function(req) {
       if (td === 'stoc') {
         // in_attesa_dichiarazione_t: primarie arrivate allo stoccaggio che il file del
         // portale considera ancora in piazzale, non ancora abbinate a una secondaria.
+        // Su un anno che non e' quello in corso, solo quelle arrivate in quell'anno.
         in_attesa_dichiarazione_t = inAttesaMap.get(ns) || 0;
         giacenza_extra_t = extraStoc.has(ns) ? extraStoc.get(ns) : null;
 
@@ -1256,6 +1273,13 @@ export default async function(req) {
     totali.giacenza_classi_kg = classiVuote();
     for (const r of righe) for (const [c, v] of Object.entries(r.giacenza_classi_kg || {})) totali.giacenza_classi_kg[c] += v;
     totali.ordini_da_dichiarare = righe.reduce((s, r) => s + (r.ordini_da_dichiarare || 0), 0);
+    // DI QUALI CARICHI E' L'ATTESA (revisione finale del 13/10/2026): su un anno
+    // che non e' quello in corso l'«In attesa di dichiarazione» e gli ordini
+    // degli stoccaggi contano solo i carichi arrivati al piazzale in quell'anno
+    // (nellAttesaDellAnno), e la colonna lo dice nella pagina, nel PDF e nel
+    // foglio Excel, come la Quadratura delle Dichiarazioni. Sull'anno in corso
+    // e' tutto il file: null, e l'etichetta resta quella di sempre.
+    totali.in_attesa_dei_carichi_del = annoNum !== annoDiOggi ? annoNum : null;
     // I formulari con le date da sistemare, un conteggio per canale: mai un totale.
     // Stesso portale dei gruppi: un senza fine di un altro anno che il portale
     // conosce e' contato anche qui (22/09/2026).

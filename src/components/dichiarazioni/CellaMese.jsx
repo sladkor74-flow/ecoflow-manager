@@ -1,6 +1,7 @@
 import React from 'react';
 import { statoDichiarazione, STATI } from '@/lib/dichiarazioniImpianti';
 import { formatKg } from '@/lib/utils';
+import { coperturaCaricata } from '@/lib/storiaRiepilogo';
 
 // Una casella del riepilogo: il colore dice che fine ha fatto quel mese, il
 // numero dice quanto. Stessa lettura del foglio di gestione, con le parole nella
@@ -83,10 +84,11 @@ export default function CellaMese({ mese, onApri, soloLettura, dove = {} }) {
                 : 'hover:bg-muted';
   const daStoccaggi = (mese.da_stoccaggi || []).map(s => `${kg(s.kg)} kg da ${s.stoccaggio}`).join(', ');
   // Quali mesi questa dichiarazione ha portato via: e' il processo che l'utente
-  // vuole leggere, e il portale lo dice ordine per ordine.
-  const copre = mese.copre && mese.copre.mesi && mese.copre.mesi.length
-    ? `caricata a portale il ${gg(mese.copre.giorno)}: ha chiuso ${mese.copre.mesi.map(x => `${x.mese} ${kg(x.kg)} kg`).join(', ')}`
-    : '';
+  // vuole leggere, e il portale lo dice ordine per ordine. Le stesse parole
+  // della «i» nell'angolo, dallo stesso aggancio (revisione del 13/10/2026):
+  // qui si leggeva `copre`, un giorno solo, e su Irigom febbraio la tendina
+  // diceva 174.400 kg e la «i» della stessa casella 721,66 t.
+  const copre = coperturaCaricata(mese);
   const titolo = [
     `${mese.mese}`,
     conferito ? `arrivati ${kg(conferito)} kg${daStoccaggi ? ` (in secondaria: ${daStoccaggi})` : ''}` : 'nessun conferimento',
