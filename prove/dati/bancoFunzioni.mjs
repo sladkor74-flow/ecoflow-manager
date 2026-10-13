@@ -9,6 +9,12 @@
 //
 // Sta in prove/dati perche' non e' una prova: esegui.mjs guarda solo i .mjs in
 // cima alla cartella.
+//
+// bulkUpdate (12/10/2026): il motore degli alert aggiorna e chiude gli alert con
+// bulkUpdate dentro un catch muto. Senza, sul banco le chiusure cadevano nel
+// catch e una prova vedeva aperti alert che la funzione vera chiude. Come
+// update: le righe ({ id, ...campi }) si fondono con quelle che ci sono, e la
+// scrittura si registra una volta sola, con tutte le righe.
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +29,7 @@ const entita = (nome) => ({
   create: async (r) => { const nuovo = { id: nome + '-nuovo-' + (++progressivo), ...r }; tabella(nome).push(nuovo); globalThis.__SCRITTE.push({ op: 'create', entita: nome, dati: r }); return { ...nuovo }; },
   bulkCreate: async (rr) => { for (const r of rr) tabella(nome).push({ id: nome + '-nuovo-' + (++progressivo), ...r }); globalThis.__SCRITTE.push({ op: 'bulkCreate', entita: nome, n: rr.length }); return rr; },
   update: async (id, r) => { const t = tabella(nome); const i = t.findIndex(x => x.id === id); if (i >= 0) t[i] = { ...t[i], ...r }; globalThis.__SCRITTE.push({ op: 'update', entita: nome, id, dati: r }); return { ...(t[i] || {}), ...r }; },
+  bulkUpdate: async (rr) => { const t = tabella(nome); for (const r of rr) { const i = t.findIndex(x => x.id === r.id); if (i >= 0) t[i] = { ...t[i], ...r }; } globalThis.__SCRITTE.push({ op: 'bulkUpdate', entita: nome, righe: rr }); return rr; },
   delete: async (id) => { const t = tabella(nome); const i = t.findIndex(x => x.id === id); if (i >= 0) t.splice(i, 1); globalThis.__SCRITTE.push({ op: 'delete', entita: nome, id }); return {}; },
   deleteMany: async (f) => { const t = tabella(nome); const via = t.filter(r => uguale(r, f)); globalThis.__DB[nome] = t.filter(r => !uguale(r, f)); if (via.length) globalThis.__SCRITTE.push({ op: 'deleteMany', entita: nome, n: via.length }); return { deleted: via.length }; },
 });

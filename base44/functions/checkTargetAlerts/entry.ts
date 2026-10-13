@@ -7,7 +7,7 @@ import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRacco
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { eAmministratore } from "../../shared/permessi.ts";
 import { filtraMovimenti, giornoMovimento, giornoOrdine, dateDaSistemare, chiaveOrdine } from "../../shared/movimenti.ts";
-import { statoCaricamenti, caricamentiDuranteLettura } from "../../shared/reportSettimanali.ts";
+import { statoCaricamenti, caricamentiDuranteLettura, dataItaliana } from "../../shared/reportSettimanali.ts";
 import { giorniCopertiNelMese } from "../../shared/attesoContratto.ts";
 import { daConfermare } from "../../shared/annoTarget.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
@@ -463,7 +463,8 @@ async function controllaTarget(req) {
         if (!nota) continue;
         await base44.asServiceRole.entities.Alert.update(a.id, {
           stato: 'risolto',
-          risolto_note: `Chiuso automaticamente il ${oggi}: rivalutato sui dati caricati, ${nota}`,
+          // la data all'italiana, come la leggono tutti (12/10/2026: usciva 2027-01-02)
+          risolto_note: `Chiuso automaticamente il ${dataItaliana(oggi)}: rivalutato sui dati caricati, ${nota}`,
         });
         alertsChiusi++;
       }
@@ -479,7 +480,7 @@ async function controllaTarget(req) {
         const REGOLA = 'target_impianto_divergente';
         const aperti = (await fetchAll(base44.asServiceRole.entities.Alert, { modulo: 'giacenze', stato: 'aperto' })).filter(a => a.regola_id === REGOLA);
         for (const a of aperti) {
-          await base44.asServiceRole.entities.Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggi}: il target dell'impianto ora si scrive solo in Target & Status` });
+          await base44.asServiceRole.entities.Alert.update(a.id, { stato: 'risolto', risolto_note: `Chiuso automaticamente il ${dataItaliana(oggi)}: il target dell'impianto ora si scrive solo in Target & Status` });
           alertsChiusi++;
         }
       }

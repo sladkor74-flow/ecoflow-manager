@@ -2,7 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { conBattito } from "../../shared/battito.ts";
 import { oggiRoma, annoRoma } from "../../shared/giornoItaliano.ts";
-import { eTerminato, periodoMovimento, giornoMovimento } from "../../shared/movimenti.ts";
+import { eTerminato, periodoMovimento, giornoMovimento, primoAnnoControllato } from "../../shared/movimenti.ts";
 import { computeProvinceMatrixData, computeRaccoglitoriMixData, computeSlaMetrics } from "../../shared/primarieReteAnalytics.ts";
 import { conferimentiSospetti } from "../../shared/rotteConferimenti.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
@@ -16,10 +16,10 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { canaleDi } from "../../shared/canaleSecondaria.ts";
 import { aggregaTargetMensili, targetDelPortale } from "../../shared/targetRaccoglitori.ts";
-import { formatoTonnellate } from "../../shared/formato.ts";
+import { formatoTonnellate, formatoKg } from "../../shared/formato.ts";
 import { daConfermare } from "../../shared/annoTarget.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
-import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, riepilogoVociDate, descriviVoceDate } from "../../shared/reportSettimanali.ts";
+import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, riepilogoVociDate, descriviVoceDate, dataItaliana } from "../../shared/reportSettimanali.ts";
 
 // Le date obbligatorie dei formulari: immissione, inizio e fine trasporto
 // (regola dell'utente del 22/09/2026, "vanno segnalate e questo vale sempre dove
@@ -79,8 +79,11 @@ const segna = (attuali, key, alert) => { if (!attuali.has(key)) attuali.set(key,
 // Motore di controllo: scansiona i record di un modulo e genera Alert per le regole violate.
 // Payload: { modulo }
 //
-// - Si controllano solo i dati dell'anno in corso e, per le primarie, i soli
-//   formulari terminati: un ordine cancellato non ha pesi ne' destinazione.
+// - Si controllano i dati dell'anno in corso e di quello prima (il perimetro,
+//   vedi PERIMETRO sotto) e, per le primarie, i soli formulari terminati: un
+//   ordine cancellato non ha pesi ne' destinazione. Gli alert nuovi sull'anno
+//   prima nascono solo a gennaio e febbraio, e un alert si chiude da solo solo
+//   se il suo record sta negli anni controllati.
 // - Un alert gia' aperto per lo stesso record e la stessa regola non si ricrea,
 //   ma se la condizione c'e' ancora con numeri diversi (una media, una
 //   percentuale, un raccolto) se ne riscrive il testo: restava quello del giorno
@@ -110,17 +113,89 @@ const segna = (attuali, key, alert) => { if (!attuali.has(key)) attuali.set(key,
 const TEMPO_MASSIMO_MS = 40000;
 const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
+// IL PERIMETRO: QUALI ANNI SI CONTROLLANO (A54 dell'audit del 20/09, corretta il
+// 12/10/2026). Prima si guardava solo l'anno di oggi, e ogni alert aperto la cui
+// condizione non si ritrovava si chiudeva come risolto: il 02/01/2027 un ritiro
+// del 20/12/2026 col peso zero, mai corretto, diventava «risolto: condizione non
+// presente nei dati 2027». Lo stesso per tratte, rotte, scostamenti e SLA. Ora:
+// - si controllano l'anno in corso e quello prima, come le date obbligatorie
+//   (primoAnnoControllato, movimenti.ts): il portale si ancora al 31/12
+//   dell'anno prima, e un formulario di dicembre si registra e si corregge a
+//   gennaio (dieci giorni dalla partenza, domeniche escluse). Non costa nessuna
+//   lettura in piu': l'archivio del modulo si legge gia' tutto.
+// - gli alert NUOVI sull'anno prima nascono solo nei primi MESI_NUOVI_ANNO_PRIMA
+//   mesi, quando arrivano e si correggono i formulari di dicembre; dopo, l'anno
+//   prima serve solo a riscrivere e a chiudere gli alert che ci sono. Aprirne
+//   tutto l'anno vorrebbe dire misurare un anno finito con le regole (tratte,
+//   destinazioni) dell'anno nuovo, e il giorno della pubblicazione aprire alert
+//   sul 2025 che nessuno ha mai chiesto.
+// - un alert si chiude da solo SOLO se il suo record sta negli anni controllati
+//   (perimetroDellAlert): quello di un anno che non si controlla piu' resta
+//   aperto, com'e', finche' qualcuno non lo risolve o lo ignora. Cosi' la fine
+//   di febbraio, o il cambio d'anno, non fanno sparire niente.
+// - i controlli che si misurano su un anno intero e la cui chiave non porta
+//   l'anno (mix classi, ritardo SLA, scostamento dal target: raccoglitore,
+//   trasportatore, raccoglitore|regione|mese) restano sull'anno in corso, e un
+//   loro alert scritto l'ultima volta in un anno prima resta aperto.
+// - la chiusura dell'anno delle Giacenze non fa da confine: scrive le
+//   rilevazioni del 31/12 sito per sito, dice che la giacenza e' fotografata e
+//   non che i formulari sono giusti, e leggerla costerebbe una richiesta a ogni
+//   giro del motore.
+// - (revisione del 13/10/2026) le regole di tratta configurate (REGOLE_DI_TRATTA)
+//   non hanno un anno: valgono dal giorno in cui sono scritte. Sull'anno prima
+//   si applica solo quella scritta prima del 01/01 di quest'anno, giorno
+//   italiano (creata e cambiata l'ultima volta prima: scrittaPrimaDellAnno), che
+//   era la regola di quell'anno: apre alert nuovi a gennaio e febbraio, come
+//   peso e rotte, e il viaggio del 30/12 registrato il 04/01 ha il suo alert.
+//   Una regola creata o cambiata quest'anno (la pagina le crea, le attiva e le
+//   disattiva: anche questo la cambia) sull'anno prima non si applica: non apre,
+//   non riscrive e non chiude. Tolta a gennaio una destinazione ammessa l'anno
+//   prima, nasceva un alert falso per ogni viaggio di allora, e aggiunta a
+//   gennaio chiudeva come risolto l'alert di un viaggio che allora era un
+//   errore; ora quell'alert resta com'e', e si conta fra quelli fuori perimetro.
+//   Il primo rimedio (nessun alert nuovo di tratta sull'anno prima) lasciava
+//   senza alert proprio i formulari di dicembre registrati a gennaio.
+// - (revisione del 13/10/2026) le province inattive: la matrice guarda i mesi
+//   finiti dell'anno e, a gennaio e febbraio, novembre e dicembre dell'anno
+//   prima. Un alert la cui coppia di mesi sta fuori da quei mesi non e' stato
+//   rivalutato e resta aperto (perimetroProvince): il 02/01/2027 l'alert di
+//   settembre-ottobre 2026 si chiudeva «risolto ... nei dati 2027» senza che
+//   nessuno avesse guardato settembre e ottobre. Resta anche com'e': la chiave
+//   e' provincia|||regola, senza i mesi, e riscritto con la coppia trovata oggi
+//   («Novembre 2026 - Dicembre 2026») si chiudeva «risolto» appena quella si
+//   risolveva, con settembre e ottobre ancora a zero. Finche' e' aperto la
+//   coppia nuova non apre un alert suo; chiuso a mano, nasce al giro dopo.
+const MESI_NUOVI_ANNO_PRIMA = 2;
+const REGOLE_DELL_ANNO = new Set(['mix_classi_deviazione', 'ritardo_sla', 'scostamento_target']);
+const REGOLE_DI_TRATTA = new Set(['tratta_autorizzata', 'tratta_combinazione', 'tratte_autorizzate_classe']);
+
+// Se una regola e' stata scritta tutta prima del 01/01 dell'anno dato (giorno
+// italiano): creata e cambiata l'ultima volta prima, quindi era la regola
+// dell'anno prima (revisione del 13/10/2026, vedi PERIMETRO). Senza le date non
+// lo si sa, e vale come scritta quest'anno.
+function scrittaPrimaDellAnno(regola, anno) {
+  const creata = annoRoma(regola.created_date);
+  const cambiata = annoRoma(regola.updated_date || regola.created_date);
+  return !!creata && !!cambiata && creata < anno && cambiata < anno;
+}
+
+// I numeri e le date nel testo degli alert, all'italiana (12/10/2026): toFixed
+// scriveva «Nr Giorni medio 14.2» e «12.5%», e le rotte «del 2026-12-15, 5000
+// kg». Ora 14,2, 12,5%, «del 15/12/2026, 5.000 kg». Il testo nuovo riscrive una
+// volta gli alert aperti (si aggiorna dove cambia), e la chiave non cambia.
+const unDecimale = (n) => (Number(n) || 0).toFixed(1).replace('.', ',');
+
 // L'anno di un movimento e' quello del giorno italiano della fine del trasporto
 // (annoRoma). Prima una correzione a mano riportava al giorno giusto solo le
 // mezzanotti italiane esatte: un trasporto finito alle 00:30 del 1 gennaio restava
 // nell'anno prima.
-function daControllare(record, modulo, anno) {
+function daControllare(record, modulo, anni) {
   if (modulo === 'assegnati') return true;
   // Per tutti i movimenti, primarie, secondarie e terziarie, contano solo i
   // terminati: un ordine annullato ha ancora destinazione e peso in archivio, e
   // finiva nel denominatore delle rotte.
   if (!eTerminato(record)) return false;
-  return annoRoma(record.trasporto_finito_il) === anno;
+  return anni.has(annoRoma(record.trasporto_finito_il));
 }
 
 async function motoreAlert(req) {
@@ -172,10 +247,21 @@ async function motoreAlert(req) {
       }, { status: 409 });
     }
 
-    // Record da validare: anno in corso, per le primarie solo i terminati.
-    const anno = Number(oggiRoma().slice(0, 4));
+    // Record da validare: anno in corso e anno prima (il PERIMETRO, sopra), per
+    // le primarie solo i terminati. Gli alert nuovi: l'anno in corso, e l'anno
+    // prima solo a gennaio e febbraio.
+    const oggi = oggiRoma();
+    const anno = Number(oggi.slice(0, 4));
+    const anniControllati = new Set();
+    for (let a = primoAnnoControllato(oggi); a <= anno; a++) anniControllati.add(a);
+    const anniNuovi = new Set([...anniControllati].filter(a => a === anno || Number(oggi.slice(5, 7)) <= MESI_NUOVI_ANNO_PRIMA));
     const tutti = await fetchAll(base44.asServiceRole.entities[entityName]);
-    const records = tutti.filter(r => daControllare(r, modulo, anno));
+    const records = tutti.filter(r => daControllare(r, modulo, anniControllati));
+    // I record di un anno solo: le rotte si leggono anno per anno (la quota di
+    // una destinazione e' sui viaggi dell'anno), e i controlli dell'anno intero
+    // (mix, SLA, scostamento, province) girano sull'anno in corso. Gli assegnati
+    // non hanno un anno: valgono tutti, come prima.
+    const dellAnno = (a) => (modulo === 'assegnati' ? (a === anno ? records : []) : records.filter(r => annoRoma(r.trasporto_finito_il) === a));
     // Regola 1: un terminato senza fine trasporto non ha anno, e daControllare lo
     // scarta in silenzio: su di lui non si valutano pesi, tratte e rotte. Si
     // conta, di qualunque anno e anche senza immissione, e la risposta lo dice.
@@ -229,8 +315,21 @@ async function motoreAlert(req) {
 
     const newAlerts = [];
 
+    // Le regole di tratta scritte quest'anno: sull'anno prima non si applicano
+    // (revisione del 13/10/2026, vedi PERIMETRO).
+    const tratteDiQuestAnno = new Set(regole.filter(r => REGOLE_DI_TRATTA.has(r.tipo_regola) && !scrittaPrimaDellAnno(r, anno)).map(r => r.id));
+
     for (const record of records) {
+      // Sull'anno prima, fuori da gennaio e febbraio, la condizione si segna (tiene
+      // aperto l'alert che c'e' e ne riscrive il testo) ma un alert nuovo non nasce.
+      // Gli assegnati non hanno un anno: valgono come l'anno in corso.
+      const annoRecord = modulo === 'assegnati' ? anno : annoRoma(record.trasporto_finito_il);
+      const puoNascere = anniNuovi.has(annoRecord);
       for (const regola of regole) {
+        // Una regola di tratta scritta quest'anno non misura l'anno prima: non
+        // apre, non riscrive e non chiude. L'alert che c'e' resta com'e' e si
+        // conta fra quelli fuori perimetro (perimetroDellAlert).
+        if (annoRecord !== anno && tratteDiQuestAnno.has(regola.id)) continue;
         const violazione = checkRegola(record, regola, entityName);
         if (violazione) {
           const key = `${record.id_ordine}|||${regola.id}`;
@@ -250,7 +349,7 @@ async function motoreAlert(req) {
             stato: 'aperto',
           };
           segna(attuali, key, alert);
-          if (existingKeys.has(key)) continue; // skip duplicati
+          if (existingKeys.has(key) || !puoNascere) continue; // skip duplicati
           existingKeys.add(key);
           newAlerts.push(alert);
         }
@@ -274,16 +373,32 @@ async function motoreAlert(req) {
       const chiaveTarget = (t) => `${normalizzaRagioneSociale(t.raccoglitore || '')}|${String(t.regione || '').trim()}|${t.mese}`;
       const copiati = new Set(righeTarget.filter(daConfermare).map(chiaveTarget));
       const targets = aggregaTargetMensili(righeTarget).filter(t => !copiati.has(chiaveTarget(t)));
-      newAlerts.push(...checkAggregateRules(records, regole, existingKeys, targets, attuali, 'PrimariaRete', 'primarie_rete', '', tutti));
+      // I contratti Ecotyre, per le province del contratto mai servite (A58,
+      // revisione del 13/10/2026): senza, una provincia del contratto senza un
+      // ritiro non stava nella matrice e non era mai «inattiva». Una lettura per
+      // giro, e solo se c'e' una regola delle province; un errore ferma il giro
+      // invece di chiudere come risolti gli alert di quelle province.
+      const commesse = regole.some(r => r.tipo_regola === 'province_inattive')
+        ? await fetchAll(base44.asServiceRole.entities.CommessaEcotyre)
+        : null;
+      // Tutti i controlli aggregati sull'anno in corso; dell'anno prima solo le
+      // rotte, che hanno per chiave il formulario e quindi un anno solo.
+      const recordsAnno = dellAnno(anno);
+      newAlerts.push(...checkAggregateRules(recordsAnno, regole, existingKeys, targets, attuali, 'PrimariaRete', 'primarie_rete', '', tutti, true, commesse));
+      for (const a of anniControllati) {
+        if (a !== anno) newAlerts.push(...soloRotte(dellAnno(a), existingKeys, attuali, entityName, modulo, '', anniNuovi.has(a)));
+      }
     } else if (modulo === 'secondarie') {
       // Le secondarie di rete e quelle ACI stanno nello stesso archivio: contarle
       // insieme farebbe un denominatore che non esiste in nessun altro modulo, e
       // una rotta ACI vera finirebbe segnalata come errore perche' annegata fra
-      // i viaggi di rete.
-      newAlerts.push(...soloRotte(records.filter(r => !eAci(r)), existingKeys, attuali, entityName, modulo, 'rete'));
-      newAlerts.push(...soloRotte(records.filter(eAci), existingKeys, attuali, entityName, modulo, 'ACI'));
+      // i viaggi di rete. Un anno per volta, per la stessa ragione.
+      for (const a of anniControllati) {
+        newAlerts.push(...soloRotte(dellAnno(a).filter(r => !eAci(r)), existingKeys, attuali, entityName, modulo, 'rete', anniNuovi.has(a)));
+        newAlerts.push(...soloRotte(dellAnno(a).filter(eAci), existingKeys, attuali, entityName, modulo, 'ACI', anniNuovi.has(a)));
+      }
     } else if (modulo !== 'extra_raccolta') {
-      newAlerts.push(...soloRotte(records, existingKeys, attuali, entityName, modulo));
+      for (const a of anniControllati) newAlerts.push(...soloRotte(dellAnno(a), existingKeys, attuali, entityName, modulo, '', modulo === 'assegnati' || anniNuovi.has(a)));
     }
 
     // Le date obbligatorie, su tutti i terminati del modulo di qualunque anno
@@ -342,10 +457,23 @@ async function motoreAlert(req) {
     // oggi: un "Nr Giorni medio 14,2" scritto sulla chiusura a portale, o il
     // raccolto di un mese fermo al caricamento di allora, restavano a video
     // mentre la pagina mostrava altri numeri. Si scrive solo dove cambia.
+    // Un alert delle province la cui coppia di mesi sta fuori da quelli che la
+    // matrice guarda oggi non si riscrive con la coppia trovata adesso (revisione
+    // del 13/10/2026): la chiave non ha i mesi, e l'alert di ottobre-novembre
+    // 2026 diventava a gennaio quello di novembre-dicembre, e si chiudeva
+    // «risolto» all'arrivo del ritiro di dicembre, con ottobre ancora a zero.
+    // Resta com'e', e si conta fra quelli fuori perimetro (sotto).
+    const tipoDi = new Map(regole.map(r => [r.id, r.tipo_regola]));
+    const mesiProvince = mesiDellaMatrice(oggi);
+    const provinceFerme = new Set();
     const daAggiornare = [];
     for (const [key, a] of apertiPerChiave) {
       const nuovo = attuali.get(key);
       if (!nuovo) continue;
+      if (tipoDi.get(a.regola_id) === 'province_inattive' && !perimetroProvince(a, anno, mesiProvince).controllato) {
+        provinceFerme.add(a.id);
+        continue;
+      }
       // Gli alert delle date portano anche quanti ordini e quanti senza fine
       // trasporto: il cruscotto li legge da li', senza rileggere gli archivi.
       const conteggi = nuovo.quanti !== undefined ? { quanti: nuovo.quanti, senza_fine: nuovo.senza_fine, canale: nuovo.canale } : null;
@@ -368,21 +496,37 @@ async function motoreAlert(req) {
     // La regola delle rotte non sta fra le RegolaAlert configurate, ma i suoi
     // alert devono chiudersi come gli altri quando il formulario viene corretto.
     // Cosi' anche quella delle date obbligatorie, un id per canale.
+    // Un alert la cui condizione non c'e' piu' si chiude solo se il suo record
+    // sta negli anni controllati (perimetroDellAlert, A54, 12/10/2026): uno di un
+    // anno che non si controlla piu' resta aperto com'e', e se ne chiudono solo i
+    // doppioni. La data della nota e' all'italiana (prima usciva 2027-01-02).
     const idDate = new Set([REGOLA_DATE, ...Object.keys(NOME_CANALE_DATE).map(c => `${REGOLA_DATE}_${c}`)]);
     const idRegole = new Set([...regole.map(r => r.id), REGOLA_ROTTA, REGOLA_ROTTA + '_rete', REGOLA_ROTTA + '_ACI', ...idDate]);
+    const contesto = { modulo, anno, anniControllati, anniDeiRecord: anniDeiRecord(tutti), mesiProvince, tratteDiQuestAnno };
+    const oggiIt = dataItaliana(oggi);
     const visti = new Set();
     const daChiudere = [];
+    let restanoAperti = 0;
     for (const a of existingAlerts) {
       if (!idRegole.has(a.regola_id)) continue;
       const key = chiaveAlert(a);
       if (!attuali.has(key)) {
-        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: idDate.has(a.regola_id)
-          ? `Chiuso automaticamente il ${oggiRoma()}: gli ordini terminati di questo modulo e canale hanno tutte le date obbligatorie, e nell'ordine giusto`
-          : `Chiuso automaticamente il ${oggiRoma()}: condizione non presente nei dati ${anno}` });
+        const genere = idDate.has(a.regola_id) ? 'date' : String(a.regola_id || '').startsWith(REGOLA_ROTTA) ? 'rotta' : tipoDi.get(a.regola_id);
+        const perimetro = perimetroDellAlert(a, genere, contesto);
+        if (!perimetro.controllato) {
+          if (visti.has(key)) daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggiIt}: doppione di un alert ancora aperto` });
+          else { visti.add(key); restanoAperti++; }
+          continue;
+        }
+        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: genere === 'date'
+          ? `Chiuso automaticamente il ${oggiIt}: gli ordini terminati di questo modulo e canale hanno tutte le date obbligatorie, e nell'ordine giusto`
+          : `Chiuso automaticamente il ${oggiIt}: ${perimetro.nota}` });
       } else if (visti.has(key)) {
-        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggiRoma()}: doppione di un alert ancora aperto` });
+        daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggiIt}: doppione di un alert ancora aperto` });
       } else {
         visti.add(key);
+        // la provincia rimasta sulla sua coppia di mesi, fuori dalla matrice di oggi
+        if (provinceFerme.has(a.id)) restanoAperti++;
       }
     }
     let chiusi = 0;
@@ -397,13 +541,23 @@ async function motoreAlert(req) {
     return Response.json({
       modulo,
       anno,
-      record_scansionati: records.length,
+      // gli anni dei record controllati, e quelli su cui possono nascere alert nuovi
+      anni_controllati: [...anniControllati],
+      anni_alert_nuovi: [...anniNuovi],
+      // quelli dell'anno in corso: la pagina scrive «su N record del <anno>
+      // controllati». Quanti per ciascun anno controllato, in record_per_anno.
+      record_scansionati: dellAnno(anno).length,
+      record_per_anno: Object.fromEntries([...anniControllati].map(a => [a, dellAnno(a).length])),
       regole_valutate: regole.length,
       alerts_creati: creati,
       alerts_aggiornati: aggiornati,
       alerts_da_aggiornare: daAggiornare.length - aggiornati,
       alerts_chiusi: chiusi,
       alerts_da_chiudere: daChiudere.length - chiusi,
+      // aperti su record di anni che non si controllano piu', su mesi che la
+      // matrice delle province non rivaluta piu', o su viaggi dell'anno prima
+      // con una regola di tratta scritta quest'anno: restano come sono
+      alerts_anni_non_controllati: restanoAperti,
       alerts_totali_aperti: existingAlerts.length + creati - chiusi,
       // terminati esclusi dal controllo perche' senza fine trasporto, per canale
       terminati_senza_fine_trasporto: [...senzaFine.values()],
@@ -413,6 +567,145 @@ async function motoreAlert(req) {
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
+}
+
+/**
+ * Gli anni dei formulari a cui puo' riferirsi un alert, letti dall'archivio
+ * appena letto: per ID ordine (le regole sul singolo record) e per numero di
+ * formulario (le rotte). Solo i terminati con la fine trasporto: gli altri non
+ * stanno in nessun anno.
+ */
+function anniDeiRecord(tutti) {
+  const anni = new Map();
+  for (const r of tutti) {
+    if (!eTerminato(r)) continue;
+    const a = annoRoma(r.trasporto_finito_il);
+    if (!a) continue;
+    for (const k of [r.id_ordine, r.numero_fir]) {
+      const s = String(k || '').trim();
+      if (!s) continue;
+      if (!anni.has(s)) anni.set(s, new Set());
+      anni.get(s).add(a);
+    }
+  }
+  return anni;
+}
+
+/**
+ * Se la condizione di un alert aperto e' stata davvero rivalutata in questo
+ * giro (A54, 12/10/2026), e con quale nota si chiude se non c'e' piu'.
+ * - date obbligatorie: tutti gli anni; assegnati: non hanno un anno.
+ * - province inattive: solo se la coppia di mesi dell'alert sta fra i mesi che
+ *   la matrice ha rivalutato (perimetroProvince, revisione del 13/10/2026). Il
+ *   12/10 valevano sempre come controllate, ma la matrice dell'anno prima
+ *   guarda solo novembre e dicembre, e solo a gennaio e febbraio.
+ * - mix, SLA e scostamento: si misurano solo sull'anno in corso e non hanno un
+ *   record dietro. L'anno e' quello dell'ultima volta che il motore ha scritto
+ *   l'alert (lo riscrive coi numeri nuovi finche' la condizione c'e'): scritto
+ *   in un anno prima, parla di quell'anno e resta aperto.
+ * - regole sul singolo formulario e rotte: l'anno e' quello del record,
+ *   ricavato dall'archivio (fine trasporto, giorno italiano). Fuori dagli anni
+ *   controllati resta aperto. Se il record non e' piu' fra i terminati con la
+ *   fine trasporto (cancellato, tolto dal file, data sparita) si chiude come
+ *   prima, e la nota lo dice: l'alert delle date obbligatorie segue la data che
+ *   manca.
+ * - regole di tratta scritte quest'anno (tratteDiQuestAnno, revisione del
+ *   13/10/2026): l'anno prima non lo misurano, quindi per loro conta solo
+ *   l'anno in corso. L'alert di un viaggio dell'anno prima resta aperto anche
+ *   se la regola nuova ammette la destinazione: allora era un errore.
+ * genere: 'date', 'rotta' o il tipo della regola. Non si chiama «tipo» apposta:
+ * prove/regoleAlert.mjs legge i confronti tipo === '...' del motore come i tipi
+ * di regola che il motore valuta.
+ */
+function perimetroDellAlert(a, genere, { modulo, anno, anniControllati, anniDeiRecord, mesiProvince, tratteDiQuestAnno }) {
+  const tuttiGliAnni = [...anniControllati].sort((x, y) => x - y).join(' e ');
+  if (genere === 'province_inattive') return perimetroProvince(a, anno, mesiProvince);
+  if (modulo === 'assegnati' || genere === 'date') {
+    return { controllato: true, nota: `condizione non presente nei dati ${anno}` };
+  }
+  if (REGOLE_DELL_ANNO.has(genere)) {
+    const scritto = annoRoma(a.updated_date || a.created_date);
+    return { controllato: !scritto || scritto === anno, nota: `condizione non presente nei dati ${anno}` };
+  }
+  const id = String(a.record_id || '').trim();
+  if (!id) return { controllato: true, nota: `condizione non presente nei dati ${tuttiGliAnni}` };
+  const anni = anniDeiRecord.get(id);
+  if (!anni || !anni.size) return { controllato: true, nota: `${id} non è più fra i terminati con la fine del trasporto` };
+  const misura = (x) => anniControllati.has(x) && (x === anno || !tratteDiQuestAnno.has(a.regola_id));
+  const dentro = [...anni].filter(misura).sort((x, y) => x - y);
+  if (!dentro.length) return { controllato: false, nota: '' };
+  return { controllato: true, nota: `condizione non presente nei dati ${dentro.join(' e ')}` };
+}
+
+// I mesi come numero unico, anno * 12 + indice del mese: si confrontano e si
+// contano anche a cavallo d'anno.
+const numeroMese = (anno, idx) => anno * 12 + idx;
+
+/**
+ * I mesi che la matrice delle province rivaluta oggi (computeProvinceMatrixData,
+ * primarieReteAnalytics.ts): i mesi finiti dell'anno e, a gennaio e febbraio,
+ * novembre e dicembre dell'anno prima (la coppia a cavallo d'anno, revisione
+ * del 10/10/2026). Se la matrice cambia i mesi che guarda, va cambiato anche
+ * qui: lo controlla prove/alertCambioAnno.mjs.
+ */
+function mesiDellaMatrice(oggi) {
+  const anno = Number(oggi.slice(0, 4));
+  const mese = Number(oggi.slice(5, 7)) - 1;
+  const mesi = new Set();
+  for (let i = 0; i < mese; i++) mesi.add(numeroMese(anno, i));
+  if (mese <= 1) { mesi.add(numeroMese(anno - 1, 10)); mesi.add(numeroMese(anno - 1, 11)); }
+  return mesi;
+}
+
+// La coppia di mesi scritta nel testo dell'alert delle province: «(Settembre
+// 2026 - Ottobre 2026)», o nel testo di prima «(Settembre - Ottobre)» e
+// «(Dicembre 2026 - Gennaio)», coi mesi dell'anno senza l'anno.
+const MESE_E_ANNO = `(${MESI_ANNO.join('|')})(?: (\\d{4}))?`;
+const COPPIA_DI_MESI = new RegExp(`\\(${MESE_E_ANNO} - ${MESE_E_ANNO}\\)`);
+
+/**
+ * Il perimetro di un alert delle province inattive (revisione del 13/10/2026).
+ * Prima era sempre «controllato»: il 02/01/2027 l'alert di settembre-ottobre
+ * 2026 si chiudeva come risolto «nei dati 2027», perche' a gennaio la matrice
+ * guarda solo novembre e dicembre del 2026, e il 01/03/2027 lo stesso accadeva
+ * a quello di novembre-dicembre 2026. Ora si chiude da solo solo se i mesi della
+ * sua coppia sono fra quelli che la matrice ha rivalutato in questo giro; se no
+ * resta aperto, come gli altri alert fuori perimetro, e la risposta lo conta.
+ * Un mese scritto senza l'anno (i testi di prima) e' dell'anno in cui il motore
+ * ha scritto l'alert l'ultima volta: un alert aperto lo scrivono solo i motori,
+ * la pagina lo chiude o lo ignora. Un testo senza la coppia si tratta come mix
+ * e SLA: si chiude solo se scritto quest'anno.
+ * Decide anche se l'alert si riscrive con la coppia trovata oggi: fuori
+ * perimetro no, resta sulla sua (giro di revisione successivo, 13/10/2026).
+ */
+function perimetroProvince(a, anno, mesiProvince) {
+  const scritto = annoRoma(a.updated_date || a.created_date) || anno;
+  const m = String(a.descrizione || '').match(COPPIA_DI_MESI);
+  if (!m) return { controllato: scritto === anno, nota: `condizione non presente nei dati ${anno}` };
+  const inizio = numeroMese(Number(m[2]) || scritto, MESI_ANNO.indexOf(m[1]));
+  const fine = numeroMese(Number(m[4]) || scritto, MESI_ANNO.indexOf(m[3]));
+  if (!mesiProvince.has(inizio) || !mesiProvince.has(fine)) return { controllato: false, nota: '' };
+  const anni = [...new Set([Math.floor(inizio / 12), Math.floor(fine / 12)])].join(' e ');
+  return { controllato: true, nota: `condizione non presente nei dati ${anni}` };
+}
+
+/**
+ * Il testo dell'alert di una provincia inattiva (revisione del 13/10/2026). I
+ * mesi della coppia portano sempre l'anno: la matrice lo scrive solo per quelli
+ * dell'anno prima («Novembre 2026 - Dicembre 2026», «Dicembre 2026 - Gennaio»),
+ * e un «Settembre - Ottobre» letto a gennaio non dice di quale anno sia. Da
+ * quell'anno dipende se l'alert si puo' chiudere da solo (perimetroProvince).
+ * Una provincia del contratto senza nessun ritiro nell'anno (senza_ritiri, A58)
+ * lo dice, coi mesi da gennaio all'ultimo finito, invece della sola coppia.
+ */
+function descrizioneProvincia(prov, annoMatrice) {
+  const conAnno = (m) => (/\d{4}$/.test(String(m ?? '')) ? String(m) : `${m} ${annoMatrice}`);
+  const coppia = prov.last_zero_pair || {};
+  const nellAnno = !/\d{4}$/.test(String(coppia.start ?? ''));
+  if (prov.senza_ritiri && nellAnno) {
+    return `Provincia ${prov.provincia} (${prov.regione}), del contratto: nessun ritiro nell'anno (${MESI_ANNO[0]} ${annoMatrice} - ${conAnno(coppia.end)}). Pianificare le raccolte per rispettare i requisiti consorziali.`;
+  }
+  return `Provincia ${prov.provincia} (${prov.regione}): 2 mesi consecutivi con 0 raccolte (${conAnno(coppia.start)} - ${conAnno(coppia.end)}). Pianificare raccolte nel terzo mese per rispettare i requisiti consorziali.`;
 }
 
 /**
@@ -543,21 +836,24 @@ function checkRegola(record, regola, entityName) {
   return null;
 }
 
-// I soli controlli di rotta, per i moduli che non hanno gli altri aggregati.
-function soloRotte(records, existingKeys, attuali, archivio, modulo, canale = '') {
-  return checkAggregateRules(records, [], existingKeys, [], attuali, archivio, modulo, canale);
+// I soli controlli di rotta, per i moduli che non hanno gli altri aggregati, e
+// per l'anno prima. creaNuovi falso: le condizioni si segnano (tengono aperto e
+// riscrivono l'alert che c'e') ma alert nuovi non ne nascono (PERIMETRO, sopra).
+function soloRotte(records, existingKeys, attuali, archivio, modulo, canale = '', creaNuovi = true) {
+  return checkAggregateRules(records, [], existingKeys, [], attuali, archivio, modulo, canale, records, creaNuovi);
 }
 
 // --- Controlli aggregati per primarie_rete ---
 // storico: tutti i ritiri, anche degli anni prima, per le province a cavallo d'anno.
-function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Map(), archivio = 'PrimariaRete', modulo = 'primarie_rete', canale = '', storico = records) {
+// commesse: i contratti Ecotyre, per le province del contratto senza ritiri (A58).
+function checkAggregateRules(records, regole, existingKeys, targets = [], attuali = new Map(), archivio = 'PrimariaRete', modulo = 'primarie_rete', canale = '', storico = records, creaNuovi = true, commesse = null) {
   const alerts = [];
   // Ogni condizione trovata si segna col testo calcolato adesso, anche quando
   // l'alert c'e' gia' (per riscriverne il testo); si crea solo se la chiave non
-  // e' ne' aperta ne' ignorata.
+  // e' ne' aperta ne' ignorata, e se l'anno ammette alert nuovi.
   const proponi = (key, alert) => {
     segna(attuali, key, alert);
-    if (existingKeys.has(key)) return;
+    if (existingKeys.has(key) || !creaNuovi) return;
     existingKeys.add(key);
     alerts.push(alert);
   };
@@ -577,7 +873,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
       titolo: `Conferimento fuori rotta${canale ? ' (' + canale + ')' : ''}: ${sospetto.origine} a ${sospetto.destinazione}`,
       descrizione: `${sospetto.testo} Formulario ${sospetto.numero_fir || '(senza numero)'}`
         + (sospetto.id_ordine ? `, ordine ${sospetto.id_ordine}` : '')
-        + `, del ${sospetto.giorno}, ${sospetto.kg} kg.`
+        + `, del ${dataItaliana(sospetto.giorno)}, ${formatoKg(sospetto.kg)} kg.`
         // le date obbligatorie che gli mancano, se ne mancano (22/09/2026)
         + (sospetto.date_da_sistemare ? ` Date obbligatorie: ${sospetto.date_da_sistemare}.` : ''),
       severita: 'warning',
@@ -596,14 +892,15 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
     // Tutti i ritiri, non solo quelli dell'anno: a gennaio e febbraio la funzione
     // guarda anche novembre e dicembre dell'anno prima (la coppia a cavallo d'anno,
     // revisione del 10/10/2026). I terminati e gli anni li sceglie lei.
-    const matrix = computeProvinceMatrixData(storico);
+    // Coi contratti (A58, 13/10/2026) entrano a zero anche le province del
+    // contratto dell'anno mai servite: senza, non comparivano mai.
+    const matrix = computeProvinceMatrixData(storico, null, commesse ? { commesse } : {});
     for (const prov of matrix.province_with_zeros) {
       for (const regola of regoleProvince) {
         const key = `${prov.provincia}|||${regola.id}`;
-        const zeroPair = prov.last_zero_pair;
         proponi(key, {
           titolo: regola.messaggio_alert || `Provincia inattiva: ${prov.provincia}`,
-          descrizione: `Provincia ${prov.provincia} (${prov.regione}): 2 mesi consecutivi con 0 raccolte (${zeroPair?.start} - ${zeroPair?.end}). Pianificare raccolte nel terzo mese per rispettare i requisiti consorziali.`,
+          descrizione: descrizioneProvincia(prov, matrix.current_year),
           severita: regola.severita || 'warning',
           modulo: 'primarie_rete',
           entity_type: 'PrimariaRete',
@@ -624,7 +921,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
       for (const regola of regoleMix) {
         const key = `${racc.raccoglitore}|||${regola.id}`;
         const devDetails = racc.deviazioni_significative.map(d =>
-          `${d.classe}: ${d.attuale.toFixed(1)}% vs target ${d.target}% (Δ${d.deviazione > 0 ? '+' : ''}${d.deviazione.toFixed(1)}%)`
+          `${d.classe}: ${unDecimale(d.attuale)}% vs target ${d.target}% (Δ${d.deviazione > 0 ? '+' : ''}${unDecimale(d.deviazione)}%)`
         ).join('; ');
         proponi(key, {
           titolo: regola.messaggio_alert || `Mix classi non conforme: ${racc.raccoglitore}`,
@@ -688,7 +985,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
           const alertKey = `${racc}|${regione}|${mese}|||${regola.id}`;
           proponi(alertKey, {
             titolo: regola.messaggio_alert || `Scostamento target grave: ${racc} - ${regione} - ${mese}`,
-            descrizione: `Raccoglitore "${racc}" (${regione}, ${mese}): target ${formatoTonnellate(targetVal)} t, raccolto ${formatoTonnellate(raccolto)} t, Δ ${formatoTonnellate(delta)} ton (${pctDelta.toFixed(1)}%). Soglia: ${soglia}%.`,
+            descrizione: `Raccoglitore "${racc}" (${regione}, ${mese}): target ${formatoTonnellate(targetVal)} t, raccolto ${formatoTonnellate(raccolto)} t, Δ ${formatoTonnellate(delta)} ton (${unDecimale(pctDelta)}%). Soglia: ${soglia}%.`,
             severita: regola.severita || 'critico',
             modulo: 'primarie_rete',
             entity_type: 'PrimariaRete',
@@ -716,7 +1013,7 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
           const key = `${t.trasportatore}|||${regola.id}`;
           proponi(key, {
             titolo: regola.messaggio_alert || `Ritardo SLA critico: ${t.trasportatore}`,
-            descrizione: `Trasportatore "${t.trasportatore}": Nr Giorni medio ${t.nr_giorni_medio.toFixed(1)} gg ${MISURA_SLA}, % fuori tempo ${t.pct_dopo_scadenza.toFixed(1)}%. Soglie: > 12 gg medio o > 20% fuori tempo.`,
+            descrizione: `Trasportatore "${t.trasportatore}": Nr Giorni medio ${unDecimale(t.nr_giorni_medio)} gg ${MISURA_SLA}, % fuori tempo ${unDecimale(t.pct_dopo_scadenza)}%. Soglie: > 12 gg medio o > 20% fuori tempo.`,
             severita: regola.severita || 'warning',
             modulo: 'primarie_rete',
             entity_type: 'PrimariaRete',

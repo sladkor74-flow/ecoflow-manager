@@ -108,7 +108,9 @@ console.log('LE DUE PAGINE DELLE PROVINCE DICONO LO STESSO DEL MOTORE');
   const pr = readFileSync(new URL('../src/components/primarie-rete/ProvinceMatrix.jsx', import.meta.url), 'utf8');
   verifica('Primarie Rete non colora di rosso il mese in corso', pr.includes('mv.count === 0 && mv.passed && mv.mese !== current_month'));
   const mo = readFileSync(new URL('../base44/functions/runAlertEngine/entry.ts', import.meta.url), 'utf8');
-  verifica("il motore di alert da' alla matrice anche l'anno prima, se no la coppia a cavallo d'anno non diventa mai un alert", mo.includes('computeProvinceMatrixData(storico)') && mo.includes("'primarie_rete', '', tutti))"));
+  // Dal 13/10/2026 il motore passa alla matrice anche i contratti (A58): la
+  // coppia a cavallo d'anno che diventa un alert la prova anche alertCambioAnno.mjs.
+  verifica("il motore di alert da' alla matrice anche l'anno prima (e i contratti), se no la coppia a cavallo d'anno non diventa mai un alert", /computeProvinceMatrixData\(storico[,)]/.test(mo) && mo.includes("'primarie_rete', '', tutti, true, commesse))"));
 }
 
 console.log('I NOMI DEI RACCOGLITORI: SI TOLGONO GLI SPAZI, NON LE S');

@@ -5,6 +5,9 @@ import AlertsPanel from '@/components/alerts/AlertsPanel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
+// Il messaggio dopo «Esegui», coi record dell'anno prima e i numeri all'italiana
+// (revisione del 13/10/2026): sta in src/lib perche' le prove lo leggono in node.
+import { messaggioEsecuzione } from '@/lib/messaggioMotoreAlert';
 
 const MODULI = [
   { value: 'secondarie', label: 'Secondarie' },
@@ -115,24 +118,7 @@ export default function AlertEngine() {
       const res = await base44.functions.invoke('runAlertEngine', { modulo });
       const d = res.data;
       if (d.messaggio) { alert(d.messaggio); setRunning(null); return; }
-      // Restano da scrivere aggiornamenti o chiusure fermati dal tempo massimo:
-      // si riprendono ripetendo il controllo.
-      const restano = [
-        d.alerts_da_aggiornare > 0 && `${d.alerts_da_aggiornare} alert da aggiornare`,
-        d.alerts_da_chiudere > 0 && `${d.alerts_da_chiudere} alert da chiudere`,
-      ].filter(Boolean);
-      // I terminati senza fine trasporto restano fuori dal controllo: si dicono,
-      // canale per canale (rete e ACI non si sommano).
-      const senzaFine = (d.terminati_senza_fine_trasporto || []).filter(g => g.quanti > 0).map(g =>
-        `${g.canale ? `${g.canale === 'ACI' ? 'ACI' : 'Rete'}: ` : ''}${g.quanti === 1 ? '1 terminato' : `${g.quanti} terminati`} senza fine trasporto${g.esempi?.length ? ` (es. ${g.esempi.join(', ')})` : ''}`);
-      // Le date obbligatorie mancanti o incoerenti, canale per canale: l'elenco sta nell'alert.
-      const nomeCanale = { rete: 'rete', ACI: 'ACI', extra: 'extra raccolta' };
-      const date = (d.date_obbligatorie || []).filter(g => g.ordini > 0).map(g =>
-        `${g.canale ? `${nomeCanale[g.canale] || g.canale}: ` : ''}${g.ordini === 1 ? '1 ordine' : `${g.ordini} ordini`}${g.senza_fine ? `, di cui ${g.senza_fine} senza fine trasporto` : ''}`);
-      alert(`${d.alerts_creati} alert creati, ${d.alerts_aggiornati || 0} aggiornati e ${d.alerts_chiusi || 0} chiusi perché superati o doppi, su ${d.record_scansionati} record ${d.anno ? `del ${d.anno} ` : ''}controllati.`
-        + (restano.length ? ` Restano ${restano.join(' e ')}: esegui di nuovo il controllo.` : '')
-        + (senzaFine.length ? ` Esclusi dalle regole dell'anno perché senza fine trasporto, di qualunque anno: ${senzaFine.join('; ')}.` : '')
-        + (date.length ? ` Terminati con date obbligatorie mancanti o incoerenti, di qualunque anno: ${date.join('; ')}. L'elenco è nell'alert; le date vanno inserite o corrette.` : ''));
+      alert(messaggioEsecuzione(d));
       load();
     } catch (e) {
       // Gli errori delle funzioni portano il testo nella risposta (e.data):
