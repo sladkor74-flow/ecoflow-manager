@@ -35,7 +35,8 @@ import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
-import { statoRequisito } from "./qualificaFornitori.ts";
+import { documentoDelRequisito } from "./qualificaFornitori.ts";
+import { applicaControlloClasse, targetAnnuoSoggetto } from "./classeAlbo.ts";
 import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 import { piuGiorni } from "./predittivita.ts";
 import { calcolaPassivaMese, indiceMesePassiva, movimentiDateDelCanale } from "./passivaCalcolo.ts";
@@ -44,6 +45,7 @@ import { leggiRegistro, statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE
 import { datiFinoAl } from "./statoArchivi.ts";
 import { tariffaNonDisattivata, tariffaValeIl } from "./validitaTariffa.ts";
 import { storicoModifiche } from "./storicoModifiche.ts";
+import { provinciaChiesta } from "./province.ts";
 
 export { oggiRoma };
 
@@ -246,9 +248,16 @@ async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione,
   };
   const chiaviRacc = chiaviDi('trasportatore', raccoglitore);
   const chiaviDest = chiaviDi('destinazione', destinazione);
+  // LA PROVINCIA ANCHE PER NOME (segnalazione alta A74 del 20/09, corretta il
+  // 12/10/2026). Gli archivi scrivono la sigla e qui si confrontava alla
+  // lettera: «Bari» contro «BA» non trovava niente e il raccolto usciva «0 t»
+  // senza un avviso. Una provincia che non si riconosce non filtra per un valore
+  // inventato (che con la sigla vuota avrebbe preso le righe senza provincia):
+  // non trova niente, e il raccolto lo dice come numero non calcolabile.
+  const prov = provinciaChiesta(provincia);
 
   const stessoLuogo = (r) => {
-    if (provincia && String(r.provincia || '').toUpperCase() !== String(provincia).toUpperCase()) return false;
+    if (prov && (!prov.sigla || String(r.provincia || '').toUpperCase().trim() !== prov.sigla)) return false;
     if (regione && normalizzaRagioneSociale(regioneDi(r)) !== normalizzaRagioneSociale(regione)) return false;
     if (chiaviRacc && !chiaviRacc.has(chiave(r.trasportatore))) return false;
     if (chiaviDest && !chiaviDest.has(chiave(r.destinazione))) return false;
@@ -272,7 +281,19 @@ async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione,
     tuttiEseguiti === null,
   );
   const modulo = canale === 'ACI' ? 'primarie ACI' : canale === 'EXTRA_RACCOLTA' ? 'extra raccolta, raccolte' : 'primarie di rete';
-  return { righe, date: dateObbligatorie(delLuogo, modulo), soggetti, periodo, riserva };
+  // Quando il filtro per provincia non trova niente, quanti terminati ha la
+  // provincia nell'anno nel canale, senza gli altri filtri: serve a dire se e' la
+  // provincia a non averne o la combinazione con periodo, raccoglitore e destinazione.
+  // Formulari, non righe (revisione del 13/10/2026): l'avviso dice «formulari» e
+  // un formulario ripartito su piu' ordini e' piu' righe. Con le righe l'ACI di
+  // Salerno 2026 ne diceva 8, mentre lo stesso strumento ne conta 6.
+  const provincia_ = prov ? {
+    ...prov,
+    ...(prov.sigla && !righe.length
+      ? { nell_anno: contaFormulari(delCanale.filter(r => String(r.provincia || '').toUpperCase().trim() === prov.sigla && meseDi(r.trasporto_finito_il, anno) >= 0)) }
+      : {}),
+  } : null;
+  return { righe, date: dateObbligatorie(delLuogo, modulo), soggetti, periodo, riserva, provincia: provincia_ };
 }
 
 /**
@@ -730,7 +751,7 @@ export const STRUMENTI = [
     parametri: {
       canale: 'RETE, ACI o EXTRA_RACCOLTA, obbligatorio', anno: 'numero', mese: 'nome del mese, opzionale',
       mesi: 'elenco di nomi di mese, per una domanda su piu\' mesi ("luglio e agosto", "da marzo a maggio": scrivili tutti)',
-      provincia: 'sigla, opzionale', regione: 'opzionale', raccoglitore: 'opzionale', destinazione: 'opzionale',
+      provincia: 'sigla (BA) o nome per esteso (Bari), opzionale', regione: 'opzionale', raccoglitore: 'opzionale', destinazione: 'opzionale',
       raggruppa: 'raccoglitore, provincia, regione, classe, destinazione o mese',
     },
     moduli: ['Terminati Rete', 'Terminati ACI', 'Extra Raccolta', 'Report Mensile'],
@@ -741,8 +762,25 @@ export const STRUMENTI = [
       const canale = canaleChiesto(p.canale) || 'RETE';
       const avvisoCanale = canaleChiesto(p.canale) ? ''
         : `${p.canale ? `"${p.canale}" non e' un canale` : 'Canale non indicato'}: questi sono i numeri della RETE. ACI ed extra raccolta non si sommano: per loro rifai la domanda col canale.`;
-      const { righe, date, soggetti, periodo, riserva } = await movimenti(base44, { ...p, anno, canale }, ctx);
+      const { righe, date, soggetti, periodo, riserva, provincia: luogo } = await movimenti(base44, { ...p, anno, canale }, ctx);
       const campo = { raccoglitore: 'trasportatore', provincia: 'provincia', regione: 'regioni', classe: 'classe', destinazione: 'destinazione', mese: 'mese' }[p.raggruppa] || 'trasportatore';
+      // LA PROVINCIA CHE NON TROVA NIENTE SI DICE (segnalazione alta A74 del
+      // 20/09, corretta il 12/10/2026). Una provincia che non si riconosce rende
+      // il numero non calcolabile, come un soggetto che non si riconosce; una
+      // riconosciuta che non trova formulari e' uno zero vero, ma va detto perche'
+      // e' zero: la provincia non ne ha nell'anno, o non ne ha con gli altri filtri.
+      const provinciaIgnota = !!(luogo && !luogo.sigla);
+      const altriFiltri = [
+        periodo.nomi.length ? `il periodo (${periodo.nomi.join(', ')})` : '',
+        p.raccoglitore ? `il raccoglitore "${p.raccoglitore}"` : '',
+        p.destinazione ? `la destinazione "${p.destinazione}"` : '',
+        p.regione ? `la regione "${p.regione}"` : '',
+      ].filter(Boolean);
+      const avvisoProvincia = !luogo ? ''
+        : provinciaIgnota ? `"${luogo.chiesta}" non e' una provincia che riconosco: scrivi la sigla (per esempio BA) o il nome per esteso (Bari). Senza la provincia il numero non si calcola, e non e' zero.`
+        : righe.length ? ''
+        : luogo.nell_anno ? `Con la provincia di ${luogo.nome} (${luogo.sigla}) il filtro non trova nessun formulario terminato del canale ${canale}: nel ${anno} la provincia ne ha ${luogo.nell_anno}, ma nessuno con ${altriFiltri.join(', ') || 'gli altri filtri chiesti'}.`
+        : `Nel canale ${canale} non c'e' nessun formulario terminato della provincia di ${luogo.nome} (${luogo.sigla}) in tutto il ${anno}: la provincia e' riconosciuta, ma il filtro non trova niente.`;
       const totale = righe.reduce((s, r) => s + peso(r), 0);
       // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
       const avvisoPeriodo = periodo.ignorati.length
@@ -755,7 +793,7 @@ export const STRUMENTI = [
       const avvisoSoggetto = nonRisolti.map(([ruolo, e]) => (e.come === 'ambiguo'
         ? `"${e.chiesto}" non basta a capire di chi si parla: in archivio ci sono ${e.alternative.join(', ')}. Rifai la domanda con il nome per esteso: sono soggetti diversi e non si sommano.`
         : `"${e.chiesto}" non risulta fra i ${ruolo === 'raccoglitore' ? 'raccoglitori' : 'siti di destinazione'} del canale ${canale}${e.alternative.length ? `. Forse intendevi: ${e.alternative.join(', ')}` : ''}.`)).join(' ');
-      const calcolabile = nonRisolti.length === 0;
+      const calcolabile = nonRisolti.length === 0 && !provinciaIgnota;
       // UN NOME CHE QUI NON C'E' PUO' ESSERCI ALTROVE. L'anagrafica dei fornitori
       // e' una tabella piccola e dice che cosa fa un soggetto: meglio rispondere
       // "Silvano Renato trasporta le secondarie, non raccoglie" che "non risulta
@@ -794,6 +832,9 @@ export const STRUMENTI = [
           ...(riserva ? { riserva_eseguiti: riserva } : {}),
           ...(risolti.length ? { soggetto_riconosciuto: risolti.join('; ') } : {}),
           ...(avvisoSoggetto ? { avviso_soggetto: avvisoSoggetto, numero_non_calcolabile: 'Non scrivere nessun numero per questo soggetto: non e\' zero, e\' che non si sa di chi si parla.' } : {}),
+          ...(luogo && luogo.sigla ? { provincia_riconosciuta: `provincia di ${luogo.nome} (${luogo.sigla})${luogo.come === 'nome' ? `, scritta "${luogo.chiesta}"` : ''}` } : {}),
+          ...(avvisoProvincia ? { avviso_provincia: avvisoProvincia } : {}),
+          ...(provinciaIgnota && !avvisoSoggetto ? { numero_non_calcolabile: 'Non scrivere nessun numero: la provincia chiesta non si e\' riconosciuta, e il numero non e\' zero.' } : {}),
           ...(inAnagrafica ? { in_anagrafica: inAnagrafica } : {}),
           ...(avvisoCanale ? { avviso_canale: avvisoCanale } : {}),
           ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
@@ -1985,14 +2026,18 @@ export const STRUMENTI = [
   {
     nome: 'punti_di_raccolta',
     descrizione: 'L\'anagrafica dei punti di raccolta e dei clienti: dove sono, chi li segue, l\'iscrizione RENTRI e il tipo di formulario.',
-    parametri: { cerca: 'ragione sociale, comune o codice, anche parziale', provincia: 'sigla, opzionale' },
+    parametri: { cerca: 'ragione sociale, comune o codice, anche parziale', provincia: 'sigla (BA) o nome per esteso (Bari), opzionale' },
     moduli: ['PDR e Clienti'],
     async esegui(base44, p) {
       const svc = base44.asServiceRole.entities;
       const cerca = String(p.cerca || '').trim().toLowerCase();
       const tutti = await fetchAll(svc.Pdr);
+      // La provincia anche per nome, e una provincia che non si riconosce lo dice
+      // invece di dare un elenco vuoto (A74 del 20/09, corretta il 12/10/2026: e'
+      // l'anagrafica dei 268 punti di raccolta di Bari).
+      const prov = provinciaChiesta(p.provincia);
       const righe = tutti.filter(r => {
-        if (p.provincia && String(r.provincia_pdr || r.provincia || '').toUpperCase() !== String(p.provincia).toUpperCase()) return false;
+        if (prov && (!prov.sigla || String(r.provincia_pdr || r.provincia || '').toUpperCase().trim() !== prov.sigla)) return false;
         if (!cerca) return true;
         return `${r.ragione_sociale || ''} ${r.descrizione_pdr || ''} ${r.comune_pdr || ''} ${r.comune || ''} ${r.codice_esterno || ''} ${r.codice_esterno_pdr || ''}`.toLowerCase().includes(cerca);
       });
@@ -2001,6 +2046,9 @@ export const STRUMENTI = [
         periodo: 'ultimo file PDR caricato',
         dati_al: oggiRoma(),
         dati: {
+          ...(prov && prov.sigla ? { provincia_riconosciuta: `provincia di ${prov.nome} (${prov.sigla})${prov.come === 'nome' ? `, scritta "${prov.chiesta}"` : ''}` } : {}),
+          ...(prov && !prov.sigla ? { avviso_provincia: `"${prov.chiesta}" non e' una provincia che riconosco: scrivi la sigla (per esempio BA) o il nome per esteso (Bari). L'elenco e' vuoto per questo, non perche' non ci siano punti di raccolta.`, numero_non_calcolabile: 'Non scrivere quanti sono: la provincia chiesta non si e\' riconosciuta.' } : {}),
+          ...(prov && prov.sigla && !righe.length ? { avviso_provincia: `Nell'anagrafica non c'e' nessun punto di raccolta della provincia di ${prov.nome} (${prov.sigla})${cerca ? ` che corrisponda a "${p.cerca}"` : ''}: la provincia e' riconosciuta, ma il filtro non trova niente.` } : {}),
           pdr: elenco(righe.map(r => ({
             ragione_sociale: r.ragione_sociale, descrizione_pdr: r.descrizione_pdr,
             comune: r.comune_pdr || r.comune, provincia: r.provincia_pdr || r.provincia,
@@ -2020,20 +2068,59 @@ export const STRUMENTI = [
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const oggi = oggiRoma();
       const svc = base44.asServiceRole.entities;
-      const [riepilogo, catalogo, documenti, contratti] = await Promise.all([
+      const [riepilogo, catalogo, salvati, contratti, targetAnnui, targetMensili] = await Promise.all([
         svc.RiepilogoQualifica.filter({ anno }, '-aggiornato_il', 1).catch(() => []),
         fetchAll(svc.TipoDocumentoQualifica),
         fetchAll(svc.DocumentoQualifica, { stato: 'attivo' }),
         fetchAll(svc.ContrattoFornitore, { anno }).catch(() => []),
+        fetchAll(svc.TargetRaccoglitore, { anno }).catch(() => null),
+        fetchAll(svc.TargetMensile, { anno }).catch(() => null),
       ]);
+      // LA CLASSE DELL'ALBO CONTRO IL TARGET, COME NEL MODULO (revisione del
+      // 13/10/2026). Qui statoRequisito girava sui documenti salvati, senza il
+      // controllo della classe: un'iscrizione in classe F con un target da 3.200 t
+      // EcoTyna la diceva «valida» mentre il modulo Qualifica la dice «non
+      // conforme». Il controllo e' quello del modulo (applicaControlloClasse,
+      // classeAlbo.ts) con i target dell'anno: due letture per domanda, nessuna
+      // per soggetto. Il modulo prende i raccoglitori dai ruoli dei movimenti
+      // dell'anno, che costerebbero gli archivi interi delle primarie; il controllo
+      // pero' scatta solo per chi ha un target, e sui dati veri dell'11/10/2026 i
+      // raccoglitori con target sono gli stessi undici del modulo. Quindi qui
+      // raccoglitore vuol dire soggetto con un target nell'anno.
+      const targetLetti = Array.isArray(targetAnnui) && Array.isArray(targetMensili);
+      const documenti = targetLetti
+        ? applicaControlloClasse(salvati, [...new Set(salvati.map(d => d.soggetto_chiave).filter(Boolean))]
+          .filter(chiave => targetAnnuoSoggetto(chiave, targetAnnui, targetMensili) > 0)
+          .map(chiave => ({ chiave, ruoli: ['raccolta'] })), targetAnnui, targetMensili, anno)
+        : salvati;
       const tipi = new Map(catalogo.map(t => [t.id, t]));
       const k = p.soggetto ? normalizzaRagioneSociale(p.soggetto) : '';
-      const perSoggetto = new Map();
+      // UN DOCUMENTO PER VOCE, COME NEL MODULO (revisione del 13/10/2026). Qui lo
+      // stato si calcolava su ogni documento attivo, uno per uno. Ma il contratto
+      // in corso resta attivo accanto a quello dell'anno dopo fino alla
+      // decorrenza (salvaContrattoFornitore): a dicembre EcoTyna contava due
+      // volte il fornitore, col nuovo «in analisi» o «da verificare» che il
+      // modulo tiene da parte, e fra la scadenza del vecchio e il primo calcolo
+      // della qualifica che lo chiude diceva «scaduto» il vecchio accanto al nuovo
+      // valido. E, senza sapere del contratto in corso, la nota sul contratto
+      // firmato in anticipo restava a meta'. Ora i documenti si raggruppano per
+      // soggetto e voce, e conta quello su cui si regge il requisito
+      // (documentoDelRequisito in qualificaFornitori.ts), col suo stato e le sue
+      // note, come nella scheda del fornitore. Nessuna lettura in piu': i
+      // documenti sono gia' in mano.
+      const perVoce = new Map();
       for (const d of documenti) {
         const nome = d.soggetto_nome || d.soggetto_chiave || 'N/D';
         if (k && !normalizzaRagioneSociale(nome).includes(k)) continue;
-        const tipo = tipi.get(d.tipo_documento_id) || { obbligatorio: true, preavviso_giorni: 60, tipo_scadenza: 'da_documento' };
-        const st = statoRequisito(tipo, d, oggi);
+        const voce = d.tipo_documento_id ? `${d.soggetto_chiave || nome}|${d.tipo_documento_id}` : `documento|${d.id}`;
+        if (!perVoce.has(voce)) perVoce.set(voce, []);
+        perVoce.get(voce).push(d);
+      }
+      const perSoggetto = new Map();
+      for (const gruppo of perVoce.values()) {
+        const tipo = tipi.get(gruppo[0].tipo_documento_id) || { obbligatorio: true, preavviso_giorni: 60, tipo_scadenza: 'da_documento' };
+        const { doc: d, esito: st } = documentoDelRequisito(tipo, gruppo, oggi);
+        const nome = d.soggetto_nome || d.soggetto_chiave || 'N/D';
         if (!perSoggetto.has(nome)) perSoggetto.set(nome, { soggetto: nome, documenti: 0, validi: 0, scaduti: 0, in_scadenza: 0, non_conformi: 0, da_verificare: 0, dettaglio: [] });
         const x = perSoggetto.get(nome);
         x.documenti++;
@@ -2041,8 +2128,14 @@ export const STRUMENTI = [
         // questa corrispondenza i due contatori restavano a zero per tutti.
         const contatore = { valido: 'validi', scaduto: 'scaduti', non_conforme: 'non_conformi', in_scadenza: 'in_scadenza', da_verificare: 'da_verificare', in_analisi: 'da_verificare' }[st.stato];
         if (contatore && x[contatore] !== undefined) x[contatore]++;
-        if (st.stato !== 'valido' && x.dettaglio.length < 10) {
-          x.dettaglio.push({ documento: d.tipo_documento_nome, stato: st.stato, scadenza: st.scadenza, giorni: st.giorni });
+        // La nota sul contratto caricato dopo (documento_id) dice com'e' il
+        // nuovo anche quando il requisito, retto da quello in corso, e' valido.
+        const notaSuUnAltro = (st.problemi || []).some(q => q && q.documento_id);
+        if ((st.stato !== 'valido' || notaSuUnAltro) && x.dettaglio.length < 10) {
+          // Il perche', come lo dice la scheda del fornitore: senza, «non
+          // conforme» per la classe non si distingue da un altro difetto.
+          const motivi = (st.problemi || []).filter(q => q && (q.gravita === 'bloccante' || q.gravita === 'attenzione' || q.documento_id)).slice(0, 3).map(q => String(q.messaggio || '').slice(0, 400));
+          x.dettaglio.push({ documento: d.tipo_documento_nome, ...(d.file_nome ? { file: d.file_nome } : {}), stato: st.stato, scadenza: st.scadenza, giorni: st.giorni, ...(motivi.length ? { motivi } : {}) });
         }
       }
       let soggetti = [...perSoggetto.values()];
@@ -2058,7 +2151,8 @@ export const STRUMENTI = [
           riepilogo: riepilogo[0] ? { ...riepilogo[0], nota: `Conteggi salvati il ${soloData(riepilogo[0].aggiornato_il)}` } : null,
           soggetti: elenco(soggetti, 80),
           contratti: elenco(contratti.map(c => ({ soggetto: c.soggetto_nome, tipo: c.tipo_contratto, canale: c.canale, stato: c.stato, anno: c.anno, decorrenza: soloData(c.data_inizio), scadenza: soloData(c.data_fine), quantitativo_t: c.quantitativo_previsto_t })), 60),
-          nota: 'Qui ci sono i documenti caricati. I documenti che mancano del tutto si vedono nel modulo Qualifica Fornitori, che confronta ogni soggetto con il catalogo dei requisiti del suo ruolo.',
+          ...(targetLetti ? {} : { controllo_classe_non_eseguito: `I target del ${anno} non si sono potuti leggere: la classe dell'iscrizione all'Albo non e' stata confrontata col target, quindi un'iscrizione in classe troppo bassa qui puo' risultare valida. Dillo, e rimanda al modulo Qualifica Fornitori.` }),
+          nota: 'Qui ci sono i documenti caricati. I documenti che mancano del tutto si vedono nel modulo Qualifica Fornitori, che confronta ogni soggetto con il catalogo dei requisiti del suo ruolo. La classe dell\'iscrizione all\'Albo si confronta col target PFU dell\'anno, come nel modulo: un target oltre il limite della classe fa il documento non conforme, e il motivo e\' in "motivi".',
         },
       };
     },

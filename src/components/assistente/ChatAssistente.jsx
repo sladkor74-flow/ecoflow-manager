@@ -20,6 +20,7 @@ import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, Boo
 import { usePermessi } from '@/lib/permessi';
 import { dataServer } from '@/lib/utils';
 import { ACCETTATI, MAX_ALLEGATI, leggiAllegato, scaricaFileEcoTyna, nomeFile, ETICHETTE_FORMATO } from '@/lib/fileEcoTyna';
+import { leggiFontiTesto, verificataSulleFonti } from '@/lib/fontiConoscenza';
 
 // Spazio domande: conversazioni con l'Assistente, archiviate nel gestionale.
 // Una risposta confermata diventa una FAQ della base di conoscenza; una risposta
@@ -128,7 +129,11 @@ function DialogValutazione({ domanda, modo, onClose, onSalvato }) {
           area,
           titolo: titolo.trim(),
           testo: testo.trim(),
-          fonti_json: modo === 'corretta' ? domanda.fonti_json || '[]' : JSON.stringify(['Correzione della direzione SMOCO']),
+          // Le fonti come testo, «titolo - riferimento url» (segnalazione alta A72
+          // del 20/09, corretta il 12/10/2026): qui si copiavano gli oggetti della
+          // risposta, e la base di conoscenza li scriveva nel prompt di EcoTyna
+          // come «[object Object]».
+          fonti_json: modo === 'corretta' ? JSON.stringify(leggiFontiTesto(domanda.fonti_json)) : JSON.stringify(['Correzione della direzione SMOCO']),
           verificato_il: oggi(),
           origine: 'domanda',
           domanda_id: domanda.id,
@@ -244,6 +249,9 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica, onAscolta }) 
                     <div className="min-w-0">
                       <p className="text-sm font-medium flex items-center gap-1.5"><FileText className="w-4 h-4 shrink-0" /> <span className="truncate">{nomeFile(f)}</span></p>
                       <p className="text-xs text-muted-foreground">{ETICHETTE_FORMATO[f.formato] || f.formato}{f.descrizione ? ` · ${f.descrizione}` : ''}</p>
+                      {/* Un file fatto mentre un elenco dei dati era tagliato puo' essere
+                          parziale, e lo dice (segnalazione alta A73 del 20/09, 12/10/2026). */}
+                      {f.parziale && <p className="text-xs text-amber-700 flex items-start gap-1 mt-0.5"><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {f.parziale}</p>}
                     </div>
                     {f.non_conservato
                       ? <span className="text-xs text-muted-foreground">File troppo grande per essere conservato: chiedilo di nuovo</span>
@@ -254,7 +262,10 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica, onAscolta }) 
             )}
             <div className="flex flex-wrap gap-1.5">
               {certezza && <span className={`text-xs rounded px-2 py-0.5 ${certezza.classe}`}>{certezza.etichetta}</span>}
-              {d.ricerca_online && <Badge variant="outline" className="gap-1 font-normal"><Globe className="w-3 h-3" /> Verificata sulle fonti</Badge>}
+              {/* «Verificata sulle fonti» solo con una fonte ufficiale citata o una
+                  voce della base di conoscenza (segnalazioni alte A71 e A76 del
+                  20/09, corrette il 12/10/2026): prima bastava la ricerca accesa. */}
+              {verificataSulleFonti(fonti, d.ricerca_online) && <Badge variant="outline" className="gap-1 font-normal"><Globe className="w-3 h-3" /> Verificata sulle fonti</Badge>}
               {d.dati_gestionale && <Badge variant="outline" className="gap-1 font-normal"><Database className="w-3 h-3" /> Dati del gestionale</Badge>}
               {d.valutazione === 'corretta' && <Badge className="bg-emerald-600 font-normal">Confermata</Badge>}
               {d.valutazione === 'da_correggere' && <Badge variant="destructive" className="font-normal">Da correggere</Badge>}
@@ -266,7 +277,10 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica, onAscolta }) 
                   <p key={i}>
                     {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="underline hover:text-foreground">{f.titolo || f.riferimento || f.url}</a> : (f.titolo || f.riferimento)}
                     {f.titolo && f.riferimento ? ` — ${f.riferimento}` : ''}
-                    {f.verificato_il ? ` (verificata il ${f.verificato_il})` : ''}
+                    {/* La data solo per una fonte di una voce della base di conoscenza,
+                        ed e' la data di quella voce: prima ogni fonte senza data
+                        prendeva il 14/09/2026 d'ufficio (A71 del 20/09, 12/10/2026). */}
+                    {f.voce && f.verificato_il ? ` (base di conoscenza, verificata il ${giornoIt(f.verificato_il)})` : ''}
                   </p>
                 ))}
               </div>
@@ -680,7 +694,7 @@ export default function ChatAssistente({ domandaIniziale = '' } = {}) {
                 <p className="text-lg font-semibold">Chiedi a EcoTyna</p>
                 <p className="text-sm text-muted-foreground">
                   Norme su PFU, rifiuti, RENTRI, Albo e responsabile tecnico, oppure i dati della commessa: target, raccolto, liste, giacenze e qualifica dei fornitori.
-                  Ogni risposta cita le fonti e, per le norme, controlla online che non ci siano novità.
+                  Sulle norme parte dalla base di conoscenza, cita le fonti e controlla online che non ci siano novità; sui numeri dice da quale modulo li ha presi.
                 </p>
                 <p className="text-sm text-muted-foreground mt-2">
                   {isAdmin

@@ -12,7 +12,9 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { useToast } from '@/components/ui/use-toast';
 import { conModifica, dataOra, nomeUtente } from '@/lib/target';
 import { AREE } from '@/components/assistente/ChatAssistente';
-import { Loader2, ShieldCheck, Plus, Pencil, Check, X, RefreshCw, Sparkles } from 'lucide-react';
+import { leggiFontiTesto } from '@/lib/fontiConoscenza';
+import { ritiroAggiornamenti, puoTornareInUso } from '@/lib/ritiroConoscenza';
+import { Loader2, ShieldCheck, Plus, Pencil, Check, X, RefreshCw, Sparkles, Undo2 } from 'lucide-react';
 
 // Base di conoscenza dell'Assistente: voci verificate nel codice, voci aggiunte
 // nel gestionale (FAQ confermate, regole interne, aggiornamenti approvati) e
@@ -20,8 +22,13 @@ import { Loader2, ShieldCheck, Plus, Pencil, Check, X, RefreshCw, Sparkles } fro
 
 const nomeArea = (a) => AREE.find(x => x.valore === a)?.etichetta || a;
 const TIPI = { faq: 'FAQ', regola_interna: 'Regola interna', aggiornamento_normativo: 'Aggiornamento normativo' };
-const leggiFonti = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v.map(String) : []; } catch { return []; } };
+// Le fonti come testo, anche quando sono oggetti (segnalazione alta A72 del
+// 20/09, corretta il 12/10/2026): le FAQ salvate dalle risposte portavano
+// { titolo, riferimento, url } e map(String) le mostrava come «[object Object]».
+// Aprire e salvare una di quelle voci le riscrive come testo.
+const leggiFonti = leggiFontiTesto;
 const oggi = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+const giornoIt = (v) => { const d = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d.split('-').reverse().join('/') : d; };
 const ORIGINI = { controllo_mensile: 'dal controllo mensile', qualifica_documento: 'dal controllo di un documento di qualifica', domanda: 'durante una domanda', manuale: 'a mano' };
 
 // Vale il piu' recente (stessa regola del backend, base44/shared/baseConoscenza.ts):
@@ -200,6 +207,31 @@ function Proposta({ p, admin, onDecidi }) {
   );
 }
 
+// TORNA AL TESTO VERIFICATO (segnalazione alta A75 del 20/09, corretta il
+// 12/10/2026). Un aggiornamento normativo approvato per errore prendeva il posto
+// della voce verificata e non c'era modo di toglierlo: non sta fra le «Aggiunte»,
+// accanto al badge non c'era nessun comando e «Rimetti in uso» gli era negato.
+// Ora si ritira come mettiDaParte (baseConoscenza.ts): non si cancella, va fra le
+// messe da parte con attiva = false e il motivo, che e' obbligatorio, perche' e'
+// l'unica spiegazione che resta a chi lo rilegge mesi dopo. Le regole stanno in
+// src/lib/ritiroConoscenza.js.
+function RitiraAggiornamento({ onRitira }) {
+  const [motivo, setMotivo] = useState(null);
+  const [lavoro, setLavoro] = useState(false);
+  if (motivo === null) {
+    return <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs mt-1" onClick={() => setMotivo('')}><Undo2 className="w-3.5 h-3.5" /> Torna al testo verificato</Button>;
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <Input className="flex-1 min-w-0" autoFocus value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Perché lo ritiri? Per esempio: approvato per errore, la norma citata non dice questo" />
+      <Button size="sm" variant="outline" disabled={!motivo.trim() || lavoro} onClick={async () => { setLavoro(true); await onRitira(motivo.trim()); setLavoro(false); setMotivo(null); }}>
+        {lavoro && <Loader2 className="w-4 h-4 animate-spin mr-1" />} Ritira l'aggiornamento
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => setMotivo(null)}>Annulla</Button>
+    </div>
+  );
+}
+
 export default function BaseConoscenza() {
   const { user } = useAuth();
   const admin = user?.role === 'admin';
@@ -286,6 +318,25 @@ export default function BaseConoscenza() {
     }
   };
 
+  // Si ritirano tutti gli aggiornamenti attivi della voce (ritiroAggiornamenti):
+  // di solito e' uno solo, perche' l'approvazione mette da parte i precedenti
+  // (decidi, qui sopra).
+  const ritira = async (codiceVoce, motivo) => {
+    try {
+      const daRitirare = ritiroAggiornamenti(voci, codiceVoce.id, { motivo, utente: nomeUtente(user), adesso: new Date().toISOString() });
+      for (const { voce: x, campi, nota } of daRitirare) {
+        await base44.entities.ConoscenzaAssistente.update(x.id, {
+          ...campi,
+          storico_json: conModifica(x.storico_json, { utente: nomeUtente(user), nota }),
+        });
+      }
+      toast({ title: 'Si torna al testo verificato', description: 'L\'aggiornamento è tra le voci messe da parte, con il motivo: da lì si può rimettere in uso.' });
+      carica();
+    } catch (e) {
+      toast({ title: 'Operazione non riuscita', description: e.message, variant: 'destructive' });
+    }
+  };
+
   const controllaOra = async () => {
     setControllo(true);
     try {
@@ -347,7 +398,7 @@ export default function BaseConoscenza() {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="font-medium text-sm">{v.titolo}</p>
-                    <p className="text-xs text-muted-foreground">{TIPI[v.tipo]} · {nomeArea(v.area)} · {v.verificato_il ? `del ${v.verificato_il}` : dataOra(v.created_date)}{v.deciso_da ? ` · ${v.deciso_da}` : ''}</p>
+                    <p className="text-xs text-muted-foreground">{TIPI[v.tipo]} · {nomeArea(v.area)} · {v.verificato_il ? `del ${giornoIt(v.verificato_il)}` : dataOra(v.created_date)}{v.deciso_da ? ` · ${v.deciso_da}` : ''}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch checked={v.attiva !== false} onCheckedChange={(val) => attiva(v, val)} />
@@ -376,9 +427,10 @@ export default function BaseConoscenza() {
                     const s = sostituzioni.get(v.id);
                     return (
                       <div key={v.id} className="border-l-2 pl-3 border-muted">
-                        <p className="text-sm font-medium">{v.titolo} {s && <Badge className="ml-1 bg-amber-500 font-normal">Aggiornata il {dataVoce(s)}</Badge>}</p>
+                        <p className="text-sm font-medium">{v.titolo} {s && <Badge className="ml-1 bg-amber-500 font-normal">Aggiornata il {giornoIt(dataVoce(s))}</Badge>}</p>
                         <p className="text-sm whitespace-pre-wrap mt-1">{s ? s.testo : v.testo}</p>
-                        <p className="text-xs text-muted-foreground mt-1">Fonti: {(s ? leggiFonti(s.fonti_json) : v.fonti).join('; ') || v.fonti.join('; ')} · verificata il {s ? dataVoce(s) : v.verificato_il}</p>
+                        <p className="text-xs text-muted-foreground mt-1">Fonti: {(s ? leggiFonti(s.fonti_json) : v.fonti).join('; ') || v.fonti.join('; ')} · verificata il {giornoIt(s ? dataVoce(s) : v.verificato_il)}</p>
+                        {s && admin && <RitiraAggiornamento onRitira={(motivo) => ritira(v, motivo)} />}
                       </div>
                     );
                   })}
@@ -411,7 +463,10 @@ export default function BaseConoscenza() {
                   <p className="text-sm whitespace-pre-wrap">{v.testo}</p>
                   {leggiFonti(v.fonti_json).length > 0 && <p className="text-xs text-muted-foreground">Fonti: {leggiFonti(v.fonti_json).join('; ')}</p>}
                   {v.motivazione && <p className="text-xs text-muted-foreground">Proposta perché: {v.motivazione}</p>}
-                  {admin && v.stato === 'approvata' && !(v.tipo === 'aggiornamento_normativo' && v.voce_id) && (
+                  {/* Un aggiornamento di una voce verificata torna in uso solo se lo si era
+                      ritirato a mano: quelli superati da qualcosa di piu' recente li
+                      rimetterebbe da parte il controllo successivo (scartaSuperate). */}
+                  {admin && puoTornareInUso(v) && (
                     <Button size="sm" variant="outline" onClick={() => attiva(v, true)}>Rimetti in uso</Button>
                   )}
                 </AccordionContent>

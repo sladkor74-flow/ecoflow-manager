@@ -303,9 +303,27 @@ function formatoPeso(intestazione, valore) {
   return undefined;
 }
 
-function foglioDaTabella(XLSX, intestazioni, righe) {
+// IL FILE PARZIALE LO DICE DENTRO DI SE' (revisione del 13/10/2026, rilievo sulla
+// A73). Un file fatto da un elenco tagliato (60 dei 268 punti di raccolta di Bari)
+// portava l'avviso solo nella scheda della chat, accanto a «Scarica»: il file
+// scaricato aveva 60 righe e nessuna nota, cioe' proprio il file incompleto che
+// sembra intero quando lo si inoltra. E al modello si diceva che il file l'avrebbe
+// portato scritto. Ora la riga c'e': in testa a ogni foglio, prima riga del CSV,
+// primo paragrafo del documento.
+export const testaParziale = (spec) => (spec && spec.parziale ? `ATTENZIONE, FILE PARZIALE: ${String(spec.parziale).trim()}` : '');
+
+/** Il testo di un documento (Word, PDF, testo) col suo avviso in testa, se e' parziale. */
+export function testoDelDocumento(spec) {
+  const testa = testaParziale(spec);
+  const testo = String((spec && spec.testo) || '');
+  return testa ? `### ${testa}\n\n${testo}` : testo;
+}
+
+function foglioDaTabella(XLSX, intestazioni, righe, testa = '') {
   const ws = {};
-  const tutte = [intestazioni.map(h => ({ v: String(h ?? ''), t: 's' })), ...righe];
+  // L'avviso del file parziale sta in A1, con una riga vuota prima delle intestazioni.
+  const sopra = testa ? [[{ v: testa, t: 's' }], []] : [];
+  const tutte = [...sopra, intestazioni.map(h => ({ v: String(h ?? ''), t: 's' })), ...righe];
   let maxC = 0;
   tutte.forEach((riga, R) => {
     riga.forEach((c, C) => {
@@ -313,7 +331,7 @@ function foglioDaTabella(XLSX, intestazioni, righe) {
       const cella = { v: c.v, t: c.t || (typeof c.v === 'number' ? 'n' : 's') };
       if (c.z && c.z !== 'General') cella.z = c.z;
       // Pesi: si applica il formato del gestionale se la cella non ne ha uno suo (date comprese).
-      if (R > 0 && cella.t === 'n' && !(cella.z && XLSX.SSF.is_date(cella.z))) { const z = formatoPeso(intestazioni[C], cella.v); if (z) cella.z = z; }
+      if (R > sopra.length && cella.t === 'n' && !(cella.z && XLSX.SSF.is_date(cella.z))) { const z = formatoPeso(intestazioni[C], cella.v); if (z) cella.z = z; }
       ws[XLSX.utils.encode_cell({ r: R, c: C })] = cella;
       maxC = Math.max(maxC, C);
     });
@@ -441,6 +459,7 @@ async function documentoPdf(testo) {
 export async function scaricaFileEcoTyna(spec, allegati = {}) {
   const nome = nomeFile(spec);
   const formato = FORMATI[spec.formato] ? spec.formato : 'txt';
+  const testa = testaParziale(spec);
   if (formato === 'xlsx' || formato === 'csv') {
     const XLSX = await xlsx();
     const fogli = fogliDelFile(XLSX, spec, allegati);
@@ -457,7 +476,7 @@ export async function scaricaFileEcoTyna(spec, allegati = {}) {
         else s = String(c.v);
         return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
       };
-      const righe = [f.intestazioni.map(h => campo({ v: h })), ...f.righe.map(r => r.map(campo))];
+      const righe = [...(testa ? [[campo({ v: testa })]] : []), f.intestazioni.map(h => campo({ v: h })), ...f.righe.map(r => r.map(campo))];
       scarica(new Blob(['﻿' + righe.map(r => r.join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), nome);
       return;
     }
@@ -467,13 +486,13 @@ export async function scaricaFileEcoTyna(spec, allegati = {}) {
       let n = String(f.nome || `Foglio${i + 1}`).replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || `Foglio${i + 1}`;
       while (usati.has(n)) n = `${n.slice(0, 28)} ${i + 1}`;
       usati.add(n);
-      XLSX.utils.book_append_sheet(wb, foglioDaTabella(XLSX, f.intestazioni, f.righe), n);
+      XLSX.utils.book_append_sheet(wb, foglioDaTabella(XLSX, f.intestazioni, f.righe, testa), n);
     });
     const dati = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     scarica(new Blob([dati], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), nome);
     return;
   }
-  const testo = spec.testo || '';
+  const testo = testoDelDocumento(spec);
   if (formato === 'docx') { scarica(new Blob([documentoWord(nome, testo)], { type: 'application/msword' }), nome); return; }
   if (formato === 'pdf') { (await documentoPdf(testo)).save(nome); return; }
   scarica(new Blob(['﻿' + testo], { type: 'text/plain;charset=utf-8' }), nome);

@@ -44,7 +44,11 @@ const PARAMETRI = {
   settimana: { type: 'integer' },
   canale: { type: 'string', enum: CANALI },
   raggruppa: { type: 'string', enum: ['raccoglitore', 'provincia', 'regione', 'classe', 'destinazione', 'mese'] },
-  provincia: { type: 'string' },
+  // La sigla, ma vale anche il nome (segnalazione alta A74 del 20/09, corretta
+  // il 12/10/2026): il pianificatore ricopia la domanda, «Bari», e gli archivi
+  // scrivono «BA». Lo strumento riconosce tutte e due (provinciaChiesta,
+  // province.ts) e dice quando non riconosce la provincia o non trova niente.
+  provincia: { type: 'string', description: 'sigla della provincia (BA); se la domanda dice il nome (Bari) va bene anche il nome' },
   regione: { type: 'string' },
   raccoglitore: { type: 'string' },
   destinazione: { type: 'string' },

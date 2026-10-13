@@ -2,8 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { cancellaFile } from "../../shared/fileArchivio.ts";
 import {
-  BASE_CONOSCENZA, FONTI_UFFICIALI, VERIFICATO_IL, REGOLE_FONTI, testoConoscenza, vociApprovate,
-  proponiNovita, proponiPrecisazioni, scartaSuperate,
+  BASE_CONOSCENZA, FONTI_UFFICIALI, REGOLE_FONTI, testoConoscenza, vociApprovate,
+  proponiNovita, proponiPrecisazioni, scartaSuperate, fontiDellaRisposta,
 } from "../../shared/baseConoscenza.ts";
 import { analizzaDomanda, situazioneGestionale } from "../../shared/assistente.ts";
 import { testoAllItaliana, numeriDeiDati } from "../../shared/formato.ts";
@@ -16,6 +16,7 @@ import { annotaFileDaRimuovere, voceDaRimuovere } from "../../shared/fileDaRimuo
 import { eAmministratore } from "../../shared/permessi.ts";
 import {
   SCHEMA_FILE_DA_CREARE, SCHEMA_LETTURA_FILE, REGOLE_FILE, allegatiRicevuti, istruzioniLettura, allegatiPerPrompt, fileDaCreare,
+  elenchiTagliati, fileDaElenchiTagliati,
 } from "../../shared/fileEcoTyna.ts";
 
 // Assistente del gestionale: risponde a dubbi normativi, a domande sui dati della
@@ -39,6 +40,13 @@ const SCHEMA_RISPOSTA = {
     // V del prompt), e la voce dice quello; il testo intero solo se lo si chiede.
     // Non e' obbligatorio: senza, la pagina dice le prime frasi della risposta.
     da_dire: { type: 'string' },
+    // LA DATA DI VERIFICA NON LA SCRIVE IL MODELLO (segnalazioni alte A71 e A76
+    // del 20/09, corrette il 12/10/2026). C'era verificato_il, e dove mancava la
+    // funzione metteva d'ufficio il 14/09/2026, la data della base di
+    // conoscenza: «verificata il» anche su una norma che nessuna voce cita. Un
+    // campo che c'e' il modello lo riempie, quindi e' uscito: la data la mette
+    // fontiDellaRisposta (baseConoscenza.ts), solo se la fonte e' quella di una
+    // voce. voce_id e' il suggerimento del modello, e si controlla.
     fonti: {
       type: 'array',
       items: {
@@ -47,7 +55,7 @@ const SCHEMA_RISPOSTA = {
           titolo: { type: 'string' },
           riferimento: { type: 'string' },
           url: { type: 'string' },
-          verificato_il: { type: 'string' },
+          voce_id: { type: 'string' },
           tipo: { type: 'string', enum: ['norma', 'gestionale'] },
           strumento: { type: 'string' },
           periodo: { type: 'string' },
@@ -298,12 +306,28 @@ export default async function(req) {
     // una risposta normativa senza fonti e' molto peggio di una risposta sui dati
     // con un link di troppo.
     const soloDati = conDati > 0 && !!piano && piano.serve_normativa === false;
+    // Se si cerca online: quello che accade davvero, scritto una volta sola per la
+    // chiamata al modello, per le fonti ufficiali e per il record.
+    const ricercaOnline = analisi.norma && !soloDati;
+    // Se il riepilogo generale e' stato letto davvero: solo allora la risposta ha
+    // «Dati del gestionale» (segnalazione alta A76 del 20/09, corretta il
+    // 12/10/2026). Prima il riquadro si accendeva con analisi.dati, cioe' con le
+    // parole della domanda, anche quando la lettura non era riuscita.
+    let riepilogoLetto = false;
     const [approvate, dati, corso] = await Promise.all([
       vociApprovate(base44),
-      analisi.dati && !conDati ? situazioneGestionale(base44, oggi).catch(e => `Dati del gestionale non disponibili: ${e.message || e}`) : Promise.resolve(''),
+      analisi.dati && !conDati
+        ? situazioneGestionale(base44, oggi)
+          .then(t => { riepilogoLetto = !!String(t || '').trim(); return t; })
+          .catch(e => `Dati del gestionale non disponibili: ${e.message || e}`)
+        : Promise.resolve(''),
       // Schede del corso RT pertinenti: solo per le domande sulle norme e per i quiz.
       analisi.norma && !soloDati ? materialePertinente(base44, quiz ? `${quiz.domanda} ${(quiz.risposte || []).join(' ')}` : domanda).catch(() => ({ testo: '', fonti: [] })) : Promise.resolve({ testo: '', fonti: [] }),
     ]);
+
+    // I dati come li legge il modello: servono anche dopo, per sapere quali
+    // elenchi gli sono arrivati tagliati (dallo strumento o per stare nel prompt).
+    const sezioneDati = risultati.length ? testoDati(risultati) : '';
 
     const storia = precedenti
       .filter(p => p.stato === 'completata')
@@ -343,7 +367,11 @@ export default async function(req) {
         'D-quinquies. Se un dato porta riserva_eseguiti, aggiungi UNA riga dopo il numero: quanti ordini e quante tonnellate aspettano il pulsante Chiudi a portale, e di chi sono se c\'e\' per_raccoglitore. Non sommarla al totale e non riscrivere il totale: il raccolto sono i terminati. Se porta lettura_non_riuscita, di\' che la riserva non si e\' potuta leggere e che il totale puo\' essere piu\' basso del vero.',
       ] : []),
       ...(soloDati ? [] : [`1. Parti dalla base di conoscenza qui sotto, verificata alla data indicata voce per voce. Per le domande sulle norme controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) se ci sono novita' successive alla data della voce: se ne trovi una certa, applicala, dillo chiaramente nella risposta e riportala in novita_normative con voce_id della voce da aggiornare (vuoto se serve una voce nuova), data_norma (AAAA-MM-GG), fonte e testo_proposto, che deve essere il testo COMPLETO della voce aggiornata, conservando tutto cio' che resta valido. In novita_normative vanno solo norme nuove: mai riassunti, consigli, lettere o norme gia' citate nella voce.`]),
-      ...(soloDati ? [] : ['2. Ogni affermazione normativa deve avere una fonte precisa in fonti (norma e articolo, delibera, FAQ o sentenza) con la data di verifica. Non inventare numeri di articolo, date, importi o scadenze: se non sei sicuro dillo e spiega come verificarlo.']),
+      // Segnalazioni alte A71 e A76 del 20/09, corrette il 12/10/2026: la data di
+      // verifica la mette il gestionale, solo per le fonti che vengono da una voce
+      // della base di conoscenza. Il modello scriveva «verificato il» anche su cio'
+      // che aveva letto online un attimo prima o che ricordava.
+      ...(soloDati ? [] : ['2. Ogni affermazione normativa deve avere una fonte precisa in fonti (norma e articolo, delibera, FAQ o sentenza). Se la fonte viene da una voce della base di conoscenza, scrivi l\'id della voce in voce_id. Non scrivere date di verifica: la data la aggiunge il gestionale, solo per le voci della base di conoscenza. Nel testo non dire che una fonte e\' "verificata" se non viene dalla base di conoscenza: una pagina trovata online e\' una fonte citata, non una verifica. Non inventare numeri di articolo, date, importi o scadenze: se non sei sicuro dillo e spiega come verificarlo.']),
       '3. Per le domande sui dati usa solo i DATI DEL GESTIONALE forniti. Ogni numero che scrivi deve venire da li\', e accanto va detto da dove: lo strumento, il periodo e la data del dato. Se un dato manca dillo apertamente, mettilo in dati_mancanti con la sezione del gestionale dove si trova (Target & Status, Assegnati, Verifiche, Giacenze, Dichiarazioni Impianti, Omologhe, Dichiarazioni RENTRI, Qualifica Fornitori, Fatturazione, Predittivita Secondarie (solo rete), To-Do List) e non stimarlo: una risposta che dice "questo non ce l\'ho" e\' utile, una che tira a indovinare no.',
       '3-ter. Rete, ACI ed extra raccolta sono commesse indipendenti: non sommarle mai in un unico numero e di\' sempre di quale canale stai parlando. I target sono solo della rete.',
       // I NUMERI ALL'ITALIANA (utente, 10/10/2026: «sistema i numeri di EcoTyna»).
@@ -376,7 +404,16 @@ export default async function(req) {
       '3-nonies. Di ogni numero che riguarda un canale scrivi qual e\'. Il totale della fatturazione, il raccolto, i viaggi: davanti ci va sempre il canale. Se il dato copre un canale solo perche\' cosi\' e\' stato chiesto, dillo, e aggiungi che degli altri due non stai parlando. Vale anche per il periodo e per il soggetto: il numero e la sua etichetta viaggiano insieme.',
       '3-sexies. Non sommare mai rete, ACI ed extra raccolta, nemmeno se te lo chiedono in modo esplicito ("in tutto", "complessivamente", "tutti e tre"). In quel caso dai i tre numeri uno sotto l\'altro, ciascuno con il suo nome, e spiega in una riga che sono commesse indipendenti e che un totale unico non vuol dire niente. Un unico numero che le mette insieme non deve comparire nella risposta: ne\' in tonnellate, ne\' come numero di formulari, ne\' come totale di controllo, ne\' nella frase di apertura. Vale anche fra primarie, secondarie e terziarie di canali diversi.',
       '3-octies. Il totale lo dice il dato, non la tua somma. Quando un blocco porta "tonnellate", "formulari" o "quanti", quello e\' il numero da scrivere: il dettaglio serve a spiegarlo, non a ricalcolarlo. Non prendere mai il valore di una riga del dettaglio al posto del totale, e non sommare le righe per rifare un totale che e\' gia\' li\'.',
-      '3-quater. In fonti metti le norme e i documenti: i moduli del gestionale che hai interrogato sono gia\' registrati sotto la risposta, non ripeterli. Quando la risposta e\' un elenco lungo, chiudi offrendo di prepararlo in Excel o in PDF: il file si crea solo se l\'utente lo chiede.',
+      // Segnalazione alta A73 del 20/09, corretta il 12/10/2026: il file si fa con
+      // le righe che il modello ha visto, e un elenco tagliato ne porta solo una
+      // parte (60 punti di raccolta su 268). Offrirlo voleva dire consegnare un
+      // file incompleto che sembra intero. Se l'utente lo chiede lo stesso, la
+      // funzione lo segna come parziale (fileDaElenchiTagliati, fileEcoTyna.ts).
+      '3-quater. In fonti metti le norme e i documenti: i moduli del gestionale che hai interrogato sono gia\' registrati sotto la risposta, non ripeterli. Quando la risposta e\' un elenco lungo e INTERO, chiudi offrendo di prepararlo in Excel o in PDF: il file si crea solo se l\'utente lo chiede. Se l\'elenco porta l\'avviso ELENCO TAGLIATO (o elenco_tagliato) non offrire il file: conterrebbe solo le righe che vedi. Se l\'utente lo chiede lo stesso, di\' nella risposta quante righe ha il file e quante sono in tutto, e che l\'elenco intero si esporta dal modulo del gestionale.',
+      // Segnalazione alta A74 del 20/09, corretta il 12/10/2026: «Bari» al posto di
+      // «BA» dava zero senza dire niente. Ora lo strumento riconosce anche il nome,
+      // e quando non riconosce la provincia o il filtro non trova niente lo dice.
+      '3-sedecies. Se un dato porta avviso_provincia, dillo sempre con le sue parole: una provincia che non si riconosce non fa zero (c\'e\' anche numero_non_calcolabile: nessun numero), e un filtro per provincia che non trova niente si dice, non si scrive solo "0 t". Nomina la provincia come la porta provincia_riconosciuta.',
       '3-bis. Se nella domanda o nella conversazione l\'utente corregge una tua risposta o afferma una regola ("non e\' cosi\'", "da noi si fa cosi\'", "il decreto dice che..."), tienine conto subito nella risposta e riportala in precisazioni_utente: tipo regola_interna se e\' una regola dell\'azienda, faq se chiarisce come si applica una norma; testo chiaro e autosufficiente. Diventera\' una proposta da approvare. Mai per una semplice domanda e mai per cio\' che la base di conoscenza dice gia\': in quei casi precisazioni_utente resta vuoto. Se contrasta con una norma verificata, spiegalo con garbo citando la fonte.',
       '4. Le voci dell\'area gestionale sono regole della direzione SMOCO: applicale. Distingui sempre gli obblighi di legge dalle regole interne e dalla prassi.',
       ...(soloDati ? [] : ['5. Scrivi in italiano semplice e pratico, in markdown. Prima la risposta in una o due frasi, poi i dettagli utili; elenchi solo se aiutano; niente formule di cortesia ne\' ripetizioni della domanda.']),
@@ -407,7 +444,7 @@ export default async function(req) {
       // riepilogo generale e non la ricerca puntuale che la domanda chiedeva:
       // senza dirlo, la risposta esce sicura di se' e generica.
       ...(!quiz && !pianoRiuscito ? ["AVVISO: la scelta degli strumenti non e' riuscita, quindi qui sotto trovi il riepilogo generale della commessa e non la ricerca puntuale che la domanda chiedeva. Se il numero preciso che serviva non c'e' nel riepilogo, dillo e invita a ripetere la domanda: non rispondere con il numero piu' simile che trovi."] : []),
-      ...(risultati.length ? ['', testoDati(risultati)] : []),
+      ...(sezioneDati ? ['', sezioneDati] : []),
       ...(dati ? ['', dati] : []),
       '',
       'DOMANDA',
@@ -420,19 +457,27 @@ export default async function(req) {
       // vocabolario del mestiere: "formulari", "classe", "trasporto", "serve".
       // Una domanda sui numeri non ha bisogno di internet, e con internet
       // acceso la risposta usciva generica e piena di link.
-      add_context_from_internet: analisi.norma && !soloDati,
+      add_context_from_internet: ricercaOnline,
       response_json_schema: soloDati ? SCHEMA_RISPOSTA_DATI : SCHEMA_RISPOSTA,
     }));
 
-    const fonti = (Array.isArray(esito.fonti) ? esito.fonti : [])
-      .filter(f => f && (f.titolo || f.riferimento || f.url))
-      .slice(0, 12)
-      .map(f => ({ titolo: taglia(f.titolo, 200), riferimento: taglia(f.riferimento, 300), url: /^https?:\/\//.test(String(f.url || '')) ? String(f.url) : '', verificato_il: taglia(f.verificato_il || VERIFICATO_IL, 20) }));
+    // NIENTE «VERIFICATA IL» D'UFFICIO (segnalazioni alte A71 e A76 del 20/09,
+    // corrette il 12/10/2026). Una fonte senza data prendeva il 14/09/2026, la
+    // data della base di conoscenza, e la chat scriveva «verificata il» anche su
+    // una norma che nessuna voce cita. Ora data e voce le mette
+    // fontiDellaRisposta, solo per le fonti di una voce della base di conoscenza;
+    // ufficiale dice se e' un sito ufficiale letto con la ricerca accesa. Da qui
+    // la chat decide il riquadro «Verificata sulle fonti».
+    const fonti = fontiDellaRisposta(esito.fonti, approvate, { ricercaOnline });
     const certezza = ['alta', 'media', 'bassa'].includes(esito.certezza) ? esito.certezza : 'media';
 
     // File da preparare: se ne salva la descrizione (il file si genera nel browser).
     // Una descrizione troppo grande si restituisce ma non si conserva.
-    const fileGenerati = fileDaCreare(esito.file_da_creare);
+    // Un file fatto da un elenco dei dati tagliato porta scritto che e' parziale
+    // (segnalazione alta A73 del 20/09, corretta il 12/10/2026). Dalla revisione
+    // del 13/10/2026 solo il file che viene da quell'elenco, non tutti i file della
+    // risposta, e lo porta scritto anche il file scaricato (src/lib/fileEcoTyna.js).
+    const fileGenerati = fileDaElenchiTagliati(fileDaCreare(esito.file_da_creare), elenchiTagliati(sezioneDati));
     const fileJson = JSON.stringify(fileGenerati);
     // La versione parlata passa dalla stessa conversione della risposta: i numeri
     // e le date all'italiana, che la pagina poi dice in parole (parlato.js).
@@ -443,12 +488,21 @@ export default async function(req) {
       certezza,
       strumenti_json: risultati.length ? JSON.stringify({ strumenti: risultati.map(r => ({ strumento: r.strumento, parametri: r.parametri, fonte: r.fonte, periodo: r.periodo, dati_al: r.dati_al, errore: r.errore || '' })), piano: pianoRiuscito ? (piano && piano.strumenti && piano.strumenti[0] && /senza chiamare il modello/.test(String(piano.strumenti[0].perche || '')) ? 'scorciatoia' : 'pianificatore') : 'ripiego', letture: contiLetture }) : undefined,
       // Se il pianificatore ha guardato nel gestionale, la scheda lo dice, anche
-      // se l'analisi iniziale della domanda non se n'era accorta.
-      dati_gestionale: conDati > 0 || analisi.dati,
+      // se l'analisi iniziale della domanda non se n'era accorta. Ma solo se un
+      // dato e' arrivato davvero: uno strumento che ha risposto, o il riepilogo
+      // generale letto al posto degli strumenti (scelti e andati in errore, o
+      // pianificatore non riuscito). Fino al 12/10/2026 bastava analisi.dati,
+      // cioe' le parole della domanda, anche con le letture andate in errore (A76
+      // del 20/09). E quando il pianificatore ha detto che i dati non servono, il
+      // riepilogo entrato per una parola («microraccolta» contiene «raccolt») non
+      // fa di una risposta di norma una risposta sui dati.
+      dati_gestionale: conDati > 0 || (riepilogoLetto && (risultati.length > 0 || !pianoRiuscito)),
       // Quello che e' ACCADUTO, non quello che si era previsto alla creazione del
-      // record: con soloDati internet non viene interrogato, e il riquadro
-      // "Verificata sulle fonti" su una risposta senza fonti e' una bugia.
-      ricerca_online: analisi.norma && !soloDati,
+      // record: con soloDati internet non viene interrogato. Il riquadro
+      // "Verificata sulle fonti" non lo decide piu' questo campo ma le fonti
+      // (verificataSulleFonti, fontiConoscenza.ts): la ricerca accesa non e' una
+      // fonte ufficiale citata.
+      ricerca_online: ricercaOnline,
       ambito: risultati.length && analisi.ambito === 'normativa' ? 'mista' : analisi.ambito,
       dati_mancanti_json: Array.isArray(esito.dati_mancanti) && esito.dati_mancanti.length ? JSON.stringify(esito.dati_mancanti) : undefined,
       allegati_json: allegati.length ? JSON.stringify(allegatiSalvati) : '',

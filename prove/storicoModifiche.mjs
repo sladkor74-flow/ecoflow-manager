@@ -387,6 +387,22 @@ console.log('6. ECOTYNA: CHI HA CAMBIATO IL TARGET DI IRIGOM');
   const chi = await eseguiStrumento(finto, 'storico_modifiche', { chi: 'anna' }, { amministratore: true });
   verifica('si filtra anche per chi ha scritto', chi.dati.modifiche.righe.length === 1 && /GATIM/.test(chi.dati.modifiche.righe[0].cosa), J(chi.dati));
 
+  // I mesi chiusi fuori dal gestionale (revisione del 13/10/2026): la riga che
+  // scrive segnaMesiChiusiFuori, una per mese e canale, si dice col nome
+  // dell'archivio a parole e si trova chiedendo della chiusura.
+  const { rigaStoricoChiusoFuori } = await import('../base44/shared/chiusuraMese.ts');
+  const chiusa = { id: 'mc1', ...rigaStoricoChiusoFuori({ id: 'd1', tipo: 'ATTIVA', anno: 2026, mese: 'Gennaio', tipologia: 'RETE', stato: 'elaborata' }, { utente: 'Amministratore', il: '2026-10-13T10:00:00.000Z' }) };
+  const conChiusa = { asServiceRole: { entities: archivioFinto({ ModificaDato: [...reg, chiusa] }).archivi } };
+  const mesi = await eseguiStrumento(conChiusa, 'storico_modifiche', { cosa: 'chiusura' }, { amministratore: true });
+  const rm = mesi.dati.modifiche.righe;
+  verifica('«chi ha chiuso i mesi?»: la riga del mese chiuso, e solo quella', rm.length === 1 && rm[0].chi === 'Amministratore' && rm[0].dopo === 'chiusa', J(rm));
+  verifica('...col nome dell\'archivio a parole, non quello interno', rm[0] && rm[0].archivio === 'documento della fatturazione attiva', J(rm[0] && rm[0].archivio));
+  for (const cosa of ['chiusi', 'fatturazione']) {
+    const x = await eseguiStrumento(conChiusa, 'storico_modifiche', { cosa }, { amministratore: true });
+    verifica(`anche chiedendo «${cosa}»`, x.dati.modifiche.righe.length === 1 && x.dati.modifiche.righe[0].archivio === 'documento della fatturazione attiva', J(x.dati.modifiche.righe));
+  }
+  verifica('e la nota dice che lo storico registra anche i mesi chiusi fuori', /mesi della fatturazione attiva segnati come chiusi fuori dal gestionale/.test(mesi.dati.nota), mesi.dati.nota);
+
   // Un impianto cancellato: il «dopo» e' vuoto, e l'unita' non deve tornare
   // quella dei chili mentre il numero e' gia' in tonnellate.
   const via = archivioFinto({ ImpiantoTargetSecondaria: [{ id: 'i1', nome_impianto: 'IRIGOM S.R.L.', anno: 2026, target: 1050000, totale_capacity_kg: 1300000, stato: 'attivo' }] });

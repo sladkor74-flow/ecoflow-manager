@@ -10,7 +10,7 @@ import { computeRaccoltoData, MESI } from "./raccoltoCalculator.ts";
 // stessoRaccoglitore e targetDelPortale: l'abbinatore unico fra il nome del
 // target e quello del portale (andamentoTarget.ts). Qui ce n'era una copia
 // propria, con un altro nome (chiusura dell'audit, 11/10/2026).
-import { aggregaTargetMensili, aggregaTargetAnnui, stessoRaccoglitore, targetDelPortale } from "./targetRaccoglitori.ts";
+import { aggregaTargetMensili, aggregaTargetAnnui, stessoRaccoglitore, targetDelPortale, targetMensiliValidi } from "./targetRaccoglitori.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { formatoTonnellate } from "./formato.ts";
 import { giornoRoma, annoRoma } from "./giornoItaliano.ts";
@@ -260,11 +260,18 @@ export async function situazioneGestionale(base44, oggi) {
     const k = normalizzaRagioneSociale(r.raccoglitore);
     if (k && !nomi.has(k)) nomi.set(k, r.raccoglitore);
   }
+  // Il target del mese si somma sui target mensili che valgono: del target
+  // scritto due volte (stesso raccoglitore, regione, impianto, ruolo e mese)
+  // l'ultimo modificato, come Andamento, avvisi e dashboard
+  // (targetMensiliValidi). Da aggregaTargetMensili passava solo l'elenco dei
+  // nomi, e con 80 t e poi 50 t EcoTyna diceva 130 dove gli altri dicevano 50
+  // (revisione del 13/10/2026).
+  const mensiliValidi = targetMensiliValidi(mensili);
   if (nomi.size) {
     righe.push(`Raccoglitori, solo RETE (target annuo | raccolto da inizio anno | target ${mese} | raccolto ${mese}):`);
     for (const [k, nome] of [...nomi.entries()].sort((a, b) => a[1].localeCompare(b[1], 'it'))) {
       const annuo = annuiAgg.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k).reduce((s, r) => s + r.target_tonnellate, 0);
-      const delMese = mensili.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k && r.mese === mese);
+      const delMese = mensiliValidi.filter(r => normalizzaRagioneSociale(r.raccoglitore) === k && r.mese === mese);
       const targetMese = delMese.filter(r => !r.non_raccoglie).reduce((s, r) => s + (Number(r.target) || 0), 0);
       const nonRaccoglie = delMese.length > 0 && delMese.every(r => r.non_raccoglie);
       const tuttiNomi = [...nomi.values()];

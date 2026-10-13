@@ -8,6 +8,7 @@
 // Ultima verifica complessiva: 14 settembre 2026.
 
 import { fetchAll } from "./fetchAll.ts";
+import { leggiFontiTesto, urlUfficiale } from "./fontiConoscenza.ts";
 
 export const VERIFICATO_IL = '2026-09-14';
 
@@ -556,9 +557,290 @@ export async function proponiPrecisazioni(base44, precisazioni, { oggi, utente, 
   return create;
 }
 
-const fontiDi = (v: VoceApprovata) => {
-  try { const f = JSON.parse(v.fonti_json || '[]'); return Array.isArray(f) ? f.map(String) : []; } catch { return []; }
+// LE FONTI COME TESTO, ANCHE QUANDO SONO OGGETTI (segnalazione alta A72 del
+// 20/09, corretta il 12/10/2026). Le FAQ salvate da «Corretta, salva come FAQ»
+// portavano le fonti della risposta come oggetti, e map(String) le scriveva nel
+// prompt di EcoTyna, del controllo mensile, del corso e della qualifica come
+// «[object Object]» - proprio sulla voce piu' recente, che prevale. Le FAQ nuove
+// si salvano gia' come testo; questa lettura sistema anche quelle di prima.
+const fontiDi = (v: VoceApprovata) => leggiFontiTesto(v.fonti_json);
+
+// === Le fonti di una risposta di EcoTyna: che cosa e' verificato davvero ===
+//
+// Segnalazioni alte A71 e A76 del 20/09, corrette il 12/10/2026, quando l'utente
+// ha chiesto un'EcoTyna piu' realistica: una voce realistica non dichiara
+// certezze che non ha. Fino a quel giorno chiediAssistente scriveva accanto a
+// OGNI fonte senza data «verificata il 14/09/2026» - la data della base di
+// conoscenza, presa d'ufficio - anche su una norma che nessuna voce cita, o su
+// un sito trovato online quel momento. La data di verifica adesso c'e' solo se
+// la fonte e' quella di una voce della base di conoscenza, ed e' la data di quella
+// voce (dell'aggiornamento approvato, se la voce e' stata aggiornata). Il modello
+// non la scrive piu': la mette il gestionale.
+
+const semplice = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const MESE_ATTO = '(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)';
+
+/**
+ * Gli estremi di un atto: «152/2006»; «n. 6 del 26 novembre 2025» e «3 giugno 2014 n. 120» diventano «6/2025» e «120/2014».
+ * Una data non e' un atto (revisione del 13/10/2026): «17/09/2026» dava l'estremo
+ * «09/2026», e la voce sul FIR digitale, che cita la «Precisazione della direzione
+ * SMOCO del 17/09/2026», prendeva qualunque fonte con una data di settembre 2026
+ * («Circolare del 10/09/2026»). Il numero dopo una barra o prima di una barra non
+ * fa un estremo.
+ */
+function estremiAtto(t) {
+  const s = semplice(t);
+  const out = new Set(s.match(/(?<![\d/])\b\d{1,4}\/\d{4}\b(?!\/)/g) || []);
+  for (const m of s.matchAll(new RegExp(`\\bn\\.?\\s*(\\d{1,4})\\s+del\\s+\\d{1,2}\\s+${MESE_ATTO}\\s+(\\d{4})`, 'g'))) out.add(`${m[1]}/${m[2]}`);
+  for (const m of s.matchAll(new RegExp(`\\b\\d{1,2}\\s+${MESE_ATTO}\\s+(\\d{4})\\s+n\\.?\\s*(\\d{1,4})\\b`, 'g'))) out.add(`${m[2]}/${m[1]}`);
+  return out;
+}
+
+/** I numeri degli articoli citati: «art. 3 c. 6» e' 3; «artt. 184-ter, 208, 214-216» sono 184, 208, 214 e 216. */
+function articoliCitati(t) {
+  const s = semplice(t);
+  const out = new Set<string>();
+  for (const m of s.matchAll(/\bart(?:t|icol[io])?\.?\s*((?:\d+(?:\s*-?\s*(?:bis|ter|quater|quinquies|sexies|septies|octies|novies|decies))?(?:\s*(?:,|\be\b|-)\s*)?)+)/g)) {
+    for (const n of m[1].match(/\d+/g) || []) out.add(n);
+  }
+  return out;
+}
+
+const paroleFonte = (t) => new Set(semplice(t).split(/[^a-z0-9]+/).filter(w => w.length >= 4 || /^\d+$/.test(w)));
+const indirizzo = (u) => semplice(String(u || '').trim()).replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[/#?]+$/, '');
+const eIndirizzo = (t) => /^https?:\/\/\S+$/i.test(String(t || '').trim());
+
+// LA PAGINA PRINCIPALE DI UN SITO NON DICE QUALE ATTO (revisione del 13/10/2026,
+// rilievo sulla A71). Quattro voci citano un sito intero - rentri.gov.it,
+// albonazionalegestoriambientali.it, pneumaticifuoriuso.it - e il prompt stesso
+// da' al modello quegli indirizzi: una FAQ RENTRI del 2 ottobre 2026 trovata
+// online, scritta con l'indirizzo del sito, prendeva «base di conoscenza,
+// verificata il 14/09/2026», diciotto giorni prima che la FAQ esistesse. Lo
+// stesso il D.Lgs. 81/2008 con l'indirizzo dell'Albo. Per una pagina principale
+// l'indirizzo non basta: serve anche un estremo dell'atto o un articolo che la
+// voce cita, o una parola del titolo della voce che non sia il nome del sito.
+const paginaPrincipale = (u) => {
+  const i = indirizzo(u);
+  const p = i.indexOf('/');
+  return p < 0 || /^\/(?:index\.(?:html?|php|aspx?)|home(?:page)?|it|ita)?$/.test(i.slice(p));
 };
+
+// Due parole sono la stessa a meno della desinenza: «formulari» e «formulario»,
+// «lista» e «liste», ma non «data» e «dati» (quattro lettere almeno in comune).
+const simili = (a, b) => {
+  if (a === b) return true;
+  let n = 0;
+  while (n < a.length && n < b.length && a[n] === b[n]) n++;
+  return n >= 4 && n >= Math.min(a.length, b.length) - 2;
+};
+
+const MESI_NOMI = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+// Il mese per esteso o abbreviato («ott.», «sett.», «genn.», «magg.»): la forma
+// lunga prima, perche' la piu' corta non si fermi a meta' della parola. Le tre
+// lettere bastano a dire il mese: nessun altro comincia allo stesso modo.
+const MESE_DATA = MESI_NOMI.map(n => [n, ...(['gen', 'feb', 'mag', 'set'].includes(n.slice(0, 3)) ? [n.slice(0, 4)] : []), n.slice(0, 3)].join('|')).join('|');
+const due = (n) => String(n).padStart(2, '0');
+// L'anno a due cifre: «02/10/26» e' il 2026, ma «5.2.98» (il DM 5 febbraio 1998
+// sul recupero agevolato) e' il 1998, non il 2098 «dopo» ogni verifica. Come
+// fanno i calendari: dal 70 in su e' del Novecento.
+const annoIntero = (a) => (a.length === 4 ? a : String((Number(a) >= 70 ? 1900 : 2000) + Number(a)));
+const dataSeEsiste = (anno, mese, giorno) => (Number(mese) >= 1 && Number(mese) <= 12 && Number(giorno) >= 1 && Number(giorno) <= 31 ? `${anno}-${due(mese)}-${due(giorno)}` : null);
+
+/**
+ * Le date scritte in un testo, in AAAA-MM-GG: «2 ottobre 2026», «2 ott. 2026», «02/10/2026», «02.10.2026», «02-10-2026», «02/10/26», «2026-10-02», «2026/10/02»; «ottobre 2026» e' il primo del mese.
+ * Le date coi punti si leggono dalla revisione del 13/10/2026: la FAQ RENTRI «del
+ * 02.10.2026» non era «dopo» la verifica e prendeva la data della voce sul FIR
+ * digitale, verificata il 17/09/2026. Nell'ultimo giro della stessa revisione
+ * anche coi trattini, col mese abbreviato e con l'anno a due cifre: il prompt non
+ * da' al modello un formato per le date delle fonti, e la stessa FAQ scritta «del
+ * 02-10-2026» o «del 2 ott. 2026» prendeva ancora «verificata il 17/09/2026».
+ */
+function dateScritte(t) {
+  const s = semplice(t);
+  const out = new Set<string>();
+  for (const m of s.matchAll(new RegExp(`\\b(?:(\\d{1,2})\\s+)?(${MESE_DATA})(?:\\.\\s*|\\s+)(\\d{4})\\b`, 'g'))) {
+    out.add(`${m[3]}-${due(MESI_NOMI.findIndex(n => n.startsWith(m[2].slice(0, 3))) + 1)}-${due(m[1] || 1)}`);
+  }
+  // Lo stesso segno fra giorno, mese e anno, e un giorno e un mese che esistono:
+  // «3.6.2014» si', «1.2/2026» e «52.53.2026» no. Due numeri soli non sono una
+  // data: «art. 214-216», «c. 52-53».
+  for (const m of s.matchAll(/\b(\d{1,2})([/.-])(\d{1,2})\2(\d{4}|\d{2})\b/g)) {
+    const d = dataSeEsiste(annoIntero(m[4]), m[3], m[1]);
+    if (d) out.add(d);
+  }
+  // L'anno davanti: «2026-10-02», e allo stesso modo «2026/10/02» e «2026.10.02».
+  for (const m of s.matchAll(/\b(\d{4})([/.-])(\d{1,2})\2(\d{1,2})\b/g)) {
+    const d = dataSeEsiste(m[1], m[3], m[4]);
+    if (d) out.add(d);
+  }
+  return out;
+}
+
+// Parole che non dicono di quale voce si parla: tutte le voci le hanno, o sono
+// le parole di chi cita la voce («verificata il ...»).
+const GENERICHE = new Set(['base', 'conoscenza', 'voce', 'voci', 'della', 'delle', 'dello', 'degli', 'dalla', 'sulla', 'sulle', 'nella', 'nelle', 'regola', 'regole', 'gestionale', 'smoco', 'direzione', 'verificata', 'verificato', 'aggiornata', 'aggiornato']);
+// Parole di un titolo che non bastano a riconoscere una pagina di un sito: le ha
+// qualunque pagina («date», «sistema»).
+const DEBOLI = new Set(['date', 'data', 'dati', 'sistema', 'pagina', 'sito', 'portale', 'nuove', 'nuovo', 'novita']);
+
+type VoceDelleFonti = { id: string; titolo: string; fonti: string[]; data: string; date_note: Set<string> };
+
+/**
+ * Gli atti e gli articoli che la fonte citata dice, controllati sulla voce come in
+ * stessaFonte: null se la fonte non ne dice. Un atto deve essere uno di quelli che
+ * la voce cita, con i suoi articoli; degli articoli senza atto devono essere
+ * articoli che la voce cita. Vale per la pagina principale di un sito
+ * (confermaDelSito) e per la fonte che porta il titolo o l'id della voce
+ * (voceDellaFonte).
+ */
+function attiDellaVoce(voce: VoceDelleFonti, testoCitato) {
+  const altre = voce.fonti.filter(f => !eIndirizzo(f));
+  if (estremiAtto(testoCitato).size) return altre.some(f => stessaFonte(f, testoCitato, '', voce));
+  const art = articoliCitati(testoCitato);
+  if (!art.size) return null;
+  const artVoce = new Set(altre.flatMap(f => [...articoliCitati(f)]));
+  return [...art].every(a => artVoce.has(a));
+}
+
+/**
+ * Per una voce che cita la pagina principale di un sito: la fonte citata con lo
+ * stesso indirizzo e' quella della voce solo se lo conferma qualcos'altro. Un
+ * atto deve essere uno di quelli che la voce cita, con i suoi articoli; degli
+ * articoli senza atto devono essere articoli che la voce cita; altrimenti serve
+ * una parola del titolo della voce che non sia il nome del sito («rentri» la ha
+ * ogni pagina del RENTRI).
+ */
+function confermaDelSito(voce: VoceDelleFonti, testoCitato, sito) {
+  const atti = attiDellaVoce(voce, testoCitato);
+  if (atti !== null) return atti;
+  const nome = indirizzo(sito).split('/')[0].replace(/[^a-z0-9]/g, '');
+  const delTitolo = [...paroleFonte(voce.titolo)].filter(w => !/^\d+$/.test(w) && !GENERICHE.has(w) && !DEBOLI.has(w) && !nome.includes(w));
+  const citate = [...paroleFonte(testoCitato)];
+  return delTitolo.some(w => citate.some(c => simili(w, c)));
+}
+
+/**
+ * true se la fonte citata nella risposta e' quella scritta in una voce. Un
+ * indirizzo vale per la stessa pagina, e la pagina principale di un sito solo con
+ * una conferma (confermaDelSito); una norma per gli stessi estremi e, se la
+ * risposta cita articoli, per articoli che la voce cita tutti: la voce sul FIR,
+ * art. 193, non ha verificato l'art. 258, e una voce che cita il DM 59/2023 senza
+ * articoli non ha verificato l'art. 21 (revisione del 13/10/2026: prima una voce
+ * senza articoli faceva passare qualunque articolo dell'atto). Il resto (regole
+ * della direzione, FAQ del RENTRI) per tutte le parole della fonte della voce.
+ */
+function stessaFonte(fonteVoce, testoCitato, url, voce: VoceDelleFonti) {
+  const fv = String(fonteVoce || '').trim();
+  if (!fv) return false;
+  if (eIndirizzo(fv)) {
+    if (!url || indirizzo(url) !== indirizzo(fv)) return false;
+    return !paginaPrincipale(fv) || confermaDelSito(voce, testoCitato, fv);
+  }
+  const atti = estremiAtto(fv);
+  if (atti.size) {
+    if (![...estremiAtto(testoCitato)].some(e => atti.has(e))) return false;
+    const artCitati = articoliCitati(testoCitato);
+    if (!artCitati.size) return true;
+    const artVoce = articoliCitati(fv);
+    return artVoce.size > 0 && [...artCitati].every(a => artVoce.has(a));
+  }
+  const pv = paroleFonte(fv);
+  if (pv.size < 3) return false;
+  const pc = paroleFonte(testoCitato);
+  return [...pv].every(w => pc.has(w));
+}
+
+/** Le voci con le loro fonti e la data di verifica: quelle del codice (aggiornate, se lo sono) e quelle aggiunte. */
+function vociDelleFonti(approvate: VoceApprovata[] = []): VoceDelleFonti[] {
+  const sostituzioni = sostituzioniValide(approvate);
+  // Le date che la voce stessa scrive (una scadenza futura che conosce, come il
+  // 16 settembre 2026 del FIR digitale): una fonte che le porta non e' «dopo».
+  const note = (...testi) => dateScritte(testi.join(' '));
+  const delCodice = BASE_CONOSCENZA.map(v => {
+    const s = sostituzioni.get(v.id);
+    // Un aggiornamento approvato riscrive tutta la voce, conservando cio' che resta
+    // valido: le sue fonti si aggiungono a quelle della voce, e la data e' la sua.
+    if (!s) return { id: v.id, titolo: v.titolo, fonti: v.fonti, data: v.verificato_il, date_note: note(v.testo, ...v.fonti) };
+    const fonti = [...fontiDi(s), ...v.fonti];
+    return { id: v.id, titolo: v.titolo, fonti, data: dataVoce(s), date_note: note(v.testo, s.testo || '', ...fonti) };
+  });
+  const aggiunte = approvate
+    .filter(v => v.id && v.testo && !(v.tipo === 'aggiornamento_normativo' && v.voce_id && BASE_CONOSCENZA.some(b => b.id === v.voce_id)))
+    .map(v => { const fonti = fontiDi(v); return { id: String(v.id), titolo: v.titolo || '', fonti, data: dataVoce(v), date_note: note(v.testo || '', ...fonti) }; });
+  return [...delCodice, ...aggiunte];
+}
+
+/**
+ * Una fonte con una data successiva alla verifica della voce non e' stata
+ * verificata quel giorno: la FAQ RENTRI del 2 ottobre 2026 non e' la voce
+ * verificata il 17/09/2026 sul FIR digitale, anche se ne parla (revisione del
+ * 13/10/2026). Le date che la voce scrive da se' non contano.
+ */
+const dopoLaVerifica = (testoCitato, v: VoceDelleFonti) => !!v.data && [...dateScritte(testoCitato)].some(d => d > v.data && !v.date_note.has(d));
+
+/**
+ * La fonte e' la voce stessa: il modello cita la base di conoscenza («Base di
+ * conoscenza - Liste degli assegnati»). Niente atti, articoli o indirizzo suoi, e
+ * tutte le sue parole sono parole del titolo della voce. Una parola sola in comune
+ * non basta: «Linee guida ISPRA sul formulario» e' un altro documento, non la voce
+ * «Formulario e microraccolta» (revisione del 13/10/2026).
+ */
+function eLaVoce(fonte, citato, v: VoceDelleFonti) {
+  if (fonte.url || estremiAtto(citato).size || articoliCitati(citato).size) return false;
+  const parole = [...paroleFonte(citato)].filter(w => !/^\d+$/.test(w) && !GENERICHE.has(w));
+  const delTitolo = [...paroleFonte(`${v.titolo} ${v.id.replace(/-/g, ' ')}`)];
+  return parole.length > 0 && parole.every(w => delTitolo.some(t => simili(w, t)));
+}
+
+/**
+ * La voce della base di conoscenza da cui viene una fonte, o null. L'id che il
+ * modello suggerisce (voce_id) si accetta se la fonte e' davvero quella voce, o
+ * se la fonte e' la voce stessa (eLaVoce). Una fonte con una data successiva alla
+ * verifica non e' di quella voce. Se piu' voci citano la stessa norma si dice la
+ * verifica piu' vecchia: e' quella che vale per tutte.
+ *
+ * Il titolo o l'id della voce nella fonte non bastano se la fonte cita atti o
+ * articoli che la voce non cita (revisione del 13/10/2026, rilievo sulla A71): il
+ * prompt mostra le voci per titolo, e «Chi si iscrive al RENTRI - DM 59/2023 art.
+ * 21» prendeva la verifica del 14/09/2026 di una voce che l'art. 21 non lo cita;
+ * cosi' «Formulario e microraccolta - D.Lgs. 152/2006 art. 258», con la voce che
+ * cita solo l'art. 193. Lo stesso controllo di stessaFonte (attiDellaVoce).
+ */
+function voceDellaFonte(fonte, voci: VoceDelleFonti[], suggerita = '') {
+  const citato = `${fonte.titolo || ''} ${fonte.riferimento || ''}`;
+  const s = semplice(citato);
+  const conIlNome = (v: VoceDelleFonti) => s.includes(semplice(v.id)) || (semplice(v.titolo).length >= 15 && s.includes(semplice(v.titolo)));
+  const cita = (v: VoceDelleFonti) => !dopoLaVerifica(citato, v) && (
+    v.fonti.some(fv => stessaFonte(fv, citato, fonte.url, v))
+    || (conIlNome(v) && attiDellaVoce(v, citato) !== false));
+  const proposta = suggerita ? voci.find(v => v.id === suggerita) : null;
+  if (proposta && (cita(proposta) || (!dopoLaVerifica(citato, proposta) && eLaVoce(fonte, citato, proposta)))) return proposta;
+  const trovate = voci.filter(cita);
+  if (!trovate.length) return null;
+  return trovate.reduce((a, b) => ((b.data || '9999') < (a.data || '9999') ? b : a));
+}
+
+/**
+ * Le fonti di una risposta di EcoTyna, ripulite, con quello che e' vero di
+ * ciascuna: verificato_il e voce solo se viene da una voce della base di
+ * conoscenza; ufficiale se e' su un sito ufficiale e la ricerca online era accesa
+ * (un indirizzo scritto a memoria non e' una verifica). Il riquadro «Verificata
+ * sulle fonti» della chat si accende solo con una di queste due cose
+ * (verificataSulleFonti, fontiConoscenza.ts).
+ */
+export function fontiDellaRisposta(fonti, approvate: VoceApprovata[] = [], { ricercaOnline = false }: { ricercaOnline?: boolean } = {}) {
+  const voci = vociDelleFonti(approvate);
+  const corto = (v, n) => { const t = String(v || '').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
+  return (Array.isArray(fonti) ? fonti : [])
+    .filter(f => f && typeof f === 'object' && (f.titolo || f.riferimento || f.url))
+    .slice(0, 12)
+    .map(f => {
+      const url = /^https?:\/\//i.test(String(f.url || '').trim()) ? String(f.url).trim() : '';
+      const fonte = { titolo: corto(f.titolo, 200), riferimento: corto(f.riferimento, 300), url };
+      const voce = voceDellaFonte(fonte, voci, String(f.voce_id || '').trim());
+      return { ...fonte, verificato_il: voce ? voce.data : '', voce: voce ? voce.id : '', ufficiale: !!ricercaOnline && urlUfficiale(url) };
+    });
+}
 
 /** Voci approvate e attive salvate nel gestionale; lista vuota se l'entita' non e' leggibile. */
 export async function vociApprovate(base44) {
