@@ -195,7 +195,12 @@ export async function leggiRegistroOmologhe(file) {
     }
 
     const tipo = testo(cella(r, colTipo));
-    if (!/omologa/i.test(tipo)) continue;
+    // Vale solo «OMOLOGA OK» (anche «OMOLOGA OK(R12)»), non qualunque cella con
+    // la parola «omologa» (audit del 20/09, alta A15; corretta il 12/10/2026):
+    // «OMOLOGA DA RIFARE» o «IN ATTESA OMOLOGA» passavano per omologhe
+    // recepite. Sul registro di Irigom del 09/10/2026 le 143 annotazioni sono
+    // tutte OK, quindi oggi non cambia nessun numero.
+    if (!/omologa\s*ok/i.test(tipo)) continue;
     const gia = perProduttore.get(chiave);
     if (!gia) {
       perProduttore.set(chiave, { nome: prod, data, riga: r + 1, volte: 1, nota: tipo, fir: colFir >= 0 ? testo(cella(r, colFir)) : '' });

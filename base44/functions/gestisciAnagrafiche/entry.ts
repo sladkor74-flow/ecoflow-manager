@@ -6,6 +6,8 @@ import { controlliTariffaAttiva, controlliUnitaTariffa } from "../../shared/ecot
 import { conflittiTariffa, periodoTariffa } from "../../shared/conflittiTariffa.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { traccia, eliminaConTraccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
+import { riferimentiFornitore, riferimentiTariffa, testoRiferimenti, ARCHIVI_MOVIMENTI } from "../../shared/riferimentiAnagrafica.ts";
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
 
 // Gestisce le operazioni di scrittura su entità anagrafiche (Tariffa, Fornitore, Servizio).
 // FornitoreSecondaria non passa piu' di qui (27/09/2026): i collegamenti degli
@@ -15,7 +17,7 @@ import { traccia, eliminaConTraccia, utenteDellaRichiesta, unisciTracce } from "
 //   - campi obbligatori, chiave di unicità, sovrapposizione periodi, auto-chiusura rinegoziazione.
 // Le regole dei conflitti stanno in shared/conflittiTariffa.ts dall'11/10/2026,
 // perche' le usa anche la copia d'anno (preparaAnno).
-// Payload: { entita, operazione, id?, dati?, motivo? }
+// Payload: { entita, operazione, id?, dati?, motivo?, conferma_eliminazione? }
 //
 // LE TARIFFE SI SCRIVONO CON LA TRACCIA (11/10/2026). Prezzo, unita', date di
 // validita' e stato di una tariffa, scritti a mano o chiusi da un prezzo nuovo,
@@ -47,13 +49,52 @@ async function nomeGiaPresente(base44, entita, nome, idEscluso = null) {
   return tutti.find(x => x && x.id !== idEscluso && chiaveNome(x[CAMPO_NOME[entita]]) === chiave) || null;
 }
 
+// PRIMA DI ELIMINARE SI GUARDA CHI LO USA (audit del 20/09, alta A88; corretta
+// il 12/10/2026). Un fornitore o una tariffa si eliminavano subito: le tariffe,
+// le voci della passiva, i contratti e i movimenti restavano senza il loro
+// soggetto o senza prezzo, e lo storico registrava l'eliminazione senza
+// fermarla. Ora, se qualcosa li usa, si risponde 409 con l'elenco
+// (shared/riferimentiAnagrafica.ts) e la proposta che non rompe niente -
+// disattivare il fornitore, chiudere il periodo della tariffa -; si elimina lo
+// stesso solo con conferma_eliminazione, e il motivo nello storico lo dice.
+// Se un archivio non si legge, l'errore sale: un controllo a meta' direbbe
+// «nessuno lo usa» quando non lo sa.
+//
+// Lo stesso vale per il record da eliminare (revisione del 13/10/2026): la sua
+// lettura finiva in un catch che dava null, e con null il controllo si saltava,
+// cosi' un errore passeggero bastava a eliminare senza domande un fornitore
+// usato. Se non si legge, si risponde errore e non si elimina niente.
+async function riferimentiPrimaDiEliminare(base44, entita, id) {
+  const svc = base44.asServiceRole.entities;
+  const [cosa, eliminato] = entita === 'Tariffa' ? ['la tariffa', 'eliminata'] : ['il fornitore', 'eliminato'];
+  let record;
+  try {
+    record = await svc[entita].get(id);
+  } catch (e) {
+    throw new Error(`Non riesco a leggere ${cosa} da eliminare (${e && e.message ? e.message : e}): non l'ho ${eliminato}, riprova.`);
+  }
+  if (!record) throw new Error(`Non trovo ${cosa} da eliminare: non l'ho ${eliminato}, ricarica la pagina.`);
+  const movimenti = {};
+  for (const archivio of ARCHIVI_MOVIMENTI) movimenti[archivio] = await fetchAll(svc[archivio]);
+  const fornitori = await fetchAll(svc.Fornitore);
+  // «Chiudi periodo» solo a una tariffa ancora aperta (revisione del
+  // 13/10/2026): a una gia' chiusa - dal 01/01/2027 tutte quelle del 2026 - la
+  // proposta portava a chiuderla a oggi, cioe' ad allungarla, contro i contratti
+  // annuali senza tacito rinnovo. La regola, e il testo per una tariffa chiusa,
+  // stanno in riferimentiTariffa e testoRiferimenti; qui si passa il giorno
+  // italiano di oggi.
+  if (entita === 'Tariffa') return riferimentiTariffa(record, { movimenti, fornitori, oggi: oggiRoma() });
+  const [tariffe, voci, contratti] = [await fetchAll(svc.Tariffa), await fetchAll(svc.VocePassivaAmministrazione), await fetchAll(svc.ContrattoFornitore)];
+  return riferimentiFornitore(record, { tariffe, fornitori, voci, contratti, movimenti });
+}
+
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return rispostaSolaLettura();
-    const { entita, operazione, id, dati, motivo } = await req.json();
+    const { entita, operazione, id, dati, motivo, conferma_eliminazione } = await req.json();
     const svc = base44.asServiceRole.entities;
     const comeScrive = { utente: utenteDellaRichiesta(user), origine: 'Tariffe & Anagrafiche', motivo: String(motivo || '').trim() };
     const tracce = [];
@@ -218,6 +259,17 @@ export default async function(req) {
       tracce.push(scritta.traccia);
       result = scritta.record;
     } else if (operazione === 'delete') {
+      // Chi usa il fornitore o la tariffa (A88, 12/10/2026): vedi
+      // riferimentiPrimaDiEliminare qui sopra.
+      if (entita === 'Fornitore' || entita === 'Tariffa') {
+        const riferimenti = await riferimentiPrimaDiEliminare(base44, entita, id);
+        if (riferimenti && riferimenti.totale > 0) {
+          if (conferma_eliminazione !== true) {
+            return Response.json({ error: testoRiferimenti(riferimenti), riferimenti, richiede_conferma: true, conferma: 'eliminazione' }, { status: 409 });
+          }
+          comeScrive.motivo = [comeScrive.motivo, `eliminazione confermata nonostante: ${riferimenti.elenco.join("; ")}`].filter(Boolean).join(' — ');
+        }
+      }
       const tolta = await eliminaConTraccia(svc, entita, id, comeScrive);
       tracce.push(tolta.traccia);
       result = { id, deleted: true };

@@ -11,7 +11,7 @@ import { getRegioneFromProvincia } from './regioneMap.ts';
 import { mappaFatturazione, fatturaA } from "./subfornitori.ts";
 import { giornoRoma, annoRoma, meseRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
-import { chiaveFormulario, raggruppaPerFormulario, ordineDi, ticketDi } from "./formulari.ts";
+import { chiaveFormulario, raggruppaPerFormulario, ordineDi, ticketDi, MINIMO_ACI_KG, SOGLIA_ACI } from "./formulari.ts";
 import { anomalieDateFormulari } from "./filtroPeriodo.ts";
 import { tariffaValeIl, tariffaNonDisattivata, disattivateNelPeriodo } from "./validitaTariffa.ts";
 import { unitaSconosciuta, avvisoPesoMancante, arrotondaAlCentesimo } from "./ecotyreTariffe.ts";
@@ -20,9 +20,8 @@ const NOMI_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta'
 
 // Regole del portale sull'ACI, dette dalla direzione il 19/09/2026: una
 // richiesta non si stima sotto i 1.500 kg, e un formulario non si chiude a piu'
-// del 10% del peso stimato del suo ticket.
-const MINIMO_ACI_KG = 1500;
-const SOGLIA_ACI = 1.1;
+// del 10% del peso stimato del suo ticket. MINIMO_ACI_KG e SOGLIA_ACI stanno in
+// formulari.ts dal 13/10/2026: le usa anche la pagina Terminati ACI, dallo specchio.
 
 const MESI_MAP = {
   'gennaio': 0, 'febbraio': 1, 'marzo': 2, 'aprile': 3, 'maggio': 4, 'giugno': 5,

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Plus, Trash2, Power } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
 export default function FornitoriManager() {
   const [fornitori, setFornitori] = useState([]);
@@ -44,9 +45,45 @@ export default function FornitoriManager() {
     load();
   };
 
+  // PRIMA DI ELIMINARE, CHI LO USA (audit del 20/09, alta A88; corretta il
+  // 12/10/2026). Qui si chiedeva solo «Eliminare X?» e il fornitore spariva con
+  // le sue tariffe, le voci della passiva e i movimenti che lo nominano senza
+  // piu' un soggetto. Ora gestisciAnagrafiche conta i riferimenti e, se ce ne
+  // sono, non elimina: risponde con l'elenco, e qui si propone di disattivarlo
+  // (resta per i conti gia' fatti) o di eliminarlo lo stesso, con una conferma
+  // che l'elenco l'ha mostrato. Anche un errore si dice: prima non si vedeva.
+  const [inUso, setInUso] = useState(null);
+  const [erroreAzione, setErroreAzione] = useState('');
+  const datiErrore = (e) => e?.response?.data || e?.data || {};
+  const elimina = async (f, conferma = false) => {
+    setErroreAzione('');
+    try {
+      await base44.functions.invoke('gestisciAnagrafiche', {
+        entita: 'Fornitore', operazione: 'delete', id: f.id, motivo: 'eliminato dall\'anagrafica dei fornitori',
+        ...(conferma ? { conferma_eliminazione: true } : {}),
+      });
+      setInUso(null);
+      load();
+    } catch (e) {
+      const d = datiErrore(e);
+      if (!conferma && d.richiede_conferma && d.riferimenti) { setInUso({ f, riferimenti: d.riferimenti, testo: d.error }); return; }
+      setInUso(null);
+      setErroreAzione(d.error || e?.message || 'Il fornitore non si è potuto eliminare.');
+    }
+  };
   const remove = async (f) => {
     if (!confirm(`Eliminare ${f.ragione_sociale}?`)) return;
-    await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Fornitore', operazione: 'delete', id: f.id }); load();
+    await elimina(f);
+  };
+  const disattivaInUso = async () => {
+    const { f } = inUso;
+    setInUso(null);
+    try {
+      await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Fornitore', operazione: 'update', id: f.id, dati: { stato: 'non_attivo' }, motivo: 'disattivato invece di eliminarlo: è ancora usato' });
+    } catch (e) {
+      setErroreAzione(datiErrore(e).error || e?.message || 'Il fornitore non si è potuto disattivare.');
+    }
+    load();
   };
 
   if (loading) return <div className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
@@ -77,6 +114,29 @@ export default function FornitoriManager() {
           <Button size="sm" onClick={add}>Salva</Button>
         </div>
       )}
+      {erroreAzione && <div className="text-sm text-destructive">{erroreAzione}</div>}
+      <Dialog open={inUso !== null} onOpenChange={(o) => !o && setInUso(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{inUso ? `${inUso.f.ragione_sociale} è ancora usato` : ''}</DialogTitle>
+          </DialogHeader>
+          {inUso && (
+            <div className="space-y-3 text-sm">
+              <ul className="list-disc pl-5 space-y-0.5">
+                {(inUso.riferimenti.elenco || []).map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+              <div className="bg-amber-50 border border-amber-300 rounded p-3 text-amber-800 text-xs">
+                Eliminandolo, questi restano senza il loro fornitore: la passiva non sa più a chi fatturare e il foglio dell&apos;amministrazione perde il soggetto. Disattivandolo resta per i conti già fatti e non si propone più nelle scelte.
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInUso(null)}>Annulla</Button>
+            <Button variant="outline" onClick={disattivaInUso}><Power className="w-4 h-4 mr-1" /> Disattiva</Button>
+            <Button variant="destructive" onClick={() => inUso && elimina(inUso.f, true)}><Trash2 className="w-4 h-4 mr-1" /> Elimina comunque</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted"><tr>

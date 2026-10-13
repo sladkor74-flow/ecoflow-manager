@@ -9,6 +9,7 @@ import { formatNumber } from '@/lib/utils';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { chiaveMatch, chiaveMatchAttiva, periodiSovrapposti } from '@/lib/conflittiTariffa';
 import { tariffaNonDisattivata } from '@/lib/validitaTariffa';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import TariffeRuoliFornitori from './TariffeRuoliFornitori';
 import TariffeForm from './TariffeForm';
@@ -23,6 +24,27 @@ function isArchiviata(t) {
   return false;
 }
 function isAperta(t) { return t.stato === 'attivo' && !t.data_fine_validita; }
+// Il periodo e' ancora aperto se la tariffa non ha una data di fine o se la
+// data di fine e' dopo oggi (giorno italiano): solo allora «Chiudi periodo» la
+// accorcia. A una tariffa gia' chiusa - dal 01/01/2027 tutte quelle del 2026 -
+// lo stesso pulsante proponeva la data di oggi, e accettandola il prezzo valeva
+// anche nell'anno dopo, contro i contratti annuali senza tacito rinnovo
+// (revisione del 13/10/2026).
+function periodoAncoraAperto(t) {
+  const al = String((t && t.data_fine_validita) || '').slice(0, 10);
+  return !al || al > oggiRoma();
+}
+const dataIt = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : '');
+// La data scritta a mano: gg/mm/aaaa, come le date a video; si accetta anche
+// aaaa-mm-gg. Una data che non esiste (31/02) non passa.
+function leggiDataScritta(testo) {
+  const v = String(testo || '').trim();
+  const it = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const iso = it ? `${it[3]}-${it[2].padStart(2, '0')}-${it[1].padStart(2, '0')}` : (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  if (!iso) return null;
+  const d = new Date(`${iso}T12:00:00Z`);
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso ? iso : null;
+}
 function countRuoli(f) { return ['ruolo_raccolta','ruolo_trasporto_secondaria','ruolo_trattamento','ruolo_stoccaggio'].filter(r => f[r]).length; }
 function getAmbito(t) {
   if (t.direzione === 'ATTIVA') return t.regione || 'Tutte le regioni';
@@ -189,8 +211,22 @@ export default function TariffeUnificate() {
   }, [tariffe, filters, showOnlyDup, showOnlyNoPrest, duplicateIds]);
 
   const closePeriod = async (t) => {
-    const dataFine = prompt('Inserisci la data di fine validità (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
-    if (!dataFine) return;
+    // Chiudere il periodo lo accorcia, mai lo allunga (revisione del 13/10/2026):
+    // a una tariffa gia' chiusa non si propone niente, e una data dopo la fine
+    // che la tariffa ha gia' non si accetta. La data proposta e' oggi in Italia.
+    if (!periodoAncoraAperto(t)) {
+      alert(`Il periodo di questa tariffa è già chiuso: vale fino al ${dataIt(t.data_fine_validita)} e non va allungato.`);
+      return;
+    }
+    const scritta = prompt('Inserisci la data di fine validità (gg/mm/aaaa):', dataIt(oggiRoma()));
+    if (!scritta) return;
+    const dataFine = leggiDataScritta(scritta);
+    if (!dataFine) { alert('Data non valida: scrivila come gg/mm/aaaa.'); return; }
+    const fineAttuale = String(t.data_fine_validita || '').slice(0, 10);
+    if (fineAttuale && dataFine > fineAttuale) {
+      alert(`Chiudere il periodo non lo allunga: la tariffa vale fino al ${dataIt(fineAttuale)}. Per cambiare le date usa «Modifica».`);
+      return;
+    }
     try {
       // Solo la data di fine: la tariffa resta valida per i giorni che ha
       // coperto, altrimenti i mesi gia' fatturati con quel prezzo resterebbero
@@ -214,16 +250,35 @@ export default function TariffeUnificate() {
     } catch (e) { alert(e?.response?.data?.error || e?.message); }
   };
 
-  const handleDelete = async () => {
+  // PRIMA DI ELIMINARE, CHI LA USA (audit del 20/09, alta A88; corretta il
+  // 12/10/2026). gestisciAnagrafiche conta i movimenti terminati del periodo
+  // della tariffa a cui puo' dare il prezzo: se ce ne sono non elimina, e qui si
+  // mostra l'elenco con «Chiudi periodo» accanto. «Elimina comunque» manda la
+  // conferma, e il motivo nello storico dice che cosa c'era.
+  const [inUsoTariffa, setInUsoTariffa] = useState(null);
+  const chiudiDialogElimina = () => { setDeleteTarget(null); setInUsoTariffa(null); };
+  const handleDelete = async (conferma = false) => {
     setDeleting(true);
     try {
-      const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'delete', id: deleteTarget.id, motivo: 'eliminata dall\'elenco delle tariffe' });
+      const res = await base44.functions.invoke('gestisciAnagrafiche', {
+        entita: 'Tariffa', operazione: 'delete', id: deleteTarget.id, motivo: 'eliminata dall\'elenco delle tariffe',
+        ...(conferma === true ? { conferma_eliminazione: true } : {}),
+      });
       const fuoriStorico = notaTraccia(res.data);
       if (fuoriStorico) alert(fuoriStorico);
-      setDeleteTarget(null);
+      chiudiDialogElimina();
       load();
-    } catch (e) { alert(e?.response?.data?.error || e?.message); }
+    } catch (e) {
+      const d = e?.response?.data || e?.data || {};
+      if (conferma !== true && d.richiede_conferma && d.riferimenti) setInUsoTariffa(d.riferimenti);
+      else alert(d.error || e?.message);
+    }
     setDeleting(false);
+  };
+  const chiudiPeriodoInvece = async () => {
+    const t = deleteTarget;
+    chiudiDialogElimina();
+    await closePeriod(t);
   };
 
   const openCreate = () => setFormState({ open: true, editing: null, duplicating: null, excludePrestazione: '' });
@@ -462,7 +517,7 @@ export default function TariffeUnificate() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && chiudiDialogElimina()}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Elimina tariffa</DialogTitle>
@@ -476,18 +531,40 @@ export default function TariffeUnificate() {
                 <div><span className="text-muted-foreground">Classe:</span> <span className="font-medium">{deleteTarget.classe_materiale || 'Tutte'}</span></div>
                 <div><span className="text-muted-foreground">Ambito:</span> <span className="font-medium">{getAmbito(deleteTarget)}</span></div>
                 <div><span className="text-muted-foreground">Valore:</span> <span className="font-medium">{formatNumber(deleteTarget.valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {deleteTarget.unita_misura}</span></div>
-                <div><span className="text-muted-foreground">Periodo:</span> <span className="font-medium">{deleteTarget.data_inizio_validita || 'n.d.'} → {deleteTarget.data_fine_validita || 'aperto'}</span></div>
+                <div><span className="text-muted-foreground">Periodo:</span> <span className="font-medium">{dataIt(deleteTarget.data_inizio_validita) || 'n.d.'} → {dataIt(deleteTarget.data_fine_validita) || 'aperto'}</span></div>
               </div>
               <div className="bg-amber-50 border border-amber-300 rounded p-3 text-amber-800 text-xs">
-                L'eliminazione è definitiva. Se il prezzo è stato applicato a fatturazioni già emesse, usa "Chiudi periodo" invece di eliminare, così lo storico resta consultabile.
+                {periodoAncoraAperto(deleteTarget)
+                  ? 'L\'eliminazione è definitiva. Se il prezzo è stato applicato a fatturazioni già emesse, usa "Chiudi periodo" invece di eliminare, così lo storico resta consultabile.'
+                  : `L'eliminazione è definitiva. Il periodo di questa tariffa è già chiuso (vale fino al ${dataIt(deleteTarget.data_fine_validita)}): se il prezzo è stato applicato a fatturazioni già emesse, lasciala com'è, così lo storico resta consultabile.`}
               </div>
+              {inUsoTariffa && (
+                <div className="bg-red-50 border border-red-300 rounded p-3 text-red-800 text-xs space-y-1">
+                  <div className="font-semibold">Questa tariffa è ancora usata:</div>
+                  <ul className="list-disc pl-4">
+                    {(inUsoTariffa.elenco || []).map((r, i) => <li key={i}>{r}</li>)}
+                  </ul>
+                  <div>
+                    Eliminandola, quei movimenti restano senza prezzo, anche nei mesi già fatturati.
+                    {inUsoTariffa.proposta === 'chiudi_periodo' && periodoAncoraAperto(deleteTarget)
+                      ? ' Chiudendo il periodo resta valida per i giorni che ha coperto.'
+                      : ' Il suo periodo è già chiuso: lasciandola com\'è vale solo per i giorni che ha coperto.'}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Annulla</Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+            <Button variant="outline" onClick={chiudiDialogElimina} disabled={deleting}>Annulla</Button>
+            {/* «Chiudi periodo» solo a una tariffa ancora aperta (13/10/2026) */}
+            {inUsoTariffa && inUsoTariffa.proposta === 'chiudi_periodo' && deleteTarget && periodoAncoraAperto(deleteTarget) && (
+              <Button variant="outline" onClick={chiudiPeriodoInvece} disabled={deleting}>
+                <CalendarX className="w-4 h-4 mr-1" /> Chiudi periodo
+              </Button>
+            )}
+            <Button variant="destructive" onClick={() => handleDelete(!!inUsoTariffa)} disabled={deleting}>
               {deleting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
-              Elimina definitivamente
+              {inUsoTariffa ? 'Elimina comunque' : 'Elimina definitivamente'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -50,8 +50,14 @@ console.log('1. UN FORNITORE, UN NOME');
   verifica('e anche salvarlo col suo nome di sempre', stessoNome.stato === 200, JSON.stringify(stessoNome.j));
   const rinomina = await chiama(modulo, { db: DB, corpo: { entita: 'Fornitore', operazione: 'update', id: 'fC', dati: { ragione_sociale: 'Gatim srl' } } });
   verifica('ma rinominare ALFA in «Gatim srl» no', rinomina.stato === 409 && rinomina.scritte.length === 0, JSON.stringify(rinomina.j));
-  const elimina = await chiama(modulo, { db: DB, corpo: { entita: 'Fornitore', operazione: 'delete', id: 'fB' } });
-  verifica('il doppione si puo\' togliere', elimina.stato === 200 && elimina.scritte.some(w => w.op === 'delete' && w.id === 'fB'));
+  // Il doppione si toglie, ma dal 12/10/2026 (A88) prima si guarda chi lo usa:
+  // la tariffa t26 punta proprio a GATIM S.R.L. per id. I nomi li prende GATIM,
+  // che resta; quel collegamento per id no, e si dice prima di eliminare.
+  const fermo = await chiama(modulo, { db: DB, corpo: { entita: 'Fornitore', operazione: 'delete', id: 'fB' } });
+  verifica('il doppione con una tariffa che punta a lui: prima di eliminarlo lo si dice', fermo.stato === 409 && fermo.j.richiede_conferma === true
+    && fermo.j.riferimenti.tariffe === 1 && fermo.j.riferimenti.gemello && fermo.j.riferimenti.gemello.id === 'fA' && !fermo.scritte.some(w => w.op === 'delete'), JSON.stringify(fermo.j));
+  const elimina = await chiama(modulo, { db: DB, corpo: { entita: 'Fornitore', operazione: 'delete', id: 'fB', conferma_eliminazione: true } });
+  verifica('e con la conferma il doppione si puo\' togliere', elimina.stato === 200 && elimina.scritte.some(w => w.op === 'delete' && w.id === 'fB'));
 
   const servizio = await chiama(modulo, { db: DB, corpo: { entita: 'Servizio', operazione: 'create', dati: { nome: 'RACCOLTA PFU' } } });
   verifica('lo stesso per i servizi', servizio.stato === 409 && servizio.scritte.length === 0, JSON.stringify(servizio.j));

@@ -37,6 +37,14 @@ export function ordineDi(r) {
 
 const pesoDi = (r) => Number((r && r.peso_effettivo) || 0);
 
+// Le due regole del portale sull'ACI, in un posto solo (revisione del
+// 13/10/2026): una richiesta non si stima sotto i 1.500 kg, e un formulario non
+// si chiude a piu' del 110% del peso stimato del suo ticket. Le usano la
+// passiva e la pagina Terminati ACI, che devono dire la stessa cosa dello
+// stesso ordine: prima erano due copie, tenute uguali solo da una prova.
+export const MINIMO_ACI_KG = 1500;
+export const SOGLIA_ACI = 1.1;
+
 /**
  * Le righe raggruppate per numero di formulario.
  * Le righe senza numero restano a se': non si possono accorpare a niente.
@@ -60,6 +68,18 @@ export function raggruppaPerFormulario(righe, numero = chiaveFormulario) {
  */
 export function contaFormulari(righe) {
   return raggruppaPerFormulario(righe).size;
+}
+
+/**
+ * Quanti formulari distinti ci sono fra le righe che un numero ce l'hanno.
+ * Per un elenco che puo' contenere ordini senza formulario: un ordine
+ * cancellato o ancora assegnato un formulario non l'ha mai avuto, e contarlo
+ * per uno diceva «6 formulari» per 6 ordini cancellati che non ne hanno nessuno
+ * (revisione del 13/10/2026). Zero vuol dire nessun formulario: chi lo mostra
+ * scrive «—».
+ */
+export function contaFormulariConNumero(righe) {
+  return raggruppaPerFormulario((righe || []).filter(r => chiaveFormulario(r))).size;
 }
 
 /**

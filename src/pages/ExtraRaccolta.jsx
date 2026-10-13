@@ -613,6 +613,7 @@ export default function ExtraRaccolta() {
       <ExtraRaccoltaForm
         open={formOpen}
         contesto={contesto}
+        interventi={records}
         initial={formInitial}
         onSave={save}
         onCancel={() => { setFormOpen(false); setFormInitial(null); }}

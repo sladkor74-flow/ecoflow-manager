@@ -433,5 +433,271 @@ const guidaFine = sorgenteFunzione.match(/'data_fine:[^\n]*/);
 const guidaInizio = sorgenteFunzione.match(/'data_inizio:[^\n]*/);
 verifica('la guida dice che la data di carico e di ingresso e\' la fine del trasporto', guidaFine && /di carico/.test(guidaFine[0]) && /si conclude|fine del trasporto/.test(guidaFine[0]), guidaFine && guidaFine[0]);
 verifica('la guida chiede l\'inizio trasporto solo con due colonne di data', guidaInizio && /SOLO se il file ha due colonne di data/.test(guidaInizio[0]) && !/di carico\./.test(guidaInizio[0]), guidaInizio && guidaInizio[0]);
+// UN FORMULARIO CHE MANCA NON E' IL REFUSO DEL VICINO (audit del 20/09, alta
+// A57; corretta il 12/10/2026). Il report di Irigom porta RGYTR027030CR (2.860
+// kg) e RGYTR027031CR (3.100 kg), nel gestionale c'e' solo il primo: la seconda
+// riga usciva «duplicata», con formulario, peso e data «errati». E' un formulario
+// non registrato. Un simile vale come lo stesso carico solo su un movimento
+// rimasto libero e con almeno una conferma dalla riga (regola del 01/10/2026).
+console.log('UN FORMULARIO CHE MANCA NON E\' IL REFUSO DEL VICINO (A57)');
+{
+  const IRIGOM = 'IRIGOM SRL';
+  const sett = { chiave: 'irigom', nome: IRIGOM, inizio: '2026-09-07', fine: '2026-09-13' };
+  const ingresso = (id, fir, kg, giorno, campi = {}) => ({
+    id, id_ordine: id, numero_fir: fir, stato: 'terminato', peso_effettivo: kg, destinazione: IRIGOM, trasportatore: 'NAPPI SUD SRL',
+    ordine_immesso_il: '2026-09-01T08:00:00Z', trasporto_iniziato_il: `${giorno}T00:00:00Z`, trasporto_finito_il: `${giorno}T00:00:00Z`, ...campi,
+  });
+  const mov = await caricaMovimenti(base44({ rete: [
+    ingresso('ET30', 'RGYTR027030CR', 2860, '2026-09-08'),
+    ingresso('ET40', 'RGYTR027140CR', 2500, '2026-09-08', { classe: 'P' }),
+    ingresso('ET50', 'RGYTR027250CR', 2000, '2026-09-08', { classe: 'P', produttore: 'GOMME ROSSI SRL' }),
+    ingresso('ET60', 'RGYTR027360CR', 1800, '2026-09-10'),
+    ingresso('ET70', 'RGYTR027480CR', 2100, '2026-09-08', { destinazione: 'TECNOGUM SRL' }),
+  ] }));
+  const leggi = (righe) => normalizzaRigheReport(righe, 'kg').righe;
+  const esito = (righe) => verificaReport(leggi(righe), mov.movimenti, { ...sett, senzaFine: mov.senza_fine });
+  const riga = (e, n) => e.esiti.find(x => x.n === n);
+
+  const caso = esito([
+    { n: 2, fir: 'RGYTR027030CR', peso: 2860, data_fine: '08/09/2026' },
+    { n: 3, fir: 'RGYTR027031CR', peso: 3100, data_fine: '09/09/2026' },
+  ]);
+  const r3 = riga(caso, 3);
+  verifica('la riga del formulario che manca e\' «non presente nel gestionale», non duplicata',
+    r3.esito === 'non_trovata' && !r3.gestionale && /^Formulario non presente nel gestionale/.test(r3.discrepanze[0].messaggio), JSON.stringify(r3));
+  verifica('niente contestazioni inventate: ne\' formulario errato ne\' peso ne\' data',
+    !r3.discrepanze.some(d => /duplicata|errato|Peso diverso|Data fine trasporto diversa/.test(d.messaggio)), JSON.stringify(r3.discrepanze));
+  verifica('il simile si dice, come osservazione, con il motivo per cui non basta',
+    r3.simile_a === 'RGYTR027030CR' && r3.discrepanze.some(d => d.gravita === 'osservazione' && /Simile a RGYTR027030CR/.test(d.messaggio) && /gia' abbinato a un'altra riga del report \(riga 2\)/.test(d.messaggio)), JSON.stringify(r3.discrepanze));
+  verifica('la riga del formulario registrato resta conforme', riga(caso, 2).esito === 'conforme', JSON.stringify(riga(caso, 2)));
+  verifica('nel riepilogo: una non trovata, nessuna duplicata, e il simile non conta fra le osservazioni',
+    caso.riepilogo.non_trovate === 1 && caso.riepilogo.duplicate === 0 && caso.riepilogo.osservazioni === 0, JSON.stringify(caso.riepilogo));
+
+  // L'ordine delle righe non cambia niente: prima tutti i formulari identici.
+  const rovescio = esito([
+    { n: 3, fir: 'RGYTR027031CR', peso: 3100, data_fine: '09/09/2026' },
+    { n: 2, fir: 'RGYTR027030CR', peso: 2860, data_fine: '08/09/2026' },
+  ]);
+  verifica('con la riga simile prima, il formulario identico tiene il suo movimento',
+    riga(rovescio, 2).esito === 'conforme' && riga(rovescio, 3).esito === 'non_trovata', JSON.stringify(rovescio.esiti.map(e => [e.n, e.esito])));
+
+  // Il refuso vero: numero quasi uguale, movimento libero, e la riga lo conferma.
+  const refuso = esito([{ n: 5, fir: 'RGYTR027141CR', peso: 2500, data_fine: '08/09/2026', classe: 'P' }]);
+  const r5 = riga(refuso, 5);
+  verifica('un carattere diverso con peso, data e classe uguali e\' lo stesso carico, scritto male',
+    r5.esito === 'discrepanze' && r5.gestionale && r5.gestionale.fir === 'RGYTR027140CR'
+    && r5.discrepanze.some(d => /^Formulario errato: "1" al posto di "0"/.test(d.messaggio)), JSON.stringify(r5));
+  verifica('e si dice da che cosa lo si e\' riconosciuto',
+    JSON.stringify(r5.riconosciuto_da) === JSON.stringify(['stesso peso', 'stessa data', 'stessa classe'])
+    && r5.discrepanze.some(d => /riconosciuto da: stesso peso, stessa data, stessa classe/.test(d.messaggio)), JSON.stringify(r5));
+
+  // Numero quasi uguale e nient'altro: peso, data, classe e produttore diversi.
+  const solo = esito([{ n: 6, fir: 'RGYTR027251CR', peso: 3400, data_fine: '12/09/2026', classe: 'M', produttore: 'PNEUS BIANCHI SRL' }]);
+  const r6 = riga(solo, 6);
+  verifica('un numero quasi uguale senza nessuna conferma non abbina',
+    r6.esito === 'non_trovata' && r6.discrepanze.some(d => d.gravita === 'osservazione' && /Simile a RGYTR027250CR/.test(d.messaggio) && /nessun altro dato della riga lo conferma/.test(d.messaggio)), JSON.stringify(r6));
+  verifica('e il formulario registrato resta fra gli assenti nel report', solo.assenti.some(a => a.fir === 'RGYTR027250CR'), JSON.stringify(solo.assenti.map(a => a.fir)));
+  // Il produttore della riga, da solo, e' una conferma.
+  const produttore = esito([{ n: 7, fir: 'RGYTR027251CR', peso: 3400, data_fine: '12/09/2026', produttore: 'Gomme Rossi S.r.l.' }]);
+  verifica('lo stesso numero quasi uguale col produttore giusto abbina',
+    riga(produttore, 7).gestionale && riga(produttore, 7).gestionale.fir === 'RGYTR027250CR' && JSON.stringify(riga(produttore, 7).riconosciuto_da) === '["stesso produttore"]', JSON.stringify(riga(produttore, 7)));
+  // L'impianto stesso sta su ogni riga del suo report: non conferma niente.
+  const sito = esito([{ n: 8, fir: 'RGYTR027251CR', peso: 3400, data_fine: '12/09/2026', destinatario: 'IRIGOM', trasportatore: 'NAPPI SUD' }]);
+  verifica('il destinatario che e\' l\'impianto stesso e il trasportatore non bastano', riga(sito, 8).esito === 'non_trovata', JSON.stringify(riga(sito, 8)));
+  // Due caratteri diversi, con una conferma: abbina come prima.
+  const due = esito([{ n: 9, fir: 'RGYTR027361CB', peso: 1800, data_fine: '10/09/2026' }]);
+  verifica('due caratteri diversi con peso e data uguali abbinano ancora', riga(due, 9).gestionale && riga(due, 9).gestionale.fir === 'RGYTR027360CR', JSON.stringify(riga(due, 9)));
+  // Lo stesso blocchetto serve piu' impianti: il formulario vicino di un carico
+  // andato a Tecnogum, con lo stesso peso e lo stesso giorno, e' un altro carico.
+  const altrove = esito([{ n: 10, fir: 'RGYTR027481CR', peso: 2100, data_fine: '08/09/2026' }]);
+  verifica('un formulario simile di un altro impianto non e\' un refuso', riga(altrove, 10).esito === 'non_trovata' && !riga(altrove, 10).gestionale, JSON.stringify(riga(altrove, 10)));
+}
+
+// I SIMILI IN UN ORDINE UNICO, E MAI CON LA SOLA CLASSE (revisione del
+// 13/10/2026, A57). Riga per riga, una riga che veniva prima con una conferma
+// debole rubava il movimento al refuso vero che veniva dopo; e a due caratteri
+// bastava la sola classe, che in un report di stoccaggio hanno quasi tutte le
+// righe. Ora le coppie si assegnano per distanza, poi per numero di conferme,
+// poi per punteggio; e a due caratteri serve lo stesso peso o la data entro un
+// giorno.
+console.log('I SIMILI IN UN ORDINE UNICO, E MAI CON LA SOLA CLASSE (A57, 13/10)');
+{
+  const IRIGOM = 'IRIGOM SRL';
+  const sett = { chiave: 'irigom', nome: IRIGOM, inizio: '2026-09-07', fine: '2026-09-13' };
+  const ingresso = (id, fir, kg, giorno, campi = {}) => ({
+    id, id_ordine: id, numero_fir: fir, stato: 'terminato', peso_effettivo: kg, destinazione: IRIGOM, trasportatore: 'NAPPI SUD SRL',
+    ordine_immesso_il: '2026-09-01T08:00:00Z', trasporto_iniziato_il: `${giorno}T00:00:00Z`, trasporto_finito_il: `${giorno}T00:00:00Z`, ...campi,
+  });
+  const leggi = (righe) => normalizzaRigheReport(righe, 'kg').righe;
+  const conMovimenti = async (rete) => {
+    const mov = await caricaMovimenti(base44({ rete }));
+    return (righe) => verificaReport(leggi(righe), mov.movimenti, { ...sett, senzaFine: mov.senza_fine });
+  };
+  const riga = (e, n) => e.esiti.find(x => x.n === n);
+  const fir = (e, n) => (riga(e, n).gestionale ? riga(e, n).gestionale.fir : null);
+  const solo030 = await conMovimenti([ingresso('ET30', 'RGYTR027030CR', 2860, '2026-09-08', { classe: 'P' })]);
+
+  // Il caso della revisione: riga 2 = un carico non registrato a due caratteri
+  // (012 invece di 030, solo la classe in comune); riga 3 = il refuso vero, a un
+  // carattere, con peso, data e classe uguali.
+  const r2 = { n: 2, fir: 'RGYTR027012CR', peso: 3400, data_fine: '11/09/2026', classe: 'P' };
+  const r3 = { n: 3, fir: 'RGYTR027031CR', peso: 2860, data_fine: '08/09/2026', classe: 'P' };
+  for (const [nome, righe] of [['nell\'ordine del report', [r2, r3]], ['con le righe invertite', [r3, r2]]]) {
+    const e = solo030(righe);
+    verifica(`il refuso vero tiene il suo carico, ${nome}`,
+      fir(e, 3) === 'RGYTR027030CR' && JSON.stringify(riga(e, 3).riconosciuto_da) === '["stesso peso","stessa data","stessa classe"]', JSON.stringify(riga(e, 3)));
+    verifica(`la riga col solo numero vicino resta «non presente», col suo termine, ${nome}`,
+      riga(e, 2).esito === 'non_trovata' && !riga(e, 2).gestionale && riga(e, 2).termine && riga(e, 2).termine.scadenza === '2026-09-23'
+      && !riga(e, 2).discrepanze.some(d => /errato|Peso diverso|Data fine trasporto diversa/.test(d.messaggio)), JSON.stringify(riga(e, 2)));
+  }
+
+  // L'ordine conta davvero: a due caratteri con lo STESSO PESO la riga prima
+  // e' abbinabile, ma il refuso a un carattere viene prima di lei.
+  const pesoUguale = { n: 2, fir: 'RGYTR027012CR', peso: 2860, data_fine: '12/09/2026' };
+  for (const [nome, righe] of [['nell\'ordine del report', [pesoUguale, r3]], ['con le righe invertite', [r3, pesoUguale]]]) {
+    const e = solo030(righe);
+    verifica(`a parita' di movimento vince la distanza piu' bassa, ${nome}`,
+      fir(e, 3) === 'RGYTR027030CR' && riga(e, 2).esito === 'non_trovata'
+      && riga(e, 2).discrepanze.some(d => d.gravita === 'osservazione' && /gia' abbinato a un'altra riga del report \(riga 3\)/.test(d.messaggio)),
+    JSON.stringify(e.esiti.map(x => [x.n, x.esito, x.gestionale && x.gestionale.fir])));
+  }
+
+  // Alla stessa distanza vince chi ha piu' conferme: la riga con la sola classe
+  // viene prima, quella con peso, data e classe dopo.
+  const soloClasse = { n: 4, fir: 'RGYTR027032CR', peso: 3300, data_fine: '12/09/2026', classe: 'P' };
+  for (const [nome, righe] of [['nell\'ordine del report', [soloClasse, r3]], ['con le righe invertite', [r3, soloClasse]]]) {
+    const e = solo030(righe);
+    verifica(`alla stessa distanza vince chi ha piu' conferme, ${nome}`,
+      fir(e, 3) === 'RGYTR027030CR' && riga(e, 4).esito === 'non_trovata', JSON.stringify(e.esiti.map(x => [x.n, x.esito, x.gestionale && x.gestionale.fir])));
+  }
+
+  // A due caratteri la sola classe non basta: il carico registrato resta fra
+  // gli assenti, la riga resta da registrare, e l'osservazione dice perche'.
+  const classeSola = solo030([r2]);
+  const c2 = riga(classeSola, 2);
+  verifica('a due caratteri la sola classe non abbina',
+    c2.esito === 'non_trovata' && c2.termine && c2.termine.scadenza === '2026-09-23' && classeSola.assenti.some(a => a.fir === 'RGYTR027030CR'), JSON.stringify({ c2, assenti: classeSola.assenti }));
+  verifica('e l\'osservazione dice che a due caratteri servono peso o data',
+    c2.simile_a === 'RGYTR027030CR' && c2.discrepanze.some(d => d.gravita === 'osservazione' && /servono lo stesso peso o la data entro un giorno \(in comune c'e' solo la classe\)/.test(d.messaggio)), JSON.stringify(c2.discrepanze));
+  // Neanche il solo produttore, a due caratteri.
+  const conProduttore = await conMovimenti([ingresso('ET30', 'RGYTR027030CR', 2860, '2026-09-08', { classe: 'P', produttore: 'GOMME ROSSI SRL' })]);
+  const p2 = riga(conProduttore([{ n: 2, fir: 'RGYTR027012CR', peso: 3400, data_fine: '11/09/2026', produttore: 'Gomme Rossi S.r.l.', classe: 'P' }]), 2);
+  verifica('a due caratteri il produttore e la classe insieme non bastano',
+    p2.esito === 'non_trovata' && p2.discrepanze.some(d => /in comune ci sono solo la classe e il produttore/.test(d.messaggio)), JSON.stringify(p2));
+  // A un carattere la sola classe resta una conferma, come nei consuntivi.
+  verifica('a un carattere la sola classe basta ancora',
+    fir(solo030([{ n: 5, fir: 'RGYTR027031CR', peso: 3300, data_fine: '12/09/2026', classe: 'P' }]), 5) === 'RGYTR027030CR');
+  // A due caratteri la data entro un giorno basta (domanda aperta all'utente).
+  const dataVicina = solo030([{ n: 6, fir: 'RGYTR027012CR', peso: 3400, data_fine: '09/09/2026' }]);
+  verifica('a due caratteri la data entro un giorno abbina',
+    fir(dataVicina, 6) === 'RGYTR027030CR' && JSON.stringify(riga(dataVicina, 6).riconosciuto_da) === '["data a un giorno di distanza"]', JSON.stringify(riga(dataVicina, 6)));
+}
+
+// IL TERZO PASSAGGIO IN UN ORDINE UNICO (revisione del 13/10/2026, A57). Lo
+// stesso peso con la data entro un giorno si assegnava riga per riga: la riga
+// che veniva prima nel report prendeva il carico anche con la data a un giorno,
+// contro quella con la stessa data che veniva dopo, e invertendo le righe
+// l'esito si invertiva. Ora le coppie (riga, movimento, punteggio) si assegnano
+// dal punteggio piu' basso, a parita' nell'ordine del report; le righe senza
+// data vengono dopo. I formulari delle righe sono lontani piu' di due
+// caratteri da quelli registrati: qui il secondo passaggio non c'entra.
+console.log('IL TERZO PASSAGGIO IN UN ORDINE UNICO (A57, 13/10)');
+{
+  const IRIGOM = 'IRIGOM SRL';
+  const sett = { chiave: 'irigom', nome: IRIGOM, inizio: '2026-09-07', fine: '2026-09-13' };
+  const ingresso = (id, fir, kg, giorno, campi = {}) => ({
+    id, id_ordine: id, numero_fir: fir, stato: 'terminato', peso_effettivo: kg, destinazione: IRIGOM, trasportatore: 'NAPPI SUD SRL',
+    ordine_immesso_il: '2026-09-01T08:00:00Z', trasporto_iniziato_il: `${giorno}T00:00:00Z`, trasporto_finito_il: `${giorno}T00:00:00Z`, classe: 'P', ...campi,
+  });
+  const conMovimenti = async (rete) => {
+    const mov = await caricaMovimenti(base44({ rete }));
+    return (righe) => verificaReport(normalizzaRigheReport(righe, 'kg').righe, mov.movimenti, { ...sett, senzaFine: mov.senza_fine });
+  };
+  const riga = (e, n) => e.esiti.find(x => x.n === n);
+  const fir = (e, n) => (riga(e, n) && riga(e, n).gestionale ? riga(e, n).gestionale.fir : null);
+  // chi prende quale carico, riga per riga, nell'ordine dei numeri di riga
+  const firma = (e) => e.esiti.slice().sort((a, b) => a.n - b.n).map(x => `${x.n}:${x.gestionale ? x.gestionale.fir : x.esito}`).join(' ');
+  const permutazioni = (a) => (a.length <= 1 ? [a] : a.flatMap((x, i) => permutazioni([...a.slice(0, i), ...a.slice(i + 1)]).map(p => [x, ...p])));
+  const solo030 = await conMovimenti([ingresso('ET30', 'RGYTR027030CR', 2860, '2026-09-08')]);
+
+  // Il caso della revisione (a57_terzo_passaggio.mjs): stesso peso, una riga
+  // con la data a un giorno e una con la stessa data.
+  const debole = { n: 2, fir: 'RGYTR027555CR', peso: 2860, data_fine: '09/09/2026', classe: 'P' };
+  const forte = { n: 3, fir: 'RGYTR027666CR', peso: 2860, data_fine: '08/09/2026', classe: 'P' };
+  for (const [nome, righe] of [['nell\'ordine del report', [debole, forte]], ['con le righe invertite', [forte, debole]]]) {
+    const e = solo030(righe);
+    verifica(`la stessa data vince sulla data a un giorno, ${nome}`,
+      fir(e, 3) === 'RGYTR027030CR' && riga(e, 3).discrepanze.some(d => /^Formulario non corrispondente: nel gestionale e' RGYTR027030CR/.test(d.messaggio)), firma(e));
+    verifica(`e la riga a un giorno resta «non presente», col suo termine, ${nome}`,
+      riga(e, 2).esito === 'non_trovata' && !riga(e, 2).gestionale && riga(e, 2).termine && riga(e, 2).termine.scadenza === '2026-09-21'
+      && riga(e, 2).discrepanze.some(d => /^Formulario non presente nel gestionale/.test(d.messaggio)), JSON.stringify(riga(e, 2)));
+  }
+
+  // Una riga senza data contro una col peso uguale e la data a un giorno: il
+  // peso da solo vale meno, anche se il suo punteggio (senza la data) e' 0.
+  const senzaData = { n: 4, fir: 'RGYTR027777CR', peso: 2860, classe: 'P' };
+  for (const [nome, righe] of [['nell\'ordine del report', [senzaData, debole]], ['con le righe invertite', [debole, senzaData]]]) {
+    const e = solo030(righe);
+    verifica(`la riga con la data passa davanti a quella senza, ${nome}`, fir(e, 2) === 'RGYTR027030CR' && riga(e, 4).esito === 'non_trovata', firma(e));
+  }
+
+  // Senza data un peso basta solo se fra i movimenti rimasti liberi ce n'e' uno
+  // solo uguale: qui uno dei due lo prende la riga con la data, in tutti e due
+  // gli ordini.
+  const dueUguali = await conMovimenti([ingresso('ET30', 'RGYTR027030CR', 2860, '2026-09-08'), ingresso('ET40', 'RGYTR027040CR', 2860, '2026-09-11')]);
+  const esatta = { n: 5, fir: 'RGYTR027888CR', peso: 2860, data_fine: '08/09/2026', classe: 'P' };
+  const firme = new Set(permutazioni([esatta, senzaData]).map(p => firma(dueUguali(p))));
+  verifica('senza data, il solo peso rimasto libero abbina, qualunque sia l\'ordine',
+    firme.size === 1 && [...firme][0] === '4:RGYTR027040CR 5:RGYTR027030CR', JSON.stringify([...firme]));
+  verifica('e con due pesi uguali liberi la riga senza data non abbina', riga(dueUguali([senzaData]), 4).esito === 'non_trovata', firma(dueUguali([senzaData])));
+
+  // Tre righe e due carichi dello stesso peso, l'08 e il 10/09: la riga del 09
+  // e' a un giorno da tutti e due, ma ognuno ha una riga con la sua data. In
+  // tutte e sei le permutazioni le righe con la data giusta tengono il loro
+  // carico (riga per riga, la riga del 09 prima delle altre si prendeva l'08).
+  const ottoDieci = await conMovimenti([ingresso('ET08', 'RGYTR027008CR', 2860, '2026-09-08'), ingresso('ET10', 'RGYTR027010CR', 2860, '2026-09-10')]);
+  const tre = [
+    { n: 6, fir: 'RGYTR027596CR', peso: 2860, data_fine: '08/09/2026' },
+    { n: 7, fir: 'RGYTR027697CR', peso: 2860, data_fine: '09/09/2026' },
+    { n: 8, fir: 'RGYTR027799CR', peso: 2860, data_fine: '10/09/2026' },
+  ];
+  const firmeTre = new Set(permutazioni(tre).map(p => firma(ottoDieci(p))));
+  verifica('tre righe, due carichi: lo stesso esito in tutte e sei le permutazioni',
+    firmeTre.size === 1 && [...firmeTre][0] === '6:RGYTR027008CR 7:non_trovata 8:RGYTR027010CR', JSON.stringify([...firmeTre]));
+
+  // Una parita' esatta (stesso peso, stessa data, un carico solo) la decide
+  // l'ordine del report, come prima.
+  const gemella = { ...forte, n: 9, fir: 'RGYTR027999CR' };
+  verifica('a parita\' esatta decide l\'ordine del report',
+    fir(solo030([forte, gemella]), 3) === 'RGYTR027030CR' && fir(solo030([gemella, forte]), 9) === 'RGYTR027030CR');
+  // Una riga sola fra due carichi dello stesso peso prende quello della sua data.
+  verifica('una riga sola prende il carico con la data piu\' vicina',
+    fir(ottoDieci([{ n: 10, fir: 'RGYTR027555CR', peso: 2860, data_fine: '10/09/2026' }]), 10) === 'RGYTR027010CR');
+
+  // A caso, con un seme fisso: scenari di soli pesi e date (formulari lontani),
+  // ogni scenario in tutte le permutazioni delle righe. Le parita' esatte - due
+  // righe con lo stesso punteggio sullo stesso carico - si saltano: le decide
+  // l'ordine del report, ed e' ammesso.
+  let seme = 13;
+  const caso = () => { seme = (seme * 1103515245 + 12345) % 2147483648; return seme / 2147483648; };
+  const scegli = (a) => a[Math.floor(caso() * a.length)];
+  const pesi = [2860, 3100], giorni = ['08', '09', '10', '11'];
+  let scenari = 0, dipendono = 0;
+  const esempi = [];
+  for (let k = 0; k < 150; k++) {
+    const movs = Array.from({ length: 1 + Math.floor(caso() * 3) }, (_, j) => ingresso('M' + j, `RGYTR02700${j}CR`, scegli(pesi), `2026-09-${scegli(giorni)}`));
+    const righe = Array.from({ length: 2 + Math.floor(caso() * 2) }, (_, j) => ({ n: 20 + j, fir: `RGYTR027${5 + j}${5 + j}${5 + j}CR`, peso: scegli(pesi), data_fine: `${scegli(giorni)}/09/2026` }));
+    const punti = (r, m) => (r.peso === m.peso_effettivo && Math.abs(Number(r.data_fine.slice(0, 2)) - Number(m.trasporto_finito_il.slice(8, 10))) <= 1
+      ? Math.abs(Number(r.data_fine.slice(0, 2)) - Number(m.trasporto_finito_il.slice(8, 10))) * 5 : null);
+    const parita = movs.some(m => righe.some((a, i) => righe.some((b, j) => i !== j && punti(a, m) !== null && punti(a, m) === punti(b, m))));
+    if (parita) continue;
+    scenari++;
+    const verifica3 = await conMovimenti(movs);
+    const firmeCaso = new Set(permutazioni(righe).map(p => firma(verifica3(p))));
+    if (firmeCaso.size > 1) { dipendono++; if (esempi.length < 3) esempi.push([...firmeCaso]); }
+  }
+  verifica(`a caso: ${scenari} scenari senza parita' esatte, nessuno dipende dall'ordine delle righe`, scenari >= 30 && dipendono === 0, JSON.stringify({ scenari, dipendono, esempi }));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

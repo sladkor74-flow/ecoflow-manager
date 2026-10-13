@@ -27,6 +27,17 @@ const nomeCategoria = (m) => {
 // "Senza data di inizio trasporto, obbligatoria" per un registrato assente nel
 // report: immissione, inizio e fine trasporto sono obbligatorie (22/09/2026).
 const elencoNomi = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} e ${xs[xs.length - 1]}`);
+// Il formulario del report simile a uno registrato, che non e' bastato a dirli
+// lo stesso carico (A57). La scheda e l'Excel lo mostravano gia', perche' li'
+// si scorrono tutte le discrepanze; nel PDF va sotto il formulario, nella
+// tabella dei non registrati (revisione del 13/10/2026). Si prende
+// l'osservazione, che dice anche perche' non basta; una verifica salvata col
+// solo simile_a dice almeno il numero.
+export const notaSimile = (e) => {
+  const oss = ((e && e.discrepanze) || []).find(d => d && d.gravita === 'osservazione' && /^Simile a /.test(d.messaggio || ''));
+  if (oss) return testoPerImpianto(oss.messaggio);
+  return e && e.simile_a ? `Simile a ${e.simile_a}` : '';
+};
 const dateBreve = (m) => {
   const voci = Array.isArray(m && m.date) ? m.date : [];
   const mancanti = [...new Set(voci.flatMap(v => v.mancanti || []))];
@@ -99,7 +110,8 @@ export async function esportaEsitoVerificaPdf(v) {
   };
 
   // Tabella con testo a capo, intestazione ripetuta a ogni pagina.
-  // colonne: [{ titolo, peso, allinea }]; righe: [{ celle, colori?, grassetti?, sfondo?, grassetto? }]
+  // colonne: [{ titolo, peso, allinea }]; righe: [{ celle, colori?, grassetti?, sfondo?, grassetto?, sotto? }]
+  // sotto: per cella, una nota in piccolo e in grigio sotto il testo (13/10/2026).
   const tabella = (colonne, righe) => {
     const totalePesi = colonne.reduce((t, c) => t + c.peso, 0);
     const larghezze = colonne.map(c => (L * c.peso) / totalePesi);
@@ -127,7 +139,10 @@ export async function esportaEsitoVerificaPdf(v) {
         doc.setFont('helvetica', (r.grassetti && r.grassetti[i]) || r.grassetto ? 'bold' : 'normal');
         return doc.splitTextToSize(String(t ?? ''), larghezze[i] - 3.5);
       });
-      const h = Math.max(...linee.map(l => l.length)) * 3.3 + 3;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.8);
+      const note = colonne.map((_c, i) => (r.sotto && r.sotto[i] ? doc.splitTextToSize(String(r.sotto[i]), larghezze[i] - 3.5) : []));
+      const h = Math.max(...linee.map((l, i) => l.length * 3.3 + note[i].length * 3)) + 3;
       if (y + h > H - 16) { nuovaPagina(); intestazione(); }
       const sfondo = r.sfondo || (k % 2 ? C.zebra : null);
       if (sfondo) { doc.setFillColor(...sfondo); doc.rect(M, y, L, h, 'F'); }
@@ -136,6 +151,7 @@ export async function esportaEsitoVerificaPdf(v) {
         const a = c.allinea || 'left';
         const px = a === 'right' ? x + larghezze[i] - 2 : a === 'center' ? x + larghezze[i] / 2 : x + 2;
         testo(linee[i], px, y + 4.3, { dim: 7.6, grassetto: (r.grassetti && r.grassetti[i]) || r.grassetto, colore: (r.colori && r.colori[i]) || C.testo, allinea: a });
+        if (note[i].length) testo(note[i], px, y + 4.3 + linee[i].length * 3.3, { dim: 6.8, colore: C.grigio, allinea: a });
         x += larghezze[i];
       });
       doc.setDrawColor(...C.bordo);
@@ -310,6 +326,7 @@ export async function esportaEsitoVerificaPdf(v) {
       s.inPiu.map(e => ({
         celle: [cap(rigaReport(e)), firConOrdine(e), dataIt(e.report.fine || e.report.data), e.report.produttore || '', e.report.destinatario || '', e.report.kg != null ? formatKg(e.report.kg) : ''],
         grassetti: [false, true, false, false, false, true], colori: [C.grigio, C.rosso],
+        sotto: [null, notaSimile(e)],
       })));
   }
 

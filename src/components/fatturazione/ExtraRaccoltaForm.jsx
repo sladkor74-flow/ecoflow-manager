@@ -15,6 +15,7 @@ import { formatNumber } from '@/lib/utils';
 import { giornoDaData, dataDaGiorno, competenza, datiChiusuraCompleti } from '@/lib/extraRaccoltaStato';
 import { oggiRoma } from '@/lib/giornoItaliano';
 import { DATE_OBBLIGATORIE, dateMancanti, dateIncoerenti, testoDate } from '@/lib/movimenti';
+import { interventiConStessoFir, domandaFirGiaPresente } from '@/lib/formularioGiaPresente';
 
 const CLASSI = ['P', 'M', 'G1', 'G2'];
 
@@ -48,6 +49,21 @@ const EMPTY = {
   costo_pulizia: 0, costi_aggiuntivi: 0, note_costi: '', note: '',
 };
 
+
+// UN CAMPO NUMERICO STA FUORI DAL MODULO (audit del 20/09, alta A39; corretta il
+// 12/10/2026). Era definito dentro ExtraRaccoltaForm: a ogni carattere scritto il
+// modulo si ridisegna, React vedeva un componente nuovo, buttava via l'input e
+// ne montava un altro, e il cursore usciva dal campo dopo ogni cifra - nei
+// sovracosti, nella pulizia e nei costi aggiuntivi. Definito qui, il tipo resta
+// lo stesso fra un disegno e l'altro e il campo tiene il cursore.
+function NumField({ label, value, onChange }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Input type="number" className="h-9 text-sm" value={value} onChange={e => onChange(e.target.value)} />
+    </div>
+  );
+}
 
 // Select con opzioni + "Altro..." che rivela un input di testo libero
 function ComboSelect({ value, onChange, options, placeholder }) {
@@ -103,7 +119,7 @@ const giornoProposta = (f) => f.trasporto_finito_il || f.ordine_immesso_il || og
 // `contesto` sono le tariffe attive e i fornitori che la pagina ha letto
 // (contestoPrezzi): il prezzo proposto e l'avviso sotto il campo vengono dalla
 // stessa funzione della fattura (chiusura dell'audit, 11/10/2026).
-export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, contesto }) {
+export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, contesto, interventi = [] }) {
   const [form, setForm] = useState({ ...EMPTY });
   const [fornitori, setFornitori] = useState([]);
   const [tariffe, setTariffe] = useState([]);
@@ -388,6 +404,11 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
       // aperta, gia' su terminato, con l'errore sotto il campo.
       if (!validate(stato)) { set('stato', stato); return; }
     }
+    // Lo stesso formulario gia' su un altro intervento (A40, 12/10/2026): si
+    // chiede prima di salvare, dicendo dove. `interventi` e' l'elenco che la
+    // pagina ha letto e rilegge dopo ogni salvataggio.
+    const stessoFir = interventiConStessoFir(interventi, form.numero_fir, initial?.id);
+    if (stessoFir.length && !window.confirm(domandaFirGiaPresente(form.numero_fir, stessoFir))) return;
     const p = { ...form, stato };
     ['peso_effettivo', 'prezzo_attivo_t', 'sovracosto_raccolta', 'sovracosto_trasporto', 'sovracosto_trattamento',
      'costo_raccolta_t', 'costo_trasporto_viaggio', 'costo_stoccaggio_t', 'costo_trattamento_t',
@@ -436,13 +457,6 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
   const ricavoNonFatturato = !calc.fatturato
     ? (secondaria ? 'una secondaria non si fattura a Ecotyre' : 'manca il peso effettivo: senza, non si fattura')
     : '';
-
-  const NumField = ({ label, k }) => (
-    <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      <Input type="number" className="h-9 text-sm" value={form[k]} onChange={e => set(k, e.target.value)} />
-    </div>
-  );
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
@@ -616,9 +630,9 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
                 <Input type="number" className="h-9 text-sm" value={form.prezzo_attivo_t} onChange={e => { set('prezzo_attivo_t', e.target.value); setPrezzoBase(null); }} />
                 {testoPrezzo}
               </div>
-              <NumField label="Sovracosto raccolta (€)" k="sovracosto_raccolta" />
-              <NumField label="Sovracosto trasporto (€)" k="sovracosto_trasporto" />
-              <NumField label="Sovracosto trattamento (€)" k="sovracosto_trattamento" />
+              <NumField label="Sovracosto raccolta (€)" value={form.sovracosto_raccolta} onChange={v => set('sovracosto_raccolta', v)} />
+              <NumField label="Sovracosto trasporto (€)" value={form.sovracosto_trasporto} onChange={v => set('sovracosto_trasporto', v)} />
+              <NumField label="Sovracosto trattamento (€)" value={form.sovracosto_trattamento} onChange={v => set('sovracosto_trattamento', v)} />
             </div>
 
             <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-destructive">Uscite: quello che SMOCO paga ai fornitori</p>
@@ -693,8 +707,8 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
 
             <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Oneri senza un fornitore a cui fatturarli</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
-              <NumField label="Costo pulizia (€)" k="costo_pulizia" />
-              <NumField label="Costi aggiuntivi (€)" k="costi_aggiuntivi" />
+              <NumField label="Costo pulizia (€)" value={form.costo_pulizia} onChange={v => set('costo_pulizia', v)} />
+              <NumField label="Costi aggiuntivi (€)" value={form.costi_aggiuntivi} onChange={v => set('costi_aggiuntivi', v)} />
             </div>
             {/* Questi due campi restano come erano: sono i dati degli interventi
                 passati e non si toccano. Non hanno un padrone, e la fatturazione

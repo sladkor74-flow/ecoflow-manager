@@ -902,6 +902,9 @@ const altroCircuito = (intermediario) => !!intermediario && !/ecotyre/i.test(int
  *   2. formulario che differisce di uno o due caratteri, segnalato come errato;
  *   3. formulario assente o irriconoscibile: stesso peso al chilogrammo e stessa
  *      data di fine trasporto, con un giorno di margine per ritrovare la riga.
+ * Il secondo e il terzo passaggio assegnano le coppie (riga, movimento) in un
+ * ordine unico su tutte le righe, non riga per riga (13/10/2026): fuori dalle
+ * parita' esatte l'esito non dipende dall'ordine delle righe del report.
  * Una volta abbinata una riga, ogni campo presente nel report viene confrontato:
  * il peso al chilogrammo, la data di verifica e' quella di fine trasporto.
  *
@@ -1048,51 +1051,157 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   const escluse = [];
   const rif = (r) => (r.foglio ? `${String(r.foglio).trim()}, riga ${r.n}` : `riga ${r.n}`);
   const escludi = (r, motivo) => escluse.push({ n: r.n, foglio: r.foglio || '', fir: r.fir, ordine: r.ordine, kg: r.kg, data: dataRiga(r), produttore: r.produttore, destinatario: r.destinatario, motivo });
-  for (const r of righeLette) {
-    let m = null;
-    let modo = null;
 
+  // UN FORMULARIO CHE MANCA NON E' IL REFUSO DEL VICINO (audit del 20/09, alta
+  // A57; corretta il 12/10/2026).
+  //
+  // Le righe si abbinavano una alla volta, e a ciascuna bastava un formulario
+  // distante un carattere, anche se quel movimento l'aveva gia' preso un'altra
+  // riga. Il caso: il report di Irigom porta RGYTR027030CR (2.860 kg) e
+  // RGYTR027031CR (3.100 kg), nel gestionale c'e' solo il primo. La seconda riga
+  // usciva «duplicata», con formulario, peso e data «errati»: quattro
+  // contestazioni all'impianto, e nessuna diceva la cosa vera, cioe' che un
+  // formulario non e' registrato. I blocchetti dei trasportatori sono numerati
+  // in sequenza, e due carichi dello stesso giorno distano proprio un carattere.
+  //
+  // Quindi tre passaggi: prima tutti i formulari identici, poi i simili, poi il
+  // peso, e gli ultimi due solo sui movimenti rimasti liberi. E un formulario
+  // simile (fino a due caratteri) vale come lo stesso carico solo con almeno una
+  // conferma dalla riga: e' la regola dell'utente del 01/10/2026, la stessa dei
+  // consuntivi (confrontaConsuntivo). Senza conferma la riga e' un formulario
+  // non presente nel gestionale, e il simile si dice come osservazione.
+  const scelte = righeLette.map(r => ({ r, m: null, modo: null, senzaData: null, gia: null, prove: null, vicino: null, vicinoProve: null }));
+  for (const s of scelte) {
+    const { r } = s;
     if (r.firN && perFir.has(r.firN)) {
-      m = migliore(r, perFir.get(r.firN));
-      modo = 'fir';
+      s.m = migliore(r, perFir.get(r.firN));
+      s.modo = 'fir';
     } else if (r.firN && perFirTutti.has(r.firN)) {
       // Fuori dalla fascia di giorni intorno alla settimana, ma registrato: si
       // dice di quale settimana e', non che non esiste.
-      m = migliore(r, perFirTutti.get(r.firN));
-      modo = 'fir';
+      s.m = migliore(r, perFirTutti.get(r.firN));
+      s.modo = 'fir';
     }
-
+    if (s.m) {
+      // Lo stesso formulario su due righe: la seconda e' una riga duplicata.
+      if (usati.has(s.m.id)) s.gia = usati.get(s.m.id);
+      else usati.set(s.m.id, rif(r));
+      continue;
+    }
     // Lo stesso formulario fra i terminati senza fine trasporto: e' registrato,
     // quindi non si cerca un formulario simile ne' un carico dello stesso peso,
     // che lo abbinerebbero a un altro movimento.
-    const senzaData = !m && r.firN ? senzaFinePerFir.get(r.firN) || null : null;
+    s.senzaData = r.firN ? senzaFinePerFir.get(r.firN) || null : null;
+  }
 
-    if (!m && !senzaData && r.firN.length >= 5) {
-      let scelto = null, sceltoDist = 3, sceltoPunti = Infinity;
-      for (const c of bacino) {
-        if (!c.firN) continue;
-        const dist = distanza(r.firN, c.firN, 2);
-        if (dist > 2) continue;
-        const punti = punteggio(r, c);
-        if (dist < sceltoDist || (dist === sceltoDist && punti < sceltoPunti)) { scelto = c; sceltoDist = dist; sceltoPunti = punti; }
-      }
-      if (scelto && (sceltoDist === 1 || (r.kg === scelto.kg && relazione(scelto)))) {
-        m = scelto;
-        modo = 'fir_simile';
-      }
+  // Che cosa, della riga, dice che e' lo stesso carico. Il nome che conta e'
+  // quello dell'altra parte - il produttore di un ingresso, il destinatario di
+  // un'uscita - non l'impianto stesso, che sta su ogni riga del suo report e non
+  // distingue un carico da un altro. Per la stessa ragione il trasportatore non
+  // conferma niente: un report porta quasi sempre lo stesso su tutte le righe.
+  const conferme = (r, c) => {
+    const prove = [];
+    if (r.kg !== null && r.kg === c.kg) prove.push('stesso peso');
+    const d = dataRiga(r);
+    const giorni = d && c.fine ? Math.abs(giorniTra(d, c.fine)) : null;
+    if (giorni === 0) prove.push('stessa data');
+    else if (giorni === 1) prove.push('data a un giorno di distanza');
+    if (r.classe && c.classe && r.classe === c.classe) prove.push('stessa classe');
+    if (r.codice_pdr && c.codice_pdr && cifre(r.codice_pdr) && cifre(r.codice_pdr) === cifre(c.codice_pdr)) prove.push('stesso codice produttore');
+    else if (r.produttore && nomiCoincidono(r.produttore, nome) !== true
+      && (nomiCoincidono(r.produttore, c.produttore) === true || nomiCoincidono(r.produttore, c.punto_raccolta) === true)) prove.push('stesso produttore');
+    if (r.destinatario && nomiCoincidono(r.destinatario, nome) !== true && nomiCoincidono(r.destinatario, c.destinatario) === true) prove.push('stesso destinatario');
+    return prove;
+  };
+  // A due caratteri di distanza la sola classe, il solo produttore o il solo
+  // destinatario non bastano (revisione del 13/10/2026): in un report di
+  // stoccaggio quasi tutte le righe hanno la stessa classe, e un formulario non
+  // registrato vicino di due cifre a un carico che il report non riporta
+  // diventava «formulario errato», perdeva il termine di registrazione e
+  // toglieva il carico dagli assenti. A due caratteri serve lo stesso peso o la
+  // data entro un giorno; gli altri dati contano solo insieme a uno di questi.
+  // A un carattere basta una conferma qualsiasi, come nei consuntivi.
+  const PESO_O_DATA = ['stesso peso', 'stessa data', 'data a un giorno di distanza'];
+  const confermeBastano = (dist, prove) => (dist <= 1 ? prove.length > 0 : prove.some(p => PESO_O_DATA.includes(p)));
+  // Le coppie si assegnano in un ordine unico, non riga per riga (revisione del
+  // 13/10/2026). Riga per riga, una riga che veniva prima con una conferma
+  // debole rubava il movimento al refuso vero che veniva dopo: il refuso usciva
+  // «non presente nel gestionale», la riga prima con tre anomalie false. Prima
+  // la distanza piu' bassa, poi il maggior numero di conferme, poi il punteggio;
+  // a parita' l'ordine del report. Cosi' l'esito non dipende dall'ordine delle righe.
+  const coppie = [];
+  scelte.forEach((s, i) => {
+    const { r } = s;
+    if (s.m || s.senzaData || r.firN.length < 5) return;
+    let vicino = null, vicinoDist = 3, vicinoPunti = Infinity, vicinoProve = null;
+    for (const c of bacino) {
+      // Solo fra i movimenti dell'impianto verificato: lo stesso blocchetto
+      // serve carichi per impianti diversi, e il formulario vicino di un carico
+      // andato a un altro impianto e' un altro carico, non un refuso. Un
+      // formulario identico registrato altrove lo trova gia' il primo passaggio.
+      if (!c.firN || !relazione(c)) continue;
+      const dist = distanza(r.firN, c.firN, 2);
+      if (dist > 2) continue;
+      const punti = punteggio(r, c);
+      const prove = conferme(r, c);
+      // il piu' simile in assoluto, preso o no: e' quello che si nomina se la
+      // riga resta senza abbinamento
+      if (dist < vicinoDist || (dist === vicinoDist && punti < vicinoPunti)) { vicino = c; vicinoDist = dist; vicinoPunti = punti; vicinoProve = prove; }
+      if (usati.has(c.id) || !confermeBastano(dist, prove)) continue;
+      coppie.push({ s, i, c, dist, prove, punti });
     }
+    if (vicino) { s.vicino = vicino; s.vicinoProve = vicinoProve; }
+  });
+  coppie.sort((x, y) => x.dist - y.dist || y.prove.length - x.prove.length || x.punti - y.punti || x.i - y.i);
+  for (const { s, c, prove } of coppie) {
+    if (s.m || usati.has(c.id)) continue;
+    s.m = c;
+    s.modo = 'fir_simile';
+    s.prove = prove;
+    usati.set(c.id, rif(s.r));
+  }
 
-    if (!m && !senzaData && r.kg !== null) {
-      const d = dataRiga(r);
-      const candidati = bacino.filter(c => relazione(c) && !usati.has(c.id) && c.kg === r.kg
-        && (!d || Math.abs(giorniTra(d, c.fine)) <= 1));
-      // Senza data, un peso da solo non basta a riconoscere un carico se ce n'e'
-      // piu' d'uno uguale.
-      if (candidati.length > 0 && (d || candidati.length === 1)) {
-        m = migliore(r, candidati);
-        modo = 'attributi';
-      }
+  // Il terzo passaggio, stesso peso e data entro un giorno, in un ordine unico
+  // anche lui (revisione del 13/10/2026). Riga per riga, la riga che veniva
+  // prima nel report prendeva il carico anche con la data a un giorno, e quella
+  // dopo, con la stessa data, usciva «non presente nel gestionale»; invertendo
+  // le righe si invertiva l'esito. Come per i simili: si raccolgono le coppie
+  // (riga, movimento libero, punteggio) e si assegnano dal punteggio piu' basso,
+  // a parita' nell'ordine del report.
+  const coppiePeso = [];
+  scelte.forEach((s, i) => {
+    const { r } = s;
+    const d = dataRiga(r);
+    if (s.m || s.senzaData || r.kg === null || !d) return;
+    for (const c of bacino) {
+      if (!relazione(c) || usati.has(c.id) || c.kg !== r.kg || Math.abs(giorniTra(d, c.fine)) > 1) continue;
+      coppiePeso.push({ s, i, c, punti: punteggio(r, c) });
     }
+  });
+  coppiePeso.sort((x, y) => x.punti - y.punti || x.i - y.i);
+  for (const { s, c } of coppiePeso) {
+    if (s.m || usati.has(c.id)) continue;
+    s.m = c;
+    s.modo = 'attributi';
+    usati.set(c.id, rif(s.r));
+  }
+  // Le righe senza data vengono dopo: il loro punteggio non conta la data che
+  // manca, e passerebbero davanti a una riga che il peso ce l'ha uguale e la
+  // data a un giorno. Un peso da solo non basta a riconoscere un carico se fra
+  // i movimenti rimasti liberi ce n'e' piu' d'uno uguale.
+  for (const s of scelte) {
+    const { r } = s;
+    if (s.m || s.senzaData || r.kg === null || dataRiga(r)) continue;
+    const candidati = bacino.filter(c => relazione(c) && !usati.has(c.id) && c.kg === r.kg);
+    if (candidati.length === 1) {
+      s.m = candidati[0];
+      s.modo = 'attributi';
+      usati.set(s.m.id, rif(r));
+    }
+  }
+
+  for (const scelta of scelte) {
+    const { r, m, modo, senzaData } = scelta;
 
     const report = {
       fir: r.fir, ordine: r.ordine, kg: r.kg, inizio: r.inizio, fine: r.fine, data: r.data, produttore: r.produttore,
@@ -1168,17 +1277,36 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       const termine = r.firN ? (termineDi(inizioCerto(r), 'report') || termineDi(dataReport, 'report_arrivo')) : null;
       const diQuale = suaSettimana ? `, ed e' della settimana ${suaSettimana.settimana}` : '';
       const entro = termine ? `: da registrare entro il ${it(termine.scadenza)} (${testoConteggio(termine)})` : '';
+      // Il formulario simile che non e' bastato (A57, 12/10/2026): si dice,
+      // perche' se e' davvero un refuso lo si vede subito, ma non fa l'abbinamento.
+      const v = scelta.vicino;
+      const giaDi = v ? usati.get(v.id) : null;
+      // A due caratteri, una conferma che da sola non basta si nomina
+      // (revisione del 13/10/2026): chi legge vede perche' non e' stato abbinato.
+      const deboli = v && !giaDi && scelta.vicinoProve && scelta.vicinoProve.length
+        ? scelta.vicinoProve.map(p => p.replace(/^stess[oa] /, (x) => (x === 'stessa ' ? 'la ' : 'il ')))
+        : null;
+      const simile = v ? [{
+        campo: 'fir',
+        gravita: 'osservazione',
+        messaggio: `Simile a ${v.fir} (${descriviDifferenzaFir(r.fir, v.fir)}), ${giaDi
+          ? `che e' gia' abbinato a un'altra riga del report (${giaDi})`
+          : deboli
+            ? `ma a due caratteri di distanza servono lo stesso peso o la data entro un giorno (in comune ${deboli.length === 1 ? "c'e' solo" : 'ci sono solo'} ${deboli.join(' e ')})`
+            : `ma nessun altro dato della riga lo conferma (peso, data, classe o produttore)`}: non si considera lo stesso carico`,
+      }] : [];
       esiti.push({
         n: r.n, ...foglio, ...fuori, tipo: null, tipo_presunto: tipoPresunto(r), categoria: 'non_registrati',
         esito: 'non_trovata', anomalia: true, report, gestionale: null,
         ...(termine ? { termine } : {}),
+        ...(v ? { simile_a: v.fir } : {}),
         discrepanze: [{
           campo: 'fir',
           gravita: 'anomalia',
           messaggio: r.firN
             ? `Formulario non presente nel gestionale${diQuale}${entro}`
             : 'Riga senza formulario, non abbinabile a nessun movimento',
-        }],
+        }, ...simile],
       });
       continue;
     }
@@ -1202,9 +1330,12 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     const aggiungi = (campo, messaggio, gravita = 'anomalia') => discrepanze.push({ campo, gravita, messaggio });
 
     if (modo === 'fir_simile') {
+      // Da che cosa lo si e' riconosciuto si dice sempre: un abbinamento fatto su
+      // una somiglianza va potuto controllare (01/10/2026).
+      const daCosa = scelta.prove && scelta.prove.length ? `; riconosciuto da: ${scelta.prove.join(', ')}` : '';
       // Se solo il numero del report ha il formato dei formulari, l'errore e' nel gestionale.
-      if (FORMATO_FIR.test(r.firN) && !FORMATO_FIR.test(m.firN)) aggiungi('fir', `Formulario errato nel gestionale: ${descriviDifferenzaFir(m.fir, r.fir)}. Nel report e' ${r.fir}, con il formato regolare di 5 lettere, 6 cifre e 2 lettere: da correggere sul portale`, 'rettifica');
-      else aggiungi('fir', `Formulario errato: ${descriviDifferenzaFir(r.fir, m.fir)}. Nel gestionale e' ${m.fir}`);
+      if (FORMATO_FIR.test(r.firN) && !FORMATO_FIR.test(m.firN)) aggiungi('fir', `Formulario errato nel gestionale: ${descriviDifferenzaFir(m.fir, r.fir)}. Nel report e' ${r.fir}, con il formato regolare di 5 lettere, 6 cifre e 2 lettere: da correggere sul portale${daCosa}`, 'rettifica');
+      else aggiungi('fir', `Formulario errato: ${descriviDifferenzaFir(r.fir, m.fir)}. Nel gestionale e' ${m.fir}${daCosa}`);
     }
     if (modo === 'attributi') aggiungi('fir', r.firN ? `Formulario non corrispondente: nel gestionale e' ${m.fir}` : `Formulario assente nel report: nel gestionale e' ${m.fir}`);
 
@@ -1280,12 +1411,14 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
     };
 
     const presunto = tipo ? { categoria: categoria(m) } : { tipo_presunto: tipoPresunto(r), categoria: 'non_registrati' };
-    if (usati.has(m.id)) {
-      esiti.push({ n: r.n, ...foglio, ...fuoriMov, tipo, ...presunto, esito: 'duplicata', anomalia: true, report, gestionale, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato (${usati.get(m.id)})` }, ...discrepanze] });
+    const riconosciuto = modo === 'fir_simile' && scelta.prove ? { riconosciuto_da: scelta.prove } : {};
+    // Solo il formulario identico puo' essere una riga duplicata: i simili e i
+    // pesi si cercano fra i movimenti rimasti liberi.
+    if (scelta.gia) {
+      esiti.push({ n: r.n, ...foglio, ...fuoriMov, tipo, ...presunto, esito: 'duplicata', anomalia: true, report, gestionale, discrepanze: [{ campo: 'fir', gravita: 'anomalia', messaggio: `Riga duplicata: lo stesso movimento e' gia' riportato (${scelta.gia})` }, ...discrepanze] });
       continue;
     }
-    usati.set(m.id, rif(r));
-    esiti.push({ n: r.n, ...foglio, ...fuoriMov, tipo, ...presunto, esito: discrepanze.length ? 'discrepanze' : 'conforme', anomalia: discrepanze.some(d => d.gravita === 'anomalia'), report, gestionale, discrepanze });
+    esiti.push({ n: r.n, ...foglio, ...fuoriMov, tipo, ...presunto, esito: discrepanze.length ? 'discrepanze' : 'conforme', anomalia: discrepanze.some(d => d.gravita === 'anomalia'), report, gestionale, ...riconosciuto, discrepanze });
   }
 
   // Il report deve contenere tutte le movimentazioni: ingressi e uscite, di ogni canale.
@@ -1370,7 +1503,10 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       conformita: anomalie === 0 && quadra ? 'piena' : 'parziale',
       per_canale: conformitaPerCanale({ quadratura, esiti, assenti }),
       anomalie,
-      osservazioni: esiti.filter(e => (e.discrepanze || []).some(d => d.gravita === 'osservazione')).length,
+      // Il «simile a ...» di un formulario non registrato (12/10/2026) e' una nota
+      // della sua anomalia, non un'osservazione in piu': la sintesi della scheda
+      // le righe non trovate le conta a parte, e cosi' qui.
+      osservazioni: esiti.filter(e => e.esito !== 'non_trovata' && (e.discrepanze || []).some(d => d.gravita === 'osservazione')).length,
       rettifiche: esiti.filter(e => (e.discrepanze || []).some(d => d.gravita === 'rettifica')).length,
       // formulari registrati senza una data obbligatoria o con date incoerenti:
       // righe del report e movimenti assenti nel report
