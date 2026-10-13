@@ -51,22 +51,51 @@ function notaSecondaria(r, tipologia) {
 
 const ambitoImpianto = (r) => [r.prestazione === 'CONFERIMENTO_STOCCAGGIO' ? 'Stoccaggio' : r.prestazione === 'TRATTAMENTO' ? 'Trattamento' : r.prestazione, r.classe !== '—' && `classe ${r.classe}`, r.provenienza && r.provenienza !== '—' && `da ${r.provenienza}`].filter(Boolean).join(' · ');
 
+// IL SURPLUS SULLE TARIFFE (13/10/2026). Richiesta dell'utente del 12/10/2026:
+// «una riga con l'importo standard ed una per il surplus (sempre riferito alle
+// stesse tonnellate raccolte o trattate nel mese)». Sotto le righe del fornitore
+// c'e' la riga del surplus («Fuel Surcharge (consorzio Ecotyre), dal 01/10/2026
+// al 31/12/2026»), col prezzo a tonnellata e l'importo del calcolo. Le sue
+// tonnellate si scrivono fra parentesi e come TESTO, non come numero: sono le
+// stesse del mese, e chi fa una somma sulla colonna non le deve prendere due
+// volte. La riga del fornitore dice il totale (standard piu' surplus, quello che
+// gli si deve) e nella nota come si compone; sotto il «Totale complessivo» del
+// blocco, che lo comprende, una riga «di cui».
+/** Le tonnellate dentro un testo, all'italiana con le migliaia: «1.120,24». */
+const tIt = (v) => { const [i, d] = tTesto(v).split(','); return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${d}`; };
+const NOTA_SURPLUS = 'surplus sulle stesse tonnellate del mese: non si sommano una seconda volta';
+/** Il nome del surplus nei «di cui»: quello vero se nel mese ce n'e' uno solo. */
+export function nomeDelSurplus(result) {
+  const nomi = [...new Set(((result && result.surplus_del_mese) || []).map(s => String((s && s.nome) || '').trim()).filter(Boolean))];
+  return nomi.length === 1 ? nomi[0] : 'surplus';
+}
+/** La nota della riga del fornitore quando ha un surplus: come si compone il suo totale. */
+const notaGruppo = (f, nome) => (Number(f.totale_surplus) > 0
+  ? `standard ${euroIt(f.totale_standard)} € + ${nome} ${euroIt(f.totale_surplus)} €`
+  : null);
+
 /**
  * Le tre sezioni del report: [{ tipo, titolo, colonne, righe: [{ celle, stile }] }].
  * stile: 'gruppo' per la riga del fornitore, 'totale' per il totale della sezione.
  */
 export function sezioniPassiva(result) {
-  const blocco = (titolo, colonnaPrezzo, fornitori, ambito, totale) => {
+  const nomeSurplus = nomeDelSurplus(result);
+  const surplusTot = (result.totali && result.totali.surplus) || {};
+  const blocco = (titolo, colonnaPrezzo, fornitori, ambito, totale, surplusBlocco) => {
     const righe = [];
     for (const f of fornitori || []) {
-      righe.push({ stile: 'gruppo', celle: [f.fornitore, r3(f.totale_tonnellate), null, null, EER, r2(f.totale_euro), f.interno ? 'interno, non fatturato' : null] });
+      righe.push({ stile: 'gruppo', celle: [f.fornitore, r3(f.totale_tonnellate), null, null, EER, r2(f.totale_euro), f.interno ? 'interno, non fatturato' : notaGruppo(f, nomeSurplus)] });
       for (const r of f.righe || []) {
         const conferenti = (r.di_cui || []).map(d => `${d.fornitore} ${tTesto(d.tonnellate)} t`).join('; ');
         righe.push({ celle: [`   ${ambito(r)}`, r3(r.tonnellate), r.tariffa_valore || 0, unita(r.unita_misura), null, r2(r.importo), [r.note, conferenti && `di cui conferito da: ${conferenti}`].filter(Boolean).join(' — ') || null] });
       }
+      for (const s of f.surplus || []) {
+        righe.push({ celle: [`   ${s.etichetta || s.nome}`, `(${tIt(s.tonnellate)})`, Number(s.euro_t) || 0, '€\\t', null, r2(s.importo), NOTA_SURPLUS] });
+      }
       for (const d of f.di_cui || []) righe.push({ celle: [`   di cui ${d.fornitore}`, r3(d.tonnellate), null, null, null, null, 'subraccoglitore, fatturato dal principale'] });
     }
     righe.push({ stile: 'totale', celle: ['Totale complessivo', r3((fornitori || []).reduce((s, f) => s + (f.totale_tonnellate || 0), 0)), null, null, null, r2(totale), null] });
+    if (Number(surplusBlocco) > 0) righe.push({ celle: [`   di cui ${nomeSurplus}`, null, null, null, null, r2(surplusBlocco), 'compreso nel totale qui sopra'] });
     return {
       tipo: 'blocco', titolo,
       colonne: [
@@ -82,12 +111,17 @@ export function sezioniPassiva(result) {
     for (const r of f.righe || []) {
       secondarie.push({ celle: [r.stoccaggio, r.trasportatore || f.fornitore, r.destinazione, r3(r.tonnellate), unita(r.unita_misura), r.tariffa_valore || 0, r.viaggi || 0, r2(r.importo), f.fornitore, notaSecondaria(r, result.tipologia)] });
     }
+    // il surplus del trasporto delle secondarie, sotto le tratte del trasportatore
+    for (const s of f.surplus || []) {
+      secondarie.push({ celle: [`   ${s.etichetta || s.nome}`, f.fornitore, null, `(${tIt(s.tonnellate)})`, '€\\t', Number(s.euro_t) || 0, null, r2(s.importo), f.fornitore, NOTA_SURPLUS] });
+    }
   }
   secondarie.push({ stile: 'totale', celle: ['Totale complessivo', null, null, r3((result.trasporti_secondaria || []).reduce((s, f) => s + (f.totale_tonnellate || 0), 0)), null, null, null, r2(result.totali.trasporti_secondaria), null, null] });
+  if (Number(surplusTot.trasporti_secondaria) > 0) secondarie.push({ celle: [`   di cui ${nomeSurplus}`, null, null, null, null, null, null, r2(surplusTot.trasporti_secondaria), null, 'compreso nel totale qui sopra'] });
 
   return [
-    blocco('RACCOGLITORI', 'Costo di Raccolta', result.raccoglitori, ambitoRaccolta, result.totali.raccoglitori),
-    blocco('IMPIANTI \\ STOCCAGGI', 'Costo', result.impianti_stoccaggi, ambitoImpianto, result.totali.impianti_stoccaggi),
+    blocco('RACCOGLITORI', 'Costo di Raccolta', result.raccoglitori, ambitoRaccolta, result.totali.raccoglitori, surplusTot.raccoglitori),
+    blocco('IMPIANTI \\ STOCCAGGI', 'Costo', result.impianti_stoccaggi, ambitoImpianto, result.totali.impianti_stoccaggi, surplusTot.impianti_stoccaggi),
     {
       tipo: 'secondarie', titolo: 'TRASPORTO DELLE SECONDARIE',
       colonne: [
@@ -117,6 +151,9 @@ export function righePassiva(result, tipi = [], stili = []) {
   let tipo = 'testa';
   const riga = (r, stile = null) => { tipi.push(tipo); stili.push(stile); aoa.push(r); };
   riga([NOMI[result.tipologia] || result.tipologia, `${result.mese} ${result.anno}`, null, null, null, 'TOTALE', r2(result.totali.totale_complessivo)], 'totale');
+  // Il surplus del canale, compreso nel totale qui sopra (13/10/2026).
+  const surplus = Number(result.totali && result.totali.surplus && result.totali.surplus.totale) || 0;
+  if (surplus > 0) riga([null, null, null, null, null, `di cui ${nomeDelSurplus(result)}`, r2(surplus)]);
   riga([]);
   for (const s of sezioniPassiva(result)) {
     tipo = s.tipo;
@@ -183,6 +220,10 @@ export async function exportFatturazionePassivaPdf(result, opzioni = {}) {
       { etichetta: 'Impianti e stoccaggi', valore: r2(result.totali.impianti_stoccaggi), tipo: 'euro' },
       { etichetta: 'Trasporto delle secondarie', valore: r2(result.totali.trasporti_secondaria), tipo: 'euro' },
       { etichetta: `Totale ${NOMI_TITOLO[result.tipologia] || ''}`, valore: r2(result.totali.totale_complessivo), tipo: 'euro' },
+      // il surplus, compreso nel totale accanto (13/10/2026)
+      ...(Number(result.totali.surplus && result.totali.surplus.totale) > 0
+        ? [{ etichetta: `di cui ${nomeDelSurplus(result)}`, valore: r2(result.totali.surplus.totale), tipo: 'euro' }]
+        : []),
     ],
     sezioni: sezioniPassiva(result),
     note: (result.anomalie || []).map(a => a.descrizione),

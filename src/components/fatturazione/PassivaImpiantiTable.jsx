@@ -1,5 +1,7 @@
 import React from 'react';
 import { formatNumber } from '@/lib/utils';
+import { testoEuroT } from '@/lib/surplus';
+import { EtichettaSurplus, OrigineSurplus, RIGA_SURPLUS, SULLA_PRESTAZIONE, TonnellateSurplus, TotaleStandardSurplus } from './PassivaSurplus';
 
 // Il "di cui" dice chi ha portato materialmente il carico al sito. Si mostra
 // quando aggiunge qualcosa: se a conferire sono stati in piu' d'uno, oppure se
@@ -86,12 +88,30 @@ export default function PassivaImpiantiTable({ data }) {
                     ))}
                   </React.Fragment>
                 ))}
+                {/* Il surplus sulle tariffe (13/10/2026), se ce n'e' uno sul
+                    trattamento o sullo stoccaggio: sotto le righe dell'impianto,
+                    sulle stesse tonnellate, prima del suo totale. */}
+                {(f.surplus || []).map((s, si) => (
+                  <tr key={`${fi}-surplus-${si}`} className={RIGA_SURPLUS}>
+                    <td className="px-3 py-1.5"><EtichettaSurplus s={s} /></td>
+                    <td className="px-3 py-1.5" colSpan={3}>
+                      <OrigineSurplus s={s} />
+                      {SULLA_PRESTAZIONE[s.prestazione] && <span className="text-xs text-muted-foreground"> · {SULLA_PRESTAZIONE[s.prestazione]}</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-right"><TonnellateSurplus t={s.tonnellate} /></td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{testoEuroT(s.euro_t)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatNumber(s.importo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                ))}
                 <tr className="border-t bg-muted/30 font-semibold">
                   <td className="px-3 py-1.5">Totale {f.fornitore}</td>
                   <td colSpan={3}></td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_tonnellate)}</td>
                   <td></td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {formatNumber(f.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <TotaleStandardSurplus f={f} />
+                  </td>
                 </tr>
               </React.Fragment>
             ))}

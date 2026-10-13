@@ -107,6 +107,11 @@ export async function esportaTabellaExcel({ nomeFile, foglio = 'Dettaglio', tito
 const C = {
   scuro: [15, 76, 92], medio: [26, 127, 142], chiaro: [226, 238, 241], zebra: [247, 250, 251],
   bordo: [214, 222, 226], testo: [30, 41, 59], grigio: [110, 120, 130], bianco: [255, 255, 255], ambra: [180, 83, 9], rosso: [185, 28, 28],
+  // La riga del surplus sulle tariffe (il Fuel Surcharge, 13/10/2026): la forma
+  // dei fogli della passiva (passivaAmministrazionePdf.js), il testo indaco
+  // scuro in corsivo sul fondo indaco chiaro, con la barra a sinistra. Indaco e
+  // non ambra o rosso, che qui vogliono dire «c'e' un problema».
+  surplus: [55, 48, 163], surplusChiaro: [238, 242, 255], surplusBarra: [99, 102, 241],
 };
 
 /**
@@ -155,7 +160,8 @@ function piedi(doc, intest, { M, W, H, sinistra = '' }) {
 /**
  * PDF A4 orizzontale: fascia di intestazione, tabella con intestazioni ripetute a
  * ogni pagina, righe alternate, totali e numero di pagina.
- * colore(riga) opzionale: 'ambra' o 'rosso' per evidenziare una riga.
+ * colore(riga) opzionale: 'ambra' o 'rosso' per evidenziare una riga, 'surplus'
+ * per la riga di un surplus sulle tariffe.
  */
 export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottotitolo, colonne, righe, totali, colore, documento }) {
   const intest = await documentoDa({ titolo, sottotitolo, ...(documento || {}) });
@@ -211,8 +217,9 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
   const conteggio = `${formatIntero(righe.length)} ${righe.length === 1 ? 'riga' : 'righe'}`;
 
   // Anche le celle vanno a capo, fino a tre righe: una nota lunga non si perde.
-  const riga = (celle, { sfondo, grassetto, coloreTesto, altezza: minima = 6 } = {}) => {
-    doc.setFont('helvetica', grassetto ? 'bold' : 'normal');
+  const riga = (celle, { sfondo, grassetto, corsivo, barra, coloreTesto, altezza: minima = 6 } = {}) => {
+    const stile = grassetto ? 'bold' : corsivo ? 'italic' : 'normal';
+    doc.setFont('helvetica', stile);
     doc.setFontSize(7.4);
     const testi = colonne.map((c, i) => {
       const v = celle[i];
@@ -228,7 +235,11 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
       doc.setFillColor(...sfondo);
       doc.rect(M, y, W - 2 * M, altezza, 'F');
     }
-    doc.setFont('helvetica', grassetto ? 'bold' : 'normal');
+    if (barra) {
+      doc.setFillColor(...barra);
+      doc.rect(M, y, 0.9, altezza, 'F');
+    }
+    doc.setFont('helvetica', stile);
     doc.setFontSize(7.4);
     doc.setTextColor(...(coloreTesto || C.testo));
     let x = M;
@@ -252,8 +263,11 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
   }
   righe.forEach((r, i) => {
     const evidenza = colore ? colore(r) : null;
+    const surplus = evidenza === 'surplus';
     riga(colonne.map(c => testoCella(c.valore(r), c.tipo)), {
-      sfondo: i % 2 ? C.zebra : null,
+      sfondo: surplus ? C.surplusChiaro : i % 2 ? C.zebra : null,
+      corsivo: surplus,
+      barra: surplus ? C.surplusBarra : null,
       coloreTesto: evidenza ? C[evidenza] : null,
     });
   });

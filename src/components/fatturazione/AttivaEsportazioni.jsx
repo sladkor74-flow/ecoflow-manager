@@ -5,6 +5,26 @@ import { Loader2, Download, FileSpreadsheet, FileDown, FileText, CheckCircle, Al
 import { exportFatturazioneAttiva, exportFatturazioneAttivaPdf, nomeFileAttiva } from '@/lib/fatturazioneExport';
 import { exportAmministrazioneAttiva, exportAmministrazioneAttivaPdf } from '@/lib/formatAmministrazioneExport';
 import { nomeFileAmministrazione } from '@/lib/formatAmministrazione';
+import { soloFormulari, soloSurplus, surplusPerNome, STILE_SURPLUS } from '@/lib/surplusVista';
+import { euro } from '@/lib/formatoSoldi';
+
+// IL SURPLUS NON ENTRA NEI QUATTRO FILE, PER ORA (il surplus sulle tariffe,
+// 13/10/2026). Il documento del mese ha la riga del surplus (il Fuel Surcharge
+// del consorzio), ma i report hanno le colonne dei modelli SMOCO, e come metterci
+// una riga in piu' lo decide l'amministrazione (domanda D3 del progetto del
+// surplus). Fino ad allora i file escono come prima, con le sole righe dei
+// formulari (soloFormulari, la regola delle pagine), e chi esporta legge, prima
+// e dopo, che il surplus si fattura con la sua riga a parte. Senza il filtro la
+// riga usciva come «Trasp.+Tratt.» con 0 kg, e il TOTALE del file cambiava.
+// Due record dello stesso surplus (un importo cambiato a meta' mese) si dicono
+// una volta, col totale (surplusPerNome).
+const surplusDelCanale = (righe) => surplusPerNome(soloSurplus(righe)).map(v => `${v.nome} ${euro(v.totale)}`);
+const elencoItaliano = (voci) => (voci.length > 1 ? `${voci.slice(0, -1).join(', ')} e ${voci[voci.length - 1]}` : voci[0] || '');
+const surplusAParte = (righe) => {
+  const voci = surplusDelCanale(righe);
+  if (!voci.length) return '';
+  return `Il file ha le sole righe dei formulari: ${elencoItaliano(voci)} ${voci.length === 1 ? 'si fattura con la sua riga' : 'si fatturano con le loro righe'} a parte.`;
+};
 
 const TIPS = [
   { key: 'RETE', label: 'Rete' },
@@ -40,6 +60,10 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
 
   // il messaggio del server quando c'e', altrimenti quello generico della rete
   const perche = (e) => e?.response?.data?.error || e?.message || 'errore sconosciuto';
+
+  // Il surplus del mese, canale per canale, detto prima di esportare: i file non
+  // lo hanno (vedi surplusAParte).
+  const surplusDelMese = TIPS.map(t => ({ label: t.label, voci: surplusDelCanale(data[t.key]?.righe) })).filter(c => c.voci.length);
 
   // L'esportazione non si blocca, ma chi esporta senza un confronto pulito lo fa sapendolo
   const consenso = () => {
@@ -77,7 +101,10 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
   // la pagina e non si possono copiare.
   const unoSolo = async (tipologia, formato) => {
     const etichetta = TIPS.find(t => t.key === tipologia)?.label || tipologia;
-    const righe = data[tipologia]?.righe || [];
+    const tutte = data[tipologia]?.righe || [];
+    const righe = soloFormulari(tutte);
+    const aParte = surplusAParte(tutte);
+    const conAParte = (testo) => (aParte ? `${testo} ${aParte}` : testo);
     if (righe.length === 0) return { tipo: 'avviso', testo: `${etichetta}: nessuna riga da esportare.` };
     let nomeFile;
     try {
@@ -91,9 +118,9 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
         tipologia, anno: periodo.anno, mese: periodo.mese,
         documento_ids: doc ? [doc.id] : [], nome_file: nomeFile,
       });
-      return { tipo: 'ok', testo: `${nomeFile} scaricato e registrato nello storico.` };
+      return { tipo: aParte ? 'avviso' : 'ok', testo: conAParte(`${nomeFile} scaricato e registrato nello storico.`) };
     } catch (e) {
-      return { tipo: 'avviso', testo: `${nomeFile} è stato scaricato, ma non è stato registrato nello storico: ${perche(e)}.` };
+      return { tipo: 'avviso', testo: conAParte(`${nomeFile} è stato scaricato, ma non è stato registrato nello storico: ${perche(e)}.`) };
     }
   };
 
@@ -120,6 +147,13 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
       <div>
         <h2 className="font-heading font-semibold mb-2">Esportazione Excel — {periodo.mese} {periodo.anno}</h2>
         <p className="text-sm text-muted-foreground mb-3">Un file per canale, in Excel o in PDF, con le colonne dei modelli SMOCO: i due formati dicono le stesse cose. I file vengono scaricati automaticamente.</p>
+        {surplusDelMese.length > 0 && (
+          <div className={`mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-md px-3 py-2 text-sm ${STILE_SURPLUS.barretta} ${STILE_SURPLUS.fondo}`}>
+            <span className={STILE_SURPLUS.etichetta}>Surplus</span>
+            <span>I file hanno le sole righe dei formulari, come prima: il surplus si fattura con la sua riga a parte.</span>
+            <span className="font-medium tabular-nums">{surplusDelMese.map(c => `${c.label}: ${c.voci.join(', ')}`).join(' · ')}</span>
+          </div>
+        )}
         {prefattura.stato !== 'caricamento' && (
           <div className={`mb-3 border rounded-lg p-3 text-sm flex flex-wrap items-center gap-2 ${prefattura.stato === 'coincide' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
             {prefattura.stato === 'coincide' ? <CheckCircle className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}

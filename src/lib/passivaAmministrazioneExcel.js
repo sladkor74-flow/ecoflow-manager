@@ -70,6 +70,21 @@ const LARGHEZZA = LARGHEZZE.length;
 // e' inevitabile - e' cosi' anche nel foglio dell'amministrazione.
 const LARGHEZZE_EXTRA = [20, 18, 34, 28, 28, 13, 13, 11, 15, 12, 15, 16, 17, 18, 15, 16, 40];
 
+// IL SURPLUS SULLE TARIFFE (13/10/2026): la riga del Fuel Surcharge e di ogni
+// altro surplus ha un colore solo, lo stesso nella pagina, nei fogli e nei PDF
+// (indaco: l'ambra e il rosso qui vogliono dire «c'e' un problema», e il surplus
+// non lo e'), una barra a sinistra, il nome in corsivo, e le tonnellate fra
+// parentesi: sono le stesse del mese, si leggono ma non si sommano. Il numero
+// resta un numero (il formato mette le parentesi), cosi' la formula t x €/t
+// della riga si rifa' se l'amministrazione corregge il prezzo; le somme delle
+// tonnellate del fornitore e del blocco non la prendono, quelle degli euro si'.
+const SURPLUS = 'FF6366F1';
+const SURPLUS_CHIARO = 'FFEEF2FF';
+const SURPLUS_SCURO = 'FF3730A3';
+const TONN_SURPLUS = '(#,##0.00)';
+const TONN3_SURPLUS = '(#,##0.000)';
+const eSurplus = (r) => !!r && r.tipo === 'surplus';
+
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const n2 = (v) => Math.round(num(v) * 100) / 100;
 const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -95,6 +110,36 @@ const APRE = { ...GRIGLIA, top: { style: 'medium', color: { argb: MEDIO } } };
 // Sopra il totale il doppio filo, che in un foglio di conti vuol dire «qui si
 // chiude».
 const CHIUDE = { ...GRIGLIA, top: { style: 'double', color: { argb: SCURO } } };
+// La riga del surplus: la barra di colore e' il bordo sinistro della prima cella.
+const BARRA_SURPLUS = { ...GRIGLIA, left: { style: 'thick', color: { argb: SURPLUS } } };
+/** Il formato delle tonnellate di una riga del surplus: fra parentesi, tre decimali solo se i chili non sono tondi. */
+const fmtTSurplus = (v) => (Math.round(num(v) * 1000) % 10 === 0 ? TONN_SURPLUS : TONN3_SURPLUS);
+
+/**
+ * UNA RIGA DEL SURPLUS, in una tabella qualunque del foglio: il nome nella sua
+ * colonna, le tonnellate fra parentesi, il prezzo a tonnellata nella colonna
+ * giusta e il totale come formula t x €/t arrotondata al centesimo, che porta
+ * dentro il numero del calcolo. `colonne`: { nome, tonn, prezzo, totale, note,
+ * soggetto? } e `ultima` per lo sfondo.
+ */
+function scriviRigaSurplus(ws, r, riga, { nome, soggetto, tonn, prezzo, totale, note }, ultima, etichetta) {
+  const st = { bordo: GRIGLIA, sfondo: SURPLUS_CHIARO };
+  stendi(ws, r, 1, ultima, st);
+  scrivi(ws, r, 1, null, { ...st, bordo: BARRA_SURPLUS });
+  scrivi(ws, r, nome, etichetta, { ...st, bordo: nome === 1 ? BARRA_SURPLUS : GRIGLIA, corsivo: true, colore: SURPLUS_SCURO, rientro: nome === 1 ? 2 : 0 });
+  if (soggetto) scrivi(ws, r, soggetto, testo(riga.soggetto), st);
+  scrivi(ws, r, tonn, num(riga.tonnellate), { ...st, corsivo: true, colore: TENUE, allinea: 'right', fmt: fmtTSurplus(riga.tonnellate) });
+  if (prezzo) {
+    scrivi(ws, r, prezzo, num(riga.prezzo), { ...st, allinea: 'right', fmt: EURO });
+    scrivi(ws, r, totale, { formula: `ROUND(${lettera(tonn)}${r}*${lettera(prezzo)}${r},2)`, result: n2(riga.totale) }, { ...st, allinea: 'right', fmt: EURO });
+  } else {
+    // Un prezzo senza colonna (il trasporto delle secondarie nell'extra
+    // raccolta, che li' si paga a viaggio): l'importo si scrive com'e'.
+    scrivi(ws, r, totale, n2(riga.totale), { ...st, allinea: 'right', fmt: EURO });
+  }
+  scrivi(ws, r, note, testo(riga.note), { ...st, corsivo: true, colore: TENUE });
+  return `${lettera(totale)}${r}`;
+}
 
 /**
  * Scrive una cella con il suo stile. Tutto il foglio passa da qui: cosi' il
@@ -180,13 +225,18 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
   r++;
 
   // Le righe che il «Totale complessivo» somma: i fornitori quando le voci sono
-  // rientrate, le voci stesse quando la tabella e' piatta.
-  const sommandi = [];
-  let aperto = null; // il fornitore in corso, con le righe delle sue voci
+  // rientrate, le voci stesse quando la tabella e' piatta. Due elenchi
+  // (13/10/2026): le tonnellate non prendono le righe del surplus, che sono le
+  // stesse del mese; gli euro si'. Senza surplus i due elenchi sono uguali e le
+  // formule quelle di prima.
+  const sommandiT = [];
+  const sommandiE = [];
+  const celleSurplus = [];
+  let aperto = null; // il fornitore in corso, con le righe delle sue voci e dei suoi surplus
   const chiudiFornitore = () => {
     if (!aperto) return;
     const t = somma(col.tonn, aperto.voci);
-    const e = somma(col.totale, aperto.voci);
+    const e = somma(col.totale, [...aperto.voci, ...aperto.surplus].sort((a, b) => a - b));
     // Un fornitore senza nemmeno una voce nel modello non ha niente da sommare:
     // si scrive il numero che arriva dai movimenti, perche' perderlo sarebbe
     // peggio che scriverlo senza formula.
@@ -212,9 +262,27 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
       stendi(ws, r, 1, ultima, st);
       scrivi(ws, r, col.nome, testo(riga.soggetto), st);
       scrivi(ws, r, col.eer, EER_PFU, { ...st, allinea: 'center', fmt: COD });
-      aperto = { riga: r, voci: [], dati: riga, st };
-      sommandi.push(r);
+      aperto = { riga: r, voci: [], surplus: [], dati: riga, st };
+      sommandiT.push(r);
+      sommandiE.push(r);
       zebrata = false;
+      r++;
+      continue;
+    }
+
+    if (eSurplus(riga)) {
+      // Il surplus sotto le voci del fornitore: nello stile piatto porta davanti
+      // il soggetto, come le voci («NAPPI SUD - (Fuel Surcharge)»); a due livelli
+      // il nome e da dove viene. Il prezzo va nella colonna della prestazione.
+      const colPrezzo = due
+        ? (riga.colonna_prezzo === 'trattamento' ? col.trattamento : col.stoccaggio)
+        : col.prezzo;
+      const etichetta = stile === 'piatto'
+        ? `${testo(riga.soggetto)} - (${testo(riga.nome)})`
+        : [testo(riga.nome), testo(riga.origine)].filter(Boolean).join(' · ');
+      celleSurplus.push(scriviRigaSurplus(ws, r, riga, { nome: col.nome, tonn: col.tonn, prezzo: colPrezzo, totale: col.totale, note: col.note }, ultima, etichetta));
+      if (aperto) aperto.surplus.push(r);
+      else sommandiE.push(r);
       r++;
       continue;
     }
@@ -289,7 +357,7 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
       testo(riga.note),
     ].filter(Boolean).join(' — '), { ...st, corsivo: true, colore: TENUE });
     if (aperto) aperto.voci.push(r);
-    else sommandi.push(r);
+    else { sommandiT.push(r); sommandiE.push(r); }
     zebrata = !zebrata;
     r++;
   }
@@ -298,8 +366,8 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
   const st = { grassetto: true, sfondo: CHIARO, bordo: CHIUDE };
   stendi(ws, r, 1, ultima, st);
   scrivi(ws, r, col.nome, 'Totale complessivo', st);
-  const t = somma(col.tonn, sommandi);
-  const e = somma(col.totale, sommandi);
+  const t = somma(col.tonn, sommandiT);
+  const e = somma(col.totale, sommandiE);
   scrivi(ws, r, col.tonn, t ? { formula: t, result: num(blocco.totale_t) } : num(blocco.totale_t),
     { ...st, allinea: 'right', fmt: fmtT(blocco.totale_t) });
   scrivi(ws, r, col.totale, e ? { formula: e, result: n2(blocco.totale_euro) } : n2(blocco.totale_euro),
@@ -329,7 +397,7 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
       r++;
     }
   }
-  return { prossima: r, cellaTotale };
+  return { prossima: r, cellaTotale, celleSurplus };
 }
 
 /**
@@ -376,10 +444,22 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
   ws.getRow(r).height = 30;
   r++;
 
+  // Le tonnellate sommano i viaggi, gli euro anche le righe del surplus
+  // (13/10/2026): le tonnellate del surplus sono quelle dei viaggi sopra.
   const sommandi = [];
+  const sommandiE = [];
+  const celleSurplus = [];
   let zebrata = false;
   for (const t of righe) {
     if (!t) continue;
+    if (eSurplus(t)) {
+      celleSurplus.push(scriviRigaSurplus(ws, r, { ...t, soggetto: t.trasportatore }, { nome: 1, soggetto: 2, tonn: 4, prezzo: 6, totale: 8, note: 9 }, ultima,
+        [testo(t.nome), testo(t.origine)].filter(Boolean).join(' · ')));
+      scrivi(ws, r, 5, '€\\t', { bordo: GRIGLIA, sfondo: SURPLUS_CHIARO, allinea: 'center' });
+      sommandiE.push(r);
+      r++;
+      continue;
+    }
     const aViaggio = t.unita_misura === 'euro_viaggio';
     const st = { bordo: GRIGLIA, ...(zebrata ? { sfondo: ZEBRA } : {}) };
     stendi(ws, r, 1, ultima, st);
@@ -423,6 +503,7 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
     { ...st, allinea: 'right', fmt: EURO });
     scrivi(ws, r, 9, testo(t.note), { ...st, corsivo: true, colore: TENUE });
     sommandi.push(r);
+    sommandiE.push(r);
     zebrata = !zebrata;
     r++;
   }
@@ -437,12 +518,12 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
   stendi(ws, r, 1, ultima, st);
   scrivi(ws, r, 1, 'Totale trasporto', st);
   const t = somma(4, sommandi);
-  const e = somma(8, sommandi);
+  const e = somma(8, sommandiE.sort((a, b) => a - b));
   scrivi(ws, r, 4, t ? { formula: t, result: num(trasporti.totale_t) } : num(trasporti.totale_t),
     { ...st, allinea: 'right', fmt: fmtT(trasporti.totale_t) });
   scrivi(ws, r, 8, e ? { formula: e, result: n2(trasporti.totale_euro) } : n2(trasporti.totale_euro),
     { ...st, allinea: 'right', fmt: EURO });
-  return { prossima: r + 1, cellaTotale: `H${r}` };
+  return { prossima: r + 1, cellaTotale: `H${r}`, celleSurplus };
 }
 
 // L'EXTRA RACCOLTA: il dettaglio degli interventi chiusi nel mese.
@@ -481,6 +562,8 @@ const COLONNE_EXTRA = [
   { chiave: 'note', titolo: 'Note' },
 ];
 const LARGO_EXTRA = COLONNE_EXTRA.length;
+/** La colonna (da 1) di una chiave della tabella dell'extra raccolta. */
+const COLONNA_EXTRA_INDICE = (chiave) => COLONNE_EXTRA.findIndex(c => c.chiave === chiave) + 1;
 /** La data come si legge: 10/09/2026. Testo, non data, per non rimettere in ballo i fusi. */
 const giornoIt = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10).split('-').reverse().join('/') : testo(v));
 
@@ -567,13 +650,33 @@ function scriviExtra(ws, r0, extra0) {
     scrivi(ws, r, 1, 'Nessun intervento di extra raccolta chiuso in questo mese.', st);
     r++;
   }
+  // IL SURPLUS SULLE TARIFFE in fondo agli interventi (13/10/2026): una riga per
+  // fornitore e per surplus, col centesimo del mese, contato dal modulo Extra
+  // Raccolta come lo conta la passiva (extraConSurplus). Il fornitore
+  // sta nella colonna del suo ruolo - il raccoglitore fra i trasportatori,
+  // l'impianto fra i destinatari - e il prezzo in quella della prestazione. Le
+  // tonnellate sono quelle degli interventi sopra: si leggono, non si sommano.
+  const sommandiE = [...sommandi];
+  const COLONNA_PREZZO_EXTRA = { RACCOLTA: iRac, CONFERIMENTO_STOCCAGGIO: iSto, TRATTAMENTO: iTra };
+  const iTras = COLONNA_EXTRA_INDICE('trasportatore');
+  const iDest = COLONNA_EXTRA_INDICE('destinatario');
+  const celleSurplus = [];
+  for (const s of elenco(extra.surplus).filter(eSurplus)) {
+    const ruolo = ['TRATTAMENTO', 'CONFERIMENTO_STOCCAGGIO'].includes(s.prestazione) ? iDest : iTras;
+    celleSurplus.push(scriviRigaSurplus(ws, r, s, {
+      nome: COLONNA_EXTRA_INDICE('produttore'), soggetto: ruolo, tonn: iT,
+      prezzo: COLONNA_PREZZO_EXTRA[s.prestazione] || 0, totale: iTot, note: LARGO_EXTRA,
+    }, LARGO_EXTRA, [testo(s.nome), testo(s.origine)].filter(Boolean).join(' · ')));
+    sommandiE.push(r);
+    r++;
+  }
 
   const stT = { grassetto: true, sfondo: CHIARO, bordo: CHIUDE };
   stendi(ws, r, 1, LARGO_EXTRA, stT);
   scrivi(ws, r, 1, 'Totale extra raccolta', stT);
   const sKg = somma(iKg, sommandi);
   const sT = somma(iT, sommandi);
-  const sE = somma(iTot, sommandi);
+  const sE = somma(iTot, sommandiE);
   scrivi(ws, r, iKg, sKg ? { formula: sKg, result: Math.round(num(extra.totale_kg)) } : Math.round(num(extra.totale_kg)), { ...stT, allinea: 'right', fmt: INTERO });
   scrivi(ws, r, iT, sT ? { formula: sT, result: num(extra.totale_t) } : num(extra.totale_t), { ...stT, allinea: 'right', fmt: fmtT(extra.totale_t) });
   scrivi(ws, r, iTot, sE ? { formula: sE, result: n2(extra.totale_euro) } : n2(extra.totale_euro), { ...stT, allinea: 'right', fmt: EURO });
@@ -609,7 +712,7 @@ function scriviExtra(ws, r0, extra0) {
   avvisa('DA SISTEMARE: interventi terminati senza data di fine trasporto. Non stanno in nessun mese e non si fatturano.',
     elenco(extra.senza_data), (x) => `${x.numero_fir} · ordine ${x.ordine} · ${x.produttore} · ${kgTesto(x.kg)}`);
 
-  return { prossima: r + 1, cellaTotale };
+  return { prossima: r + 1, cellaTotale, celleSurplus };
 }
 
 /** Il periodo come si scrive nei titoli: «Settembre 2026». */
@@ -644,6 +747,7 @@ function scriviCanale(ws, r0, f) {
   if (f.extra) {
     const ex = scriviExtra(ws, r0 + 2, f.extra);
     scrivi(ws, r0, 5, { formula: ex.cellaTotale, result: n2(f.totale_euro) }, { ...st, allinea: 'right', fmt: EURO });
+    diCuiSurplus(ws, r0, ex.celleSurplus, f, st);
     return ex.prossima;
   }
 
@@ -656,7 +760,22 @@ function scriviCanale(ws, r0, f) {
 
   scrivi(ws, r0, 5, { formula: `${racc.cellaTotale}+${imp.cellaTotale}+${tra.cellaTotale}`, result: n2(f.totale_euro) },
     { ...st, allinea: 'right', fmt: EURO });
+  diCuiSurplus(ws, r0, [...racc.celleSurplus, ...imp.celleSurplus, ...tra.celleSurplus], f, st);
   return tra.prossima;
+}
+
+/**
+ * IL «DI CUI» DEL SURPLUS NELLA FASCIA DEL CANALE (13/10/2026): accanto al
+ * totale, quanto ne e' surplus, come somma delle righe del surplus (una formula,
+ * come il totale: se l'amministrazione corregge un prezzo si rifa'). Il nome e'
+ * quello del surplus quando nel mese ce n'e' uno solo.
+ */
+function diCuiSurplus(ws, r0, celle, f, st) {
+  if (!celle.length) return;
+  const nomi = [...new Set(elenco(f.surplus).map(s => testo(s && s.nome)).filter(Boolean))];
+  scrivi(ws, r0, 6, `di cui ${nomi.length === 1 ? nomi[0] : 'surplus'}`, { ...st, corpo: 9, grassetto: false, allinea: 'right', capo: true });
+  scrivi(ws, r0, 7, { formula: celle.length === 1 ? celle[0] : `SUM(${celle.join(',')})`, result: n2(f.totale_surplus) },
+    { ...st, corpo: 11, allinea: 'right', fmt: EURO });
 }
 
 /** Il titolo in cima al foglio: chi manda il documento e di che mese parla. */
@@ -683,15 +802,30 @@ function notaFinale(ws, r, fogli) {
   const largo = soloExtra ? LARGHEZZE_EXTRA.length : LARGHEZZA;
   const st = { corsivo: true, colore: TENUE, capo: true };
   stendi(ws, r, 1, largo, st);
+  // Il surplus si spiega solo dove c'e' (13/10/2026): una frase su un foglio che
+  // non lo porta farebbe cercare righe che non ci sono.
+  const surplus = conSurplus(quali)
+    ? ' Le righe con la barra indaco sono il surplus sulle tariffe (per esempio il Fuel Surcharge): stanno sotto il fornitore, sulle stesse tonnellate del mese, scritte fra parentesi e fuori dalle somme delle tonnellate; il loro importo e\' nel totale del fornitore e del canale.'
+    : '';
   if (soloExtra) {
-    scrivi(ws, r, 1, 'L\'extra raccolta non ha voci a modello: ogni intervento fa storia a se\', coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento, piu\' il sovracosto, che si paga al raccoglitore o all\'impianto e la nota dice a chi (la pulizia e i costi aggiuntivi degli interventi di prima non hanno un padrone e non si fatturano a nessuno). Entra nel mese in cui e\' stata chiusa la fine trasporto. I totali sono formule: correggi un prezzo e si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.', st);
+    scrivi(ws, r, 1, `L'extra raccolta non ha voci a modello: ogni intervento fa storia a se', coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull'intervento, piu' il sovracosto, che si paga al raccoglitore o all'impianto e la nota dice a chi (la pulizia e i costi aggiuntivi degli interventi di prima non hanno un padrone e non si fatturano a nessuno). Entra nel mese in cui e' stata chiusa la fine trasporto. I totali sono formule: correggi un prezzo e si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.${surplus}`, st);
     ws.mergeCells(r, 1, r, largo);
-    ws.getRow(r).height = 30;
+    ws.getRow(r).height = surplus ? 42 : 30;
     return;
   }
-  scrivi(ws, r, 1, 'Le voci del modello restano nel foglio anche a zero: il foglio e\' lo stesso ogni mese e un conferimento comparso dove prima non ce n\'erano si vede subito. I totali sono formule: correggi un prezzo e i totali si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.', st);
+  scrivi(ws, r, 1, `Le voci del modello restano nel foglio anche a zero: il foglio e' lo stesso ogni mese e un conferimento comparso dove prima non ce n'erano si vede subito. I totali sono formule: correggi un prezzo e i totali si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.${surplus}`, st);
   ws.mergeCells(r, 1, r, LARGHEZZA);
-  ws.getRow(r).height = 30;
+  ws.getRow(r).height = surplus ? 42 : 30;
+}
+
+/** Vero se almeno un canale ha una riga del surplus, in un blocco qualunque. */
+function conSurplus(fogli) {
+  return elenco(fogli).some(f => f && [
+    ...elenco(f.raccoglitori && f.raccoglitori.righe),
+    ...elenco(f.impianti && f.impianti.righe),
+    ...elenco(f.trasporti && f.trasporti.righe),
+    ...elenco(f.extra && f.extra.surplus),
+  ].some(eSurplus));
 }
 
 /**

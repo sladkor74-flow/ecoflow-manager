@@ -33,6 +33,18 @@
     --eco-chart-3: 217 33% 17%;
     --eco-chart-4: 43 74% 66%;
     --eco-chart-5: 27 87% 67%;
+    /* Il surplus sulle tariffe (il Fuel Surcharge, 13/10/2026): un colore solo
+       per ogni riga, pastiglia e scheda di un surplus, nelle pagine della
+       passiva, dell'attiva e delle tariffe, cosi' chi l'ha visto una volta lo
+       riconosce ovunque. Indaco, la tinta della barra dei fogli Excel e PDF
+       (6366F1) e delle pagine della passiva e dell'attiva: qui l'ambra e il
+       rosso vogliono dire "c'e' un problema", il verde "a posto" e il blu e'
+       il colore della pagina, e un surplus non e' ne' un errore ne' un
+       comando. Un tono piu' scuro della barra, perche' si legga anche come
+       testo piccolo sul bianco. Si usa come
+       hsl(var(--eco-surplus)), anche trasparente: hsl(var(--eco-surplus) / 0.1).
+       Il colore da solo non basta: la riga dice anche la parola "Surplus". */
+    --eco-surplus: 243 75% 59%;
     --eco-radius: 0.5rem;
     --font-heading: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
     --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
@@ -75,6 +87,8 @@
     --eco-chart-3: 210 40% 98%;
     --eco-chart-4: 43 74% 66%;
     --eco-chart-5: 27 87% 67%;
+    /* Il surplus nel tema scuro: lo stesso indaco, piu' chiaro, leggibile sulle schede scure. */
+    --eco-surplus: 234 89% 74%;
     --eco-sidebar-background: 217 33% 14%;
     --eco-sidebar-foreground: 210 40% 98%;
     --eco-sidebar-primary: 198 93% 60%;

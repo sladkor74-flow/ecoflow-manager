@@ -11,7 +11,10 @@ import { calcExtraRaccolta, prezzoAttivoExtra, annoIntervento, avvisoPesoMancant
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { PROV_TO_REGION } from '@/lib/regioneMap';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, formatTonnellate } from '@/lib/utils';
+import { euro } from '@/lib/formatoSoldi';
+import { testoEuroT, periodoSurplus, statoSurplus, DESTINATARI } from '@/lib/surplus';
+import { STILE_SURPLUS } from '@/lib/surplusVista';
 import { giornoDaData, dataDaGiorno, competenza, datiChiusuraCompleti } from '@/lib/extraRaccoltaStato';
 import { oggiRoma } from '@/lib/giornoItaliano';
 import { DATE_OBBLIGATORIE, dateMancanti, dateIncoerenti, testoDate } from '@/lib/movimenti';
@@ -62,6 +65,31 @@ function NumField({ label, value, onChange }) {
       <Label className="text-xs text-muted-foreground">{label}</Label>
       <Input type="number" className="h-9 text-sm" value={value} onChange={e => onChange(e.target.value)} />
     </div>
+  );
+}
+
+// IL SURPLUS NELLA SCHEDA (13/10/2026). Il Fuel Surcharge del consorzio e ogni
+// altro surplus dell'extra raccolta: SMOCO lo fattura a Ecotyre e lo paga al
+// fornitore, sulle stesse tonnellate. Qui si vede la quota di questo intervento,
+// con la barretta che segna il surplus in tutte le pagine. Fuori dal modulo per
+// la stessa ragione di NumField.
+const A_CHI = { RACCOLTA: 'al raccoglitore', TRATTAMENTO: "all'impianto", CONFERIMENTO_STOCCAGGIO: 'allo stoccaggio', TRASPORTO_SECONDARIA: 'al trasportatore' };
+const tonn = (kg) => formatTonnellate((Number(kg) || 0) / 1000);
+const giornoIt = (v) => { const g = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(g) ? g.split('-').reverse().join('/') : ''; };
+// «fra il 01/10/2026 e il 31/12/2026»: il periodo in cui deve finire il trasporto.
+const fraIl = (s) => {
+  const dal = giornoIt(s && s.data_inizio_validita);
+  const al = giornoIt(s && s.data_fine_validita);
+  return dal && al ? `fra il ${dal} e il ${al}` : periodoSurplus(s) || 'nel suo periodo';
+};
+// La riga del surplus nella scheda: la forma e il colore delle altre pagine,
+// dal token --eco-surplus (STILE_SURPLUS, revisione del 13/10/2026).
+function RigaSurplus({ children }) {
+  return (
+    <p className={`mt-2 rounded-sm px-2 py-1 text-xs tabular-nums ${STILE_SURPLUS.barretta} ${STILE_SURPLUS.fondo}`}>
+      <span className={`mr-1.5 ${STILE_SURPLUS.etichetta}`}>Surplus</span>
+      {children}
+    </p>
   );
 }
 
@@ -458,6 +486,21 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
     ? (secondaria ? 'una secondaria non si fattura a Ecotyre' : 'manca il peso effettivo: senza, non si fattura')
     : '';
 
+  // Il surplus (13/10/2026): la quota di questo intervento, con le regole della
+  // fattura e della passiva (calcExtraRaccolta). Se la fine del trasporto non
+  // c'e' ancora, si dice quali surplus dell'extra raccolta varrebbero e quando:
+  // il periodo lo decide il giorno di fine trasporto, non la richiesta.
+  const conSurplus = calc.surplus_attivo.length > 0 || calc.surplus_passivo.length > 0;
+  // Una secondaria non e' una raccolta e non si fattura a Ecotyre: per lei
+  // valgono solo i surplus di trattamento, stoccaggio e trasporto, e solo la
+  // parte ai fornitori.
+  const daEcotyre = (s) => !secondaria && Number(s.euro_t_attiva) > 0;
+  const surplusPossibili = !form.trasporto_finito_il
+    ? ((contesto && contesto.surplus) || []).filter(s => statoSurplus(s) !== 'concluso'
+      && !(secondaria && String(s.prestazione || '').toUpperCase() === 'RACCOLTA')
+      && (daEcotyre(s) || Number(s.euro_t_passiva) > 0))
+    : [];
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
       <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
@@ -634,6 +677,21 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
               <NumField label="Sovracosto trasporto (€)" value={form.sovracosto_trasporto} onChange={v => set('sovracosto_trasporto', v)} />
               <NumField label="Sovracosto trattamento (€)" value={form.sovracosto_trattamento} onChange={v => set('sovracosto_trattamento', v)} />
             </div>
+            {/* Il surplus che SMOCO fattura a Ecotyre su questo intervento: una
+                riga sua in fattura, sulle stesse tonnellate. */}
+            {calc.surplus_attivo.map(v => (
+              <RigaSurplus key={`a-${v.chiave}`}>
+                <strong className="italic text-foreground">{v.nome}</strong>{v.origine ? ` · ${v.origine}` : ''} · <strong>+{testoEuroT(v.euro_t)}</strong> da Ecotyre, {periodoSurplus({ data_inizio_validita: v.dal, data_fine_validita: v.al })}: <strong>{euro(v.importo)}</strong> su {tonn(v.kg)} t
+              </RigaSurplus>
+            ))}
+            {surplusPossibili.map(s => (
+              <p key={`p-${s.id || s.nome}`} className="mt-2 text-xs text-muted-foreground">
+                Se il trasporto finisce {fraIl(s)} vale anche {String(s.nome || '').trim() || 'un surplus'}:
+                {daEcotyre(s) ? ` +${testoEuroT(s.euro_t_attiva)} da Ecotyre` : ''}
+                {daEcotyre(s) && Number(s.euro_t_passiva) > 0 ? ' e' : ''}
+                {Number(s.euro_t_passiva) > 0 ? ` +${testoEuroT(s.euro_t_passiva)} ai ${DESTINATARI[String(s.prestazione || '').toUpperCase()] || 'fornitori'}` : ''}, sulle stesse tonnellate.
+              </p>
+            ))}
 
             <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-destructive">Uscite: quello che SMOCO paga ai fornitori</p>
             <p className="text-xs text-muted-foreground">
@@ -701,6 +759,17 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
                 <p className="text-xs text-muted-foreground">Si paga all&apos;impianto di destinazione, che deve trattare o triturare: importo fisso, non a tonnellata</p>
               </div>
             </div>
+            {/* Il surplus che SMOCO paga al fornitore su questo intervento: una
+                riga sua nella passiva del mese. Un fornitore interno non lo
+                riceve, e si dice. */}
+            {calc.surplus_passivo.map(v => (
+              <RigaSurplus key={`p-${v.chiave}-${v.prestazione}-${v.fornitore_chiave}`}>
+                <strong className="italic text-foreground">{v.nome}</strong> · <strong>+{testoEuroT(v.euro_t)}</strong> {A_CHI[v.prestazione] || 'al fornitore'}
+                {v.interno
+                  ? `: niente, ${v.fornitore} è interno e a se stessa SMOCO non fattura`
+                  : <> {v.fornitore}: <strong>{euro(v.importo)}</strong> su {tonn(v.kg)} t</>}
+              </RigaSurplus>
+            ))}
             <p className="mt-2 text-xs text-muted-foreground">
               I costi di raccolta, trasporto, stoccaggio e trattamento sono quelli scritti qui, e la fatturazione passiva paga questi. Il modulo propone solo i costi a tonnellata, dalle tariffe di extra raccolta del fornitore e solo nei campi vuoti; il costo del trasporto a viaggio e i due sovracosti si scrivono sempre a mano, perché un listino a viaggio per l&apos;extra raccolta non c&apos;è e un imprevisto non sta in nessuna tariffa. Va scritto tutto prima di passare l&apos;intervento a terminato.
             </p>
@@ -740,10 +809,12 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
               {ricavoNonFatturato
                 ? <div className="text-base font-bold tabular-nums text-muted-foreground" title={secondaria ? '' : avvisoPesoMancante(form)}>—<span className="block text-[11px] font-normal">{ricavoNonFatturato}</span></div>
                 : <div className="text-base font-bold tabular-nums">€ {formatNumber(calc.ricavo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+              {calc.surplus_ricavo > 0 && <div className="text-[11px] text-muted-foreground tabular-nums">di cui surplus {euro(calc.surplus_ricavo)}</div>}
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Costo totale</div>
               <div className="text-base font-bold tabular-nums">€ {formatNumber(calc.costo_totale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              {calc.surplus_costo > 0 && <div className="text-[11px] text-muted-foreground tabular-nums">di cui surplus {euro(calc.surplus_costo)}</div>}
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Margine</div>
@@ -758,6 +829,14 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
               </div>
             </div>
           </div>
+          {/* Il centesimo del surplus e' quello del mese (13/10/2026): fattura e
+              passiva lo arrotondano una volta sulle tonnellate del mese, qui c'e'
+              la quota dell'intervento, e si dice. */}
+          {conSurplus && (
+            <p className="-mt-3 text-xs text-muted-foreground">
+              Il surplus qui è la quota di questo intervento. In fattura e in passiva si calcola una volta sul mese, sulle tonnellate di tutti gli interventi del mese: il centesimo che fa fede è quello del mese.
+            </p>
+          )}
         </div>
 
         {/* Chi ha cambiato un costo o un prezzo di questo intervento, quando e

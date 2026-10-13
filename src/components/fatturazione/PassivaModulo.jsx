@@ -13,12 +13,15 @@ import PassivaSecondariaTable from './PassivaSecondariaTable';
 import PassivaAnomalie from './PassivaAnomalie';
 import PassivaFormulariRipartiti from './PassivaFormulariRipartiti';
 import PassivaQualifica from './PassivaQualifica';
+import { DiCuiSurplus, FasceSurplus, nomeSurplusDelMese } from './PassivaSurplus';
 import { exportFatturazionePassiva, exportFatturazionePassivaPdf } from '@/lib/passivaExport';
 import { cartellaPassivaUnFoglio, cartellaPassivaPerCanale } from '@/lib/passivaAmministrazioneExcel';
 import { esportaPassivaAmministrazionePdf } from '@/lib/passivaAmministrazionePdf';
 import { fogliDa, nomeFilePassiva } from '@/lib/passivaAmministrazione';
 import { modelloAmministrazione, quanteVociModello } from '@/lib/modelloPassivaAmministrazione';
 import { bloccoExtraRaccolta } from '@/lib/extraRaccoltaAmministrazione';
+import { contestoPrezzi } from '@/lib/extraRaccoltaCalc';
+import * as subfornitori from '@/lib/subfornitori';
 import { scarica } from '@/lib/docxModello';
 import { creaMoltiConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 import VociPassivaDialog from './VociPassivaDialog';
@@ -53,7 +56,10 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
   // solo quando in quel determinato mese effettivamente sono stati chiusi quei
   // movimenti e le info vanno riprese dal modulo 'extra raccolta', compresi i
   // prezzi». Percio' per questo canale non si chiede niente al calcolo della
-  // passiva: le righe sono gli interventi del modulo, coi loro prezzi.
+  // passiva: le righe sono gli interventi del modulo, coi loro prezzi. E dal
+  // modulo viene anche il surplus sulle tariffe (13/10/2026): il blocco lo conta
+  // col contesto della pagina dell'extra raccolta (i surplus, l'anagrafica, la
+  // catena dei subfornitori), una riga per fornitore col centesimo del mese.
   const CANALI_AMM = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
   const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const esportaAmministrazione = async (come) => {
@@ -88,9 +94,16 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
         per[canale] = res.data || res;
       }
       // Gli interventi: tutti, e il blocco si prende quelli terminati con la fine
-      // trasporto nel mese, col giorno italiano.
+      // trasporto nel mese, col giorno italiano. Il surplus sulle tariffe degli
+      // interventi (13/10/2026) lo conta il blocco col contesto della pagina
+      // dell'extra raccolta: i surplus letti tutti (il disattivato lo toglie il
+      // conto, come per le tariffe), l'anagrafica intera (chi e' interno, chi
+      // fattura per chi) e la catena dei subfornitori. Due letture per foglio,
+      // non per intervento ne' per fornitore.
       const interventi = await fetchAllClient(base44.entities.ExtraRaccolta, null, '-created_date');
-      const extra = bloccoExtraRaccolta(interventi, periodo.anno, periodo.mese);
+      const surplusAll = await fetchAllClient(base44.entities.SurplusTariffa, null, '-created_date');
+      const fornitori = await fetchAllClient(base44.entities.Fornitore, null, 'ragione_sociale');
+      const extra = bloccoExtraRaccolta(interventi, periodo.anno, periodo.mese, contestoPrezzi([], fornitori, surplusAll, subfornitori));
       // Senza voci il foglio uscirebbe vuoto. Si propone il modello
       // dell'amministrazione - le sue righe e i suoi prezzi, quelli con cui
       // settembre 2026 torna al centesimo - e poi l'utente lo corregge dal
@@ -222,23 +235,33 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
 
       {result && (
         <>
-          {/* Riepilogo totali + quadratura */}
+          {/* Riepilogo totali + quadratura. Il surplus sulle tariffe (13/10/2026)
+              e' dentro i totali, che sono quello che si deve ai fornitori: sotto il
+              numero si legge quanto ne e' surplus, e nel totale come si compone. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="border rounded-lg p-3 bg-card">
               <div className="text-xs text-muted-foreground">Raccoglitori</div>
               <div className="text-lg font-bold tabular-nums">€ {formatNumber(result.totali.raccoglitori, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <DiCuiSurplus valore={result.totali.surplus?.raccoglitori} nome={nomeSurplusDelMese(result)} />
             </div>
             <div className="border rounded-lg p-3 bg-card">
               <div className="text-xs text-muted-foreground">Impianti e stoccaggi</div>
               <div className="text-lg font-bold tabular-nums">€ {formatNumber(result.totali.impianti_stoccaggi, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <DiCuiSurplus valore={result.totali.surplus?.impianti_stoccaggi} nome={nomeSurplusDelMese(result)} />
             </div>
             <div className="border rounded-lg p-3 bg-card">
               <div className="text-xs text-muted-foreground">Trasporti secondaria</div>
               <div className="text-lg font-bold tabular-nums">€ {formatNumber(result.totali.trasporti_secondaria, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <DiCuiSurplus valore={result.totali.surplus?.trasporti_secondaria} nome={nomeSurplusDelMese(result)} />
             </div>
             <div className="border-2 rounded-lg p-3 bg-card">
               <div className="text-xs text-muted-foreground">Totale complessivo</div>
               <div className="text-lg font-bold tabular-nums">€ {formatNumber(result.totali.totale_complessivo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              {result.totali.surplus?.totale > 0 && (
+                <div className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+                  standard {formatNumber(result.totali.standard?.totale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · surplus {formatNumber(result.totali.surplus.totale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              )}
             </div>
           </div>
 
@@ -257,6 +280,10 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
 
           {/* Formulari il cui peso e' stato ripartito su piu' ordini */}
           <PassivaFormulariRipartiti formulari={result.formulari_ripartiti} />
+
+          {/* I surplus sulle tariffe in corso nel mese su questo canale (il Fuel
+              Surcharge): che cosa vale, a chi, su quante tonnellate e quanto fa */}
+          <FasceSurplus surplus={result.surplus_del_mese} />
 
           {/* Tabelle */}
           <div className="space-y-4">

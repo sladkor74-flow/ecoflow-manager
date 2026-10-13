@@ -1,5 +1,7 @@
 import React from 'react';
 import { formatNumber } from '@/lib/utils';
+import { testoEuroT } from '@/lib/surplus';
+import { EtichettaSurplus, OrigineSurplus, RIGA_SURPLUS, TonnellateSurplus, TotaleStandardSurplus } from './PassivaSurplus';
 
 // Un viaggio di secondaria puo' portare insieme formulari di rete e formulari
 // ACI. La tabella mostra le tonnellate del canale che si sta guardando: quelle
@@ -71,12 +73,28 @@ export default function PassivaSecondariaTable({ data, tipologia }) {
                     </td>
                   </tr>
                 ))}
+                {/* Il surplus del trasporto delle secondarie (13/10/2026), se ce
+                    n'e' uno: sulle tonnellate del canale delle tratte, a tonnellata
+                    anche sui viaggi misti, prima del totale del trasportatore. */}
+                {(f.surplus || []).map((s, si) => (
+                  <tr key={`${fi}-surplus-${si}`} className={RIGA_SURPLUS}>
+                    <td className="px-3 py-1.5"><EtichettaSurplus s={s} /></td>
+                    <td className="px-3 py-1.5"><OrigineSurplus s={s} /></td>
+                    <td className="px-3 py-1.5 text-right"><TonnellateSurplus t={s.tonnellate} /></td>
+                    <td className="px-3 py-1.5 text-right text-muted-foreground" title="Il surplus è a tonnellata">—</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{testoEuroT(s.euro_t)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatNumber(s.importo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                ))}
                 <tr className="border-t bg-muted/30 font-semibold">
                   <td className="px-3 py-1.5">Totale {f.fornitore}</td>
                   <td></td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_tonnellate)} t</td>
                   <td colSpan={2}></td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {formatNumber(f.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <TotaleStandardSurplus f={f} />
+                  </td>
                 </tr>
               </React.Fragment>
             ))}

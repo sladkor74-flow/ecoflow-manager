@@ -5,11 +5,98 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Upload, CheckCircle, AlertTriangle, FileText, Info } from 'lucide-react';
 import { formatKg, formatNumber, formatIntero } from '@/lib/utils';
 import { giornoRoma } from '@/lib/giornoItaliano';
+import { STILE_SURPLUS, ESITI_SURPLUS, FORME_SURPLUS, ordiniSurplusDaChiarire, baseSurplus } from '@/lib/surplusVista';
+import { testoEuroT } from '@/lib/surplus';
+import NomeSurplus from './NomeSurplus';
 
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const SERVIZI = { TRASP: 'Trasp', TRASP_TRATT: 'Trasp+Tratt' };
 const euro = (v) => (v === null || v === undefined ? '—' : formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const kg = (v) => (v === null || v === undefined ? '—' : formatKg(v));
+// un importo col segno davanti all'euro: «+€ 1.268,40», «−€ 0,02»
+const euroConSegno = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}€ ${euro(Math.abs(v))}`);
+const TONI = {
+  ok: 'bg-emerald-100 text-emerald-800', errore: 'bg-red-100 text-red-800', attenzione: 'bg-amber-100 text-amber-900',
+  osservazione: 'bg-sky-100 text-sky-800', neutro: 'bg-muted text-muted-foreground',
+};
+
+// IL SURPLUS DI UN CANALE CONTRO LA PREFATTURA (il Fuel Surcharge, 13/10/2026).
+// Come lo portera' la prefattura di Ecotyre non si sa ancora (la prima e' quella
+// di ottobre): nel prezzo di ogni ordine, una riga per ordine, una riga sola, o
+// niente. Il confronto (confrontaPrefattura) le riconosce tutte e qui si dice in
+// tre numeri, gestionale, prefattura e scarto, con l'esito in un cartellino e la
+// frase del calcolo; sotto, gli ordini su cui non torna. Le tonnellate e gli
+// importi della tabella dei canali restano quelli dei formulari: il surplus non
+// si somma agli ordini.
+export function RiquadroSurplus({ canale, s }) {
+  if (!s) return null;
+  const esito = ESITI_SURPLUS[s.esito] || { testo: s.esito, tono: 'neutro' };
+  const righe = s.gestionale?.righe || [];
+  // senza righe nel gestionale (un surplus che c'e' solo nella prefattura) il nome non c'e'
+  const nomi = [...new Set(righe.map(r => r.nome).filter(Boolean))].join(' e ') || 'non nel gestionale';
+  const forme = (s.prefattura?.forme || []).map(f => FORME_SURPLUS[f] || f).join(', ');
+  const daChiarire = ordiniSurplusDaChiarire(s.ordini);
+  const gia = s.ordini?.gia_fra_le_differenze || [];
+  const fuori = s.esito === 'fuori_prefattura';
+  return (
+    <div className={`rounded-lg p-3 ${STILE_SURPLUS.riquadro} ${STILE_SURPLUS.barretta}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold flex flex-wrap items-center gap-2">{NOMI[canale] || canale} <NomeSurplus nome={nomi} /></p>
+        <span className={`text-xs px-2 py-0.5 rounded ${TONI[esito.tono] || TONI.neutro}`}>{esito.testo}</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 text-sm">
+        <div className="rounded bg-background/70 px-2.5 py-1.5">
+          <span className="block text-xs text-muted-foreground">Gestionale</span>
+          {righe.length
+            ? <><span className="font-semibold tabular-nums">€ {euro(s.gestionale.euro)}</span><span className="block text-xs text-muted-foreground tabular-nums">{righe.map(r => baseSurplus(r.kg, r.euro_t)).join(' + ')}</span></>
+            : <span className="text-muted-foreground">nessun surplus nel mese</span>}
+        </div>
+        <div className="rounded bg-background/70 px-2.5 py-1.5">
+          <span className="block text-xs text-muted-foreground">Prefattura</span>
+          {fuori
+            ? <span className="text-muted-foreground">non passa dalla prefattura</span>
+            : s.esito === 'ipotesi' && s.ipotesi
+              // lo stesso €/t in piu' su tanti ordini, che il gestionale non ha come surplus
+              ? <><span className="font-semibold tabular-nums">€ {euro(s.ipotesi.euro)}</span><span className="block text-xs text-muted-foreground">{testoEuroT(s.ipotesi.euro_t)} in più su {s.ipotesi.ordini} ordini</span></>
+              : <><span className="font-semibold tabular-nums">{s.prefattura?.euro === null || s.prefattura?.euro === undefined ? '—' : `€ ${euro(s.prefattura.euro)}`}</span><span className="block text-xs text-muted-foreground">{forme || 'non lo porta'}</span></>}
+        </div>
+        <div className="rounded bg-background/70 px-2.5 py-1.5">
+          <span className="block text-xs text-muted-foreground">Scarto</span>
+          <span className="font-semibold tabular-nums">{euroConSegno(s.scarto)}</span>
+          {s.esito === 'arrotondamento' && <span className="block text-xs text-muted-foreground">arrotondamento ordine per ordine</span>}
+        </div>
+      </div>
+      {s.testo && <p className="text-xs mt-2">{s.testo}</p>}
+      {daChiarire.length > 0 && (
+        <div className="mt-2 overflow-x-auto max-h-56 overflow-y-auto bg-background/80 rounded border">
+          <table className="w-full text-xs">
+            <thead className="bg-muted sticky top-0"><tr>
+              <th className="px-2 py-1.5 font-semibold text-left">ID ordine</th>
+              <th className="px-2 py-1.5 font-semibold text-right">kg</th>
+              <th className="px-2 py-1.5 font-semibold text-right">Surplus atteso €</th>
+              <th className="px-2 py-1.5 font-semibold text-right">In prefattura €</th>
+              <th className="px-2 py-1.5 font-semibold text-left">Che cosa</th>
+            </tr></thead>
+            <tbody>
+              {daChiarire.map((o, i) => (
+                <tr key={`${o.id_ordine}|${i}`} className="border-t">
+                  <td className="px-2 py-1 font-mono">{o.id_ordine || '—'}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{kg(o.kg)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{euro(o.atteso)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{euro(o.trovato)}</td>
+                  <td className="px-2 py-1">{o.cosa}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {gia.length > 0 && (
+        <p className="text-xs text-muted-foreground mt-2">{gia.length === 1 ? `L'ordine ${gia[0]} è già fra le differenze qui sopra` : `${gia.length} ordini sono già fra le differenze qui sopra`}: il loro surplus si chiarisce con quelle.</p>
+      )}
+    </div>
+  );
+}
 // il giorno e' quello italiano: un caricamento fatto dopo mezzanotte non deve risultare del giorno prima
 const giorno = (v) => (v ? (giornoRoma(v) || String(v).slice(0, 10)).split('-').reverse().join('/') : '—');
 const messaggio = (e) => e?.response?.data?.error || e?.data?.error || e.message || String(e);
@@ -165,6 +252,18 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
             </table>
           </div>
           <p className="text-xs text-muted-foreground -mt-2">Nelle colonne della prefattura entrano solo gli ordini che il gestionale ha nello stesso mese; gli altri sono elencati qui sotto.</p>
+          {/* Il surplus (il Fuel Surcharge, 13/10/2026): gli importi della tabella sono
+              quelli dei formulari, il surplus ha il suo riquadro in fondo a ogni canale.
+              Qui l'esito in una riga, per vederlo subito. */}
+          {c.canali.some(x => x.surplus) && (
+            <p className="text-xs -mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-muted-foreground">Gli importi qui sopra sono quelli dei formulari; il surplus si confronta a parte, in fondo a ogni canale:</span>
+              {c.canali.filter(x => x.surplus).map(x => {
+                const e = ESITI_SURPLUS[x.surplus.esito] || { testo: x.surplus.esito, tono: 'neutro' };
+                return <span key={x.canale} className="inline-flex items-center gap-1"><span className="font-medium">{NOMI[x.canale]}</span><span className={`px-1.5 py-0.5 rounded ${TONI[e.tono] || TONI.neutro}`}>{e.testo}</span></span>;
+              })}
+            </p>
+          )}
 
           {c.terziarie?.ordini > 0 && (
             <Tabella tono="grigio" titolo={`Terziarie in prefattura (sezione a parte): € ${euro(c.terziarie.euro)} su ${kg(c.terziarie.kg)} kg`}
@@ -202,8 +301,15 @@ export default function PrefatturaEcotyre({ periodo, isAdmin, onEsito }) {
               <Tabella titolo={`${NOMI[x.canale]}: stesso peso, importo diverso`} spiega="Il prezzo per tonnellata della prefattura è ricavato dall'importo: dice subito se è una tariffa diversa."
                 righe={x.importo_diverso}
                 colonne={[{ t: 'ID ordine', v: r => r.id_ordine, m: true }, { t: 'Formulario', v: r => r.numero_fir || '—' }, { t: 'kg', v: r => kg(r.kg), d: true }, { t: '€ prefattura', v: r => euro(r.importo_prefattura), d: true }, { t: '€ gestionale', v: r => euro(r.importo_gestionale), d: true }, { t: '€/t prefattura', v: r => euro(r.prezzo_prefattura_t), d: true }, { t: '€/t gestionale', v: r => euro(r.prezzo_gestionale_t), d: true }]} />
+              <RiquadroSurplus canale={x.canale} s={x.surplus} />
             </React.Fragment>
           ))}
+
+          {/* Una riga di surplus della prefattura che non si sa di quale canale sia,
+              o su un ordine che il mese non ha: conta fra le differenze. */}
+          <Tabella tono="red" titolo="Righe di surplus della prefattura senza un canale" spiega="Il gestionale non sa a quale canale darle: la ragione è scritta accanto. Un canale non prende mai il surplus di un altro."
+            righe={c.surplus_da_attribuire || []}
+            colonne={[{ t: 'ID ordine', v: r => r.id_ordine || '—', m: true }, { t: 'Riga della prefattura', v: r => r.testo || '—' }, { t: '€', v: r => euro(r.importo), d: true }, { t: 'Perché', v: r => r.spiegazione }]} />
         </>
       )}
     </div>

@@ -408,19 +408,186 @@ export function descriviFuori(righe) {
   return [...new Set(pezzi.filter(Boolean))].join('; ');
 }
 
+// ─── IL SURPLUS SULLE TARIFFE (13/10/2026) ───
+//
+// Richiesta dell'utente del 12/10/2026: accanto alla tariffa un eventuale
+// surplus in €/t con le sue date, e in fattura «una riga con l'importo standard
+// ed una per il surplus (sempre riferito alle stesse tonnellate raccolte o
+// trattate nel mese)». Il primo e' il Fuel Surcharge del consorzio Ecotyre, +5
+// €/t a tutti i raccoglitori dal 01/10/2026 al 31/12/2026.
+//
+// Il surplus NON e' una voce del modello: e' una riga che il foglio aggiunge da
+// se', dal calcolo della passiva, sotto le voci del soggetto. Il numero e'
+// quello del calcolo (una riga per fornitore e per surplus, t x €/t arrotondato
+// una volta, come il fornitore la scrive in fattura): il foglio non lo rifa'.
+// Le tonnellate della riga sono le stesse del mese e NON si sommano una seconda
+// volta: il totale del soggetto e del blocco in tonnellate resta quello delle
+// voci, quello in euro comprende il surplus. Nel periodo di validita' la riga
+// c'e' anche a zero per i soggetti del modello che nel mese non hanno portato
+// niente, come le voci: il foglio resta lo stesso ogni mese. Un fornitore
+// interno non la riceve: a se stessi non si fattura.
+
+// Le prestazioni di un blocco, come le scrive il calcolo sulle righe del surplus.
+const PRESTAZIONI_SURPLUS = {
+  raccoglitori: ['RACCOLTA'],
+  impianti: ['TRATTAMENTO', 'CONFERIMENTO_STOCCAGGIO'],
+};
+// Negli impianti dell'ACI il prezzo va nella colonna della prestazione.
+const COLONNA_SURPLUS = { CONFERIMENTO_STOCCAGGIO: 'stoccaggio', TRATTAMENTO: 'trattamento' };
+const COLONNA_PRESTAZIONE = { stoccaggio: 'CONFERIMENTO_STOCCAGGIO', trattamento: 'TRATTAMENTO' };
+const giornoIt = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10).split('-').reverse().join('/') : '');
+
+/** «dal 01/10/2026 al 31/12/2026», dai giorni che il calcolo scrive sulla riga. */
+export function periodoDelSurplus(s) {
+  const dal = giornoIt(s && s.dal);
+  const al = giornoIt(s && s.al);
+  if (dal && al) return `dal ${dal} al ${al}`;
+  if (dal) return `dal ${dal}`;
+  if (al) return `fino al ${al}`;
+  return '';
+}
+
+/** La nota della riga del surplus: da dove viene, quando vale, e che le tonnellate non si sommano. */
+export function notaDelSurplus(s) {
+  const testa = [testo(s && s.origine), periodoDelSurplus(s)].filter(Boolean).join(', ');
+  return `${testa ? `${testa}: ` : ''}surplus sulle stesse tonnellate del mese, che non si sommano una seconda volta`;
+}
+
+/** Una riga 'surplus' del foglio: dal calcolo, oppure a zero per un soggetto senza movimenti. */
+function rigaSurplus(soggetto, s, tonnellate, totale) {
+  const prestazione = testo(s.prestazione).toUpperCase();
+  return {
+    tipo: 'surplus',
+    soggetto,
+    voce: testo(s.nome) || 'Surplus',
+    nome: testo(s.nome) || 'Surplus',
+    origine: testo(s.origine),
+    surplus_id: testo(s.surplus_id),
+    prestazione,
+    tonnellate: n3(tonnellate),
+    viaggi: 0,
+    prezzo: Number(s.euro_t) || 0,
+    unita_misura: 'euro_tonnellata',
+    colonna_prezzo: COLONNA_SURPLUS[prestazione] || '',
+    totale: n2(totale),
+    dal: testo(s.dal),
+    al: testo(s.al),
+    etichetta: testo(s.etichetta),
+    note: notaDelSurplus(s),
+  };
+}
+
 /**
- * Un blocco del foglio. Torna { righe, totale_t, totale_euro, non_previsti }.
+ * Le righe del surplus dei gruppi del calcolo, per soggetto (nome normalizzato,
+ * come le righe del mese): { nome -> [righe del surplus del calcolo] }.
+ */
+export function surplusPerSoggetto(gruppi) {
+  const fuori = new Map();
+  for (const g of gruppi || []) {
+    if (!g || g.interno === true || !Array.isArray(g.surplus) || !g.surplus.length) continue;
+    const k = nome(g.fornitore);
+    if (!fuori.has(k)) fuori.set(k, []);
+    fuori.get(k).push(...g.surplus);
+  }
+  return fuori;
+}
+
+/**
+ * I soggetti interni del canale: quelli che il calcolo dice interni in uno
+ * qualunque dei tre blocchi, quelli dei surplus del mese, e - per un soggetto
+ * che nel mese non ha movimenti nel canale, e quindi il calcolo non nomina - le
+ * voci del modello che lo dicono nella nota («Interno: non fatturato.»).
+ */
+export function soggettiInterni(passiva, voci) {
+  const fuori = new Set();
+  for (const blocco of ['raccoglitori', 'impianti_stoccaggi', 'trasporti_secondaria']) {
+    for (const g of (passiva && passiva[blocco]) || []) if (g && g.interno === true) fuori.add(nome(g.fornitore));
+  }
+  for (const s of (passiva && passiva.surplus_del_mese) || []) {
+    for (const f of (s && s.interni) || []) fuori.add(nome(f.fornitore));
+  }
+  const perSoggetto = new Map();
+  for (const v of voci || []) {
+    if (!v || !testo(v.soggetto)) continue;
+    const k = nome(v.soggetto);
+    if (!perSoggetto.has(k)) perSoggetto.set(k, []);
+    perSoggetto.get(k).push(v);
+  }
+  for (const [k, sue] of perSoggetto) {
+    if (sue.every(v => /\binterno\b/i.test(testo(v.note)) && !(Number(v.prezzo) > 0))) fuori.add(k);
+  }
+  fuori.delete('');
+  return fuori;
+}
+
+/** Le prestazioni di un soggetto in un blocco: per decidere quali surplus lo riguardano. */
+function prestazioniDelSoggetto(blocco, vociSoggetto, righeSoggetto) {
+  if (blocco === 'raccoglitori') return new Set(['RACCOLTA']);
+  const fuori = new Set();
+  for (const r of righeSoggetto || []) if (testo(r.prestazione)) fuori.add(prestazioneChiave(r.prestazione));
+  for (const v of vociSoggetto || []) {
+    const c = criterioDi(v);
+    if (c && testo(c.prestazione)) fuori.add(prestazioneChiave(c.prestazione));
+    if (COLONNA_PRESTAZIONE[testo(v.colonna_prezzo)]) fuori.add(COLONNA_PRESTAZIONE[testo(v.colonna_prezzo)]);
+  }
+  return fuori;
+}
+
+/** Vero se un surplus del mese con un elenco nomina il soggetto (fra i pagati, i senza righe o gli interni). */
+function elencoNomina(s, k) {
+  const nomi = [
+    ...((s && s.fornitori) || []).map(f => f && f.fornitore),
+    ...((s && s.senza_righe) || []),
+    ...((s && s.interni) || []).map(f => f && f.fornitore),
+  ];
+  return nomi.some(x => nome(x) === k);
+}
+
+/**
+ * Le righe del surplus di un soggetto in un blocco: quelle del calcolo (con le
+ * sue tonnellate e il suo importo) e, per i surplus del mese che lo riguardano
+ * e che il calcolo non gli ha dato perche' nel periodo non ha portato niente, la
+ * riga a zero. In ordine di nome e di inizio, come nel calcolo.
+ */
+function righeSurplusDelSoggetto(surplus, blocco, soggetto, vociSoggetto, righeSoggetto) {
+  if (!surplus) return [];
+  const k = nome(soggetto);
+  const prestazioni = PRESTAZIONI_SURPLUS[blocco] || [];
+  const dalCalcolo = ((surplus.perSoggetto && surplus.perSoggetto.get(k)) || [])
+    .filter(s => prestazioni.includes(testo(s.prestazione).toUpperCase()));
+  const fuori = dalCalcolo.map(s => rigaSurplus(soggetto, s, s.tonnellate, s.importo));
+  if (!(surplus.interni && surplus.interni.has(k))) {
+    const sue = prestazioniDelSoggetto(blocco, vociSoggetto, righeSoggetto);
+    for (const s of surplus.delMese || []) {
+      const p = testo(s.prestazione).toUpperCase();
+      if (!prestazioni.includes(p) || !sue.has(p)) continue;
+      if (testo(s.a_chi).toLowerCase() === 'elenco' && !elencoNomina(s, k)) continue;
+      if (dalCalcolo.some(x => testo(x.surplus_id) && testo(x.surplus_id) === testo(s.surplus_id))) continue;
+      fuori.push(rigaSurplus(soggetto, s, 0, 0));
+    }
+  }
+  return fuori.sort((a, b) => a.nome.localeCompare(b.nome, 'it') || a.dal.localeCompare(b.dal));
+}
+
+/**
+ * Un blocco del foglio. Torna { righe, totale_t, totale_euro, totale_standard,
+ * totale_surplus, non_previsti }.
  *
- * Le righe sono di tre tipi: 'soggetto' (il totale del fornitore), 'voce' (una
- * riga del modello, anche a zero) e 'senza_voce' (i chili del fornitore che
- * nessuna voce ha preso: si scrivono, perche' un chilo che sparisce dal foglio e'
- * un chilo che non si fattura).
+ * Le righe sono di quattro tipi: 'soggetto' (il totale del fornitore), 'voce'
+ * (una riga del modello, anche a zero), 'surplus' (il surplus sulle tariffe,
+ * sotto le voci del soggetto: le tonnellate sono le stesse del mese e non si
+ * sommano, l'importo si') e 'senza_voce' (i chili del fornitore che nessuna voce
+ * ha preso: si scrivono, perche' un chilo che sparisce dal foglio e' un chilo
+ * che non si fattura).
  *
  * non_previsti sono i fornitori che nel mese hanno movimenti ma non hanno nessuna
  * voce nel modello: non si buttano via e non si inventano prezzi - si elencano,
  * perche' e' il segnale che il modello va aggiornato.
+ *
+ * @param surplus facoltativo: { perSoggetto, delMese, interni } (foglioPassiva);
+ *   senza, il blocco e' quello di prima del surplus, riga per riga
  */
-export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
+export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surplus = null) {
   const scelte = vociOrdinate(voci, canale, blocco);
   const perSoggetto = new Map();
   for (const r of dati || []) {
@@ -431,6 +598,7 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
   const righe = [];
   let totaleT = 0;
   let totaleEuro = 0;
+  let totaleSurplus = 0;
   const soggettiUsati = new Set();
   const ordineSoggetti = [...new Set(scelte.map(v => testo(v.soggetto)))];
   for (const soggetto of ordineSoggetti) {
@@ -515,12 +683,19 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
     });
     const tFuori = n3(fuori.reduce((s, r) => s + (Number(r.tonnellate) || 0), 0));
     const tSoggetto = n3(dettaglio.reduce((s, d) => s + d.tonnellate, 0) + tFuori);
-    const eSoggetto = n2(dettaglio.reduce((s, d) => s + d.totale, 0));
-    righe.push({ tipo: 'soggetto', soggetto, tonnellate: tSoggetto, totale: eSoggetto });
+    const eStandard = n2(dettaglio.reduce((s, d) => s + d.totale, 0));
+    // Il surplus: le sue righe vanno nell'importo del soggetto, non nelle sue
+    // tonnellate (sono le stesse del mese, gia' contate nelle voci).
+    const sueSurplus = righeSurplusDelSoggetto(surplus, blocco, soggetto, sue, righeSoggetto);
+    const eSurplus = n2(sueSurplus.reduce((s, d) => s + d.totale, 0));
+    const eSoggetto = n2(eStandard + eSurplus);
+    righe.push({ tipo: 'soggetto', soggetto, tonnellate: tSoggetto, totale: eSoggetto, totale_standard: eStandard, totale_surplus: eSurplus });
     for (const d of dettaglio) righe.push(d);
+    for (const d of sueSurplus) righe.push(d);
     if (tFuori > 0) righe.push({ tipo: 'senza_voce', soggetto, tonnellate: tFuori, dettaglio: descriviFuori(fuori) });
     totaleT += tSoggetto;
     totaleEuro += eSoggetto;
+    totaleSurplus += eSurplus;
   }
   // Chi ha movimenti ma non e' nel modello: si dice, non si indovina.
   const nonPrevisti = [...perSoggetto.entries()]
@@ -535,6 +710,9 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno) {
     righe,
     totale_t: n3(totaleT),
     totale_euro: n2(totaleEuro),
+    // lo standard e il surplus: senza surplus lo standard e' il totale di prima
+    totale_standard: n2(totaleEuro - totaleSurplus),
+    totale_surplus: n2(totaleSurplus),
     non_previsti: nonPrevisti,
   };
 }
@@ -562,7 +740,11 @@ export function righePiatte(gruppi) {
     if (dettaglio.length) {
       for (const r of dettaglio) out.push({ soggetto: g.fornitore, interno: g.interno === true, ...r });
     } else if (g) {
-      out.push({ soggetto: g.fornitore, interno: g.interno === true, tonnellate: g.totale_tonnellate, importo: g.totale_euro });
+      // Lo STANDARD, non il totale (il surplus sulle tariffe, 13/10/2026): dal
+      // calcolo totale_euro comprende il surplus, che nel foglio ha la sua riga
+      // sotto il soggetto; qui ripreso dentro il totale si pagherebbe due volte.
+      const standard = g.totale_standard !== undefined && g.totale_standard !== null ? g.totale_standard : g.totale_euro;
+      out.push({ soggetto: g.fornitore, interno: g.interno === true, tonnellate: g.totale_tonnellate, importo: standard });
     }
   }
   return out;
@@ -592,11 +774,22 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
   // dentro il mese qualunque sia e quindi prende le tariffe di quel mese anche
   // quando un accordo e' cambiato il primo o l'ultimo giorno.
   const giorno = giornoDelMese(anno, mese);
-  const raccoglitori = bloccoPassiva(voci, righePiatte(passiva && passiva.raccoglitori), canale, 'raccoglitori', tariffe, giorno);
-  const impianti = bloccoPassiva(voci, righePiatte(passiva && passiva.impianti_stoccaggi), canale, 'impianti', tariffe, giorno);
+  // Il surplus del canale, dal calcolo (13/10/2026): le righe di ogni fornitore,
+  // i surplus in corso nel mese (per le righe a zero) e chi e' interno.
+  const delMese = Array.isArray(passiva && passiva.surplus_del_mese) ? passiva.surplus_del_mese : [];
+  const interni = soggettiInterni(passiva, (voci || []).filter(v => v && v.canale === canale));
+  const surplusDi = (gruppi) => ({ perSoggetto: surplusPerSoggetto(gruppi), delMese, interni });
+  // L'extra raccolta col suo blocco di interventi non ha voci ne' trasporti nel
+  // foglio: i tre blocchi restano vuoti com'erano, e il suo surplus sta nel
+  // blocco degli interventi (extraConSurplus).
+  const dati = canale === 'EXTRA_RACCOLTA' && extra ? {} : (passiva || {});
+  const raccoglitori = bloccoPassiva(voci, righePiatte(dati.raccoglitori), canale, 'raccoglitori', tariffe, giorno, surplusDi(dati.raccoglitori));
+  const impianti = bloccoPassiva(voci, righePiatte(dati.impianti_stoccaggi), canale, 'impianti', tariffe, giorno, surplusDi(dati.impianti_stoccaggi));
   // Il trasporto: il trasportatore e' il fornitore del gruppo, produttore e
-  // destinatario stanno sulla riga della tratta.
-  const trasporti = (passiva && passiva.trasporti_secondaria || []).flatMap(g => (g.righe || []).map(t => ({
+  // destinatario stanno sulla riga della tratta. Il surplus del trasporto delle
+  // secondarie, se c'e', sta sotto le tratte del suo trasportatore, una riga per
+  // surplus: anche qui le tonnellate sono le stesse e non si sommano.
+  const trasporti = (dati.trasporti_secondaria || []).flatMap(g => [...(g.righe || []).map(t => ({
     produttore: testo(t.stoccaggio),
     trasportatore: testo(g.fornitore),
     destinatario: testo(t.destinazione),
@@ -624,8 +817,12 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     // trasporto torna a 350 euro dentro il totale del canale (audit 03/10/2026).
     interno: !!g.interno,
     note: testo(t.note),
-  })));
+  })), ...(g.interno === true ? [] : (g.surplus || [])
+    .filter(s => testo(s.prestazione).toUpperCase() === 'TRASPORTO_SECONDARIA')
+    .map(s => ({ ...rigaSurplus(testo(g.fornitore), s, s.tonnellate, s.importo), produttore: '', trasportatore: testo(g.fornitore), destinatario: '', viaggi_pagati: 0, interno: false })))]);
   const totaleTrasporti = n2(trasporti.reduce((s, t) => s + t.totale, 0));
+  const surplusTrasporti = n2(trasporti.filter(eRigaSurplus).reduce((s, t) => s + t.totale, 0));
+  const extraFoglio = canale === 'EXTRA_RACCOLTA' && extra ? extraConSurplus(extra, passiva) : null;
   return {
     canale,
     nome_canale: NOMI[canale] || canale,
@@ -652,8 +849,11 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     },
     trasporti: {
       righe: trasporti,
-      totale_t: n3(trasporti.reduce((s, t) => s + t.tonnellate, 0)),
+      // le tonnellate dei viaggi, non quelle ripetute sulle righe del surplus
+      totale_t: n3(trasporti.filter(t => !eRigaSurplus(t)).reduce((s, t) => s + t.tonnellate, 0)),
       totale_euro: totaleTrasporti,
+      totale_standard: n2(totaleTrasporti - surplusTrasporti),
+      totale_surplus: surplusTrasporti,
     },
     // L'EXTRA RACCOLTA NON HA VOCI FISSE: ogni intervento fa storia a se', coi
     // suoi prezzi scritti a mano sull'intervento prima di passarlo a terminato.
@@ -661,8 +861,10 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     // costruisce src/lib/extraRaccoltaAmministrazione.js dal modulo Extra
     // Raccolta, come ha chiesto l'utente il 03/10/2026; qui si riporta e basta,
     // perche' questo file deve restare caricabile dalle prove senza tirarsi
-    // dietro mezzo gestionale.
-    extra: canale === 'EXTRA_RACCOLTA' ? (extra || null) : null,
+    // dietro mezzo gestionale. Il surplus degli interventi, che il blocco del
+    // modulo porta gia', qui si veste come le altre righe del surplus
+    // (extraConSurplus).
+    extra: canale === 'EXTRA_RACCOLTA' ? extraFoglio : null,
     // Il numero in cima al foglio: i blocchi di QUESTO canale, mai di altri.
     // Per l'extra raccolta il blocco degli interventi ha gia' dentro il trasporto
     // a viaggio di ciascuno (colonna TRASPORTO), e la passiva mette lo stesso
@@ -672,8 +874,73 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     // anche l'unico che il PDF disegna e quello a cui punta la cella in cima
     // dell'Excel.
     totale_euro: canale === 'EXTRA_RACCOLTA' && extra
-      ? n2(Number(extra.totale_euro) || 0)
+      ? n2(Number(extraFoglio.totale_euro) || 0)
       : n2(raccoglitori.totale_euro + impianti.totale_euro + totaleTrasporti),
+    // I surplus del mese su questo canale, per i riquadri e le note dei file: il
+    // nome, quanto vale a tonnellata e quanto fa nel foglio. Il «di cui» del
+    // canale e' la somma delle righe del foglio, cioe' quello che il foglio paga.
+    surplus: delMese.map(s => ({
+      nome: testo(s.nome) || 'Surplus', origine: testo(s.origine), prestazione: testo(s.prestazione).toUpperCase(),
+      euro_t: Number(s.euro_t) || 0, dal: testo(s.dal), al: testo(s.al), etichetta: testo(s.etichetta),
+    })),
+    totale_surplus: canale === 'EXTRA_RACCOLTA' && extra
+      ? n2(Number(extraFoglio.totale_surplus) || 0)
+      : n2(raccoglitori.totale_surplus + impianti.totale_surplus + surplusTrasporti),
+  };
+}
+
+/** Vero per una riga del surplus sulle tariffe, in qualunque blocco del foglio. */
+export const eRigaSurplus = (r) => !!r && r.tipo === 'surplus';
+
+/**
+ * IL SURPLUS NEL BLOCCO DELL'EXTRA RACCOLTA (13/10/2026).
+ *
+ * Gli interventi restano quelli del modulo Extra Raccolta, coi loro prezzi (la
+ * regola dell'utente del 03/10/2026), e il surplus pure: il blocco del modulo
+ * (bloccoExtraRaccolta col contesto dei prezzi) lo porta gia', una riga per
+ * fornitore e per surplus col centesimo del mese, contata come la passiva. Qui
+ * quelle righe si vestono come le altre righe del surplus del foglio, in fondo
+ * agli interventi. Se il blocco non le porta (un blocco fatto senza contesto) e
+ * chi chiama passa il calcolo della passiva del canale, si prendono dal calcolo:
+ * mai da tutti e due, che sarebbe pagarle due volte.
+ *
+ * Torna il blocco con `surplus` (le righe del foglio), `totale_interventi` (lo
+ * standard: la somma degli interventi, come prima), `totale_surplus` e
+ * `totale_euro` che li comprende. Senza surplus il blocco e' quello di prima, a
+ * parte i tre campi.
+ */
+export function extraConSurplus(extra, passiva) {
+  const dalModulo = Array.isArray(extra && extra.surplus) ? extra.surplus : [];
+  const righe = [];
+  if (dalModulo.length) {
+    for (const v of dalModulo) {
+      if (!v) continue;
+      const r = rigaSurplus(testo(v.fornitore || v.soggetto), v, v.tonnellate, v.importo !== undefined ? v.importo : v.totale);
+      // la nota del modulo dice anche su quanti interventi: si tiene la sua
+      righe.push(testo(v.note) ? { ...r, note: testo(v.note) } : r);
+    }
+  } else {
+    for (const blocco of ['raccoglitori', 'impianti_stoccaggi', 'trasporti_secondaria']) {
+      for (const g of (passiva && passiva[blocco]) || []) {
+        if (!g || g.interno === true) continue;
+        for (const s of g.surplus || []) righe.push(rigaSurplus(testo(g.fornitore), s, s.tonnellate, s.importo));
+      }
+    }
+  }
+  righe.sort((a, b) => a.nome.localeCompare(b.nome, 'it') || a.soggetto.localeCompare(b.soggetto, 'it') || a.dal.localeCompare(b.dal));
+  // Lo standard: quello che il blocco dice (col surplus del modulo il suo
+  // totale_euro lo comprende gia'), o la somma degli interventi.
+  const standard = extra && extra.totale_standard !== undefined && extra.totale_standard !== null
+    ? Number(extra.totale_standard) || 0
+    : Number(extra && extra.totale_euro) || 0;
+  const interventi = n2(standard);
+  const totaleSurplus = n2(righe.reduce((s, r) => s + r.totale, 0));
+  return {
+    ...extra,
+    surplus: righe,
+    totale_interventi: interventi,
+    totale_surplus: totaleSurplus,
+    totale_euro: n2(interventi + totaleSurplus),
   };
 }
 

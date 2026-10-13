@@ -1,6 +1,13 @@
 import React from 'react';
 import { formatNumber } from '@/lib/utils';
+import { testoEuroT } from '@/lib/surplus';
+import { EtichettaSurplus, OrigineSurplus, RIGA_SURPLUS, TonnellateSurplus, TotaleStandardSurplus } from './PassivaSurplus';
 
+// Il surplus sulle tariffe (13/10/2026): sotto le righe standard di ogni
+// fornitore e prima del suo totale, una riga per surplus (il Fuel Surcharge del
+// consorzio Ecotyre), sulle stesse tonnellate del mese. Il totale del fornitore
+// in tonnellate resta quello delle righe; in euro comprende il surplus, e sotto
+// si legge come si compone. Un interno non ha la riga: a se stessi non si fattura.
 export default function PassivaRaccoglitoriTable({ data }) {
   if (!data || data.length === 0) {
     return <div className="text-sm text-muted-foreground py-4 text-center">Nessun raccoglitore per questo periodo.</div>;
@@ -56,12 +63,26 @@ export default function PassivaRaccoglitoriTable({ data }) {
                     </td>
                   </tr>
                 ))}
+                {(f.surplus || []).map((s, si) => (
+                  <tr key={`${fi}-surplus-${si}`} className={RIGA_SURPLUS}>
+                    <td className="px-3 py-1.5"><EtichettaSurplus s={s} /></td>
+                    <td className="px-3 py-1.5"><OrigineSurplus s={s} /></td>
+                    <td className="px-3 py-1.5 text-right"><TonnellateSurplus t={s.tonnellate} /></td>
+                    <td className="px-3 py-1.5 text-right text-muted-foreground" title="Il surplus è a tonnellata">—</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{testoEuroT(s.euro_t)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatNumber(s.importo, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-1.5 text-xs text-muted-foreground">sulle stesse tonnellate del mese</td>
+                  </tr>
+                ))}
                 <tr className="border-t bg-muted/30 font-semibold">
                   <td className="px-3 py-1.5">Totale {f.fornitore}</td>
                   <td></td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_tonnellate)}</td>
                   <td colSpan={2}></td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(f.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {formatNumber(f.totale_euro, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <TotaleStandardSurplus f={f} />
+                  </td>
                   <td></td>
                 </tr>
                 {/* Le tonnellate di un subraccoglitore sono già dentro il totale

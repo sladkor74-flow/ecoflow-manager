@@ -37,9 +37,22 @@
 // la fattura non fattura. Ora la riga resta - i suoi importi fissi si pagano
 // lo stesso, come nella passiva - ma senza chili, con la nota che lo dice, e
 // l'intervento torna anche nell'elenco `senza_peso`: va sistemato, non stimato.
+//
+// IL SURPLUS SULLE TARIFFE (13/10/2026). Il Fuel Surcharge del consorzio, +5 €/t
+// ai raccoglitori dal 01/10/2026 al 31/12/2026, vale anche qui. Non e' un costo
+// dell'intervento: e' una riga per raccoglitore in fondo al blocco, sulle stesse
+// tonnellate degli interventi del mese, come la riga del surplus sotto ogni
+// fornitore della rete e dell'ACI («Fuel Surcharge · EMMESSE SRLS · t · 5,00 ·
+// €»). Il conto e' quello della passiva - per fornitore che fattura e per
+// surplus, arrotondato una volta sul mese - e lo fa surplusDelMese di
+// extraRaccoltaCalc.js, la stessa funzione dei totali della pagina. Le righe
+// degli interventi restano quelle di prima (il loro totale e' lo standard),
+// le tonnellate del surplus non si sommano a nessun totale di tonnellate, e il
+// totale in euro del blocco comprende il surplus: e' quello che si paga.
 
 import { giornoRoma } from '@/lib/giornoItaliano';
-import { calcExtraRaccolta, avvisoPesoMancante } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, avvisoPesoMancante, surplusDelMese } from '@/lib/extraRaccoltaCalc';
+import { cifreItaliane } from '@/lib/formatoSoldi';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -94,15 +107,29 @@ export function produttoreDi(r) {
  * IL BLOCCO DELL'EXTRA RACCOLTA: una riga per intervento chiuso nel mese, con i
  * suoi prezzi e il suo totale.
  *
- * Torna { righe, totale_kg, totale_t, totale_euro, senza_costi, senza_peso, senza_data }.
+ * Torna { righe, totale_kg, totale_t, totale_standard, surplus, surplus_interni,
+ * totale_surplus, totale_euro, senza_costi, senza_peso, senza_data }.
  * `senza_costi` sono gli interventi chiusi su cui nessun costo e' stato scritto:
  * la passiva non pagherebbe niente, e un intervento gratis e' quasi sempre una
  * dimenticanza. Si dicono, non si inventano i prezzi.
+ *
+ * `contesto` (13/10/2026) e' quello di contestoPrezzi(tariffe, fornitori,
+ * surplus, subfornitori) di extraRaccoltaCalc.js, con i record di SurplusTariffa
+ * letti tutti, l'anagrafica intera dei fornitori e il modulo
+ * src/lib/subfornitori.js: senza, il blocco e' quello di prima (nessuna riga di
+ * surplus, totale_euro uguale allo standard). Con un surplus nel mese:
+ * - `surplus`: una riga per fornitore e per surplus, [{ fornitore, nome, origine,
+ *   prestazione, euro_t, kg, tonnellate, importo, dal, al, etichetta, note }];
+ * - `surplus_interni`: i chili di un fornitore interno, che il surplus non lo
+ *   riceve (SMOCO), per dirlo nelle note;
+ * - `totale_standard` la somma delle righe degli interventi, `totale_surplus`
+ *   quella delle righe del surplus, `totale_euro` le due insieme;
+ * - `totale_kg` e `totale_t` restano le tonnellate degli interventi.
  */
-export function bloccoExtraRaccolta(interventi, anno, mese) {
+export function bloccoExtraRaccolta(interventi, anno, mese, contesto = null) {
   const { dentro, senza_data } = interventiDelMese(interventi, anno, mese);
   const righe = dentro.map(r => {
-    const c = calcExtraRaccolta(r);
+    const c = calcExtraRaccolta(r, contesto || undefined);
     const raccolta = Number(r.costo_raccolta_t) || 0;
     const stoccaggio = Number(r.costo_stoccaggio_t) || 0;
     const trattamento = Number(r.costo_trattamento_t) || 0;
@@ -141,8 +168,9 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
       sovracosto_raccoglitore: sovraRaccoglitore,
       sovracosto_impianto: sovraImpianto,
       sovracosto_senza_padrone: senzaPadrone,
-      // Il totale e' quello del modulo, non un conto rifatto qui.
-      totale: n2(c.costo_totale),
+      // Il totale e' quello del modulo, non un conto rifatto qui: lo standard
+      // dell'intervento, perche' il surplus ha la sua riga in fondo al blocco.
+      totale: n2(c.costo_standard),
       secondaria: chiave(r.tipo_movimento) === 'secondaria',
       note: [
         // A chi va il sovracosto, prima di tutto il resto: e' la cosa che serve
@@ -157,11 +185,44 @@ export function bloccoExtraRaccolta(interventi, anno, mese) {
       senza_costi: raccolta === 0 && stoccaggio === 0 && trattamento === 0 && oneri === 0 && trasporto === 0,
     };
   });
+  // Le righe del surplus: una per fornitore e per surplus, col centesimo del mese.
+  const conto = surplusDelMese(dentro, contesto || undefined);
+  const surplus = conto.passivo.map(v => {
+    const chi = [v.origine, v.dal && v.al ? `dal ${v.dal.split('-').reverse().join('/')} al ${v.al.split('-').reverse().join('/')}` : ''].filter(Boolean).join(', ');
+    return {
+      fornitore: v.fornitore,
+      surplus_id: v.surplus_id,
+      nome: v.nome,
+      origine: v.origine,
+      riferimento: v.riferimento,
+      prestazione: v.prestazione,
+      euro_t: v.euro_t,
+      kg: Math.round(v.kg),
+      tonnellate: n3(v.kg / 1000),
+      importo: v.importo,
+      dal: v.dal,
+      al: v.al,
+      etichetta: v.etichetta,
+      interventi: v.interventi,
+      note: `${chi ? `${chi}: ` : ''}sulle stesse tonnellate ${v.interventi === 1 ? "dell'intervento" : `dei ${v.interventi} interventi`} del mese, già nelle righe qui sopra`,
+    };
+  });
+  const surplusInterni = conto.interni.map(v => ({
+    fornitore: v.fornitore, nome: v.nome, kg: Math.round(v.kg), tonnellate: n3(v.kg / 1000),
+    nota: `${v.nome}: ${v.fornitore} è interno, sulle sue ${cifreItaliane(v.kg / 1000, 2, 3)} t non si paga`,
+  }));
+  const totaleStandard = n2(righe.reduce((s, r) => s + r.totale, 0));
+  const totaleSurplus = n2(surplus.reduce((s, v) => s + v.importo, 0));
   return {
     righe,
     totale_kg: righe.reduce((s, r) => s + (r.kg || 0), 0),
     totale_t: n3(righe.reduce((s, r) => s + r.tonnellate, 0)),
-    totale_euro: n2(righe.reduce((s, r) => s + r.totale, 0)),
+    totale_standard: totaleStandard,
+    surplus,
+    surplus_interni: surplusInterni,
+    totale_surplus: totaleSurplus,
+    // quello che si paga: gli interventi e il surplus
+    totale_euro: n2(totaleStandard + totaleSurplus),
     senza_costi: righe.filter(r => r.senza_costi && r.kg > 0),
     // I terminati del mese senza peso effettivo: nel foglio ci sono, senza chili,
     // e qui si elencano con la frase che dicono anche fattura e pagina.

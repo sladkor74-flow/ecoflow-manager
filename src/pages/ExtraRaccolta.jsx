@@ -7,8 +7,13 @@ import { Loader2, Plus, Pencil, Trash2, Copy, FileSpreadsheet, FileText, AlertTr
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { MESI } from '@/lib/pfuConstants';
-import { calcExtraRaccolta, contestoPrezzi, avvisoPesoMancante } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, contestoPrezzi, avvisoPesoMancante, totaliExtraRaccolta } from '@/lib/extraRaccoltaCalc';
 import { formatNumber, formatTonnellate, formatKg } from '@/lib/utils';
+import { euro } from '@/lib/formatoSoldi';
+import { fetchAllClient } from '@/lib/fetchAllClient';
+import * as subfornitori from '@/lib/subfornitori';
+import { testoEuroT, periodoSurplus, statoSurplus, surplusTocca, euroTDi, NOMI_ORIGINE, NOMI_PRESTAZIONE, aiDestinatari } from '@/lib/surplus';
+import { STILE_SURPLUS } from '@/lib/surplusVista';
 import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRaccoltaExport';
 import ExtraRaccoltaForm from '@/components/fatturazione/ExtraRaccoltaForm';
 import { STATI_EXTRA, statoExtra, eTerminato, datiChiusuraCompleti, dateDaCorreggere, competenza } from '@/lib/extraRaccoltaStato';
@@ -64,6 +69,81 @@ function avviaRicalcoli(c) {
     .then(fine, (e) => fine([{ nome: 'moduli collegati', ok: false, errore: e && e.message ? e.message : String(e) }]));
 }
 
+// LA FASCIA DI UN SURPLUS (13/10/2026). Una per surplus, sopra la tabella:
+// sottile, con la barretta a sinistra che la segna come surplus (l'ambra qui
+// vuol dire «c'e' un problema», e un surplus non lo e'). Dice chi lo ha
+// deciso, quanto vale a tonnellata in attiva e in passiva, il periodo, e quanto
+// fa sugli interventi dell'elenco, col centesimo del mese. La parte ai fornitori
+// e' un costo: la vede solo l'amministratore. Sta fuori dalla pagina perche' un
+// componente definito dentro si rimonta a ogni disegno.
+// La forma e' quella del surplus nelle pagine della passiva e dell'attiva: la
+// barretta indaco a sinistra, il nome in corsivo, la parola «Surplus» per chi
+// non distingue il colore; chi l'ha vista una volta la riconosce ovunque.
+// UN COLORE SOLO, IL TOKEN (revisione del 13/10/2026): qui c'erano le classi
+// indaco di Tailwind, un tono diverso da quello delle altre pagine. Ora le
+// classi vengono da STILE_SURPLUS (src/lib/surplusVista.js), col token
+// --eco-surplus di src/index.css, chiaro e scuro come vuole il tema.
+const RIQUADRO_SURPLUS = `${STILE_SURPLUS.riquadro} ${STILE_SURPLUS.barretta}`;
+const NOME_SURPLUS = 'italic text-foreground';
+const QUOTA_SURPLUS = STILE_SURPLUS.diCui;
+const tIt = (kg) => formatTonnellate((Number(kg) || 0) / 1000);
+// Il titolo della quota di surplus di una riga: quale surplus, a quanto, su quante
+// tonnellate e a chi, e che il centesimo che fa fede e' quello del mese.
+const titoloQuota = (voci) => [
+  ...(voci || []).map(v => `${v.etichetta}: ${testoEuroT(v.euro_t)} su ${tIt(v.kg)} t${v.interno ? `; ${v.fornitore} è interno e non lo riceve` : v.fornitore ? ` a ${v.fornitore}` : ''}`),
+  'È la quota di questo intervento: in fattura e in passiva il surplus si calcola una volta sul mese, e il centesimo del mese fa fede.',
+].join('\n');
+function FasciaSurplus({ p, isAdmin, filtrata }) {
+  const aChi = p.a_chi === 'elenco' ? `solo ${aiDestinatari(p.prestazione, 'elenco')}` : aiDestinatari(p.prestazione, 'tutti');
+  const agliChi = aiDestinatari(p.prestazione, 'elenco').replace(/ dell'elenco$/, '');
+  const periodo = periodoSurplus({ data_inizio_validita: p.dal, data_fine_validita: p.al });
+  const attiva = p.euro_t_attiva !== null && p.euro_t_attiva !== undefined;
+  const passiva = p.euro_t_passiva !== null && p.euro_t_passiva !== undefined;
+  const scarto = !p.vuota && (Math.abs((p.quote_attivo || 0) - (p.attivo || 0)) > 0.004
+    || (isAdmin && Math.abs((p.quote_passivo || 0) - (p.passivo || 0)) > 0.004));
+  return (
+    <div className={`${RIQUADRO_SURPLUS} rounded-md px-4 py-3 text-sm space-y-1.5`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+        <p>
+          <span className={`font-semibold ${NOME_SURPLUS}`}>{p.nome}</span>
+          <span className="text-muted-foreground">{p.origine ? ` · ${p.origine}` : ''}{periodo ? ` · ${periodo}` : ''}</span>
+        </p>
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Surplus · {NOMI_PRESTAZIONE[p.prestazione] || 'prestazione'}, {aChi}</span>
+      </div>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
+        <span>
+          da Ecotyre <strong>{attiva ? `+${testoEuroT(p.euro_t_attiva)}` : 'niente'}</strong>
+          {!p.vuota && attiva && <> · {tIt(p.kg_attivo)} t · <strong>{euro(p.attivo)}</strong> in fattura</>}
+        </span>
+        {isAdmin && (
+          <span>
+            {agliChi} <strong>{passiva ? `+${testoEuroT(p.euro_t_passiva)}` : 'niente'}</strong>
+            {!p.vuota && passiva && p.kg_passivo > 0 && <> · {tIt(p.kg_passivo)} t · <strong>{euro(p.passivo)}</strong> in passiva</>}
+          </span>
+        )}
+      </div>
+      {p.vuota ? (
+        <p className="text-xs text-muted-foreground">Nessun intervento terminato dell&apos;elenco ci rientra: vale sugli interventi che finiscono il trasporto {periodo || 'nel suo periodo'}, sulle stesse tonnellate, con una riga sua {[attiva && 'in fattura', isAdmin && passiva && 'in passiva'].filter(Boolean).join(' e ') || 'nei conti del mese'}.</p>
+      ) : (
+        <>
+          {isAdmin && (p.fornitori.length > 0 || p.interni.length > 0) && (
+            <p className="text-xs text-muted-foreground">
+              {p.fornitori.map(f => `${f.fornitore} ${tIt(f.kg)} t, ${euro(f.importo)}`).join(' · ')}
+              {p.fornitori.length > 0 && p.interni.length > 0 ? ' · ' : ''}
+              {p.interni.map(f => `${f.fornitore} è interno: sulle sue ${tIt(f.kg)} t non si paga`).join(' · ')}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Si calcola sulle stesse tonnellate degli interventi, una volta per mese, come in fattura{isAdmin ? ' e in passiva' : ''}: il centesimo che fa fede è quello del mese.
+            {scarto && ` Sommate intervento per intervento, le quote nella tabella fanno ${euro(p.quote_attivo)}${isAdmin && passiva ? ` in fattura e ${euro(p.quote_passivo)} in passiva` : ''}: la differenza è l'arrotondamento.`}
+            {filtrata && ` Con i filtri il conto è sui soli interventi mostrati: ${isAdmin ? 'fattura e passiva lo fanno' : 'la fattura lo fa'} su tutti gli interventi del mese.`}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ExtraRaccolta() {
   const { isAdmin } = usePermessi();
   const { toast } = useToast();
@@ -79,8 +159,12 @@ export default function ExtraRaccolta() {
   // in fattura (chiusura dell'audit, 11/10/2026). Si leggono una volta: sono
   // poche righe, e la scheda le riceve da qui invece di rileggerle.
   const [tariffeAttive, setTariffeAttive] = useState([]);
-  const [fornitoriDicitura, setFornitoriDicitura] = useState([]);
+  const [fornitori, setFornitori] = useState([]);
   const [tariffeNonLette, setTariffeNonLette] = useState(false);
+  // I surplus sulle tariffe (il Fuel Surcharge, 13/10/2026): tutti i record,
+  // anche i disattivati, che toglie contestoPrezzi come per le tariffe.
+  const [surplusAll, setSurplusAll] = useState([]);
+  const [surplusNonLetti, setSurplusNonLetti] = useState(false);
   const coda = useRef(null);
   if (!coda.current) coda.current = nuovaCoda();
 
@@ -146,15 +230,35 @@ export default function ExtraRaccolta() {
         if (vivo) setTariffeNonLette(true);
       }
       try {
-        const f = await base44.entities.Fornitore.filter({ trattamento_fatturato_da_ecotyre: true }, 'ragione_sociale', 500);
-        if (vivo) setFornitoriDicitura(f || []);
+        // Tutta l'anagrafica, non solo i fornitori con la spunta della dicitura
+        // (13/10/2026): per il surplus serve sapere chi e' interno (SMOCO non lo
+        // riceve) e chi fattura per un subraccoglitore. La dicitura la sceglie
+        // servizioEcotyre guardando la spunta, come prima.
+        const f = await fetchAllClient(base44.entities.Fornitore, null, 'ragione_sociale');
+        if (vivo) setFornitori(f || []);
       } catch {
         if (vivo) setTariffeNonLette(true);
+      }
+      try {
+        // Una lettura sola, tutti i record: il disattivato lo toglie il calcolo,
+        // come per le tariffe (mai un filtro sullo stato qui).
+        const s = await fetchAllClient(base44.entities.SurplusTariffa, null, '-created_date');
+        if (vivo) setSurplusAll(s || []);
+      } catch {
+        if (vivo) setSurplusNonLetti(true);
       }
     })();
     return () => { vivo = false; };
   }, []);
-  const contesto = useMemo(() => contestoPrezzi(tariffeAttive, fornitoriDicitura), [tariffeAttive, fornitoriDicitura]);
+  // Il contesto dei prezzi e del surplus: lo stesso della fattura e della
+  // passiva, con la catena dei subfornitori (il surplus di un subraccoglitore va
+  // al principale, come la tariffa).
+  const contesto = useMemo(() => contestoPrezzi(tariffeAttive, fornitori, surplusAll, subfornitori), [tariffeAttive, fornitori, surplusAll]);
+  // I file Excel e PDF della pagina (extraRaccoltaExport.js) non hanno ancora la
+  // riga del surplus: ricevono i soli prezzi, cosi' i loro totali restano quelli
+  // delle loro righe. Il surplus lo dicono la pagina, la fattura attiva e la
+  // passiva del mese, e accanto ai pulsanti c'e' scritto (13/10/2026).
+  const contestoFile = useMemo(() => contestoPrezzi(tariffeAttive, fornitori), [tariffeAttive, fornitori]);
 
   // I filtri si dividono in due, come negli altri elenchi: quelli di periodo
   // leggono giornoElenco, gli altri la scheda. Separati, per contare le date da
@@ -202,18 +306,42 @@ export default function ExtraRaccolta() {
   // dashboard: un trasferimento in secondaria porta lo stesso peso una seconda
   // volta, e sommarlo dava due numeri diversi per la stessa extra raccolta. Ricavi
   // e costi restano tutti: il trasferimento si paga.
-  const kpi = useMemo(() => {
-    let kg = 0, ricavi = 0, costi = 0, margine = 0;
-    for (const r of terminati) {
-      const c = calcExtraRaccolta(r, contesto);
-      if (!eSecondaria(r)) kg += Number(r.peso_effettivo) || 0;
-      ricavi += c.ricavo;
-      costi += c.costo_totale;
-      margine += c.margine;
+  // IL SURPLUS COL CENTESIMO DEL MESE (13/10/2026): i riquadri sommano lo
+  // standard intervento per intervento e il surplus come lo fanno la fattura e
+  // la passiva, una volta per mese (totaliExtraRaccolta). Sugli interventi di un
+  // mese dicono il ricavo della fattura e il costo della passiva al centesimo.
+  const kpi = useMemo(() => totaliExtraRaccolta(terminati, contesto), [terminati, contesto]);
+  const contoSurplus = kpi.surplus;
+  // Un filtro che non e' il periodo restringe gli interventi: il surplus allora
+  // e' quello dei soli interventi mostrati, e la fattura del mese lo fa su tutti.
+  const filtriOltreIlPeriodo = !!(filters.stato || filters.trasportatore || filters.destinazione || filters.tipologia_trasporto || filters.date);
+  // Le fasce del surplus: quelli che toccano gli interventi dell'elenco e, senza
+  // interventi, quelli dell'extra raccolta che valgono nel periodo scelto (o
+  // oggi, senza un periodo), perche' si sappia che ci sono.
+  const fasceSurplus = useMemo(() => {
+    const conChili = contoSurplus.per_surplus;
+    const viste = new Set(conChili.map(p => p.surplus_id).filter(Boolean));
+    let dal = '', al = '';
+    if (filters.anno && filters.mese) {
+      const mm = String(MESI.indexOf(filters.mese) + 1).padStart(2, '0');
+      dal = `${filters.anno}-${mm}-01`; al = `${filters.anno}-${mm}-31`;
+    } else if (filters.anno) {
+      dal = `${filters.anno}-01-01`; al = `${filters.anno}-12-31`;
     }
-    const margine_perc = ricavi !== 0 ? (margine / ricavi * 100) : 0;
-    return { tonnellate: kg / 1000, ricavi, costi, margine, margine_perc };
-  }, [terminati, contesto]);
+    const senzaChili = (contesto.surplus || [])
+      .filter(s => !viste.has(String(s.id || '')))
+      .filter(s => (dal ? surplusTocca(s, dal, al) : statoSurplus(s) === 'in_corso'))
+      .map(s => ({
+        chiave: String(s.id || s.nome), surplus_id: String(s.id || ''), nome: String(s.nome || '').trim() || 'Surplus',
+        origine: NOMI_ORIGINE[String(s.origine || '').trim().toUpperCase()] || '',
+        prestazione: String(s.prestazione || '').trim().toUpperCase(),
+        a_chi: String(s.a_chi || 'tutti').trim().toLowerCase() === 'elenco' ? 'elenco' : 'tutti',
+        dal: String(s.data_inizio_validita || '').slice(0, 10), al: String(s.data_fine_validita || '').slice(0, 10),
+        euro_t_attiva: euroTDi(s, 'ATTIVA'), euro_t_passiva: euroTDi(s, 'PASSIVA'),
+        kg_attivo: 0, kg_passivo: 0, attivo: 0, passivo: 0, quote_attivo: 0, quote_passivo: 0, fornitori: [], interni: [], vuota: true,
+      }));
+    return [...conChili, ...senzaChili];
+  }, [contoSurplus, contesto, filters.anno, filters.mese]);
 
   // QUELLO CHE LA FATTURA SEGNALA, LA PAGINA LO DICE UGUALE (11/10/2026).
   // Un terminato senza peso effettivo non si fattura e non si valuta: prima qui
@@ -288,15 +416,20 @@ export default function ExtraRaccolta() {
   // che la pagina ha letto (contesto): senza, conoscevano solo il prezzo scritto
   // e la base dell'anno, e con la tabella a un altro valore dicevano un prezzo
   // diverso da pagina e fattura (chiusura dell'audit, 11/10/2026).
+  // Il surplus no (13/10/2026): il loro contesto e' quello dei soli prezzi,
+  // contestoFile, perche' i file non hanno ancora la riga del surplus e con le
+  // quote dentro i totali il «Totale imponibile» non tornerebbe con le righe.
   const exportExcel = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
+    const contesto = contestoFile;
     await exportExtraRaccoltaExcel(terminati, mese, anno, contesto);
   };
 
   const exportPDF = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
+    const contesto = contestoFile;
     await exportExtraRaccoltaPDF(terminati, mese, anno, contesto);
   };
 
@@ -361,6 +494,10 @@ export default function ExtraRaccolta() {
 
       {tariffeNonLette && (
         <p className="text-xs text-amber-700">Le tariffe attive dell&apos;extra raccolta o i fornitori non si sono potuti leggere: i ricavi degli interventi senza prezzo scritto usano solo la base dell&apos;anno, e possono non essere quelli della fattura. Ricarica la pagina.</p>
+      )}
+
+      {surplusNonLetti && (
+        <p className="text-xs text-amber-700">I surplus sulle tariffe (come il Fuel Surcharge) non si sono potuti leggere: ricavi e costi qui sono senza surplus, e possono non essere quelli della fattura e della passiva. Ricarica la pagina.</p>
       )}
 
       {senzaStato.length > 0 && (
@@ -458,8 +595,12 @@ export default function ExtraRaccolta() {
         </div>
       </div>
 
-      {/* KPI */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* KPI. Ricavi e costi comprendono il surplus col centesimo del mese
+          (totaliExtraRaccolta), e sotto il numero una riga dice quanto ne e'
+          surplus; la parte dei costi solo all'amministratore. */}
+      {/* Costi e margine li vede solo l'amministratore (13/10/2026): chi non lo e'
+          vede tonnellate e ricavi. */}
+      <div className={`grid grid-cols-2 ${isAdmin ? 'lg:grid-cols-4' : ''} gap-3`}>
         <div className="border rounded-lg p-3 bg-card">
           <div className="text-xs text-muted-foreground">Tonnellate raccolte (senza le secondarie)</div>
           <div className="text-lg font-bold tabular-nums">{formatTonnellate(kpi.tonnellate)} t</div>
@@ -467,10 +608,17 @@ export default function ExtraRaccolta() {
         <div className="border rounded-lg p-3 bg-card">
           <div className="text-xs text-muted-foreground">Ricavi</div>
           <div className="text-lg font-bold tabular-nums">€ {formatNumber(kpi.ricavi, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          {contoSurplus.totale_attivo > 0 && (
+            <div className="text-[11px] text-muted-foreground tabular-nums">standard {euro(kpi.ricavi_standard)} · surplus {euro(contoSurplus.totale_attivo)}</div>
+          )}
         </div>
+        {isAdmin && (<>
         <div className="border rounded-lg p-3 bg-card">
           <div className="text-xs text-muted-foreground">Costi</div>
           <div className="text-lg font-bold tabular-nums">€ {formatNumber(kpi.costi, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          {isAdmin && contoSurplus.totale_passivo > 0 && (
+            <div className="text-[11px] text-muted-foreground tabular-nums">standard {euro(kpi.costi_standard)} · surplus {euro(contoSurplus.totale_passivo)}</div>
+          )}
         </div>
         <div className="border rounded-lg p-3 bg-card">
           <div className="text-xs text-muted-foreground">Margine</div>
@@ -479,7 +627,14 @@ export default function ExtraRaccolta() {
             <span className="text-xs font-normal ml-1">({formatNumber(kpi.margine_perc, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)</span>
           </div>
         </div>
+        </>)}
       </div>
+
+      {/* Il surplus sulle tariffe (13/10/2026): una fascia per surplus. Chi non
+          e' amministratore non vede un surplus solo ai fornitori, che e' un costo. */}
+      {fasceSurplus.filter(p => isAdmin || p.euro_t_attiva !== null).map(p => (
+        <FasciaSurplus key={p.chiave} p={p} isAdmin={isAdmin} filtrata={filtriOltreIlPeriodo} />
+      ))}
 
       {/* Export. Accanto ai pulsanti, quanti degli interventi che vanno nel file
           hanno le date da sistemare (regola del 22/09/2026): i terminati senza
@@ -493,6 +648,9 @@ export default function ExtraRaccolta() {
           <FileText className="w-4 h-4 mr-1.5" /> Esporta PDF
         </Button>
         <span className="self-center text-xs text-muted-foreground">Totali ed esportazioni comprendono solo i terminati.</span>
+        {(contoSurplus.totale_attivo > 0 || (isAdmin && contoSurplus.totale_passivo > 0)) && (
+          <span className="self-center text-xs text-muted-foreground">I file riportano gli importi standard: il surplus sta nella fattura attiva e nella passiva del mese.</span>
+        )}
         <NotaDate righe={terminati} nomi={['intervento esportato', 'interventi esportati']} className="self-center" />
       </div>
 
@@ -518,8 +676,8 @@ export default function ExtraRaccolta() {
                 <th className="text-left px-3 py-2 font-semibold">Classe</th>
                 <th className="text-right px-3 py-2 font-semibold">Quantità (kg)</th>
                 <th className="text-right px-3 py-2 font-semibold">Ricavo</th>
-                <th className="text-right px-3 py-2 font-semibold">Costo totale</th>
-                <th className="text-right px-3 py-2 font-semibold">Margine</th>
+                {isAdmin && <th className="text-right px-3 py-2 font-semibold">Costo totale</th>}
+                {isAdmin && <th className="text-right px-3 py-2 font-semibold">Margine</th>}
                 <th className="text-center px-3 py-2 font-semibold">Azioni</th>
               </tr>
             </thead>
@@ -528,7 +686,7 @@ export default function ExtraRaccolta() {
                 const c = calcExtraRaccolta(r, contesto);
                 const stato = statoExtra(r);
                 const conta = stato === 'terminato';
-                const euro = (v) => (conta ? `€ ${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
+                const soldi = (v) => (conta ? `€ ${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
                 // Il ricavo che la fattura non ha non si scrive come un incasso:
                 // una secondaria non si fattura, un terminato senza peso nemmeno.
                 const perche = eSecondaria(r) ? 'Una secondaria non si fattura a Ecotyre: il ricavo sta sulla raccolta.' : avvisoPesoMancante(r);
@@ -563,13 +721,25 @@ export default function ExtraRaccolta() {
                         ? <span className="text-muted-foreground" title={perche}>—</span>
                         : <>
                           {conta && c.prezzo.altro_anno && <span className="text-amber-700 font-medium mr-1" title={c.prezzo.nota}>!</span>}
-                          {euro(c.ricavo)}
+                          {soldi(c.ricavo)}
+                          {/* la quota del surplus di questo intervento (13/10/2026) */}
+                          {conta && c.surplus_ricavo > 0 && (
+                            <span className={`block text-[11px] whitespace-nowrap ${QUOTA_SURPLUS}`} title={titoloQuota(c.surplus_attivo)}>di cui surplus {euro(c.surplus_ricavo)}</span>
+                          )}
                         </>}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{euro(c.costo_totale)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${!conta ? 'text-muted-foreground' : c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
-                      {euro(c.margine)}
-                    </td>
+                    {isAdmin && <td className="px-3 py-2 text-right tabular-nums">
+                      {soldi(c.costo_totale)}
+                      {conta && isAdmin && c.surplus_costo > 0 && (
+                        <span className={`block text-[11px] whitespace-nowrap ${QUOTA_SURPLUS}`} title={titoloQuota(c.surplus_passivo)}>di cui surplus {euro(c.surplus_costo)}</span>
+                      )}
+                      {conta && isAdmin && !(c.surplus_costo > 0) && c.surplus_passivo.some(v => v.interno) && (
+                        <span className={`block text-[11px] whitespace-nowrap ${QUOTA_SURPLUS}`} title={titoloQuota(c.surplus_passivo)}>surplus: interno, non si paga</span>
+                      )}
+                    </td>}
+                    {isAdmin && <td className={`px-3 py-2 text-right tabular-nums font-medium ${!conta ? 'text-muted-foreground' : c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
+                      {soldi(c.margine)}
+                    </td>}
                     <td className="px-3 py-2">
                       <div className="flex gap-1 justify-center">
                         {isAdmin ? (<>

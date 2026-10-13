@@ -39,6 +39,28 @@ const C = {
   blu: [2, 132, 199],
   viola: [124, 58, 237],
   bianco: [255, 255, 255],
+  // Il surplus sulle tariffe (13/10/2026): lo stesso indaco della pagina e del
+  // foglio Excel, perche' chi ha visto la riga una volta la riconosca ovunque.
+  surplus: [99, 102, 241],
+  surplusChiaro: [238, 242, 255],
+  surplusScuro: [55, 48, 163],
+};
+
+// Le tonnellate di una riga del surplus: fra parentesi, perche' sono le stesse del
+// mese e l'occhio non le deve sommare una seconda volta.
+const tSurplus = (v) => `(${formatTonnellate(v)})`;
+const eSurplus = (r) => !!r && r.tipo === 'surplus';
+/** Vero se un canale ha almeno una riga del surplus, in un blocco qualunque. */
+const conSurplus = (f) => !!f && [
+  ...((f.raccoglitori && f.raccoglitori.righe) || []),
+  ...((f.impianti && f.impianti.righe) || []),
+  ...((f.trasporti && f.trasporti.righe) || []),
+  ...((f.extra && f.extra.surplus) || []),
+].some(eSurplus);
+/** Il nome del surplus nella fascia del canale: quello vero se nel mese ce n'e' uno solo. */
+const nomeSurplus = (f) => {
+  const nomi = [...new Set(((f && f.surplus) || []).map(s => String((s && s.nome) || '').trim()).filter(Boolean))];
+  return nomi.length === 1 ? nomi[0] : 'surplus';
 };
 
 // L'EER dei pneumatici fuori uso. Nel foglio dell'amministrazione sta sulla riga
@@ -138,25 +160,32 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
   // un totale generale su un documento che va all'amministrazione sarebbe un
   // numero che nessuno deve usare.
   const riquadri = (f) => {
-    const viaggi = f.trasporti.righe.length;
+    // le righe della tabella del trasporto sono i viaggi del mese, a parte quelle
+    // del surplus (13/10/2026), che non sono viaggi
+    const viaggi = f.trasporti.righe.filter(r => !eSurplus(r)).length;
     // L'extra raccolta non ha raccoglitori ne' impianti a modello: ha interventi,
     // ognuno coi suoi prezzi. I riquadri dicono quelli.
     const oneri = f.extra ? (f.extra.righe || []).reduce((s, r) => s + (Number(r.oneri) || 0), 0) : 0;
     const quanti = f.extra ? (f.extra.righe || []).length : 0;
+    // Il surplus sulle tariffe (13/10/2026): sotto il numero di ogni riquadro che
+    // lo comprende, una riga in indaco col «di cui».
+    const nome = nomeSurplus(f);
+    const diCui = (v) => (Number(v) > 0 ? `di cui ${nome} ${euro(v)}` : '');
     const voci = f.extra ? [
       { etichetta: 'Interventi chiusi nel mese', valore: formatIntero(quanti), sotto: quanti === 1 ? 'un intervento' : 'interventi con la fine trasporto in questo mese', colore: C.blu },
       { etichetta: 'Peso', valore: `${t(f.extra.totale_t)} t`, sotto: `${formatIntero(f.extra.totale_kg)} kg`, colore: C.viola },
       { etichetta: 'Sovracosto', valore: euro(oneri), sotto: 'pulizia e costi aggiuntivi degli interventi', colore: C.medio },
-      { etichetta: 'TOTALE EXTRA RACCOLTA', valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro },
+      { etichetta: 'TOTALE EXTRA RACCOLTA', valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro, surplus: diCui(f.extra.totale_surplus) },
     ] : [
-      { etichetta: 'Raccoglitori', valore: euro(f.raccoglitori.totale_euro), sotto: `${t(f.raccoglitori.totale_t)} t raccolte`, colore: C.blu },
-      { etichetta: 'Impianti \\ stoccaggi', valore: euro(f.impianti.totale_euro), sotto: `${t(f.impianti.totale_t)} t trattate o stoccate`, colore: C.viola },
-      { etichetta: 'Trasporto secondarie', valore: euro(f.trasporti.totale_euro), sotto: `${t(f.trasporti.totale_t)} t · ${formatIntero(viaggi)} ${viaggi === 1 ? 'viaggio' : 'viaggi'}`, colore: C.medio },
-      { etichetta: `TOTALE ${f.nome_canale}`, valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro },
+      { etichetta: 'Raccoglitori', valore: euro(f.raccoglitori.totale_euro), sotto: `${t(f.raccoglitori.totale_t)} t raccolte`, colore: C.blu, surplus: diCui(f.raccoglitori.totale_surplus) },
+      { etichetta: 'Impianti \\ stoccaggi', valore: euro(f.impianti.totale_euro), sotto: `${t(f.impianti.totale_t)} t trattate o stoccate`, colore: C.viola, surplus: diCui(f.impianti.totale_surplus) },
+      { etichetta: 'Trasporto secondarie', valore: euro(f.trasporti.totale_euro), sotto: `${t(f.trasporti.totale_t)} t · ${formatIntero(viaggi)} ${viaggi === 1 ? 'viaggio' : 'viaggi'}`, colore: C.medio, surplus: diCui(f.trasporti.totale_surplus) },
+      { etichetta: `TOTALE ${f.nome_canale}`, valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro, surplus: diCui(f.totale_surplus) },
     ];
     const gap = 4;
     const lw = (L - gap * (voci.length - 1)) / voci.length;
-    const h = 17;
+    const rigaDelSurplus = voci.some(r => r.surplus);
+    const h = rigaDelSurplus ? 20.5 : 17;
     spazio(h + 2);
     voci.forEach((r, i) => {
       const x = M + i * (lw + gap);
@@ -178,6 +207,12 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       doc.setTextColor(...C.grigio);
       doc.setFontSize(6.5);
       doc.text(doc.splitTextToSize(r.sotto, lw - 7)[0], x + 4.5, y + 15);
+      if (r.surplus) {
+        doc.setTextColor(...C.surplusScuro);
+        doc.setFont('helvetica', 'italic');
+        doc.text(doc.splitTextToSize(r.surplus, lw - 7)[0], x + 4.5, y + 18.4);
+        doc.setFont('helvetica', 'normal');
+      }
     });
     y += h + 5;
   };
@@ -195,7 +230,8 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       ? (blocco.etichette_prezzo || [blocco.etichetta_prezzo || 'Costo di Stoccaggio [€\\t]', 'Costo di Trattamento [€\\t]'])
       : [blocco.etichetta_prezzo || 'Costo [€\\t]'];
     const conViaggi = righe.some(r => r.tipo === 'voce' && r.unita_misura === 'euro_viaggio');
-    const conNote = righe.some(r => r.tipo === 'voce' && r.note);
+    // la riga del surplus porta sempre la sua nota: da dove viene e quando vale
+    const conNote = righe.some(r => (r.tipo === 'voce' || r.tipo === 'surplus') && r.note);
     const prezzi = etichette.slice(0, 2).map((e, i) => ({ chiave: i === 0 ? 'prezzo1' : 'prezzo2', w: 34, titolo: dueRighe(e) }));
     const code = [
       ...(conViaggi ? [{ chiave: 'viaggi', w: 18, titolo: ['Viaggi'] }] : []),
@@ -243,13 +279,16 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
   // alza di conseguenza: su un documento che si manda all'amministrazione un nome
   // di fornitore tagliato a meta' non va bene, e nella tabella del trasporto le
   // tre colonne dei nomi sono per forza strette.
+  // Il corsivo (stile.corsivo) e' quello delle righe del surplus sulle tariffe
+  // (13/10/2026), come nella pagina e nel foglio Excel.
+  const carattere = (cella, stile) => (cella.grassetto || stile.grassetto ? 'bold' : (stile.corsivo ? 'italic' : 'normal'));
   const riga = (colonne, celle, stile = {}) => {
     const spezzate = {};
     let quante = 1;
     for (const c of colonne) {
       const cella = celle[c.chiave];
       if (!c.sx || !cella || cella.testo === undefined || cella.testo === null || cella.testo === '') continue;
-      doc.setFont('helvetica', cella.grassetto || stile.grassetto ? 'bold' : 'normal');
+      doc.setFont('helvetica', carattere(cella, stile));
       doc.setFontSize(7.6);
       const linee = doc.splitTextToSize(String(cella.testo), c.w - (stile.rientro ? 5.5 : 3) - 2).slice(0, 2);
       spezzate[c.chiave] = linee;
@@ -275,7 +314,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       const cella = celle[c.chiave];
       if (cella && cella.testo !== undefined && cella.testo !== null && cella.testo !== '') {
         doc.setTextColor(...(cella.colore || stile.colore || C.testo));
-        doc.setFont('helvetica', cella.grassetto || stile.grassetto ? 'bold' : 'normal');
+        doc.setFont('helvetica', carattere(cella, stile));
         doc.setFontSize(c.sx ? 7.6 : 7.4);
         const linee = spezzate[c.chiave] || [String(cella.testo)];
         linee.forEach((l, i) => doc.text(
@@ -341,6 +380,19 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
           eer: { testo: EER_PFU },
           totale: { testo: euro(r.totale) },
         }, { sfondo: C.chiaro, accento: C.medio, grassetto: true, colore: C.scuro, h: 6.5, senzaBordo: true });
+        continue;
+      }
+      if (eSurplus(r)) {
+        // Il surplus sulle tariffe sotto le voci del soggetto (13/10/2026): barra
+        // e fondo indaco, corsivo, le tonnellate fra parentesi perche' sono le
+        // stesse del mese. Nel foglio piatto porta davanti il soggetto, come le voci.
+        riga(colonne, {
+          etichetta: { testo: piatto ? `${r.soggetto} - (${r.nome})` : [r.nome, r.origine].filter(Boolean).join(' · '), colore: C.surplusScuro },
+          tonnellate: { testo: tSurplus(r.tonnellate), colore: C.tenue },
+          ...cellePrezzo(blocco, r),
+          totale: { testo: euro(r.totale), colore: r.totale ? C.testo : C.tenue },
+          note: { testo: r.note || '', colore: C.grigio },
+        }, { sfondo: C.surplusChiaro, accento: C.surplus, corsivo: true, rientro: !piatto });
         continue;
       }
       // Nel foglio piatto l'etichetta porta il soggetto e, fra parentesi, la voce;
@@ -411,6 +463,20 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       riga(colonne, { produttore: { testo: 'Nessun viaggio delle secondarie in questo mese.', colore: C.grigio } }, { h: 6.5 });
     }
     righe.forEach((r, i) => {
+      if (eSurplus(r)) {
+        // Il surplus del trasporto delle secondarie, sotto le tratte del suo
+        // trasportatore (13/10/2026): sulle stesse tonnellate, a tonnellata.
+        riga(colonne, {
+          produttore: { testo: [r.nome, r.origine].filter(Boolean).join(' · '), colore: C.surplusScuro },
+          trasportatore: { testo: r.trasportatore },
+          tonnellate: { testo: tSurplus(r.tonnellate), colore: C.tenue },
+          unita: { testo: unitaMisura(r.unita_misura), colore: C.grigio },
+          prezzo: { testo: prezzo(r.prezzo) },
+          totale: { testo: euro(r.totale), colore: r.totale ? C.testo : C.tenue },
+          note: { testo: r.note || '', colore: C.grigio },
+        }, { sfondo: C.surplusChiaro, accento: C.surplus, corsivo: true });
+        return;
+      }
       riga(colonne, {
         produttore: { testo: r.produttore },
         trasportatore: { testo: r.trasportatore },
@@ -440,7 +506,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
   // stanno nel foglio Excel, e la legenda lo dice.
   const tabellaExtra = (f) => {
     const righe = (f.extra && f.extra.righe) || [];
-    const conNote = righe.some(r => r.note);
+    const conNote = righe.some(r => r.note) || ((f.extra && f.extra.surplus) || []).some(r => r && r.note);
     // Le colonne dei numeri stanno strette - «90,00» non ha bisogno di spazio -
     // perche' quello che serve largo sono i tre nomi: con colonne da venti
     // millimetri «COMUNE DI MARCIANISE» perdeva il cognome per strada.
@@ -495,6 +561,23 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
         note: { testo: r.note || '', colore: C.grigio },
       }, { sfondo: i % 2 ? C.zebra : null });
     });
+    // Il surplus sulle tariffe in fondo agli interventi (13/10/2026): una riga per
+    // fornitore e per surplus, col centesimo del mese contato dal modulo come la
+    // passiva; il fornitore nella colonna del suo ruolo, il prezzo in quella
+    // della prestazione.
+    const COLONNA_PREZZO_EXTRA = { RACCOLTA: 'raccolta', CONFERIMENTO_STOCCAGGIO: 'stoccaggio', TRATTAMENTO: 'trattamento' };
+    for (const s of ((f.extra && f.extra.surplus) || []).filter(eSurplus)) {
+      const impianto = ['TRATTAMENTO', 'CONFERIMENTO_STOCCAGGIO'].includes(s.prestazione);
+      const colonna = COLONNA_PREZZO_EXTRA[s.prestazione];
+      riga(colonne, {
+        produttore: { testo: [s.nome, s.origine].filter(Boolean).join(' · '), colore: C.surplusScuro },
+        [impianto ? 'destinatario' : 'trasportatore']: { testo: s.soggetto },
+        tonnellate: { testo: tSurplus(s.tonnellate), colore: C.tenue },
+        ...(colonna ? { [colonna]: { testo: prezzo(s.prezzo) } } : {}),
+        totale: { testo: euro(s.totale), grassetto: true },
+        note: { testo: s.note || '', colore: C.grigio },
+      }, { sfondo: C.surplusChiaro, accento: C.surplus, corsivo: true });
+    }
     // L'etichetta del totale sta nella colonna del produttore, che e' larga: nella
     // prima, quella del formulario, «Totale extra raccolta» ci veniva tagliato.
     riga(colonne, {
@@ -614,6 +697,10 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       'L\'EER 160103 è quello dei pneumatici fuori uso ed è lo stesso su tutte le righe. Le tonnellate sono i pesi effettivi del mese, con due decimali.',
       'RETE, ACI ed extra raccolta sono canali indipendenti e non si sommano mai fra loro: per questo ogni canale ha il suo totale e in fondo al documento non c\'è nessun totale generale.',
       'Le righe in ambra sono quello che al modello manca: finché restano, il foglio non sta fatturando tutto il mese.',
+      // Il surplus sulle tariffe si spiega solo dove c'e' (13/10/2026).
+      ...(elenco.some(conSurplus) ? [
+        'Le righe in corsivo con la barra indaco sono il surplus sulle tariffe (per esempio il Fuel Surcharge del consorzio Ecotyre): un importo in euro per tonnellata in più, con le sue date, sotto il fornitore che lo riceve. Le tonnellate sono le stesse del mese, scritte fra parentesi perché non si sommano una seconda volta; l\'importo è dentro il totale del fornitore e del canale. Un fornitore interno non lo riceve.',
+      ] : []),
       ...(elenco.some(f => f.extra) ? [
         'L\'extra raccolta non ha voci fisse: ogni intervento fa storia a sé, coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento prima di passarlo a terminato, più il sovracosto, che si paga al raccoglitore quando ha avuto costi imprevisti nella raccolta o all\'impianto quando li ha avuti nel trattamento: la nota di ogni riga dice a chi va. Entra nel mese in cui la fine trasporto è stata chiusa. Nel foglio Excel ci sono anche l\'ordine Ecotyre, il CER e la data di inizio trasporto.',
       ] : []),

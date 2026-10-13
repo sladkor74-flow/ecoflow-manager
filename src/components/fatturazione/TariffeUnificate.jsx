@@ -14,6 +14,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import TariffeRuoliFornitori from './TariffeRuoliFornitori';
 import TariffeForm from './TariffeForm';
 import TariffeStorico from './TariffeStorico';
+import { surplusDellaTariffa } from '@/lib/surplus';
+import SurplusSezione, { PastiglieSurplus, FasciaSurplus } from './SurplusSezione';
+import { schedeSurplus, tariffeDelleSchede, haSurplus } from './surplusTariffe';
 
 const PRESTAZIONI_LABEL = { RACCOLTA: 'Raccolta', TRASPORTO_SECONDARIA: 'Trasporto secondaria', TRATTAMENTO: 'Trattamento', CONFERIMENTO_STOCCAGGIO: 'Conferimento stoccaggio' };
 const TIPOLOGIA_LABEL = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra Raccolta', TUTTE: 'RETE + ACI' };
@@ -99,7 +102,12 @@ export default function TariffeUnificate() {
   const [stoccaggi, setStoccaggi] = useState([]);
   const [destSecondaria, setDestSecondaria] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ direzione: '', tipologia: '', prestazione: '', fornitore_id: '', showArchived: false });
+  const [filters, setFilters] = useState({ direzione: '', tipologia: '', prestazione: '', fornitore_id: '', showArchived: false, conSurplus: false });
+  // I surplus sulle tariffe (il Fuel Surcharge, 13/10/2026): null finche' non
+  // si sono letti, o se la lettura non e' riuscita. Allora la colonna dice «non
+  // letto» e non «—», che vorrebbe dire «nessun surplus».
+  const [surplus, setSurplus] = useState(null);
+  const [erroreSurplus, setErroreSurplus] = useState('');
   const [formState, setFormState] = useState({ open: false, editing: null, duplicating: null, excludePrestazione: '' });
   const [storico, setStorico] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -110,15 +118,34 @@ export default function TariffeUnificate() {
   const [showOnlyDup, setShowOnlyDup] = useState(false);
   const [showOnlyNoPrest, setShowOnlyNoPrest] = useState(false);
 
+  // I surplus si leggono tutti e il disattivato si toglie in memoria, come per
+  // le tariffe (AGENTS.md, «Quando una tariffa vale»): mai con { stato: 'attivo' }.
+  // Dopo una scrittura si rileggono solo loro, non le tariffe e i movimenti.
+  const caricaSurplus = async () => {
+    try {
+      setSurplus(await fetchAllClient(base44.entities.SurplusTariffa));
+      setErroreSurplus('');
+    } catch (e) {
+      setSurplus(null);
+      setErroreSurplus(e?.response?.data?.error || e?.message || 'lettura non riuscita');
+    }
+  };
   const load = async () => {
     setLoading(true);
-    try {
-      const [t, f, primarie, secondarie] = await Promise.all([
+    // Tariffe e surplus sono due letture indipendenti (13/10/2026): se i
+    // surplus non si leggono, le tariffe restano a video e la scheda lo dice.
+    const [esito] = await Promise.allSettled([
+      Promise.all([
         fetchAllClient(base44.entities.Tariffa),
         base44.entities.Fornitore.filter({ stato: 'attivo' }),
         fetchAllClient(base44.entities.PrimariaRete),
         fetchAllClient(base44.entities.Secondaria),
-      ]);
+      ]),
+      caricaSurplus(),
+    ]);
+    try {
+      if (esito.status !== 'fulfilled') throw esito.reason;
+      const [t, f, primarie, secondarie] = esito.value;
       setTariffe(t); setFornitori(f);
       const provSet = new Set(), destRacSet = new Set(), stocSet = new Set(), destSecSet = new Set();
       for (const r of primarie) {
@@ -137,7 +164,7 @@ export default function TariffeUnificate() {
       setDestRaccolta(Array.from(destRacSet).sort());
       setStoccaggi(Array.from(stocSet).sort());
       setDestSecondaria(Array.from(destSecSet).sort());
-    } catch (e) {}
+    } catch { /* le tariffe non lette lasciano la tabella com'era */ }
     setLoading(false);
   };
   useEffect(() => {
@@ -188,6 +215,21 @@ export default function TariffeUnificate() {
   };
 
   const duplicateIds = useMemo(() => calcolaDuplicate(tariffe), [tariffe]);
+  // LA COLONNA «SURPLUS» (13/10/2026): per ogni tariffa che cosa vale oggi e che
+  // cosa arriva, con surplusDellaTariffa, la stessa regola della passiva e
+  // dell'attiva (stesso canale, stessa prestazione, il fornitore della tariffa
+  // in elenco o «tutti»). La fascia in cima conta le tariffe da qui, cosi'
+  // colonna e fascia non dicono due numeri diversi.
+  const oggi = oggiRoma();
+  const surplusPerTariffa = useMemo(() => {
+    const m = new Map();
+    if (!surplus) return m;
+    for (const t of tariffe) m.set(t.id, surplusDellaTariffa(t, surplus, oggi));
+    return m;
+  }, [tariffe, surplus, oggi]);
+  const schede = useMemo(() => schedeSurplus(surplus || [], oggi), [surplus, oggi]);
+  const contiSurplus = useMemo(() => tariffeDelleSchede(tariffe, surplusPerTariffa, isArchiviata), [tariffe, surplusPerTariffa]);
+  const surplusInCorso = schede.filter(s => s.stato === 'in_corso').length;
   const noPrestCount = useMemo(() => tariffe.filter(t => !t.prestazione && t.direzione !== 'ATTIVA').length, [tariffe]);
 
   const filtered = useMemo(() => {
@@ -199,6 +241,7 @@ export default function TariffeUnificate() {
       if (!filters.showArchived && isArchiviata(t)) return false;
       if (showOnlyDup && !duplicateIds.has(t.id)) return false;
       if (showOnlyNoPrest && (t.prestazione || t.direzione === 'ATTIVA')) return false;
+      if (filters.conSurplus && (isArchiviata(t) || !haSurplus(surplusPerTariffa.get(t.id)))) return false;
       return true;
     });
     result.sort((a, b) => {
@@ -208,7 +251,7 @@ export default function TariffeUnificate() {
       return new Date(b.data_inizio_validita || 0) - new Date(a.data_inizio_validita || 0);
     });
     return result;
-  }, [tariffe, filters, showOnlyDup, showOnlyNoPrest, duplicateIds]);
+  }, [tariffe, filters, showOnlyDup, showOnlyNoPrest, duplicateIds, surplusPerTariffa]);
 
   const closePeriod = async (t) => {
     // Chiudere il periodo lo accorcia, mai lo allunga (revisione del 13/10/2026):
@@ -293,12 +336,16 @@ export default function TariffeUnificate() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="tariffe">Tariffe</TabsTrigger>
+          <TabsTrigger value="surplus">
+            Surplus
+            {surplusInCorso > 0 && <span className="ml-1.5 rounded-full bg-[hsl(var(--eco-surplus)/0.14)] px-1.5 text-[10px] font-semibold leading-4 text-[hsl(var(--eco-surplus))]">{surplusInCorso}</span>}
+          </TabsTrigger>
           <TabsTrigger value="ruoli">Ruoli fornitori</TabsTrigger>
         </TabsList>
         <TabsContent value="tariffe" className="mt-4 space-y-3">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2">
             <p className="text-sm text-muted-foreground">Gestione unificata di tutte le tariffe per prestazione e fornitore.</p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={openCreate}><Plus className="w-4 h-4 mr-1" /> Aggiungi tariffa</Button>
               {isAdmin && (
                 <Button size="sm" variant="outline" onClick={handleImport2026}>
@@ -312,6 +359,13 @@ export default function TariffeUnificate() {
               )}
             </div>
           </div>
+          {/* I surplus in corso e in arrivo, con le tariffe che toccano (13/10/2026) */}
+          <FasciaSurplus schede={schede} conti={contiSurplus} conCosti={isAdmin} onVai={() => setTab('surplus')} />
+          {surplus === null && erroreSurplus && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              I surplus non si sono letti ({erroreSurplus}): la colonna Surplus non dice niente finché non si rileggono. <button type="button" onClick={caricaSurplus} className="font-medium underline">Riprova</button>
+            </div>
+          )}
           {/* Filtri */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
             <Select value={filters.direzione} onValueChange={v => setFilters({ ...filters, direzione: v })}>
@@ -330,10 +384,17 @@ export default function TariffeUnificate() {
               <SelectTrigger><SelectValue placeholder="Fornitore" /></SelectTrigger>
               <SelectContent><SelectItem value={null}>Tutti i fornitori</SelectItem>{fornitori.map(f => <SelectItem key={f.id} value={f.id}>{f.ragione_sociale}</SelectItem>)}</SelectContent>
             </Select>
-            <label className="flex items-center gap-2 text-sm cursor-pointer px-1">
-              <input type="checkbox" checked={filters.showArchived} onChange={e => setFilters({ ...filters, showArchived: e.target.checked })} className="w-4 h-4 rounded border-input accent-primary" />
-              <span className="text-muted-foreground text-xs">Mostra archiviate</span>
-            </label>
+            <div className="flex flex-col justify-center gap-1 px-1">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={filters.showArchived} onChange={e => setFilters({ ...filters, showArchived: e.target.checked })} className="w-4 h-4 rounded border-input accent-primary" />
+                <span className="text-muted-foreground text-xs">Mostra archiviate</span>
+              </label>
+              {/* Solo le tariffe con un surplus in corso o in arrivo (13/10/2026) */}
+              <label className={`flex items-center gap-2 text-sm ${surplus ? 'cursor-pointer' : 'opacity-50'}`}>
+                <input type="checkbox" checked={filters.conSurplus} disabled={!surplus} onChange={e => setFilters({ ...filters, conSurplus: e.target.checked })} className="w-4 h-4 rounded border-input accent-[hsl(var(--eco-surplus))]" />
+                <span className="text-muted-foreground text-xs">Con surplus</span>
+              </label>
+            </div>
           </div>
           {/* Avvisi duplicati e senza prestazione */}
           {(duplicateIds.size > 0 || noPrestCount > 0) && (
@@ -377,6 +438,7 @@ export default function TariffeUnificate() {
                   <th className="text-left px-3 py-2 font-semibold">Ambito</th>
                   <th className="text-left px-2 py-2 font-semibold">Unità</th>
                   <th className="text-right px-3 py-2 font-semibold">Valore</th>
+                  <th className="text-left px-2 py-2 font-semibold">Surplus</th>
                   <th className="text-left px-2 py-2 font-semibold">Dal</th>
                   <th className="text-left px-2 py-2 font-semibold">Al</th>
                   <th className="text-left px-2 py-2 font-semibold">Stato</th>
@@ -402,6 +464,8 @@ export default function TariffeUnificate() {
                       <td className="px-3 py-2 text-xs">{getAmbito(t)}</td>
                       <td className="px-2 py-2 text-xs">{t.unita_misura || '—'}</td>
                       <td className="px-3 py-2 text-right font-medium">{formatNumber(t.valore, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{zeroVal && <div className="text-xs text-muted-foreground">Nessun compenso</div>}</td>
+                      {/* Niente sulle tariffe archiviate: il surplus di oggi non le riguarda */}
+                      <td className="px-2 py-2">{arch ? null : <PastiglieSurplus col={surplus ? (surplusPerTariffa.get(t.id) || null) : null} tariffa={t} onVai={() => setTab('surplus')} />}</td>
                       <td className="px-2 py-2 text-xs text-muted-foreground">{t.data_inizio_validita ? new Date(t.data_inizio_validita).toLocaleDateString('it-IT') : '—'}</td>
                       <td className="px-2 py-2 text-xs text-muted-foreground">{t.data_fine_validita ? new Date(t.data_fine_validita).toLocaleDateString('it-IT') : <span className="italic">aperto</span>}</td>
                       <td className="px-2 py-2">
@@ -426,10 +490,13 @@ export default function TariffeUnificate() {
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && <tr><td colSpan={12} className="text-center py-8 text-muted-foreground">Nessuna tariffa. Clicca "Aggiungi tariffa" per iniziare.</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan={13} className="text-center py-8 text-muted-foreground">Nessuna tariffa. Clicca "Aggiungi tariffa" per iniziare.</td></tr>}
               </tbody>
             </table>
           </div>
+        </TabsContent>
+        <TabsContent value="surplus" className="mt-4">
+          <SurplusSezione surplus={surplus} erroreLettura={erroreSurplus} fornitori={fornitori} isAdmin={isAdmin} oggi={oggi} onCambiato={caricaSurplus} onRiprova={caricaSurplus} />
         </TabsContent>
         <TabsContent value="ruoli" className="mt-4"><TariffeRuoliFornitori /></TabsContent>
       </Tabs>

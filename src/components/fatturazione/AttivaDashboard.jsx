@@ -15,6 +15,77 @@ import RiepilogoEcotyre from './RiepilogoEcotyre';
 import AttivaAnomalie from './AttivaAnomalie';
 import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
 import { TIPI_ATTIVA } from '@/lib/registroCaricamenti';
+import { eRigaSurplus, contiAttiva, nomiVociSurplus, surplusPerNome, STILE_SURPLUS } from '@/lib/surplusVista';
+import NomeSurplus from './NomeSurplus';
+
+// IL DOCUMENTO DI UN CANALE COL SURPLUS (il Fuel Surcharge, 13/10/2026). Il
+// totale del documento e' quello che si fattura e comprende la riga del
+// surplus; sotto, le due righe della fattura: lo standard e il surplus. La riga
+// del surplus non e' una prestazione: prima il documento della rete di un mese
+// col Fuel Surcharge avrebbe detto «Prestazioni 381, verificate 381» su 380
+// formulari. Senza surplus non cambia niente. Due righe dello stesso surplus
+// (un importo che cambia a meta' mese) si distinguono dall'importo, come nel
+// dettaglio (revisione del 13/10/2026).
+export function ContiDocumento({ doc, righe }) {
+  const elenco = righe || [];
+  const conti = contiAttiva(elenco, { escluseSospese: false });
+  // le voci salvate nel documento, meno le righe dei surplus
+  const prestazioni = Math.max(0, (doc.numero_voci || 0) - conti.voci_surplus.length);
+  const verificate = elenco.filter(r => !eRigaSurplus(r) && r.stato_validazione === 'verificato').length;
+  const errori = doc.voci_errore || 0;
+  const sospese = doc.voci_sospese || 0;
+  const surplus = conti.voci_surplus;
+  const nomi = nomiVociSurplus(surplus);
+  // lo standard e' il totale del documento meno il surplus: il totale salvato fa fede
+  const totaleDoc = doc.totale === null || doc.totale === undefined || doc.totale === '' ? null : Number(doc.totale);
+  const standard = totaleDoc === null ? null : (Math.round(totaleDoc * 100) - Math.round(conti.surplus * 100)) / 100;
+  return (
+    <>
+      <p className="text-2xl font-bold tabular-nums">{euro(doc.totale)}</p>
+      {surplus.length > 0 && (
+        <div className="mt-2 rounded-md border overflow-hidden text-xs">
+          <div className="flex items-baseline justify-between gap-2 px-2.5 py-1.5">
+            <span className="text-muted-foreground">Standard <span className="text-[11px]">· formulari</span></span>
+            <span className="tabular-nums font-medium">{euro(standard)}</span>
+          </div>
+          {surplus.map((r, i) => (
+            <div key={r.id || i} className={`flex items-center justify-between gap-2 px-2.5 py-1.5 border-t ${STILE_SURPLUS.fondo}`}>
+              <NomeSurplus nome={nomi[i]} />
+              <span className="tabular-nums font-medium">{euro(r.totale)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs mt-2">
+        <span className="text-muted-foreground">Prestazioni</span><span className="text-right tabular-nums font-medium">{prestazioni}</span>
+        <span className="text-muted-foreground">Verificate</span><span className="text-right tabular-nums font-medium text-green-600">{verificate}</span>
+        <span className="text-muted-foreground">Errori</span><span className={`text-right tabular-nums font-medium ${errori > 0 ? 'text-red-600' : 'text-green-600'}`}>{errori}</span>
+        <span className="text-muted-foreground">Sospese</span><span className={`text-right tabular-nums font-medium ${sospese > 0 ? 'text-amber-600' : 'text-green-600'}`}>{sospese}</span>
+      </div>
+    </>
+  );
+}
+
+// Il totale di un canale nel riquadro dei tre totali, con il surplus detto
+// sotto: «di cui Fuel Surcharge € 5.601,20». Un «di cui» per surplus: due righe
+// dello stesso surplus si sommano (revisione del 13/10/2026).
+export function TotaleCanale({ label, doc, righe }) {
+  const surplus = surplusPerNome(contiAttiva(righe || [], { escluseSospese: false }).voci_surplus);
+  return (
+    <div className="border-t pt-2 sm:border-t-0 sm:pt-0">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="text-xl font-bold tabular-nums">{euro(doc?.totale)}</span>
+      </div>
+      {surplus.map((r, i) => (
+        <p key={r.nome || i} className={`mt-0.5 flex items-center justify-end gap-1.5 text-xs tabular-nums ${STILE_SURPLUS.diCui}`}>
+          <span aria-hidden="true" className="h-3 w-0.5 shrink-0 rounded-full bg-[hsl(var(--eco-surplus))]" />
+          <span>di cui {r.nome} {euro(r.totale)}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const ANNI = anniDaScegliere();
@@ -197,22 +268,13 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
                   </div>
                 );
               }
-              const verificate = data[t.key]?.righe?.filter(r => r.stato_validazione === 'verificato').length || 0;
-              const errori = doc.voci_errore || 0;
-              const sospese = doc.voci_sospese || 0;
               return (
                 <div key={t.key} className="border rounded-lg p-4 flex flex-col">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="font-heading font-semibold">{t.label}</h3>
                     <span className={`text-xs px-2 py-0.5 rounded ${STATI[doc.stato] || ''}`}>{doc.stato}</span>
                   </div>
-                  <p className="text-2xl font-bold tabular-nums">{euro(doc.totale)}</p>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs mt-2">
-                    <span className="text-muted-foreground">Prestazioni</span><span className="text-right tabular-nums font-medium">{doc.numero_voci || 0}</span>
-                    <span className="text-muted-foreground">Verificate</span><span className="text-right tabular-nums font-medium text-green-600">{verificate}</span>
-                    <span className="text-muted-foreground">Errori</span><span className={`text-right tabular-nums font-medium ${errori > 0 ? 'text-red-600' : 'text-green-600'}`}>{errori}</span>
-                    <span className="text-muted-foreground">Sospese</span><span className={`text-right tabular-nums font-medium ${sospese > 0 ? 'text-amber-600' : 'text-green-600'}`}>{sospese}</span>
-                  </div>
+                  <ContiDocumento doc={doc} righe={data[t.key]?.righe} />
                   {doc.stato === 'chiusa' && doc.fattura_confermata_il && (
                     <p className="text-xs text-emerald-700 mt-2">Fatturazione confermata il {doc.fattura_confermata_il.split('-').reverse().join('/')}{doc.fattura_numero ? ` · fattura ${doc.fattura_numero}` : ''}</p>
                   )}
@@ -241,12 +303,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             <h3 className="font-heading font-bold text-lg mb-1">TOTALE FATTURAZIONE ATTIVA</h3>
             <p className="text-xs text-muted-foreground mb-3">Le tre commesse sono indipendenti e non si sommano.</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {TIPS.map(t => (
-                <div key={t.key} className="flex items-baseline justify-between gap-2 border-t pt-2 sm:border-t-0 sm:pt-0">
-                  <span className="text-sm font-medium">{t.label}</span>
-                  <span className="text-xl font-bold tabular-nums">{euro(data[t.key]?.documento?.totale)}</span>
-                </div>
-              ))}
+              {TIPS.map(t => <TotaleCanale key={t.key} label={t.label} doc={data[t.key]?.documento} righe={data[t.key]?.righe} />)}
             </div>
           </div>
 
