@@ -42,6 +42,11 @@ const SPECCHI = [
   ['base44/shared/andamentoTarget.ts', 'src/lib/andamentoTarget.js'],
   ['base44/shared/registroCaricamenti.ts', 'src/lib/registroCaricamenti.js'],
   ['base44/shared/campiTracciati.ts', 'src/lib/campiTracciati.js'],
+  // Dal 13/10/2026 (giro delle alte aperte): le fonti di EcoTyna e la loro data,
+  // i segnaposti dei contratti, il numero di formulario letto allo stesso modo.
+  ['base44/shared/fontiConoscenza.ts', 'src/lib/fontiConoscenza.js'],
+  ['base44/shared/segnapostiContratto.ts', 'src/lib/segnapostiContratto.js'],
+  ['base44/shared/formulari.ts', 'src/lib/formulari.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa
