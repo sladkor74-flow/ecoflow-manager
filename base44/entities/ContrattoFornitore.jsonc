@@ -98,6 +98,15 @@
       "type": "string",
       "description": "Il documento di qualifica creato quando si carica il contratto controfirmato"
     },
+    "documento_firmato": {
+      "type": "boolean",
+      "default": false,
+      "description": "Il file del contratto e' la copia controfirmata caricata dall'amministratore, non il documento generato (12/10/2026)"
+    },
+    "versioni_json": {
+      "type": "string",
+      "description": "Le versioni sostituite, la piu' vecchia per prima: [{ file_uri, file_nome, stato, documento_firmato, generato_il, inviato_il, controfirmato_il, valori_json, modello_nome, sostituito_il, motivo }]. Rigenerare un contratto inviato o controfirmato non cancella la versione di prima (12/10/2026)"
+    },
     "note": {
       "type": "string"
     }

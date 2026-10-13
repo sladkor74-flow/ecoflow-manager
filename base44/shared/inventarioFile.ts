@@ -23,12 +23,45 @@
 //                          documenti riservati passano dalla funzione apriFile
 //                          (shared/fileRiservato.ts).
 
-/** Dove stanno i riferimenti ai file, archivio per archivio. */
+// I FILE DELLE VERSIONI DI UN CONTRATTO (revisione del 13/10/2026).
+//
+// Dal 12/10/2026 rigenerare un contratto, o caricarne il controfirmato, non
+// butta la versione di prima: il suo file_uri resta dentro
+// ContrattoFornitore.versioni_json (salvaContrattoFornitore), col suo stato e le
+// sue date. L'inventario guardava solo il campo file_uri del record, e quei file
+// non comparivano da nessuna parte: un giorno, confrontando l'elenco con lo
+// spazio occupato, sarebbero sembrati orfani da far rimuovere, mentre sono la
+// copia mandata al fornitore o quella che ha firmato. Ora ogni versione e' una
+// riga in uso, con l'azione «NON RIMUOVERE», come il documento del record.
+// Il riferimento finisce dove finiscono gli altri dell'inventario: nell'elenco
+// che solo l'amministratore scarica per l'assistenza, mai in una pagina.
+const versioniDi = (r) => {
+  try {
+    const v = typeof r.versioni_json === 'string' ? JSON.parse(r.versioni_json || '[]') : r.versioni_json;
+    return Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
+  } catch { return []; }
+};
+const giornoLeggibile = (v) => {
+  const g = String(v || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(g) ? g.split('-').reverse().join('/') : '';
+};
+const etichettaContratto = (r) => `${r.soggetto_nome || r.fornitore_nome || ''} · ${r.tipo_contratto || ''} ${r.canale || ''} ${r.anno || ''}`;
+/** I file delle versioni sostituite di un contratto: { riferimento, descrizione, caricato_il }. */
+export function fileDelleVersioni(r) {
+  return versioniDi(r || {}).map(v => ({
+    riferimento: String(v.file_uri ?? '').trim(),
+    descrizione: `${etichettaContratto(r)} · versione sostituita${v.stato ? ` (era ${v.stato}${v.documento_firmato ? ', firmato' : ''})` : ''}${giornoLeggibile(v.sostituito_il) ? ` il ${giornoLeggibile(v.sostituito_il)}` : ''}`,
+    caricato_il: String(v.generato_il || v.sostituito_il || '').slice(0, 10),
+  })).filter(f => f.riferimento);
+}
+
+/** Dove stanno i riferimenti ai file, archivio per archivio. altriFile: i file che il record tiene fuori dal suo campo. */
 export const ARCHIVI_CON_FILE = [
   { entita: 'UploadLog', campoUrl: 'file_url', campoUri: 'file_uri', cosa: 'file di caricamento dati', etichetta: (r) => `${r.tipo_file || ''} · ${r.nome_file || ''}` },
   { entita: 'EsportazioneFatturazione', campoUrl: 'file_url', campoUri: null, cosa: 'export di fatturazione', etichetta: (r) => `${r.tipo || ''} ${r.mese || ''} ${r.anno || ''}` },
   { entita: 'DocumentoQualifica', campoUrl: null, campoUri: 'file_uri', cosa: 'documento di qualifica fornitore', etichetta: (r) => `${r.soggetto_nome || ''} · ${r.tipo_documento_nome || ''}` },
-  { entita: 'ContrattoFornitore', campoUrl: null, campoUri: 'file_uri', cosa: 'contratto fornitore', etichetta: (r) => `${r.fornitore_nome || ''} ${r.anno || ''}` },
+  // L'etichetta diceva r.fornitore_nome, che ContrattoFornitore non ha: usciva solo l'anno.
+  { entita: 'ContrattoFornitore', campoUrl: null, campoUri: 'file_uri', cosa: 'contratto fornitore', etichetta: etichettaContratto, altriFile: fileDelleVersioni },
   { entita: 'ModelloContratto', campoUrl: null, campoUri: 'file_uri', cosa: 'modello di contratto', etichetta: (r) => `${r.nome || ''}` },
   { entita: 'ModelloDocumento', campoUrl: null, campoUri: 'file_uri', cosa: 'modello di documento', etichetta: (r) => `${r.nome || ''}` },
   { entita: 'QuadraturaFir', campoUrl: null, campoUri: 'file_uri', cosa: 'stampa della quadratura FIR', etichetta: (r) => `settimana ${r.settimana || ''}/${r.anno || ''} · ${r.file_nome || ''}` },
@@ -83,26 +116,46 @@ export const azioneFile = (genere, inUso = true) => {
   return genere === 'pubblico' ? AZIONE_PUBBLICO : AZIONE_PRIVATO;
 };
 
-/** Una riga dell'inventario da un record. null se quel record non tiene nessun file. */
+/**
+ * Una riga dell'inventario da un record. null se quel record non tiene nessun file.
+ *
+ * Un record che tiene altri file oltre al suo (le versioni di un contratto,
+ * def.altriFile) li porta in altri_file, una voce per file: perFile,
+ * csvInventario e contaInventario li contano come gli altri. Stanno dentro la
+ * voce del record, e non in voci a parte, perche' chi legge gli archivi
+ * (la funzione inventarioFile) fa una voce per record (revisione del 13/10/2026).
+ */
 export function voceFile(def, r) {
   const url = def.campoUrl ? testo(r[def.campoUrl]) : '';
   const uri = def.campoUri ? testo(r[def.campoUri]) : '';
-  if (!url && !uri) return null;
-  const genere = url ? 'pubblico' : 'privato';
-  return {
+  const voce = (riferimento, genere, descrizione, caricato) => ({
     entita: def.entita,
     id: testo(r.id),
     cosa: def.cosa,
-    descrizione: testo(def.etichetta ? def.etichetta(r) : ''),
+    descrizione: testo(descrizione),
     genere,
     // In uso e' sempre vero: l'inventario nasce dai record. Si scrive comunque,
     // perche' chi legge l'elenco non sa come e' stato costruito.
     in_uso: true,
     azione: azioneFile(genere),
-    riferimento: url || uri,
-    caricato_il: testo(r.created_date).slice(0, 10),
-  };
+    riferimento,
+    caricato_il: testo(caricato).slice(0, 10),
+  });
+  const tutte = [];
+  if (url || uri) tutte.push(voce(url || uri, url ? 'pubblico' : 'privato', def.etichetta ? def.etichetta(r) : '', r.created_date));
+  // I file delle versioni sono privati: si caricano solo nell'area privata.
+  for (const f of (def.altriFile ? def.altriFile(r) : [])) tutte.push(voce(testo(f.riferimento), 'privato', f.descrizione, f.caricato_il || r.created_date));
+  if (!tutte.length) return null;
+  const [prima, ...altre] = tutte;
+  return altre.length ? { ...prima, altri_file: altre } : prima;
 }
+
+// Le voci con i file che portano dentro (altri_file), una per file.
+const conAltriFile = (voci) => (voci || []).flatMap(v => {
+  if (!v || !Array.isArray(v.altri_file)) return v ? [v] : [];
+  const { altri_file: altri, ...sola } = v;
+  return [sola, ...altri];
+});
 
 /**
  * Una riga dell'inventario da una voce del registro FileDaRimuovere: un file che
@@ -143,7 +196,7 @@ const csvCampo = (v) => {
  */
 export function perFile(voci) {
   const per = new Map();
-  for (const v of voci || []) {
+  for (const v of conAltriFile(voci)) {
     const k = v.riferimento;
     const usato = v.in_uso !== false;
     if (!per.has(k)) { per.set(k, { ...v, record: usato ? 1 : 0, id: [v.id] }); continue; }

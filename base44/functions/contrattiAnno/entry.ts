@@ -2,196 +2,96 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.48';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { individuaSoggetti } from "../../shared/qualificaFornitori.ts";
-import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
-import { impiantiTargetDellAnno } from "../../shared/targetImpianti.ts";
-import { annoDelRecord } from "../../shared/annoTarget.ts";
-import { targetDelPortale } from "../../shared/targetRaccoglitori.ts";
+import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { nuovaCache, chiaveLettura } from "../../shared/cacheLetture.ts";
+import { situazioneContratti } from "../../shared/contrattiDellAnno.ts";
 
-// La situazione contrattuale di un anno: chi va contrattualizzato, per cosa, e
-// a che punto e' ciascun contratto.
+// La situazione contrattuale di un anno: chi va contrattualizzato, per quale
+// prestazione, su quale canale, e a che punto e' ciascun contratto.
 //
-// I soggetti sono gli stessi della qualifica documentale, ricavati dai
-// movimenti dell'anno con il loro ruolo: chi raccoglie vuole un contratto di
-// raccolta, chi stocca uno di stoccaggio, e cosi' via. Per ognuno si cerca il
-// contratto dell'anno chiesto e quello dell'anno prima, che e' la base da cui
-// si parte per il rinnovo.
+// I soggetti sono gli stessi della qualifica documentale (individuaSoggetti),
+// con il ruolo e il canale che hanno nei movimenti: chi raccoglie sulla rete
+// vuole un contratto di raccolta di rete, chi raccoglie anche sull'ACI ne vuole
+// un secondo, distinto, col suo modello e i suoi valori. Le regole stanno in
+// base44/shared/contrattiDellAnno.ts (giro K3 delle segnalazioni del 20/09,
+// corretto il 12/10/2026): qui solo le letture.
 //
-// Rete, ACI ed extra raccolta restano canali separati anche qui.
+// L'elenco e' l'unione dei soggetti dell'anno, di quelli dell'anno prima finche'
+// l'anno chiesto non e' finito, e di chi ha gia' un contratto dell'anno. Prima
+// l'anno prima si guardava solo se l'anno chiesto non aveva nessuno: un'inclusione
+// manuale o i primi viaggi di gennaio bastavano a far sparire i contratti gia'
+// generati per tutti gli altri.
+//
+// I valori dei contratti, le tariffe e le proposte hanno dentro dei prezzi: vanno
+// solo all'amministratore. Il file_uri non va a nessuno: si apre da apriFile.
 //
 // Payload: { anno }
 
-const TIPI = [
-  { chiave: 'raccolta', ruolo: 'raccolta' },
-  { chiave: 'stoccaggio', ruolo: 'stoccaggio' },
-  { chiave: 'trattamento', ruolo: 'trattamento' },
-  { chiave: 'trasporto_secondaria', ruolo: 'trasporto_secondaria' },
-];
+// Le letture dello stesso archivio si fanno una volta sola: individuaSoggetti
+// legge le primarie e le secondarie per l'anno chiesto, poi per quello prima, e
+// qui servono di nuovo per i canali. Senza la cache sarebbero tre letture di
+// decine di migliaia di righe contro il limite al minuto di tutta l'app.
+function conLettureCondivise(base44) {
+  const cache = nuovaCache();
+  const svc = base44.asServiceRole.entities;
+  // Solo list e filter passano dalla cache; ogni altro metodo va all'archivio
+  // vero, cosi' se individuaSoggetti un giorno legge in un altro modo non si rompe.
+  const entita = new Proxy({}, {
+    get: (_t, nome) => {
+      const archivio = svc[nome];
+      const inCache = {
+        list: (...args) => cache.leggi(chiaveLettura(`${String(nome)}|list|${JSON.stringify(args)}`), () => archivio.list(...args)),
+        filter: (filtro, ...resto) => cache.leggi(chiaveLettura(`${String(nome)}|filter|${JSON.stringify(resto)}`, filtro), () => archivio.filter(filtro, ...resto)),
+      };
+      return new Proxy({}, {
+        get: (_x, metodo) => (Object.prototype.hasOwnProperty.call(inCache, metodo) ? inCache[metodo]
+          : (typeof archivio[metodo] === 'function' ? archivio[metodo].bind(archivio) : archivio[metodo])),
+      });
+    },
+  });
+  return { asServiceRole: { entities: entita } };
+}
 
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    const admin = user.role === 'admin';
 
     const { anno } = await req.json();
     const annoNum = Number(anno) || new Date().getUTCFullYear();
-    const svc = base44.asServiceRole.entities;
+    const oggi = oggiRoma();
+    const condivise = conLettureCondivise(base44);
+    const svc = condivise.asServiceRole.entities;
+    const conAnnoPrima = oggi <= `${annoNum}-12-31`;
 
-    // I contratti si fanno per l'anno che viene, ma i soggetti si conoscono dai
-    // movimenti di quello in corso: se l'anno chiesto non ha ancora movimenti si
-    // guarda l'anno prima, altrimenti non ci sarebbe nessuno da contrattualizzare.
-    // individuaSoggetti restituisce { soggetti, esclusi }: gli esclusi qui non
-    // servono, chi e' fuori dalla qualifica e' fuori anche dai contratti.
-    let soggetti = (await individuaSoggetti(base44, annoNum)).soggetti || [];
-    let annoSoggetti = annoNum;
-    if (!soggetti.length) {
-      soggetti = (await individuaSoggetti(base44, annoNum - 1)).soggetti || [];
-      annoSoggetti = annoNum - 1;
-    }
+    // individuaSoggetti restituisce { soggetti, esclusi }: chi e' escluso dalla
+    // qualifica e' fuori anche dai contratti, e chi e' escluso per l'anno chiesto
+    // non rientra dall'anno prima.
+    const delAnno = await individuaSoggetti(condivise, annoNum);
+    const dellAnnoPrima = conAnnoPrima ? await individuaSoggetti(condivise, annoNum - 1) : { soggetti: [] };
 
-    const [contratti, modelli, fornitori, targetRacc, impiantiTarget] = await Promise.all([
-      fetchAll(svc.ContrattoFornitore),
-      svc.ModelloContratto.filter({ stato: 'attivo' }, 'tipo_contratto', 100),
+    const [rete, aci, extra, sec, contratti, modelli, fornitori, targetRaccoglitori, impiantiTarget, tariffe] = await Promise.all([
+      fetchAll(svc.PrimariaRete),
+      fetchAll(svc.PrimariaAci),
+      fetchAll(svc.ExtraRaccolta),
+      fetchAll(svc.Secondaria),
+      fetchAll(base44.asServiceRole.entities.ContrattoFornitore),
+      base44.asServiceRole.entities.ModelloContratto.filter({ stato: 'attivo' }, 'tipo_contratto', 200),
       fetchAll(svc.Fornitore),
-      svc.TargetRaccoglitore.filter({ anno: annoNum }, 'raccoglitore', 500),
-      fetchAll(svc.ImpiantoTargetSecondaria, { stato: 'attivo' }),
+      base44.asServiceRole.entities.TargetRaccoglitore.filter({ anno: annoNum }, 'raccoglitore', 1000),
+      fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria, { stato: 'attivo' }),
+      fetchAll(base44.asServiceRole.entities.Tariffa),
     ]);
 
-    const perChiave = (elenco, campo) => {
-      const m = new Map();
-      for (const x of elenco) {
-        const k = normalizzaRagioneSociale(x[campo]);
-        if (k && !m.has(k)) m.set(k, x);
-      }
-      return m;
-    };
-    const fornitorePer = perChiave(fornitori, 'ragione_sociale');
-    // Il target di un impianto vale un anno (26/09/2026): i record degli anni
-    // chiusi restano attivi, e ogni anno se ne aggiunge uno. Vale quello
-    // dell'anno chiesto, o se non c'e' ancora quello dell'ultimo anno scritto:
-    // mai il primo trovato per nome, che poteva essere di due anni prima.
-    // Da quale anno viene lo dice target_anno, e la pagina lo scrive quando non
-    // e' quello chiesto (27/09/2026): il target si scrive in Target & Status.
-    const impiantoPer = impiantiTargetDellAnno(impiantiTarget, annoNum);
-
-    // I target per raccoglitore si sommano fra le regioni: il contratto e' uno solo.
-    //
-    // IL NOME DEL TARGET E QUELLO DEL PORTALE (chiusura dell'audit, 11/10/2026).
-    // Il soggetto porta il nome dei movimenti, il target puo' essere scritto
-    // abbreviato («PNEUSERVICE SRL» per «PNEUSERVICE CONVERSANO SRL»): qui si
-    // cercava solo il nome uguale, e il contratto di raccolta restava senza
-    // target mentre l'Andamento, gli alert ed EcoTyna lo abbinano. Ora con lo
-    // stesso abbinatore (targetDelPortale): prima il nome uguale, poi
-    // l'abbreviazione, mai il contrario. Un target abbreviato che vale per piu'
-    // raccoglitori, nessuno col nome uguale, non si assegna a caso: resta senza
-    // soggetto, come prima.
-    const nomiTarget = [...new Set(targetRacc.map(t => String(t.raccoglitore || '').trim()).filter(Boolean))];
-    const chiaviSoggetti = new Set(soggetti.map(s => s.chiave));
-    const soggettoDelTarget = new Map(); // nome del target -> chiave del soggetto
-    for (const nome of nomiTarget) {
-      const k = normalizzaRagioneSociale(nome);
-      if (!k) continue;
-      if (chiaviSoggetti.has(k)) { soggettoDelTarget.set(nome, k); continue; }
-      // Si confronta il nome normalizzato, non la grafia: un target abbreviato
-      // scritto in due modi in due regioni («PNEUSERVICE SRL» e «Pneuservice
-      // S.r.l.») e' lo stesso soggetto, e i suoi target si sommano fra le regioni
-      // (revisione finale, 11/10/2026).
-      const suoi = soggetti.filter(s => s.ruoli.includes('raccolta') && normalizzaRagioneSociale(targetDelPortale(nomiTarget, s.nome || s.chiave) || '') === k);
-      if (suoi.length === 1) soggettoDelTarget.set(nome, suoi[0].chiave);
-    }
-    const targetPer = new Map();
-    for (const t of targetRacc) {
-      const k = soggettoDelTarget.get(String(t.raccoglitore || '').trim()) || normalizzaRagioneSociale(t.raccoglitore);
-      if (!k) continue;
-      targetPer.set(k, (targetPer.get(k) || 0) + (Number(t.target_tonnellate) || 0));
-    }
-
-    const righe = [];
-    let attesi = 0, fatti = 0;
-    for (const s of soggetti) {
-      const f = fornitorePer.get(s.chiave) || null;
-      const suoi = [];
-      for (const tipo of TIPI) {
-        if (!s.ruoli.includes(tipo.ruolo)) continue;
-        // Il canale si ricava dai ruoli: per ora i contratti si fanno sulla rete,
-        // e l'ACI si aggiunge a mano quando serve, perche' le condizioni sono altre.
-        const canale = 'RETE';
-        const contratto = contratti.find(c => c.soggetto_chiave === s.chiave && c.tipo_contratto === tipo.chiave
-          && (c.canale || 'RETE') === canale && Number(c.anno) === annoNum && c.stato !== 'annullato') || null;
-        // Il contratto di riferimento e' l'ultimo fatto, non quello dell'anno
-        // prima per forza: se nel corso dell'anno se n'e' firmato uno nuovo -
-        // una decorrenza diversa, condizioni cambiate - vale quello, come in
-        // tutto il resto del gestionale.
-        const precedente = contratti
-          .filter(c => c.soggetto_chiave === s.chiave && c.tipo_contratto === tipo.chiave
-            && (c.canale || 'RETE') === canale && Number(c.anno) < annoNum && c.stato !== 'annullato')
-          .sort((a, b) => Number(b.anno) - Number(a.anno)
-            || String(b.data_inizio || '').localeCompare(String(a.data_inizio || ''))
-            || String(b.created_date || '').localeCompare(String(a.created_date || '')))[0] || null;
-        const modello = modelli
-          .filter(m => m.tipo_contratto === tipo.chiave && (m.canale || 'RETE') === canale)
-          .sort((a, b) => Number(b.anno_riferimento || 0) - Number(a.anno_riferimento || 0)
-            || String(b.created_date || '').localeCompare(String(a.created_date || '')))[0] || null;
-
-        const impianto = impiantoPer.get(s.chiave);
-        const target = tipo.chiave === 'raccolta' ? (targetPer.get(s.chiave) || null)
-          : (impianto && impianto.target ? Math.round(Number(impianto.target) / 1000) : null);
-        const target_anno = target === null ? null : (tipo.chiave === 'raccolta' ? annoNum : annoDelRecord(impianto));
-
-        attesi++;
-        if (contratto && contratto.stato === 'controfirmato') fatti++;
-        suoi.push({
-          tipo: tipo.chiave,
-          canale,
-          stato: contratto ? contratto.stato : 'mancante',
-          contratto_id: contratto ? contratto.id : null,
-          contratto: contratto ? {
-            id: contratto.id, data_inizio: contratto.data_inizio, data_fine: contratto.data_fine,
-            quantitativo_previsto_t: contratto.quantitativo_previsto_t, condizioni_pagamento: contratto.condizioni_pagamento,
-            file_nome: contratto.file_nome, file_uri: contratto.file_uri, generato_il: contratto.generato_il,
-            inviato_il: contratto.inviato_il, controfirmato_il: contratto.controfirmato_il,
-            modello_nome: contratto.modello_nome, note: contratto.note,
-          } : null,
-          precedente_id: precedente ? precedente.id : null,
-          precedente: precedente ? {
-            id: precedente.id, anno: precedente.anno, data_inizio: precedente.data_inizio, data_fine: precedente.data_fine,
-            quantitativo_previsto_t: precedente.quantitativo_previsto_t, condizioni_pagamento: precedente.condizioni_pagamento,
-            file_nome: precedente.file_nome, valori_json: precedente.valori_json,
-          } : null,
-          modello_id: modello ? modello.id : null,
-          modello_nome: modello ? modello.nome : null,
-          target_t: target,
-          target_anno,
-        });
-      }
-      if (!suoi.length) continue;
-      righe.push({
-        chiave: s.chiave,
-        nome: s.nome,
-        ruoli: s.ruoli,
-        fornitore_id: f ? f.id : null,
-        piva: (f && f.piva) || s.piva || '',
-        fornitore: f ? {
-          ragione_sociale: f.ragione_sociale, piva: f.piva, codice_fiscale: f.codice_fiscale,
-          indirizzo: f.indirizzo, cap: f.cap, comune: f.comune, provincia: f.provincia,
-          email: f.email, telefono: f.telefono,
-        } : null,
-        contratti: suoi,
-      });
-    }
-    righe.sort((a, b) => a.nome.localeCompare(b.nome, 'it'));
-
-    return Response.json({
-      anno: annoNum,
-      anno_soggetti: annoSoggetti,
-      soggetti: righe,
-      modelli: modelli.map(m => ({
-        id: m.id, nome: m.nome, tipo_contratto: m.tipo_contratto, canale: m.canale || 'RETE',
-        anno_riferimento: m.anno_riferimento, file_nome: m.file_nome, file_uri: m.file_uri,
-        segnaposti_json: m.segnaposti_json,
-      })),
-      totali: { attesi, controfirmati: fatti, da_fare: attesi - fatti },
-    });
+    return Response.json(situazioneContratti({
+      anno: annoNum, oggi, admin,
+      soggettiAnno: delAnno.soggetti || [], esclusiAnno: delAnno.esclusi || [],
+      soggettiPrima: dellAnnoPrima.soggetti || [],
+      archivi: { rete, aci, extra, sec },
+      contratti, modelli, fornitori, targetRaccoglitori, impiantiTarget, tariffe,
+    }));
   } catch (error) {
     return Response.json({ error: error && error.message ? error.message : String(error) }, { status: 500 });
   }

@@ -2,7 +2,7 @@
 // (base44/shared/tipiDocumento.ts): un DURC non e' una visura e non e' una White
 // List. Si controlla anche che non si gridi al lupo quando non si capisce.
 // npm run prove
-import { riconosciTipoDocumento, confrontaTipoDocumento, problemiLettura } from '../base44/shared/tipiDocumento.ts';
+import { riconosciTipoDocumento, confrontaTipoDocumento, problemiLettura, problemaTipoSbagliato } from '../base44/shared/tipiDocumento.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -51,6 +51,42 @@ verifica('lettura senza tipo: si guarda la sintesi', confrontaTipoDocumento('Vis
 verifica('attestato di pagamento sotto l Albo: sbagliato (caso vero, TRANSAR)', confrontaTipoDocumento('Iscrizione Albo Nazionale Gestori Ambientali', letto('Attestato di Pagamento')).esito === 'diverso');
 verifica('quietanza sotto la polizza: sbagliato (caso vero, Logistica)', confrontaTipoDocumento('Polizza di responsabilita civile', letto('Atto di quietanza')).esito === 'diverso');
 verifica('la polizza vera sotto la polizza: coincide', confrontaTipoDocumento('Polizza di responsabilita civile', letto('Polizza di responsabilita civile')).esito === 'coincide');
+
+console.log('IL REN E\' UN\'ALTRA ISCRIZIONE (revisione del 13/10/2026)');
+{
+  // La casella del catalogo proposto dal 21/09 e le letture dei certificati REN
+  // veri (inventario del 21/09/2026: Motorizzazione, «Albo autotrasportatori
+  // conto terzi», «Albo degli autotrasportatori», «Registro Elettronico
+  // Nazionale»). Fino al 13/10 la casella era Albo gestori e «registro
+  // elettronico nazionale» era il RENTRI.
+  const REN = "Iscrizione all'Albo autotrasportatori conto terzi (REN)";
+  const ALBO = 'Iscrizione Albo Nazionale Gestori Ambientali';
+  verifica('la casella del REN e\' la sua famiglia, non l\'Albo gestori', fam(REN) === 'albo_autotrasportatori', 'trovato ' + fam(REN));
+  verifica('l\'Albo gestori resta Albo gestori', fam(ALBO) === 'albo_gestori');
+  verifica('l\'Albo nazionale degli autotrasportatori per esteso', fam("Iscrizione all'Albo nazionale delle persone fisiche e giuridiche che esercitano l'autotrasporto di cose per conto di terzi") === 'albo_autotrasportatori'
+    && fam('Certificato di iscrizione all\'Albo Nazionale degli Autotrasportatori') === 'albo_autotrasportatori');
+  verifica('«provvedimento di iscrizione all\'Albo degli autotrasportatori» non e\' l\'Albo gestori', fam("Provvedimento di iscrizione all'Albo degli autotrasportatori") === 'albo_autotrasportatori', 'trovato ' + fam("Provvedimento di iscrizione all'Albo degli autotrasportatori"));
+  verifica('il RENTRI resta RENTRI, anche per esteso', fam('Iscrizione RENTRI') === 'rentri' && fam('Iscrizione al Registro Elettronico Nazionale per la Tracciabilità dei rifiuti') === 'rentri');
+  verifica('«Registro Elettronico Nazionale» da solo non e\' il RENTRI', fam('Certificato di iscrizione al Registro Elettronico Nazionale (REN)') !== 'rentri', 'trovato ' + fam('Certificato di iscrizione al Registro Elettronico Nazionale (REN)'));
+
+  const errore = (casella, tipo) => problemaTipoSbagliato(casella, letto(tipo));
+  const provvAlbo = 'Provvedimento di iscrizione all\'Albo Nazionale Gestori Ambientali, categoria 4 classe F';
+  const certRen = "Certificato di iscrizione all'Albo degli autotrasportatori conto terzi";
+  const pa = errore(REN, provvAlbo);
+  verifica('il provvedimento dell\'Albo gestori nella casella del REN: documento sbagliato', !!pa && pa.gravita === 'bloccante' && /Albo Nazionale Gestori Ambientali/.test(pa.messaggio), JSON.stringify(pa));
+  const pr = errore(ALBO, certRen);
+  verifica('il certificato REN nella casella dell\'Albo gestori: documento sbagliato', !!pr && pr.gravita === 'bloccante' && /autotrasportatori conto terzi \(REN\)/.test(pr.messaggio), JSON.stringify(pr));
+  // Nessun allarme falso sul REN giusto, in nessuna delle forme in cui si legge.
+  for (const t of [certRen, "Iscrizione all'Albo nazionale delle persone fisiche e giuridiche che esercitano l'autotrasporto di cose per conto di terzi",
+    "Provvedimento di iscrizione all'Albo degli autotrasportatori", 'Certificato di iscrizione al Registro Elettronico Nazionale delle imprese di autotrasporto (REN)',
+    "Certificato di iscrizione all'Albo", 'Certificato di autorizzazione all\'esercizio della professione di trasportatore su strada']) {
+    verifica(`il REN letto «${t.slice(0, 60)}» nella sua casella non e\' «sbagliato»`, errore(REN, t) === null, JSON.stringify(errore(REN, t)));
+  }
+  // Le parole generiche dell'Albo valgono come prima dove non c'e' il dubbio fra i due Albi.
+  verifica('«provvedimento di iscrizione all\'Albo» nella casella dell\'Albo gestori: coincide, come prima', confrontaTipoDocumento(ALBO, letto("Provvedimento di iscrizione all'Albo")).esito === 'coincide');
+  verifica('«iscrizione all\'Albo» nella casella del DURC: sbagliato, come prima', confrontaTipoDocumento('DURC', letto("Provvedimento di iscrizione all'Albo")).esito === 'diverso');
+  verifica('«iscrizione all\'Albo» nella casella del REN: incerto, non sbagliato', confrontaTipoDocumento(REN, letto("Certificato di iscrizione all'Albo")).esito === 'incerto');
+}
 
 console.log('QUANDO IL FILE NON SI LEGGE');
 const p1 = problemiLettura({ leggibile: false, note_lettura: 'pagine tagliate' });

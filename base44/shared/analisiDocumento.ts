@@ -14,7 +14,7 @@
 // deterministico: un errore del modello su questo non deve poter passare.
 
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
-import { aggiungiPeriodo, oggiRoma } from "./qualificaFornitori.ts";
+import { aggiungiPeriodo, eContratto, oggiRoma } from "./qualificaFornitori.ts";
 import { testoConoscenza, vociApprovate, proponiNovita, AREE_NORMATIVE, FONTI_UFFICIALI, REGOLE_FONTI } from "./baseConoscenza.ts";
 import { confrontaTipoDocumento, problemaTipoSbagliato, problemiLettura } from "./tipiDocumento.ts";
 
@@ -99,6 +99,13 @@ const cifre = (v) => String(v || '').replace(/[^0-9]/g, '');
 function formatoIt(d) {
   return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '';
 }
+
+// Un contratto si firma anche prima che decorra (revisione del 13/10/2026): i
+// contratti dell'anno dopo si controfirmano a dicembre e portano come data della
+// firma il primo giorno di validita'. Senza dirlo, chi valuta poteva prendere un
+// contratto non ancora in vigore per un documento da non accettare. Il controllo
+// delle date lette (statoRequisito) lo accetta gia' per la famiglia «contratto».
+export const FIRMA_ANTICIPATA = 'Il documento e\' un contratto: si firma anche prima che decorra. I contratti dell\'anno dopo si controfirmano di solito a dicembre e possono portare come data della firma il primo giorno di validita\'. Una data di sottoscrizione o di inizio successiva a oggi non e\' un problema e non rende il contratto inaccettabile: fino a quel giorno vale il contratto in corso.';
 
 function regolaCatalogo(tipo) {
   if (tipo.tipo_scadenza === 'nessuna') return 'il documento non ha scadenza';
@@ -221,6 +228,7 @@ export async function analizzaDocumento(base44, { doc, tipo, contesto, conoscenz
         `Documento richiesto: ${tipo.nome}`,
         `Regola del catalogo interno: ${regolaCatalogo(tipo)}`,
         `Riferimento normativo del catalogo: ${tipo.riferimento_normativo || 'non indicato'}`,
+        ...(eContratto(tipo) ? [FIRMA_ANTICIPATA] : []),
         '',
         `Base di conoscenza della commessa, verificata voce per voce alla data indicata. Il fornitore lavora nella filiera dei pneumatici fuori uso (EER 16 01 03, rifiuti speciali non pericolosi) per il sistema collettivo Ecotyre. Usala come riferimento, ma controlla online sulle fonti ufficiali (${FONTI_UFFICIALI.join('; ')}) che dopo la data della voce non sia cambiato nulla: se trovi una norma nuova e certa, applicala, segnalala con un problema informativo e riportala in novita_normative con voce_id, data_norma (AAAA-MM-GG), fonte e il testo COMPLETO della voce aggiornata, cosi' la base di conoscenza di tutto il gestionale si aggiorna dopo l'approvazione.`,
         REGOLE_FONTI,
@@ -287,6 +295,12 @@ export async function analizzaDocumento(base44, { doc, tipo, contesto, conoscenz
     // piu' vicina. La data ricavata dal modello si usa solo quando mancano le
     // altre due: altrimenti un suo errore potrebbe dichiarare scaduto un documento
     // valido. Se e' piu' vicina, viene comunque segnalata perche' la si verifichi.
+    //
+    // La data letta si salva com'e', anche quando non sta in piedi: emissione nel
+    // futuro, scadenza prima dell'emissione, durata oltre la misura scritta. Quei
+    // controlli (A64, 12/10/2026) stanno in statoRequisito, dentro
+    // qualificaFornitori.ts, e mettono il documento «da verificare» col motivo:
+    // li' valgono anche per i documenti letti prima, senza rileggerli.
     const emissione = data(lettura.data_emissione);
     const candidati = [];
     const daDocumento = data(lettura.data_scadenza);

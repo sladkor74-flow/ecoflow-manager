@@ -40,6 +40,14 @@
       "type": "string",
       "description": "I segnaposto trovati nel modello quando e' stato caricato, in ordine di comparsa"
     },
+    "punti_json": {
+      "type": "string",
+      "description": "I punti che cambiano, riconosciuti nel format e confermati dall'amministratore (12/10/2026): [{ segnaposto, nome, categoria, tipo, stile, originale, occorrenze }]. Lo stile dice come scrivere una data (02 Gennaio 2026, 01/06/2026). Per i prezzi il valore del format non si conserva: il modello lo legge chiunque sia collegato"
+    },
+    "fornitore_origine": {
+      "type": "string",
+      "description": "Il fornitore del contratto compilato da cui e' nato il modello, se il format era un contratto gia' scritto"
+    },
     "stato": {
       "type": "string",
       "enum": [

@@ -44,6 +44,18 @@ function Kpi({ etichetta, valore, Icona, tono }) {
   );
 }
 
+// IL CONTRATTO NUOVO IN LETTURA FA AGGIORNARE LA PAGINA (revisione del
+// 13/10/2026). La pagina si ricontrollava da sola solo se un requisito era «in
+// analisi». Col contratto dell'anno dopo appena caricato accanto a quello in
+// corso, il requisito resta sul vecchio (in scadenza o valido) e il nuovo in
+// lettura sta fra gli altri documenti della voce (altri_documenti, vedi
+// documentoDelRequisito in base44/shared/qualificaFornitori.ts): la scheda
+// diceva «in analisi» finche' non si ricaricava la pagina. Ora contano anche loro.
+export function documentoInLettura(dati) {
+  return !!dati && Array.isArray(dati.soggetti) && dati.soggetti.some(s => (s.requisiti || []).some(r => r.stato === 'in_analisi'
+    || (Array.isArray(r.altri_documenti) && r.altri_documenti.some(a => a && a.stato === 'in_analisi'))));
+}
+
 function dettaglioAlert(r) {
   if (r.stato === 'scaduto') return `Scaduto il ${dataIt(r.scadenza)}`;
   if (r.stato === 'in_scadenza') return `Scade il ${dataIt(r.scadenza)}, ${quandoScade(r.giorni)}`;
@@ -319,7 +331,7 @@ export default function QualificaFornitori() {
   useEffect(() => { caricaTutto(); }, [caricaTutto]);
 
   // Finche' c'e' un documento in analisi il modulo ricontrolla da solo.
-  const inAnalisi = !!dati && dati.soggetti.some(s => s.requisiti.some(r => r.stato === 'in_analisi'));
+  const inAnalisi = documentoInLettura(dati);
   useEffect(() => {
     if (!inAnalisi) return undefined;
     const t = setTimeout(() => { aggiorna(); }, 10000);

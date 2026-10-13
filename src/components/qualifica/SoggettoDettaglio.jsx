@@ -15,24 +15,58 @@ const ICONA_GRAVITA = {
   informativo: { Icona: Info, classe: 'text-muted-foreground' },
 };
 
+// LA SPUNTA SENZA DATA NON SI SALVA (segnalazione alta A65 del 20/09, corretta
+// il 12/10/2026). La maschera salvava «verificato a mano» anche senza scadenza,
+// e per un documento che scade quella spunta lo rendeva valido per sempre. Il
+// modulo ora lo tiene «da verificare» comunque (statoRequisito in
+// base44/shared/qualificaFornitori.ts); qui lo si dice prima, e non si salva.
+// Restituisce il motivo per cui la correzione non si salva, o null.
+export function motivoCorrezioneNonSalvabile(req, { scadenza, verificato }) {
+  if (!verificato || scadenza || !req || req.tipo_scadenza === 'nessuna') return null;
+  return 'Per confermarlo a mano scrivi la data di scadenza: questo documento scade, e senza la data la conferma non basta.';
+}
+
 function Pill({ stato, mappa }) {
   const s = mappa[stato] || { etichetta: stato, classe: 'bg-muted text-muted-foreground border-border' };
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-medium whitespace-nowrap ${s.classe}`}>{s.etichetta}</span>;
 }
 
-function Requisito({ req, soggetto, isAdmin, occupato, onCarica, onApri, onAnalizza, onSalvaCorrezione }) {
-  const inputRef = useRef(null);
+// IL CONTRATTO IN CORSO NON SI SOSTITUISCE A MANO (revisione del 13/10/2026).
+// «Sostituisci» mandava fra i sostituiti tutti i documenti attivi della voce: il
+// contratto dell'anno dopo caricato da qui a dicembre toglieva di mezzo il 2026,
+// valido fino al 31/12, e finche' il nuovo non era letto bene il fornitore
+// scendeva «da completare» o «critico». Restano attivi i contratti che il modulo
+// dice in vigore oggi, con la scadenza non passata (req.contratti_in_corso,
+// documentoDelRequisito in base44/shared/qualificaFornitori.ts): il requisito
+// sceglie fra i due e la qualifica chiude il vecchio quando scade
+// (chiudiContrattiSuperati), senza alert. Gli altri documenti, e i contratti
+// scaduti, non conformi o da verificare, si sostituiscono come sempre.
+// Restituisce i documenti attivi della voce da mandare fra i sostituiti.
+export function documentiDaSostituire(req, precedenti, nuovoId) {
+  const inCorso = new Set((req && Array.isArray(req.contratti_in_corso)) ? req.contratti_in_corso : []);
+  return (precedenti || []).filter(p => p && p.id !== nuovoId && !inCorso.has(p.id));
+}
+
+// Che cosa e' per il requisito un documento accanto a quello su cui si regge.
+const RELAZIONE = {
+  successivo: 'Caricato dopo: finché non risulta valido, il requisito si regge sul documento sopra.',
+  in_corso: 'Contratto in corso: il requisito si regge già sul documento sopra; questo vale fino alla sua scadenza, poi la qualifica lo chiude da sola.',
+  insieme: 'Vale insieme al documento sopra: il requisito prende lo stato peggiore.',
+};
+
+// APRI, RIANALIZZA E CORREGGI PER OGNI DOCUMENTO (revisione del 13/10/2026).
+// I pulsanti stavano solo sul documento del requisito. Col contratto dell'anno
+// dopo accanto a quello in corso il requisito si regge sul vecchio finche' il
+// nuovo non e' valido, e il nuovo letto male restava una nota: non si apriva,
+// non si rileggeva, e «Correggi», sotto la nota che parlava del nuovo,
+// scriveva sul vecchio (la scadenza del 2027 finiva sul 2026). Ora ogni
+// documento ha i suoi pulsanti e la sua maschera, che scrive solo su di lui.
+export function AzioniDocumento({ doc, req, isAdmin, inAnalisi, occupato, onApri, onAnalizza, onSalvaCorrezione, prima = null, conNome = false }) {
   const [correggi, setCorreggi] = useState(false);
   const [scadenza, setScadenza] = useState('');
   const [verificato, setVerificato] = useState(false);
   const [note, setNote] = useState('');
-  const [mostraTesto, setMostraTesto] = useState(false);
-  const { toast } = useToast();
-
-  const doc = req.documento;
-  const problemi = problemiDi(req);
-  const inAnalisi = req.stato === 'in_analisi';
-  const stile = STATI_REQUISITO[req.stato] || STATI_REQUISITO.mancante;
+  const nonSalvabile = motivoCorrezioneNonSalvabile(req, { scadenza, verificato });
 
   const apriCorrezione = () => {
     setScadenza(doc?.data_scadenza_manuale || doc?.data_scadenza || '');
@@ -40,6 +74,122 @@ function Requisito({ req, soggetto, isAdmin, occupato, onCarica, onApri, onAnali
     setNote('');
     setCorreggi(true);
   };
+
+  if (!isAdmin) return null;
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5 pt-1 pl-4">
+        {prima}
+        {doc && (
+          <>
+            {/* Il file si apre solo se c'e' ancora: il dettaglio dei documenti
+                si conserva quaranta giorni, dopo resta la storia scritta. */}
+            {doc.ha_file && (
+              <Button size="sm" variant="ghost" className="h-7" onClick={() => onApri(doc)}>
+                <ExternalLink className="w-3 h-3 mr-1" /> Apri
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" className="h-7" disabled={inAnalisi || occupato} onClick={() => onAnalizza(doc.id)}>
+              <RefreshCw className="w-3 h-3 mr-1" /> Rianalizza
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7" onClick={apriCorrezione}>
+              <PencilLine className="w-3 h-3 mr-1" /> Correggi
+            </Button>
+          </>
+        )}
+      </div>
+
+      {correggi && doc && (
+        <div className="ml-4 p-3 rounded-md border bg-muted/30 space-y-2">
+          {/* Con piu' documenti sulla voce si dice su quale si scrive. */}
+          {conNome && doc.file_nome && <p className="text-xs font-medium">Correzione di «{doc.file_nome}»</p>}
+          <label className="block text-xs text-muted-foreground">
+            Scadenza corretta
+            <input type="date" value={scadenza || ''} onChange={(e) => setScadenza(e.target.value)} className="block mt-1 px-2 py-1 rounded border bg-card text-sm text-foreground" />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={verificato} onChange={(e) => setVerificato(e.target.checked)} />
+            Ho controllato il documento: è valido nonostante le segnalazioni
+          </label>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Nota facoltativa" rows={2} className="w-full px-2 py-1 rounded border bg-card text-sm" />
+          <p className="text-xs text-muted-foreground">La correzione ha la precedenza sull'analisi e non viene sovrascritta se il documento viene rianalizzato.</p>
+          {nonSalvabile && <p className="text-xs text-amber-700">{nonSalvabile}</p>}
+          <div className="flex gap-2">
+            <Button size="sm" className="h-7" disabled={!!nonSalvabile} onClick={async () => { if (await onSalvaCorrezione(doc, { scadenza, verificato, note }, req)) setCorreggi(false); }}>Salva</Button>
+            <Button size="sm" variant="ghost" className="h-7" onClick={() => setCorreggi(false)}>Annulla</Button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Un altro contratto attivo della voce (req.altri_documenti, 13/10/2026): il
+// contratto dell'anno dopo non ancora valido, quello in corso che lo aspetta,
+// o il contratto che vale insieme a quello del requisito. Col suo stato, il
+// perche' e i suoi pulsanti.
+export function DocumentoAccanto({ altro, req, isAdmin, occupato, onApri, onAnalizza, onSalvaCorrezione }) {
+  const inAnalisi = altro.stato === 'in_analisi';
+  const problemi = Array.isArray(altro.problemi) ? altro.problemi : [];
+  return (
+    <div className="ml-4 pl-3 border-l-2 space-y-1.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium break-words">{altro.file_nome || 'Documento senza nome'}</div>
+          <div className="text-xs text-muted-foreground">{RELAZIONE[altro.relazione] || ''}</div>
+        </div>
+        <Pill stato={altro.stato} mappa={STATI_REQUISITO} />
+      </div>
+      <div className="text-sm grid grid-cols-2 gap-x-4 gap-y-0.5 pl-4">
+        <span className="text-muted-foreground">Emesso</span>
+        <span className="tabular-nums">{dataIt(altro.data_emissione)}</span>
+        <span className="text-muted-foreground">Scadenza</span>
+        <span className="tabular-nums">
+          {altro.scadenza ? dataIt(altro.scadenza) : '—'}
+          {altro.giorni != null && <span className="text-muted-foreground"> · {quandoScade(altro.giorni)}</span>}
+          {altro.data_scadenza_manuale && <span className="text-muted-foreground"> · corretta a mano</span>}
+        </span>
+      </div>
+      {inAnalisi && (
+        <div className="flex items-center gap-2 text-sm text-violet-700 pl-4">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> L'agente sta leggendo il documento e verificando la normativa…
+        </div>
+      )}
+      {altro.sintesi && !inAnalisi && <p className="text-sm text-muted-foreground pl-4">{altro.sintesi}</p>}
+      {problemi.length > 0 && !inAnalisi && (
+        <ul className="space-y-1 pl-4">
+          {problemi.map((p, i) => {
+            const g = ICONA_GRAVITA[p.gravita] || ICONA_GRAVITA.attenzione;
+            return (
+              <li key={i} className="flex items-start gap-1.5 text-sm">
+                <g.Icona className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${g.classe}`} />
+                <span>{p.messaggio}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {altro.verificato_manualmente && <p className="text-xs text-emerald-700 pl-4">Verificato manualmente da un amministratore.</p>}
+      {altro.errore_analisi && !inAnalisi && <p className="text-xs text-red-700 pl-4">Analisi non riuscita: {altro.errore_analisi}</p>}
+      <AzioniDocumento doc={altro} req={req} isAdmin={isAdmin} inAnalisi={inAnalisi} occupato={occupato} conNome
+        onApri={onApri} onAnalizza={onAnalizza} onSalvaCorrezione={onSalvaCorrezione} />
+    </div>
+  );
+}
+
+export function Requisito({ req, soggetto, isAdmin, occupato, onCarica, onApri, onAnalizza, onSalvaCorrezione }) {
+  const inputRef = useRef(null);
+  const [mostraTesto, setMostraTesto] = useState(false);
+  const { toast } = useToast();
+
+  const doc = req.documento;
+  const altri = Array.isArray(req.altri_documenti) ? req.altri_documenti : [];
+  // La nota sul contratto caricato dopo sta col suo documento, accanto ai suoi
+  // pulsanti, non sopra i pulsanti del documento del requisito (13/10/2026).
+  const idAltri = new Set(altri.map(a => a.id));
+  const problemi = problemiDi(req).filter(p => !(p && p.documento_id && idAltri.has(p.documento_id)));
+  const inAnalisi = req.stato === 'in_analisi';
+  const stile = STATI_REQUISITO[req.stato] || STATI_REQUISITO.mancante;
 
   const copia = async () => {
     try {
@@ -129,55 +279,32 @@ function Requisito({ req, soggetto, isAdmin, occupato, onCarica, onApri, onAnali
         </div>
       )}
 
-      {isAdmin && (
-        <div className="flex flex-wrap gap-1.5 pt-1 pl-4">
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".pdf,.jpg,.jpeg,.png"
-            className="hidden"
-            onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) onCarica(req, f); }}
-          />
-          <Button size="sm" variant={doc ? 'outline' : 'default'} className="h-7" disabled={occupato} onClick={() => inputRef.current && inputRef.current.click()}>
-            {occupato ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Upload className="w-3 h-3 mr-1" />}
-            {doc ? 'Sostituisci' : 'Carica'}
-          </Button>
-          {doc && (
-            <>
-              {/* Il file si apre solo se c'e' ancora: il dettaglio dei documenti
-                  si conserva quaranta giorni, dopo resta la storia scritta. */}
-              {doc.ha_file && (
-                <Button size="sm" variant="ghost" className="h-7" onClick={() => onApri(doc)}>
-                  <ExternalLink className="w-3 h-3 mr-1" /> Apri
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" className="h-7" disabled={inAnalisi || occupato} onClick={() => onAnalizza(doc.id)}>
-                <RefreshCw className="w-3 h-3 mr-1" /> Rianalizza
-              </Button>
-              <Button size="sm" variant="ghost" className="h-7" onClick={apriCorrezione}>
-                <PencilLine className="w-3 h-3 mr-1" /> Correggi
-              </Button>
-            </>
-          )}
-        </div>
-      )}
+      <AzioniDocumento doc={doc} req={req} isAdmin={isAdmin} inAnalisi={inAnalisi} occupato={occupato} conNome={altri.length > 0}
+        onApri={onApri} onAnalizza={onAnalizza} onSalvaCorrezione={onSalvaCorrezione}
+        prima={(
+          <>
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) onCarica(req, f); }}
+            />
+            <Button size="sm" variant={doc ? 'outline' : 'default'} className="h-7" disabled={occupato} onClick={() => inputRef.current && inputRef.current.click()}>
+              {occupato ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Upload className="w-3 h-3 mr-1" />}
+              {doc ? 'Sostituisci' : 'Carica'}
+            </Button>
+          </>
+        )} />
 
-      {correggi && doc && (
-        <div className="ml-4 p-3 rounded-md border bg-muted/30 space-y-2">
-          <label className="block text-xs text-muted-foreground">
-            Scadenza corretta
-            <input type="date" value={scadenza || ''} onChange={(e) => setScadenza(e.target.value)} className="block mt-1 px-2 py-1 rounded border bg-card text-sm text-foreground" />
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={verificato} onChange={(e) => setVerificato(e.target.checked)} />
-            Ho controllato il documento: è valido nonostante le segnalazioni
-          </label>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Nota facoltativa" rows={2} className="w-full px-2 py-1 rounded border bg-card text-sm" />
-          <p className="text-xs text-muted-foreground">La correzione ha la precedenza sull'analisi e non viene sovrascritta se il documento viene rianalizzato.</p>
-          <div className="flex gap-2">
-            <Button size="sm" className="h-7" onClick={async () => { await onSalvaCorrezione(doc, { scadenza, verificato, note }); setCorreggi(false); }}>Salva</Button>
-            <Button size="sm" variant="ghost" className="h-7" onClick={() => setCorreggi(false)}>Annulla</Button>
-          </div>
+      {/* Gli altri contratti attivi della voce, ciascuno coi suoi pulsanti. */}
+      {altri.length > 0 && (
+        <div className="space-y-2 pt-1">
+          <p className="text-xs font-medium text-muted-foreground pl-4">Altri contratti attivi di questa voce</p>
+          {altri.map(a => (
+            <DocumentoAccanto key={a.id} altro={a} req={req} isAdmin={isAdmin} occupato={occupato}
+              onApri={onApri} onAnalizza={onAnalizza} onSalvaCorrezione={onSalvaCorrezione} />
+          ))}
         </div>
       )}
     </div>
@@ -242,11 +369,23 @@ export default function SoggettoDettaglio({ soggetto, anno, isAdmin, open, onClo
       });
       // Il documento precedente si archivia solo dopo che il nuovo e' stato
       // salvato: se il caricamento fallisse, il fornitore non resterebbe scoperto.
+      // Il contratto ancora in vigore resta attivo fino alla sua scadenza
+      // (documentiDaSostituire, 13/10/2026).
       const precedenti = await base44.entities.DocumentoQualifica.filter({
         soggetto_chiave: soggetto.chiave, tipo_documento_id: req.tipo_id, stato: 'attivo',
       });
-      for (const p of precedenti) {
-        if (p.id !== nuovo.id) await base44.entities.DocumentoQualifica.update(p.id, { stato: 'sostituito' });
+      const daSostituire = documentiDaSostituire(req, precedenti, nuovo.id);
+      for (const p of daSostituire) {
+        await base44.entities.DocumentoQualifica.update(p.id, { stato: 'sostituito' });
+      }
+      const tenuti = precedenti.filter(p => p.id !== nuovo.id && !daSostituire.includes(p));
+      if (tenuti.length) {
+        const uno = tenuti.length === 1;
+        toast({
+          title: uno ? 'Il contratto in corso resta attivo' : 'I contratti in corso restano attivi',
+          description: `${tenuti.map(p => `«${p.file_nome || 'senza nome'}»`).join(', ')} ${uno ? 'vale' : 'valgono'} fino alla scadenza: il requisito passa al nuovo quando risulta valido, e `
+            + (uno ? 'il vecchio si chiude da solo quando scade.' : 'i vecchi si chiudono da soli quando scadono.'),
+        });
       }
       setOccupato(null);
       await onAggiorna();
@@ -280,7 +419,14 @@ export default function SoggettoDettaglio({ soggetto, anno, isAdmin, open, onClo
     }
   };
 
-  const salvaCorrezione = async (doc, { scadenza, verificato, note }) => {
+  // Restituisce true se la correzione e' salvata: altrimenti la maschera resta
+  // aperta, con quello che si era scritto.
+  const salvaCorrezione = async (doc, { scadenza, verificato, note }, req) => {
+    const motivo = motivoCorrezioneNonSalvabile(req, { scadenza, verificato });
+    if (motivo) {
+      toast({ title: 'Correzione non salvata', description: motivo, variant: 'destructive' });
+      return false;
+    }
     try {
       await base44.entities.DocumentoQualifica.update(doc.id, {
         data_scadenza_manuale: scadenza || null,
@@ -289,8 +435,10 @@ export default function SoggettoDettaglio({ soggetto, anno, isAdmin, open, onClo
       });
       await onAggiorna();
       toast({ title: 'Correzione salvata' });
+      return true;
     } catch (e) {
       toast({ title: 'Salvataggio non riuscito', description: e.message || String(e), variant: 'destructive' });
+      return false;
     }
   };
 

@@ -31,7 +31,7 @@
 
 import { fetchAll } from "./fetchAll.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
-import { problemaTipoSbagliato } from "./tipiDocumento.ts";
+import { problemaTipoSbagliato, riconosciTipoDocumento } from "./tipiDocumento.ts";
 import { annoRoma } from "./giornoItaliano.ts";
 import { eTerminato, giornoMovimento, annoOrdine, testoDate, canaleMovimento } from "./movimenti.ts";
 
@@ -72,6 +72,124 @@ export function aggiungiPeriodo(data, mesi, giorni) {
   if (mesi) d.setUTCMonth(d.getUTCMonth() + Number(mesi));
   if (giorni) d.setUTCDate(d.getUTCDate() + Number(giorni));
   return d.toISOString().slice(0, 10);
+}
+
+const dataIt = (d) => d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4);
+
+// === plausibilita' delle date lette ===
+//
+// LA DATA LETTA NON VALE A SCATOLA CHIUSA (segnalazione alta A64 del 20/09,
+// corretta il 12/10/2026). Per i tipi «da documento» la scadenza e' quella che
+// il modello legge sul file, e fino ad allora valeva com'era: un anno letto
+// male, o la data di emissione scritta anche come scadenza, rendeva un
+// documento «valido» o «scaduto» senza che nessuno se ne accorgesse. Ora tre
+// controlli che non chiedono decisioni mettono il documento «da verificare»,
+// col motivo: emissione nel futuro, scadenza che non viene dopo l'emissione,
+// durata oltre la misura scritta per quel documento. Valgono solo sulle date
+// della lettura: una scadenza corretta a mano o una conferma dell'amministratore
+// li chiudono. Se ogni scadenza letta debba aspettare comunque un clic
+// dell'amministratore e' una decisione dell'utente, non presa qui.
+
+// Le durate scritte nel gestionale, per famiglia di documento (riconosciuta dal
+// nome della casella come in tipiDocumento.ts): la voce «Regole di validita'
+// dei documenti ricorrenti» della base di conoscenza (visura, DURC, Albo, White
+// List) e la descrizione della CQC nel catalogo proposto. L'autorizzazione
+// d'impianto non c'e': per l'AIA la durata e' «secondo il provvedimento».
+export const DURATE_SCRITTE = {
+  visura: { mesi: 6, fonte: 'la visura vale sei mesi dal rilascio' },
+  durc: { giorni: 120, fonte: 'il DURC vale 120 giorni' },
+  albo_gestori: { mesi: 60, fonte: "l'iscrizione all'Albo dura cinque anni" },
+  white_list: { mesi: 12, fonte: "l'iscrizione alla White List vale dodici mesi" },
+  cqc: { mesi: 60, fonte: 'la CQC si rinnova ogni cinque anni' },
+};
+
+// Margine sulla durata. Un rinnovo ottenuto prima della scadenza decorre dalla
+// scadenza precedente: sui provvedimenti dell'Albo dei fornitori (2022-2026) fra
+// la data del provvedimento e l'inizio della validita' passano fino a tre mesi
+// («del 30/04/2026 ... dal 31/07/2026 al 31/07/2031»). Un quarto della durata li
+// copre largamente e resta lontano dagli errori da prendere: un anno sbagliato,
+// una data che non e' la scadenza.
+export const MARGINE_DURATA = 0.25;
+
+// L'ALBO GESTORI SI RICONOSCE DAI GESTORI (revisione del 13/10/2026). In
+// tipiDocumento.ts la famiglia albo_gestori scatta anche con le sole parole
+// «iscrizione all'Albo», che stanno pure nel nome dell'Albo degli
+// autotrasportatori conto terzi («Iscrizione all'Albo autotrasportatori conto
+// terzi (REN)», nel catalogo dal 21/09). Il REN e' un'altra iscrizione: non ha
+// categorie ne' classi e non dura cinque anni, eppure riceveva l'avviso
+// «controllo classe/target non eseguito» (classeAlbo.ts) e la durata dell'Albo.
+// Qui l'Albo gestori e' tale solo se il testo nomina i gestori («Albo Nazionale
+// Gestori Ambientali»); l'iscrizione a un albo senza quella parola non si
+// attribuisce a nessuna famiglia.
+/** La famiglia di un nome di documento (tipiDocumento.ts), con l'Albo gestori solo se nomina i gestori; o null. */
+export function famigliaDocumento(testo) {
+  const famiglia = riconosciTipoDocumento(testo || '');
+  if (famiglia && famiglia.chiave === 'albo_gestori' && !/\bgestori\b/i.test(String(testo || ''))) return null;
+  return famiglia;
+}
+
+/** La durata di un tipo di documento: quella del catalogo, altrimenti quella scritta per la sua famiglia, o null. */
+export function durataScritta(tipo) {
+  const mesi = Number(tipo && tipo.validita_mesi) || 0;
+  const giorni = Number(tipo && tipo.validita_giorni) || 0;
+  if (mesi > 0 || giorni > 0) {
+    const parti = [mesi > 0 ? mesi + ' mesi' : '', giorni > 0 ? giorni + ' giorni' : ''].filter(Boolean).join(' e ');
+    return { mesi, giorni, fonte: `il catalogo gli dà ${parti} di validità` };
+  }
+  const famiglia = famigliaDocumento((tipo && tipo.nome) || '');
+  const scritta = famiglia && DURATE_SCRITTE[famiglia.chiave];
+  return scritta ? { mesi: scritta.mesi || 0, giorni: scritta.giorni || 0, fonte: scritta.fonte } : null;
+}
+
+// IL CONTRATTO SI FIRMA PRIMA DI DECORRERE (revisione del 13/10/2026). I
+// contratti dell'anno dopo si generano dalla scheda Contratti con la data della
+// firma uguale alla decorrenza (segnapostiContratto.ts, DATA_FIRMA =
+// DATA_INIZIO: in fondo c'e' «Massafra, 02 Gennaio 2027») e si controfirmano a
+// dicembre. La lettura prende quella data come emissione, e il controllo
+// dell'emissione nel futuro la dava per «letta male»: il contratto nuovo andava
+// «da verificare» e il fornitore «da completare» proprio dopo il rinnovo, con un
+// promemoria ogni settimana. Per un contratto un'emissione nel futuro e' la
+// decorrenza e si accetta fino all'anno dopo quello di oggi, cioe' fin dove
+// arrivano i contratti firmati in anticipo; oltre, e' ancora un anno letto male.
+// Fino alla decorrenza vale il contratto in corso: lo dice una nota, e lo stato
+// non cambia. Il contratto in corso resta attivo fino ad allora
+// (salvaContrattoFornitore) e il requisito si regge sul migliore dei due
+// (documentoDelRequisito, revisione del 13/10/2026).
+
+/** Vero per le voci del catalogo della famiglia «contratto»: la categoria, oppure il nome. */
+export function eContratto(tipo) {
+  if (tipo && tipo.categoria === 'contratto') return true;
+  const famiglia = famigliaDocumento((tipo && tipo.nome) || '');
+  return !!famiglia && famiglia.chiave === 'contratto';
+}
+
+/** Vero se l'emissione letta nel futuro e' quella di un contratto firmato prima della decorrenza. */
+export function firmatoPrimaDellaDecorrenza(tipo, emissione, oggi) {
+  if (!emissione || !oggi || emissione <= oggi || !eContratto(tipo)) return false;
+  return Number(emissione.slice(0, 4)) <= Number(oggi.slice(0, 4)) + 1;
+}
+
+/**
+ * Le incongruenze fra le date lette di un documento, come problemi di
+ * attenzione; [] se le date stanno in piedi o mancano. Date AAAA-MM-GG.
+ */
+export function dateIncongruenti(tipo, emissione, scadenza, oggi) {
+  const problemi = [];
+  if (emissione && oggi && emissione > oggi && !firmatoPrimaDellaDecorrenza(tipo, emissione, oggi)) {
+    problemi.push({ gravita: 'attenzione', messaggio: `La data di emissione letta, ${dataIt(emissione)}, è nel futuro: con ogni probabilità è letta male. Controlla il documento.` });
+  }
+  if (emissione && scadenza && scadenza <= emissione) {
+    problemi.push({ gravita: 'attenzione', messaggio: `La scadenza letta, ${dataIt(scadenza)}, non viene dopo la data di emissione, ${dataIt(emissione)}: una delle due è letta male, oppure l'emissione è la data di stampa o di estrazione. Controlla il documento e, se serve, correggi la scadenza.` });
+  } else if (emissione && scadenza) {
+    const durata = durataScritta(tipo);
+    if (durata) {
+      const limite = aggiungiPeriodo(emissione, Math.ceil(durata.mesi * (1 + MARGINE_DURATA)), Math.ceil(durata.giorni * (1 + MARGINE_DURATA)));
+      if (scadenza > limite) {
+        problemi.push({ gravita: 'attenzione', messaggio: `La scadenza letta, ${dataIt(scadenza)}, è troppo lontana dalla data di emissione, ${dataIt(emissione)}: ${durata.fonte}. Controlla che sia la data giusta e, se serve, correggila.` });
+      }
+    }
+  }
+  return problemi;
 }
 
 export function ruoliDaTesto(s) {
@@ -320,11 +438,30 @@ function nomePreferito(s, fornitore) {
 
 // === stato dei requisiti ===
 
+// LA NOTA DEL CONTRATTO FIRMATO IN ANTICIPO NON E' IL MOTIVO (revisione del
+// 13/10/2026). Stava in testa ai problemi di ogni stato: con una rilettura
+// fallita, o con la scadenza non letta, la pagina e il promemoria (che mostrano
+// il primo problema) dicevano «Contratto firmato prima della decorrenza ...» al
+// posto di «La lettura automatica del file non ha funzionato» o di «Scadenza non
+// determinata». Ora la nota si aggiunge solo a un requisito valido o in scadenza,
+// dopo i suoi problemi. E non promette un contratto in corso se non c'e': a un
+// fornitore nuovo dice solo da quando vale. Chi la chiama sapendo che accanto
+// c'e' un contratto in vigore (valutaSoggetto) lo dice con contrattoInCorso.
+function notaDecorrenza(decorrenza, contrattoInCorso) {
+  return {
+    gravita: 'informativo',
+    messaggio: `Contratto firmato prima della decorrenza: la data letta, ${dataIt(decorrenza)}, è quella da cui vale.`
+      + (contrattoInCorso ? ' Fino ad allora resta in vigore il contratto in corso.' : ''),
+  };
+}
+
 /**
- * Stato di un requisito: il documento piu' recente di quel tipo per il soggetto,
- * confrontato con la data di oggi e con le regole del catalogo.
+ * Stato di un requisito: il documento di quel tipo per il soggetto (il piu'
+ * recente; per i contratti vedi documentoDelRequisito), confrontato con
+ * la data di oggi e con le regole del catalogo. contesto.contrattoInCorso: vero
+ * se accanto c'e' un contratto gia' in vigore (cambia solo la nota).
  */
-export function statoRequisito(tipo, doc, oggi) {
+export function statoRequisito(tipo, doc, oggi, contesto = {}) {
   const base = { scadenza: null, giorni: null, problemi: [] };
   if (!doc) {
     return { ...base, stato: tipo.obbligatorio === false ? 'facoltativo_mancante' : 'mancante' };
@@ -335,10 +472,23 @@ export function statoRequisito(tipo, doc, oggi) {
   // doverli rileggere tutti da capo.
   const salvati = leggiProblemi(doc);
   const sbagliato = problemaTipoSbagliato(tipo.nome, letturaDi(doc));
-  const problemi = sbagliato && !salvati.some(p => p.messaggio === sbagliato.messaggio) ? [sbagliato, ...salvati] : salvati;
+  const conTipo = sbagliato && !salvati.some(p => p.messaggio === sbagliato.messaggio) ? [sbagliato, ...salvati] : salvati;
   const scadenza = soloData(doc.data_scadenza_manuale) || soloData(doc.data_scadenza);
   const giorni = scadenza ? giorniTra(oggi, scadenza) : null;
+  // Le date della lettura si controllano finche' nessuno le ha guardate: una
+  // scadenza scritta a mano o la conferma dell'amministratore valgono su di loro.
+  const dateDaLettura = !doc.verificato_manualmente && !soloData(doc.data_scadenza_manuale);
+  const incongruenze = dateDaLettura ? dateIncongruenti(tipo, soloData(doc.data_emissione), scadenza, oggi) : [];
+  const problemi = [...conTipo, ...incongruenze.filter(p => !conTipo.some(q => q.messaggio === p.messaggio))];
   const esito = { scadenza, giorni, problemi };
+  // Un contratto firmato prima della decorrenza vale gia' come requisito, ma
+  // non e' ancora quello in vigore: la nota lo dice, solo sui ritorni «valido» e
+  // «in scadenza» e in fondo (13/10/2026, vedi notaDecorrenza).
+  const decorrenza = firmatoPrimaDellaDecorrenza(tipo, soloData(doc.data_emissione), oggi) ? soloData(doc.data_emissione) : null;
+  const conNota = (stato) => ({
+    ...esito, stato,
+    problemi: decorrenza ? [...problemi, notaDecorrenza(decorrenza, !!(contesto && contesto.contrattoInCorso))] : problemi,
+  });
 
   // Un'analisi ferma da piu' di dieci minuti, avviata o mai partita, e' stata
   // interrotta: il documento passa da verificare invece di restare in attesa.
@@ -355,17 +505,201 @@ export function statoRequisito(tipo, doc, oggi) {
   const bloccanti = problemi.filter(p => p.gravita === 'bloccante');
   if (bloccanti.length > 0 && !doc.verificato_manualmente) return { ...esito, stato: 'non_conforme' };
 
-  const preavviso = typeof tipo.preavviso_giorni === 'number' ? tipo.preavviso_giorni : 60;
-  if (giorni !== null && giorni <= preavviso) return { ...esito, stato: 'in_scadenza' };
+  // Date che non stanno in piedi: ne' valido ne' in scadenza, finche' qualcuno
+  // non guarda il documento (A64, 12/10/2026). Uno scaduto resta scaduto, sopra,
+  // col motivo accanto.
+  if (incongruenze.length > 0) return { ...esito, stato: 'da_verificare' };
 
-  if (!doc.verificato_manualmente) {
-    // Il motivo del fallimento viaggia insieme allo stato: cosi arriva anche
-    // nel promemoria via email, non solo sulla scheda del fornitore.
-    if (doc.analisi_stato === 'errore') return { ...esito, stato: 'da_verificare', problemi: [...problemi, { gravita: 'attenzione', messaggio: 'La lettura automatica del file non ha funzionato' + (doc.errore_analisi ? ': ' + doc.errore_analisi : '.') + ' Controlla il file a mano.' }] };
-    if (giorni === null && tipo.tipo_scadenza !== 'nessuna') return { ...esito, stato: 'da_verificare' };
+  const preavviso = typeof tipo.preavviso_giorni === 'number' ? tipo.preavviso_giorni : 60;
+  if (giorni !== null && giorni <= preavviso) return conNota('in_scadenza');
+
+  // Il motivo del fallimento viaggia insieme allo stato: cosi arriva anche
+  // nel promemoria via email, non solo sulla scheda del fornitore.
+  if (!doc.verificato_manualmente && doc.analisi_stato === 'errore') return { ...esito, stato: 'da_verificare', problemi: [...problemi, { gravita: 'attenzione', messaggio: 'La lettura automatica del file non ha funzionato' + (doc.errore_analisi ? ': ' + doc.errore_analisi : '.') + ' Controlla il file a mano.' }] };
+
+  // LA SPUNTA NON E' UNA SCADENZA (segnalazione alta A65 del 20/09, corretta il
+  // 12/10/2026). Questo controllo stava dentro «se non e' verificato a mano»:
+  // un documento che scade, confermato a mano senza scrivere la data, risultava
+  // «valido» per sempre, e la maschera lo permetteva. Per i tipi con scadenza
+  // senza data si resta «da verificare» anche con la spunta, e si dice perche'.
+  if (giorni === null && tipo.tipo_scadenza !== 'nessuna') {
+    if (!doc.verificato_manualmente) return { ...esito, stato: 'da_verificare' };
+    return { ...esito, stato: 'da_verificare', problemi: [...problemi, { gravita: 'attenzione', messaggio: 'Il documento è segnato come verificato a mano, ma senza data di scadenza: per questo documento la scadenza serve, altrimenti resterebbe valido per sempre. Scrivila con «Correggi».' }] };
   }
 
-  return { ...esito, stato: 'valido' };
+  return conNota('valido');
+}
+
+// IL CONTRATTO IN CORSO VALE FINO ALLA DECORRENZA DEL NUOVO (revisione del
+// 13/10/2026). Il requisito prendeva sempre il documento attivo piu' recente.
+// Ma il contratto dell'anno dopo, controfirmato a dicembre dalla scheda
+// Contratti, nasce «in analisi» e la sua lettura puo' fallire (un limite di
+// richieste) o trovare un problema: il requisito scendeva «in analisi», «da
+// verificare» o «non conforme» e il fornitore «da completare» o «critico» - e la
+// fatturazione passiva, che legge i critici, avvisava prima di pagare dicembre,
+// coperto dal contratto in corso, valido fino al 31/12. Ora il contratto in corso
+// resta attivo fino alla decorrenza del nuovo (salvaContrattoFornitore) e, per la
+// famiglia contratto, il requisito si regge sul migliore dei documenti attivi:
+// valido, poi in scadenza, poi gli altri; a parita' il piu' recente. Il piu'
+// recente lasciato indietro non sparisce: una nota dice com'e'. (Il migliore
+// vale ora per la sola successione, e il lasciato indietro ha i suoi pulsanti:
+// vedi «Il migliore solo per la successione», qui sotto.)
+//
+// Un contratto scaduto accanto a uno valido o in scadenza e' finito: non porta
+// alert ne' promemoria, perche' il requisito non lo guarda, e va fra i
+// sostituiti (superati, scritti da chiudiContrattiSuperati). E' il passo della
+// decorrenza: senza, il contratto vecchio restava attivo per sempre, e il presidio
+// lo avrebbe fatto rileggere ogni sei mesi. Si chiude solo un documento scaduto
+// accanto a uno piu' recente, e solo se un contratto in vigore c'e': due
+// contratti veri dello stesso anno (rete e ACI) restano attivi tutti e due
+// finche' valgono, e un contratto nuovo letto male (scaduto prima di
+// cominciare) resta li', invece di sparire.
+//
+// IL MIGLIORE SOLO PER LA SUCCESSIONE, E IL CONTRATTO NUOVO RAGGIUNGIBILE
+// (revisione del 13/10/2026). La scelta del migliore valeva per tutti i contratti
+// attivi della voce: rete e ACI dello stesso anno, uno valido e l'altro non
+// conforme, davano un fornitore «qualificato» con una nota, e la fatturazione
+// passiva non avvisava piu' prima di pagare. E il contratto nuovo lasciato
+// indietro viaggiava solo come testo: la scheda metteva Apri, Rianalizza e
+// Correggi sul contratto vecchio, e con «Correggi» la scadenza del 2027 finiva
+// scritta sul 2026. Ora:
+// - si mette da parte solo il SUCCESSIVO di un contratto in vigore: quello, non
+//   piu' vecchio del contratto in corso, che decorre dopo oggi (emissione letta
+//   nel futuro), oppure di cui la decorrenza non si conosce ancora (file non
+//   ancora letto, o date lette che non stanno in piedi) e che non vale gia' da
+//   solo. Finche' non e' valido il requisito si regge sul contratto in corso;
+//   letto bene ne prende il posto. Un documento piu' vecchio del contratto in
+//   corso (emissione, o caricamento, prima della sua) non e' «caricato dopo»: si
+//   guarda insieme agli altri e, scaduto, si chiude come gli altri finiti;
+// - i contratti che valgono insieme si guardano tutti: regge il requisito il
+//   peggiore (scaduto o non conforme, poi da verificare, in analisi, in
+//   scadenza, valido; a parita' il piu' recente), cosi' uno non conforme fa il
+//   fornitore critico come prima;
+// - gli altri contratti attivi della voce si espongono uno per uno
+//   (altri_documenti: id, file, stato, problemi, lettura, mai il file_uri), cosi'
+//   la scheda da' a ciascuno i suoi pulsanti Apri, Rianalizza e Correggi, e la
+//   pagina si aggiorna da sola mentre il nuovo e' in lettura; la nota sul
+//   successivo porta documento_id, e la scheda la mostra accanto ai suoi pulsanti;
+// - contratti_in_corso dice quali documenti valgono oggi: un contratto caricato a
+//   mano dalla scheda del fornitore non li manda fra i sostituiti
+//   (documentiDaSostituire in src/components/qualifica/SoggettoDettaglio.jsx).
+// Un contratto con la lettura fallita accanto a uno in vigore resta da parte,
+// con la nota: se e' il 2027 non fa scendere il fornitore, se fosse un ACI
+// dello stesso anno lo rilegge il presidio (analisi_fallita) e, letto, si guarda
+// insieme all'altro.
+
+const ETICHETTA_STATO = {
+  valido: 'valido', in_scadenza: 'in scadenza', scaduto: 'scaduto', non_conforme: 'non conforme',
+  da_verificare: 'da verificare', in_analisi: 'in analisi',
+};
+const dataPerRecenza = (d) => String(d.data_emissione || d.created_date || '');
+const recenteDavanti = (a, b) => dataPerRecenza(b).localeCompare(dataPerRecenza(a));
+const inVigore = (s) => s.stato === 'valido' || s.stato === 'in_scadenza';
+// Fra contratti che valgono insieme regge il requisito il peggiore.
+const GRAVITA_SCELTA = { scaduto: 0, non_conforme: 0, da_verificare: 1, in_analisi: 2, in_scadenza: 3, valido: 4 };
+const gravitaScelta = (s) => GRAVITA_SCELTA[s.stato] ?? 2;
+// Le date di un documento vengono dalla lettura del file: finche' non e' letto
+// l'emissione e' quella scritta al caricamento (la data della firma), non la
+// decorrenza.
+const lettoDalFile = (d) => d.analisi_stato === 'completata' || !!letturaDi(d);
+function dateNonAffidabili(tipo, d, oggi) {
+  if (d.verificato_manualmente || soloData(d.data_scadenza_manuale)) return false;
+  return dateIncongruenti(tipo, soloData(d.data_emissione), soloData(d.data_scadenza), oggi).length > 0;
+}
+
+/**
+ * Il documento su cui si regge il requisito, il suo stato e gli altri documenti.
+ * documenti: quelli attivi del soggetto per quel tipo. Restituisce
+ * { doc, esito, superati: [id], altri: [{ doc, esito, relazione }],
+ * contrattiInCorso: [id] }. relazione: 'successivo' (non piu' vecchio di un
+ * contratto in vigore, e decorre dopo o non e' ancora letto bene), 'in_corso' (in
+ * vigore fino alla decorrenza del successivo che regge il requisito), 'insieme'
+ * (vale insieme a quello scelto). altri non comprende i contratti finiti
+ * (scaduti accanto a uno piu' recente), che vanno fra i superati quando accanto
+ * c'e' un contratto in vigore.
+ * Per i tipi che non sono contratti e' il documento piu' recente, come sempre,
+ * e il resto e' vuoto.
+ */
+export function documentoDelRequisito(tipo, documenti, oggi) {
+  const ordinati = [...(documenti || [])].sort(recenteDavanti);
+  if (!eContratto(tipo) || ordinati.length === 0) {
+    return { doc: ordinati[0] || null, esito: statoRequisito(tipo, ordinati[0] || null, oggi), superati: [], altri: [], contrattiInCorso: [] };
+  }
+  const stati = ordinati.map(d => ({ d, s: statoRequisito(tipo, d, oggi) }));
+  const decorreDopo = (x) => firmatoPrimaDellaDecorrenza(tipo, soloData(x.d.data_emissione), oggi);
+  const decorrenzaIgnota = (x) => !inVigore(x.s) && (!lettoDalFile(x.d) || dateNonAffidabili(tipo, x.d, oggi));
+  const candidato = (x) => decorreDopo(x) || decorrenzaIgnota(x);
+  // I contratti in corso: gia' decorsi e in vigore oggi.
+  const inCorso = stati.filter(x => !candidato(x) && inVigore(x.s));
+  // La successione c'e' solo accanto a un contratto in corso, e il successivo non
+  // e' piu' vecchio di lui: un documento senza data ne' caricamento noti si
+  // tiene per nuovo (stati va dal piu' recente, inCorso[0] e' il piu' recente).
+  const riferimento = inCorso.length ? dataPerRecenza(inCorso[0].d) : '';
+  const piuVecchio = (x) => !!riferimento && !!dataPerRecenza(x.d) && dataPerRecenza(x.d) < riferimento;
+  const successivi = inCorso.length ? stati.filter(x => candidato(x) && !piuVecchio(x)) : [];
+  const correnti = stati.filter(x => !successivi.includes(x));
+  // Finiti: scaduti, con un documento piu' recente accanto.
+  const finiti = correnti.filter(x => x.s.stato === 'scaduto' && stati.indexOf(x) > 0);
+  const pronti = successivi.filter(x => inVigore(x.s));
+  let guardati = correnti.filter(x => !finiti.includes(x));
+  // Il successivo letto bene prende il posto del contratto in corso (non di
+  // quelli che, accanto, non valgono: quelli restano da guardare).
+  if (pronti.length) guardati = [...guardati.filter(x => !inCorso.includes(x)), ...pronti];
+  guardati.sort((a, b) => stati.indexOf(a) - stati.indexOf(b));
+  let scelto = guardati[0];
+  for (const x of guardati) if (gravitaScelta(x.s) < gravitaScelta(scelto.s)) scelto = x;
+
+  // «Il contratto in corso» della nota sul contratto firmato in anticipo.
+  const esito = statoRequisito(tipo, scelto.d, oggi, { contrattoInCorso: inCorso.some(x => x !== scelto) });
+  // Il successivo non ancora valido: una nota sul requisito, quando il
+  // requisito si regge davvero su un contratto in vigore.
+  const lasciati = successivi.filter(x => !guardati.includes(x));
+  const note = !inVigore(esito) ? [] : lasciati.map(({ d, s }) => {
+    const motivo = (s.problemi || []).find(p => p.gravita === 'bloccante') || (s.problemi || []).find(p => p.gravita === 'attenzione');
+    const nome = String(d.file_nome || '').trim();
+    return {
+      gravita: s.stato === 'in_analisi' ? 'informativo' : 'attenzione',
+      documento_id: d.id,
+      messaggio: `Il contratto caricato dopo questo${nome ? `, «${nome}»,` : ''} è ${ETICHETTA_STATO[s.stato] || s.stato}${motivo ? ` (${String(motivo.messaggio || '').replace(/\.\s*$/, '')})` : ''}: finché non risulta valido il requisito si regge su questo.`,
+    };
+  });
+  const relazione = (x) => (successivi.includes(x) ? 'successivo' : !guardati.includes(x) ? 'in_corso' : 'insieme');
+  const altri = stati.filter(x => x !== scelto && !finiti.includes(x)).map(x => ({ doc: x.d, esito: x.s, relazione: relazione(x) }));
+  const superati = stati.some(x => !finiti.includes(x) && inVigore(x.s)) ? finiti.map(x => x.d.id) : [];
+  // Quelli che valgono oggi, con una scadenza non passata: un caricamento a mano
+  // non li sostituisce (SoggettoDettaglio.jsx, documentiDaSostituire).
+  const contrattiInCorso = inCorso.filter(x => x.s.giorni !== null && x.s.giorni >= 0).map(x => x.d.id);
+  return { doc: scelto.d, esito: note.length ? { ...esito, problemi: [...esito.problemi, ...note] } : esito, superati, altri, contrattiInCorso };
+}
+
+// Quello che la pagina vede di un documento: mai il file_uri (vedi sotto).
+function vistaDocumento(doc) {
+  return {
+    id: doc.id,
+    file_nome: doc.file_nome,
+    // IL file_uri NON ESCE DAL SERVER (05/10/2026).
+    //
+    // Questo riepilogo lo chiede la pagina a ogni apertura e la funzione
+    // risponde a QUALUNQUE utente collegato: finche' qui c'era il file_uri,
+    // chiunque poteva farselo firmare e aprire il DURC, la polizza, la visura
+    // o le patenti degli autisti di un fornitore - documenti di terzi, con
+    // dati personali - mentre il pulsante «Apri» nella pagina si disegnava
+    // solo per l'amministratore. La firma non e' controllata contro l'utente
+    // ne' contro le regole RLS del record: lo ha scritto l'assistenza della
+    // piattaforma (vedi shared/fileRiservato.ts). Alla pagina basta sapere se
+    // il file c'e'; per aprirlo si passa dalla funzione apriFile.
+    ha_file: !!doc.file_uri,
+    data_emissione: doc.data_emissione,
+    data_scadenza: doc.data_scadenza,
+    data_scadenza_manuale: doc.data_scadenza_manuale,
+    verificato_manualmente: !!doc.verificato_manualmente,
+    analisi_stato: doc.analisi_stato,
+    sintesi: doc.sintesi,
+    richiesta_al_fornitore: doc.richiesta_al_fornitore,
+    confidenza: doc.confidenza,
+    errore_analisi: doc.errore_analisi,
+    created_date: doc.created_date,
+  };
 }
 
 /**
@@ -379,9 +713,7 @@ export function valutaSoggetto(soggetto, catalogo, documenti, oggi) {
   const propri = documenti.filter(d => d.soggetto_chiave === soggetto.chiave && d.stato !== 'sostituito');
 
   const requisiti = applicabili.map(t => {
-    const doc = propri
-      .filter(d => d.tipo_documento_id === t.id)
-      .sort((a, b) => String(b.data_emissione || b.created_date || '').localeCompare(String(a.data_emissione || a.created_date || '')))[0] || null;
+    const { doc, esito, superati, altri, contrattiInCorso } = documentoDelRequisito(t, propri.filter(d => d.tipo_documento_id === t.id), oggi);
     const nominati = soggettiDelTipo(t);
     return {
       tipo_id: t.id,
@@ -392,33 +724,22 @@ export function valutaSoggetto(soggetto, catalogo, documenti, oggi) {
       obbligatorio: t.obbligatorio !== false,
       tipo_scadenza: t.tipo_scadenza,
       preavviso_giorni: t.preavviso_giorni,
-      documento: doc ? {
-        id: doc.id,
-        file_nome: doc.file_nome,
-        // IL file_uri NON ESCE DAL SERVER (05/10/2026).
-        //
-        // Questo riepilogo lo chiede la pagina a ogni apertura e la funzione
-        // risponde a QUALUNQUE utente collegato: finche' qui c'era il file_uri,
-        // chiunque poteva farselo firmare e aprire il DURC, la polizza, la visura
-        // o le patenti degli autisti di un fornitore - documenti di terzi, con
-        // dati personali - mentre il pulsante «Apri» nella pagina si disegnava
-        // solo per l'amministratore. La firma non e' controllata contro l'utente
-        // ne' contro le regole RLS del record: lo ha scritto l'assistenza della
-        // piattaforma (vedi shared/fileRiservato.ts). Alla pagina basta sapere se
-        // il file c'e'; per aprirlo si passa dalla funzione apriFile.
-        ha_file: !!doc.file_uri,
-        data_emissione: doc.data_emissione,
-        data_scadenza: doc.data_scadenza,
-        data_scadenza_manuale: doc.data_scadenza_manuale,
-        verificato_manualmente: !!doc.verificato_manualmente,
-        analisi_stato: doc.analisi_stato,
-        sintesi: doc.sintesi,
-        richiesta_al_fornitore: doc.richiesta_al_fornitore,
-        confidenza: doc.confidenza,
-        errore_analisi: doc.errore_analisi,
-        created_date: doc.created_date,
-      } : null,
-      ...statoRequisito(t, doc, oggi),
+      documento: doc ? vistaDocumento(doc) : null,
+      ...esito,
+      // contratti scaduti accanto a uno in vigore: li chiude chiudiContrattiSuperati
+      superati,
+      // Gli altri contratti attivi della voce, ciascuno col suo stato: la scheda
+      // da' a ognuno i suoi pulsanti (13/10/2026). Mai il file_uri.
+      altri_documenti: altri.map(a => ({
+        ...vistaDocumento(a.doc),
+        relazione: a.relazione,
+        stato: a.esito.stato,
+        scadenza: a.esito.scadenza,
+        giorni: a.esito.giorni,
+        problemi: a.esito.problemi,
+      })),
+      // i contratti che valgono oggi: il caricamento a mano non li sostituisce
+      contratti_in_corso: contrattiInCorso,
     };
   });
 
@@ -534,7 +855,31 @@ export async function salvaRiepilogo(base44, anno, valutati, anomalie) {
   } else {
     await ent.create(dati);
   }
+  // Il riepilogo si salva solo su archivi interi (mai durante un caricamento):
+  // e' anche il momento di chiudere i contratti finiti (13/10/2026).
+  await chiudiContrattiSuperati(base44, valutati);
   return dati;
+}
+
+/**
+ * IL PASSO DELLA DECORRENZA (revisione del 13/10/2026). I contratti scaduti
+ * accanto a uno in vigore (superati, vedi documentoDelRequisito) passano fra i
+ * sostituiti, come in un caricamento a mano: una scrittura per documento, una
+ * volta sola, perche' dopo non e' piu' attivo; nessuna lettura in piu', i
+ * documenti sono quelli gia' letti per la valutazione. Una scrittura che non
+ * riesce si rifa' al calcolo dopo: il documento intanto non porta alert, perche'
+ * il requisito non lo guarda. Restituisce quanti ne ha chiusi.
+ */
+export async function chiudiContrattiSuperati(base44, valutati) {
+  const ids = [...new Set((valutati || []).flatMap(s => (s.requisiti || []).flatMap(r => r.superati || [])))];
+  let chiusi = 0;
+  for (const id of ids) {
+    try {
+      await base44.asServiceRole.entities.DocumentoQualifica.update(id, { stato: 'sostituito' });
+      chiusi++;
+    } catch (_e) { /* si rifa' al prossimo calcolo */ }
+  }
+  return chiusi;
 }
 
 /**

@@ -17,14 +17,33 @@
  * cercano fra spazi, quindi "iso 14001" non scatta dentro un'altra parola e
  * "durc" non scatta dentro "durchmesser". Vince la parola piu' lunga trovata,
  * cioe' la piu' specifica: "polizza fideiussoria" batte "polizza".
+ *
+ * "generiche" sono parole che dicono la famiglia solo se nel testo non c'e'
+ * nessuna parola vera di nessuna famiglia (revisione del 13/10/2026): «iscrizione
+ * all'Albo» sta nel nome dell'Albo gestori ambientali e in quello dell'Albo degli
+ * autotrasportatori conto terzi (il REN). Come parola vera, la piu' lunga,
+ * «provvedimento di iscrizione all albo», batteva «albo degli autotrasportatori»
+ * e un REN letto cosi' risultava un Albo gestori.
  */
 export const FAMIGLIE = [
   { chiave: 'durc', nome: 'DURC', parole: ['durc', 'durc online', 'documento unico di regolarita contributiva', 'regolarita contributiva'] },
   { chiave: 'visura', nome: 'Visura camerale', parole: ['visura', 'visura camerale', 'visura ordinaria', 'visura storica', 'visura di evasione', 'registro delle imprese', 'certificato camera di commercio'] },
   { chiave: 'white_list', nome: 'Iscrizione alla White List antimafia', parole: ['white list', 'whitelist', 'elenco prefettizio', 'elenchi prefettizi', 'elenco dei fornitori prestatori di servizi ed esecutori di lavori'] },
   { chiave: 'antimafia', nome: 'Comunicazione o informazione antimafia', parole: ['comunicazione antimafia', 'informazione antimafia', 'certificazione antimafia', 'certificato antimafia', 'liberatoria antimafia'] },
-  { chiave: 'albo_gestori', nome: 'Iscrizione all\'Albo Nazionale Gestori Ambientali', parole: ['albo gestori', 'albo gestori ambientali', 'albo nazionale gestori', 'albo nazionale gestori ambientali', 'iscrizione all albo', 'provvedimento di iscrizione all albo'] },
-  { chiave: 'rentri', nome: 'Iscrizione al RENTRI', parole: ['rentri', 'registro elettronico nazionale'] },
+  { chiave: 'albo_gestori', nome: 'Iscrizione all\'Albo Nazionale Gestori Ambientali', parole: ['albo gestori', 'albo gestori ambientali', 'albo nazionale gestori', 'albo nazionale gestori ambientali'], generiche: ['iscrizione all albo', 'provvedimento di iscrizione all albo'] },
+  // IL REN E' UN'ALTRA ISCRIZIONE (revisione del 13/10/2026). L'Albo degli
+  // autotrasportatori conto terzi, col Registro Elettronico Nazionale delle
+  // imprese di autotrasporto (REN), non ha categorie ne' classi e non dura
+  // cinque anni. Fino ad allora la casella «Iscrizione all'Albo autotrasportatori
+  // conto terzi (REN)» risultava Albo gestori, per «iscrizione all albo», e un
+  // certificato REN letto come «Registro Elettronico Nazionale» risultava RENTRI:
+  // un provvedimento dell'Albo gestori caricato nella casella del REN, o il
+  // contrario, passava senza una parola, e quel certificato REN nella sua casella
+  // era «documento sbagliato».
+  { chiave: 'albo_autotrasportatori', nome: 'Iscrizione all\'Albo degli autotrasportatori conto terzi (REN)', parole: ['albo autotrasportatori', 'albo degli autotrasportatori', 'autotrasportatori conto terzi', 'autotrasporto di cose per conto di terzi', 'albo nazionale degli autotrasportatori'] },
+  // «Registro elettronico nazionale» da solo e' il REN degli autotrasportatori:
+  // il RENTRI e' quello «per la tracciabilita dei rifiuti».
+  { chiave: 'rentri', nome: 'Iscrizione al RENTRI', parole: ['rentri', 'registro elettronico nazionale per la tracciabilita'] },
   { chiave: 'autorizzazione_impianto', nome: 'Autorizzazione dell\'impianto', parole: ['aua', 'aia', 'autorizzazione unica ambientale', 'autorizzazione integrata ambientale', 'autorizzazione ordinaria', 'autorizzazione dell impianto', 'autorizzazione impianto', 'provvedimento autorizzativo', 'articolo 208', 'art 208', 'articolo 216', 'art 216'] },
   { chiave: 'garanzia_finanziaria', nome: 'Garanzia finanziaria', parole: ['garanzia finanziaria', 'garanzie finanziarie', 'fideiussione', 'fideiussoria', 'polizza fideiussoria', 'garanzia fideiussoria'] },
   { chiave: 'polizza_rc', nome: 'Polizza di responsabilita civile', parole: ['responsabilita civile', 'polizza rct', 'rct rco', 'polizza di responsabilita civile', 'assicurazione di responsabilita civile'] },
@@ -53,26 +72,38 @@ function normalizza(v) {
 
 /**
  * La famiglia di un testo, oppure null se non si riconosce o se due famiglie
- * diverse hanno la stessa evidenza. Restituisce { chiave, nome, parola }.
+ * diverse hanno la stessa evidenza. Restituisce { chiave, nome, parola }, con
+ * generica: true quando l'hanno detta solo le parole generiche.
  */
 export function riconosciTipoDocumento(testo) {
   const t = normalizza(testo);
   if (t.trim().length < 2) return null;
-  let migliore = null;
-  let ambiguo = false;
-  for (const f of FAMIGLIE) {
-    for (const parola of f.parole) {
-      if (!t.includes(' ' + parola + ' ')) continue;
-      if (!migliore || parola.length > migliore.parola.length) {
-        migliore = { chiave: f.chiave, nome: f.nome, parola };
-        ambiguo = false;
-      } else if (parola.length === migliore.parola.length && f.chiave !== migliore.chiave) {
-        ambiguo = true;
+  const cerca = (campo) => {
+    let migliore = null;
+    let ambiguo = false;
+    for (const f of FAMIGLIE) {
+      for (const parola of f[campo] || []) {
+        if (!t.includes(' ' + parola + ' ')) continue;
+        if (!migliore || parola.length > migliore.parola.length) {
+          migliore = { chiave: f.chiave, nome: f.nome, parola };
+          ambiguo = false;
+        } else if (parola.length === migliore.parola.length && f.chiave !== migliore.chiave) {
+          ambiguo = true;
+        }
       }
     }
-  }
-  return ambiguo ? null : migliore;
+    return { migliore, ambiguo };
+  };
+  const vere = cerca('parole');
+  if (vere.migliore) return vere.ambiguo ? null : vere.migliore;
+  const generiche = cerca('generiche');
+  return generiche.migliore && !generiche.ambiguo ? { ...generiche.migliore, generica: true } : null;
 }
+
+// Le parole generiche dell'Albo («iscrizione all'Albo») stanno anche nel nome
+// dell'Albo degli autotrasportatori: da sole non dicono quale dei due Albi sia,
+// quindi contro il REN non bastano per dire «diverso» (revisione del 13/10/2026).
+const DUE_ALBI = ['albo_gestori', 'albo_autotrasportatori'];
 
 /**
  * Confronta la casella del catalogo con il documento letto dal file.
@@ -85,7 +116,9 @@ export function confrontaTipoDocumento(nomeAtteso, lettura) {
   const letto = String((lettura && lettura.tipo_documento) || '').trim();
   const letta = riconosciTipoDocumento(letto || (lettura && lettura.sintesi) || '');
   if (!attesa || !letta) return { esito: 'incerto', attesa, letta };
-  return { esito: attesa.chiave === letta.chiave ? 'coincide' : 'diverso', attesa, letta };
+  if (attesa.chiave === letta.chiave) return { esito: 'coincide', attesa, letta };
+  const unAlboQualunque = (attesa.generica || letta.generica) && DUE_ALBI.includes(attesa.chiave) && DUE_ALBI.includes(letta.chiave);
+  return { esito: unAlboQualunque ? 'incerto' : 'diverso', attesa, letta };
 }
 
 /**
