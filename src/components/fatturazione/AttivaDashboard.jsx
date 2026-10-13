@@ -7,7 +7,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Loader2, Play, CheckCircle, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Input } from '@/components/ui/input';
-import { oggiRoma } from '@/lib/giornoItaliano';
+import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
 // Gli importi all'italiana, e «—» se manca (chiusura dell'audit, 11/10/2026):
 // prima «€ 372976.50», e zero per un totale che non c'era.
 import { euro } from '@/lib/formatoSoldi';
@@ -215,6 +215,12 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
                   </div>
                   {doc.stato === 'chiusa' && doc.fattura_confermata_il && (
                     <p className="text-xs text-emerald-700 mt-2">Fatturazione confermata il {doc.fattura_confermata_il.split('-').reverse().join('/')}{doc.fattura_numero ? ` · fattura ${doc.fattura_numero}` : ''}</p>
+                  )}
+                  {/* I mesi fatturati prima dell'avvio, segnati chiusi dalla chiusura del
+                      mese: la stessa regola di chiusoFuoriDalGestionale (shared/chiusuraMese.ts),
+                      che qui non si importa (13/10/2026). */}
+                  {doc.stato === 'chiusa' && !doc.fattura_confermata_il && String(doc.note || '').includes('Chiuso fuori dal gestionale') && (
+                    <p className="text-xs text-emerald-700 mt-2">Fatturata fuori dal gestionale, prima dell'avvio{doc.data_chiusura ? ` (segnata chiusa il ${giornoRoma(doc.data_chiusura).split('-').reverse().join('/')})` : ''}</p>
                   )}
                   <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t">
                     {['elaborata', 'verificata'].includes(doc.stato) && <Pulsante t={t} azione="verifica"><CheckCircle className="w-3.5 h-3.5 mr-1" /> Verifica</Pulsante>}

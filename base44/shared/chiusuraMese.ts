@@ -719,6 +719,18 @@ export function passiAttiva({ periodo, documenti = [], prefatture = [], esportaz
       }
       return p;
     }
+    if (chiusoFuoriDalGestionale(d)) {
+      // Fatturato fuori, prima dell'avvio (giro K8, 12/10/2026): prefattura,
+      // approvazione ed esportazione qui non ci sono mai state, e non si dicono
+      // fatte; si dice com'e' andata.
+      p.stato = 'fatto';
+      p.dettaglio = testoChiusoFuori(d);
+      p.voci = [
+        voce('fatto', `Elaborata il ${it(giornoDi(d.data_elaborazione))}${typeof d.numero_voci === 'number' ? `: ${d.numero_voci} ${d.numero_voci === 1 ? 'riga' : 'righe'}` : ''}.`),
+        voce('fatto', p.dettaglio),
+      ];
+      return p;
+    }
     const conPrefattura = c !== 'EXTRA_RACCOLTA';
     const approvata = !!d && ['approvata', 'esportata', 'chiusa'].includes(d.stato);
     const dopoApprovazione = (quando) => !!quando && (!d.data_approvazione || String(quando) >= String(d.data_approvazione));
@@ -1016,6 +1028,33 @@ export function chiusuraDelMese(dati) {
   return { mese: periodo, passi, conteggio, sintesi: sintesiDelMese(periodo, passi) };
 }
 
+// CHE COSA MANCA A UN MESE PER DIRSI CHIUSO: l'attiva di ogni canale, e la
+// passiva dal primo mese da chiedere in poi. Un elenco vuoto se non manca
+// niente. Sta a parte (giro K8, 12/10/2026) perche' la usa anche il piano dei
+// mesi chiusi fuori, per dire prima di scrivere se il mese dopo resta aperto:
+// una regola sola, non una seconda che puo' dire un'altra cosa.
+function mancanzeDelMese(periodo, { docs, chiusure, primoCongelato, movimentiExtra }) {
+  const k = indiceMese(periodo.anno, periodo.mese_idx);
+  const delMese = documentiAttivaDelMese(docs, periodo);
+  // Prima l'attiva, poi la passiva, come nella lista del mese.
+  const attiva = [];
+  const passiva = [];
+  const nuoviExtra = movimentiExtraNelMese(movimentiExtra, periodo);
+  for (const c of CANALI_CHIUSURA) {
+    const d = documentoDelCanale(delMese, c);
+    if (vuotoDavvero(d, c, c === 'EXTRA_RACCOLTA' ? nuoviExtra : null)) continue;
+    if (senzaRighe(d)) attiva.push({ cosa: mancaAlVuoto(nuoviExtra), canale: c });
+    else if (!d) attiva.push({ cosa: "l'elaborazione dell'attiva", canale: c });
+    else if (d.stato !== 'chiusa') attiva.push({ cosa: "la chiusura dell'attiva", canale: c });
+    // chiusure null = la lettura non e' riuscita: la passiva non si giudica.
+    if (chiusure !== null && k >= primoCongelato
+      && !(chiusure || []).some(x => x && Number(x.anno) === periodo.anno && Number(x.mese) === periodo.numero && x.canale === c)) {
+      passiva.push({ cosa: 'il congelamento della passiva', canale: c });
+    }
+  }
+  return [...attiva, ...passiva];
+}
+
 /**
  * I MESI PRIMA DELL'ULTIMO FINITO ANCORA APERTI, anche dell'anno prima: un
  * dicembre mai chiuso non diventa a posto perche' e' cominciato marzo (la
@@ -1041,31 +1080,232 @@ export function mesiAncoraAperti({ ultimo, documenti = [], chiusure = [], movime
   const out = [];
   for (let k = primo; k < fineFinestra; k++) {
     const periodo = periodoDelMese(Math.floor(k / 12), k % 12);
-    const delMese = documentiAttivaDelMese(docs, periodo);
-    // Prima l'attiva, poi la passiva, come nella lista del mese.
-    const attiva = [];
-    const passiva = [];
-    const nuoviExtra = movimentiExtraNelMese(movimentiExtra, periodo);
-    for (const c of CANALI_CHIUSURA) {
-      const d = documentoDelCanale(delMese, c);
-      if (vuotoDavvero(d, c, c === 'EXTRA_RACCOLTA' ? nuoviExtra : null)) continue;
-      if (senzaRighe(d)) attiva.push({ cosa: mancaAlVuoto(nuoviExtra), canale: c });
-      else if (!d) attiva.push({ cosa: "l'elaborazione dell'attiva", canale: c });
-      else if (d.stato !== 'chiusa') attiva.push({ cosa: "la chiusura dell'attiva", canale: c });
-      // chiusure null = la lettura non e' riuscita: la passiva non si giudica.
-      if (chiusure !== null && k >= primoCongelato
-        && !(chiusure || []).some(x => x && Number(x.anno) === periodo.anno && Number(x.mese) === periodo.numero && x.canale === c)) {
-        passiva.push({ cosa: 'il congelamento della passiva', canale: c });
-      }
-    }
-    const mancano = [...attiva, ...passiva];
+    const mancano = mancanzeDelMese(periodo, { docs, chiusure, primoCongelato, movimentiExtra });
     if (!mancano.length) continue;
     const testi = raggruppaMancanze(mancano);
     out.push({
       anno: periodo.anno, mese: periodo.mese, numero: periodo.numero, etichetta: periodo.etichetta,
+      // Un mese di prima di settembre 2026 si e' chiuso fuori: il pannello offre
+      // all'amministratore di segnarlo chiuso (pianoMesiChiusiFuori).
+      prima_del_gestionale: k < PARTENZA,
       mancano: testi,
       sintesi: `${periodo.etichetta}: ${testi.length > 1 || plurale(testi[0]) ? 'mancano' : 'manca'} ${elenco(testi)}.`,
     });
   }
   return out;
+}
+
+// === I mesi fatturati prima del gestionale ===
+
+/**
+ * I MESI FATTURATI PRIMA DEL GESTIONALE SI SEGNANO CHIUSI (giro K8, 12/10/2026).
+ *
+ * L'attiva di gennaio-agosto 2026 e' stata elaborata a posteriori (gennaio il
+ * 18/09, febbraio-agosto il 06/10/2026), ma le fatture di quei mesi si sono
+ * fatte fuori: il gestionale e' nato a fine estate. La chiusura del mese li
+ * elencava tutti e otto fra i mesi ancora aperti, con «manca la chiusura
+ * dell'attiva». Decisione dell'utente dell'11/10/2026, testuale: «si chiudili
+ * nel gestionale come se fossero già stati fatti (è ovvio perchè il gestionale
+ * è nato solo due mesi fa)».
+ *
+ * Non con una regola speciale qui: i documenti dell'attiva di quei mesi vanno
+ * nello stato che tutti i moduli leggono gia', «chiusa» - Fatturazione attiva,
+ * dashboard, «Da gestire», chiusura del mese, EcoTyna - con la nota che dice
+ * com'e' andata e una riga nello storico delle modifiche. Si scrivono i campi
+ * della chiusura vera (cambiaStatoFatturazione) che hanno senso: stato,
+ * data_chiusura (quando si e' segnato qui) e chi l'ha registrato. Il giorno e
+ * il numero della fattura no: non si sanno, e non si inventano. Si riapre col
+ * «Riapri» di sempre.
+ *
+ * Tutti i documenti del mese, anche l'extra raccolta senza righe: la griglia
+ * della dashboard dice chiuso un mese solo se sono chiusi tutti e tre i canali
+ * (statoMesiAttiva). Un canale senza documento invece non si chiude: un
+ * documento creato apposta, senza righe ne' totale, la pagina e EcoTyna lo
+ * leggerebbero come zero euro fatturati. Si dice, e il mese resta aperto su
+ * quel canale finche' non si elabora. Nemmeno l'extra raccolta a zero righe con
+ * dei movimenti finiti nel mese: il documento e' di prima, e chiuso non si
+ * rielabora piu'. Sulla copia dei dati veri dell'11/10/2026 nessuno dei due
+ * casi: ognuno degli otto mesi ha i suoi tre documenti, e l'extra raccolta di
+ * aprile e di luglio ha la sua riga.
+ *
+ * Solo i mesi prima di settembre 2026 (PRIMO_MESE_DEL_GESTIONALE): da li' un
+ * mese si chiude in Fatturazione attiva, con la conferma della fattura. Nei
+ * mesi ancora aperti quelli di prima portano prima_del_gestionale, e il
+ * pannello offre all'amministratore di segnarli. Scrive la funzione
+ * segnaMesiChiusiFuori; qui le regole, pure.
+ */
+export const NOTA_CHIUSO_FUORI = "Chiuso fuori dal gestionale: fatturato prima dell'avvio, decisione dell'utente dell'11/10/2026";
+export const ORIGINE_CHIUSO_FUORI = 'Chiusura del mese: mesi fatturati prima del gestionale';
+
+/**
+ * Vero per un documento chiuso da quest'azione: chiuso, con la nota, e senza la
+ * conferma della fattura. Riaperto e richiuso davvero non lo e' piu': Riapri
+ * lascia la nota, ma la chiusura vera scrive il giorno della conferma.
+ */
+export function chiusoFuoriDalGestionale(d) {
+  return !!d && d.stato === 'chiusa' && !d.fattura_confermata_il && String(d.note || '').includes(NOTA_CHIUSO_FUORI);
+}
+
+/** La frase di un documento chiuso fuori, come la dice la chiusura del mese. */
+export function testoChiusoFuori(d) {
+  const quando = d && d.data_chiusura ? ` il ${it(giornoDi(d.data_chiusura))}` : '';
+  return `Fatturata fuori dal gestionale, prima dell'avvio: segnata chiusa${quando} (decisione dell'utente dell'11/10/2026).`;
+}
+
+/**
+ * Che cosa si scrive su un documento: stato, data_chiusura, chi l'ha
+ * registrato e la riga della nota, in coda alle note che c'erano, come fa
+ * Riapri. giorno e' il giorno italiano, quando l'istante.
+ */
+export function patchChiusoFuori(d, { utente = '', quando, giorno }) {
+  const riga = `${NOTA_CHIUSO_FUORI}. Segnato chiuso il ${it(giorno)}${utente ? ` da ${utente}` : ''}: era «${d.stato}».`;
+  return {
+    stato: 'chiusa',
+    data_chiusura: quando,
+    ...(utente ? { fattura_confermata_da: utente } : {}),
+    note: [d.note, riga].filter(x => String(x || '').trim()).join('\n'),
+  };
+}
+
+const CANALE_ETICHETTA = { RETE: 'RETE', ACI: 'ACI', EXTRA_RACCOLTA: 'EXTRA RACCOLTA' };
+
+/**
+ * La riga dello storico delle modifiche di un documento segnato chiuso, nella
+ * forma di ModificaDato. Lo stato di un documento non e' fra i campi tracciati
+ * (CAMPI_TRACCIATI): la riga si scrive a parte, col registro di sempre.
+ */
+export function rigaStoricoChiusoFuori(d, { utente = '', il }) {
+  return {
+    entita: 'DocumentoFatturazione', record_id: String(d.id || ''),
+    etichetta: `Fatturazione attiva · ${CANALE_ETICHETTA[d.tipologia] || 'tutti i canali'} · ${minuscolo(d.mese)} ${d.anno}`,
+    campo: 'stato', ...(d.stato ? { prima: String(d.stato) } : {}), dopo: 'chiusa', unita: 'testo', operazione: 'update',
+    utente, il, origine: ORIGINE_CHIUSO_FUORI, motivo: NOTA_CHIUSO_FUORI, riservato: false,
+    ...(Number(d.anno) ? { anno: Number(d.anno) } : {}),
+  };
+}
+
+// Com'e' un documento, in una riga del piano: «elaborata il 06/10/2026, 316 righe».
+const comeDocumento = (d) => {
+  const righe = typeof d.numero_voci === 'number' ? (d.numero_voci === 0 ? 'senza righe' : `${d.numero_voci} ${d.numero_voci === 1 ? 'riga' : 'righe'}`) : '';
+  const errori = Number(d.voci_errore) || 0;
+  return [
+    d.data_elaborazione ? `elaborata il ${it(giornoDi(d.data_elaborazione))}` : '',
+    righe,
+    errori ? `${errori} ${errori === 1 ? 'riga' : 'righe'} in errore, che restano come sono` : '',
+  ].filter(Boolean).join(', ');
+};
+
+/**
+ * IL PIANO: che cosa cambierebbe, mese per mese e canale per canale, prima di
+ * scrivere. mesi: [{ anno, mese }] (mese col nome o col numero). documenti:
+ * quelli dell'attiva di tutti gli anni, come li legge statoChiusuraMese.
+ * chiusure e movimentiExtra servono a dire, con la regola dei mesi ancora
+ * aperti (mancanzeDelMese), se il mese dopo resta aperto e per che cosa: la
+ * passiva prima di settembre 2026 non si chiede, e un'extra raccolta a zero
+ * righe con dei movimenti finiti nel mese non si chiude, va prima rielaborata.
+ *
+ * Risponde { mesi, rifiutati, documenti_da_chiudere, sintesi }. Per ogni mese i
+ * canali (azione 'chiude', 'gia_chiusa', 'senza_documento' o 'da_rielaborare',
+ * col testo), lo stato prima e dopo ({ aperto, mancano }) e come resta, detto
+ * col nome del mese (frase) e senza (esito, accanto al nome nella conferma); i
+ * mesi che non si segnano, col perche'; i documenti da chiudere, ognuno una
+ * volta.
+ */
+export function pianoMesiChiusiFuori({ mesi = [], oggi, documenti = [], chiusure = [], movimentiExtra = null }) {
+  const ultimo = ultimoMeseFinito(oggi);
+  const ultimoFinito = indiceMese(ultimo.anno, ultimo.mese_idx);
+  const rifiutati = [];
+  const scelti = new Map();
+  for (const m of Array.isArray(mesi) ? mesi : []) {
+    const anno = Number(m && m.anno);
+    const idx = meseDa(m && m.mese);
+    if (!Number.isInteger(anno) || anno < 2000 || idx === null || idx === undefined) {
+      rifiutati.push({ anno: (m && m.anno) ?? null, mese: (m && m.mese) ?? null, perche: 'Mese non riconosciuto: servono l\'anno e il mese.' });
+      continue;
+    }
+    const periodo = periodoDelMese(anno, idx);
+    const k = indiceMese(anno, idx);
+    if (k >= PARTENZA) {
+      rifiutati.push({ anno, mese: periodo.mese, perche: k === PARTENZA
+        ? `${periodo.etichetta} è il primo mese chiuso nel gestionale: si chiude in Fatturazione attiva, con la conferma della fattura.`
+        : `${periodo.etichetta} si chiude nel gestionale, come ogni mese da ${minuscolo(PRIMO_MESE_DEL_GESTIONALE.etichetta)}: in Fatturazione attiva, con la conferma della fattura.` });
+      continue;
+    }
+    if (k > ultimoFinito) {
+      rifiutati.push({ anno, mese: periodo.mese, perche: `${periodo.etichetta} non è ancora finito.` });
+      continue;
+    }
+    scelti.set(k, periodo);
+  }
+  const daChiudere = [];
+  const presi = new Set();
+  const perMese = [...scelti.entries()].sort((a, b) => a[0] - b[0]).map(([, periodo]) => {
+    const delMese = documentiAttivaDelMese(documenti, periodo);
+    // Un documento senza canale (di prima dei documenti per canale) vale per
+    // tutto il mese, come in documentoDelCanale: si chiude una volta.
+    const senzaCanale = delMese.filter(d => !CANALI_CHIUSURA.includes(d.tipologia));
+    const canali = CANALI_CHIUSURA.map(c => {
+      const suoi = delMese.filter(d => d.tipologia === c);
+      const docs = suoi.length ? suoi : senzaCanale;
+      const titolo = TITOLI_CANALI[c];
+      if (!docs.length) {
+        return { canale: c, azione: 'senza_documento', documenti: [],
+          testo: `${titolo}: nessun documento dell'attiva. Non si chiude da qui: un documento creato apposta direbbe zero euro fatturati. Si elabora in Fatturazione attiva, poi si segna chiuso.` };
+      }
+      const aperti = docs.filter(d => d.stato !== 'chiusa');
+      if (!aperti.length) return { canale: c, azione: 'gia_chiusa', documenti: [], testo: `${titolo}: già chiusa.` };
+      // L'extra raccolta elaborata a zero righe con dei movimenti finiti nel
+      // mese e' di prima di quei movimenti (movimentiExtraNelMese): chiusa,
+      // restava «da rielaborare» e non si poteva piu' rielaborare senza
+      // riaprirla. Non si chiude: si rielabora (o si scrive il peso), poi si
+      // segna. Sulla copia dei dati veri dell'11/10/2026 non succede: aprile e
+      // luglio, i due mesi con un intervento, hanno la loro riga.
+      const nuovi = c === 'EXTRA_RACCOLTA' && suoi.length ? movimentiExtraNelMese(movimentiExtra, periodo) : null;
+      const letto = documentoDelCanale(delMese, c);
+      if (nuovi && letto && letto.stato !== 'chiusa' && senzaRighe(letto) && quantiExtra(nuovi) > 0) {
+        const n = nuovi.con_peso > 0 ? nuovi.con_peso : nuovi.senza_peso;
+        return { canale: c, azione: 'da_rielaborare', documenti: [],
+          testo: `${titolo}: ${comeDocumento(letto)}, ma nel mese ${movimentiDetti(n, nuovi.con_peso > 0 ? '' : ' senza il peso effettivo')}. Non si chiude da qui: manca ${mancaAlVuoto(nuovi)}, poi si segna chiuso.` };
+      }
+      for (const d of aperti) if (!presi.has(d)) { presi.add(d); daChiudere.push(d); }
+      const come = aperti.length === 1 ? comeDocumento(aperti[0]) : '';
+      return {
+        canale: c, azione: 'chiude',
+        documenti: aperti.map(d => ({ id: d.id || null, stato_prima: d.stato, numero_voci: typeof d.numero_voci === 'number' ? d.numero_voci : null })),
+        testo: aperti.length === 1
+          ? `${titolo}: ${come ? `${come}; ` : ''}da «${aperti[0].stato}» a «chiusa».`
+          : `${titolo}: ${aperti.length} documenti, da ${elenco([...new Set(aperti.map(d => `«${d.stato}»`))])} a «chiusa».`,
+      };
+    });
+    return { periodo, canali };
+  });
+  // Prima e dopo con la regola dei mesi ancora aperti, sui documenti di adesso
+  // e su quelli che si avrebbero dopo la scrittura.
+  const primoCongelato = chiusure === null ? null : primoDaChiedere(primoMese(chiusure, idxNumero));
+  const dopoDocs = (documenti || []).map(d => (presi.has(d) ? { ...d, stato: 'chiusa' } : d));
+  const statoDi = (docs, periodo) => {
+    const m = mancanzeDelMese(periodo, { docs, chiusure, primoCongelato, movimentiExtra });
+    return { aperto: m.length > 0, mancano: raggruppaMancanze(m) };
+  };
+  const out = perMese.map(({ periodo, canali }) => {
+    const prima = statoDi(documenti, periodo);
+    const dopo = statoDi(dopoDocs, periodo);
+    const verbo = dopo.mancano.length > 1 || plurale(dopo.mancano[0] || '') ? 'mancano' : 'manca';
+    const esito = dopo.aperto ? `Resta aperto: ${verbo} ${elenco(dopo.mancano)}.` : 'Dopo è chiuso.';
+    return {
+      anno: periodo.anno, mese: periodo.mese, numero: periodo.numero, etichetta: periodo.etichetta,
+      canali, prima, dopo,
+      // esito accanto al nome del mese, nella conferma; frase da sola.
+      esito,
+      frase: dopo.aperto ? `${periodo.etichetta}: resta aperto, ${verbo} ${elenco(dopo.mancano)}.` : `${periodo.etichetta}: chiuso.`,
+    };
+  });
+  const quanti = daChiudere.length;
+  const mesiToccati = out.filter(m => m.canali.some(c => c.azione === 'chiude')).length;
+  const restano = out.filter(m => m.dopo.aperto).map(m => minuscolo(m.etichetta));
+  const sintesi = [
+    quanti ? `Da segnare chiusi: ${quanti} ${quanti === 1 ? 'documento' : 'documenti'} dell'attiva in ${mesiToccati} ${mesiToccati === 1 ? 'mese' : 'mesi'}.` : 'Niente da segnare chiuso.',
+    restano.length ? `Dopo, ${restano.length === 1 ? 'resta aperto' : 'restano aperti'} ${elenco(restano)}.` : (out.length ? 'Dopo, nessuno di questi mesi resta aperto.' : ''),
+  ].filter(Boolean).join(' ');
+  return { mesi: out, rifiutati, documenti_da_chiudere: daChiudere, sintesi };
 }

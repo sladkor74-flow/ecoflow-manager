@@ -273,6 +273,13 @@ console.log('SETTEMBRE 2026, IL PRIMO MESE CHIUSO NEL GESTIONALE, NON SCIVOLA');
   const settembre = (nov.j.mesi_aperti || []).find(m => m.etichetta === 'Settembre 2026');
   verifica('e fra i mesi prima ancora aperti, settembre c\'e\' per il congelamento', settembre && settembre.mancano.join(' | ') === 'il congelamento della passiva (rete, ACI ed extra raccolta)', JSON.stringify(nov.j.mesi_aperti));
   verifica('luglio e agosto, chiusi fuori dal gestionale, non chiedono il congelamento', (nov.j.mesi_aperti || []).filter(m => m.numero < 9).every(m => !m.mancano.some(x => /congelamento/.test(x))), JSON.stringify(nov.j.mesi_aperti));
+  // Giro K8 (12/10/2026): i mesi di prima di settembre 2026 si sono fatturati
+  // fuori, e il pannello offre all'amministratore di segnarli chiusi. Lo dice
+  // prima_del_gestionale; il primo mese chiuso nel gestionale arriva come
+  // etichetta, perche' le pagine non scrivono anni.
+  const prima = (nov.j.mesi_aperti || []).filter(m => m.prima_del_gestionale === true).map(m => m.etichetta);
+  verifica('luglio ha prima_del_gestionale, settembre no', prima.join(',') === 'Luglio 2026' && settembre?.prima_del_gestionale === false, JSON.stringify(nov.j.mesi_aperti));
+  verifica('la risposta dice qual e\' il primo mese chiuso nel gestionale', nov.j.primo_mese_del_gestionale === 'Settembre 2026', nov.j.primo_mese_del_gestionale);
   const ago = await chiama({ db, oggi: '2026-11-15', corpo: { anno: 2026, mese: 'Agosto' } });
   verifica('agosto: passiva e quadrature non servono, e il perche\' e\' il primo mese del gestionale', ['passiva_RETE', 'passiva_ACI', 'quadrature_fir'].every(k => passo(ago, k).stato === 'non_serve') && /Il gestionale chiude i mesi da settembre 2026: agosto 2026 si è chiuso fuori/.test(JSON.stringify(passo(ago, 'passiva_RETE').voci)), JSON.stringify(['passiva_RETE', 'quadrature_fir'].map(k => [passo(ago, k).stato, passo(ago, k).voci.map(v => v.testo)])));
 }

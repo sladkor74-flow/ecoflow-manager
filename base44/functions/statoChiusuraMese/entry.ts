@@ -7,7 +7,7 @@ import { leggiRegistro } from "../../shared/registroCaricamenti.ts";
 import { datiFinoAl, finoAlPerTipo } from "../../shared/statoArchivi.ts";
 import { freschezzaArchivi } from "../../shared/cruscotto.ts";
 import { leggiFotografia } from "../../shared/indicatoriGiorno.ts";
-import { meseDaChiudere, chiusuraDelMese, mesiAncoraAperti, FILE_DEL_MESE } from "../../shared/chiusuraMese.ts";
+import { meseDaChiudere, chiusuraDelMese, mesiAncoraAperti, FILE_DEL_MESE, PRIMO_MESE_DEL_GESTIONALE } from "../../shared/chiusuraMese.ts";
 
 // LA CHIUSURA DEL MESE, PASSO PASSO (migliorie dell'11/10/2026).
 //
@@ -40,8 +40,16 @@ import { meseDaChiudere, chiusuraDelMese, mesiAncoraAperti, FILE_DEL_MESE } from
 // e dei consuntivi si passano alle regole solo stato e date, mai totale_euro o
 // importo_consuntivo; delle prefatture solo il fatto che ci sono, senza righe.
 //
+// I MESI DI PRIMA DEL GESTIONALE (giro K8, 12/10/2026). Fra i mesi ancora
+// aperti, quelli di prima di settembre 2026 portano prima_del_gestionale: si
+// sono fatturati fuori, e il pannello offre all'amministratore di segnarli
+// chiusi (la funzione segnaMesiChiusiFuori, che scrive; questa resta di sola
+// lettura). Il primo mese chiuso nel gestionale arriva come etichetta
+// (primo_mese_del_gestionale), perche' le pagine non scrivono anni.
+//
 // Payload: { anno?, mese? } - mese col nome ('Settembre') o col numero (9).
-// Risponde { oggi, mese, passi, conteggio, sintesi, mesi_aperti, letture_non_riuscite }.
+// Risponde { oggi, mese, passi, conteggio, sintesi, mesi_aperti,
+// primo_mese_del_gestionale, letture_non_riuscite }.
 
 // Gli archivi dei movimenti che possono avere ordini «eseguito» a portale.
 const CON_ESEGUITI = { primarieRete: 'PrimariaRete', primarieAci: 'PrimariaAci', secondarie: 'Secondaria' };
@@ -55,7 +63,7 @@ export default async function(req) {
     const oggi = oggiRoma();
     const scelta = meseDaChiudere({ oggi, anno: body && body.anno, mese: body && body.mese });
     if (scelta.errore) return Response.json({ error: scelta.errore }, { status: 400 });
-    if (!scelta.periodo) return Response.json({ oggi, mese: null, perche: scelta.perche, passi: [], conteggio: null, sintesi: scelta.perche, mesi_aperti: [], letture_non_riuscite: [] });
+    if (!scelta.periodo) return Response.json({ oggi, mese: null, perche: scelta.perche, passi: [], conteggio: null, sintesi: scelta.perche, mesi_aperti: [], primo_mese_del_gestionale: PRIMO_MESE_DEL_GESTIONALE.etichetta, letture_non_riuscite: [] });
     const periodo = scelta.periodo;
     const ultimo = scelta.ultimo;
     const svc = base44.asServiceRole.entities;
@@ -112,6 +120,7 @@ export default async function(req) {
       // Congelamenti non letti: null, non un elenco vuoto, cosi' l'elenco dei mesi
       // aperti non dice «manca il congelamento» di mesi che magari sono congelati.
       mesi_aperti: nonLette.includes('documenti') ? [] : mesiAncoraAperti({ ultimo, documenti, chiusure: nonLette.includes('chiusure') ? null : chiusure, movimentiExtra }),
+      primo_mese_del_gestionale: PRIMO_MESE_DEL_GESTIONALE.etichetta,
       letture_non_riuscite: nonLette,
     });
   } catch (error) {

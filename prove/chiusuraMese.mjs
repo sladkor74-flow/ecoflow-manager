@@ -23,7 +23,13 @@
 // L'ultimo giro (12/10/2026): il primo mese chiuso nel gestionale e' fisso,
 // settembre 2026 (PRIMO_MESE_DEL_GESTIONALE). Prima, senza nessun fatto scritto,
 // era «il mese che si chiude adesso» e scivolava col calendario: dal 01/11/2026
-// settembre mai congelato diventava «non serve». npm run prove
+// settembre mai congelato diventava «non serve».
+// Giro K8 (12/10/2026): i mesi fatturati prima del gestionale (gennaio-agosto
+// 2026) si segnano chiusi, decisione dell'utente dell'11/10/2026. Qui le regole
+// pure: il piano mese per mese e canale per canale (pianoMesiChiusiFuori), che
+// cosa si scrive (patchChiusoFuori, rigaStoricoChiusoFuori), e che dopo la
+// chiusura del mese li legga chiusi; la funzione intera, sui dati veri, in
+// prove/mesiChiusiFuori.mjs. npm run prove
 import * as C from '../base44/shared/chiusuraMese.ts';
 import { fotografiaDelGiorno, leggiFotografia } from '../base44/shared/indicatoriGiorno.ts';
 import { freschezzaArchivi } from '../base44/shared/cruscotto.ts';
@@ -481,6 +487,95 @@ console.log('I MESI PRIMA ANCORA APERTI, ANCHE DELL\'ANNO PRIMA');
   // Lo stato si legge come lo legge l'attiva (filtraPeriodo): «Terminato » e' terminato.
   const luglioSenzaPeso = ap([{ stato: 'Terminato ', trasporto_finito_il: '2026-07-21T00:00:00.000Z', tipo_movimento: 'primaria', peso_effettivo: 0 }]);
   verifica('e senza peso: aperto, manca il peso dei movimenti', luglioSenzaPeso.length === 1 && luglioSenzaPeso[0].sintesi === 'Luglio 2026: manca il peso effettivo dei movimenti (extra raccolta).', JSON.stringify(luglioSenzaPeso));
+}
+
+console.log('I MESI FATTURATI PRIMA DEL GESTIONALE SI SEGNANO CHIUSI (giro K8, 12/10/2026)');
+{
+  // Decisione dell'utente dell'11/10/2026: gennaio-agosto 2026, elaborati a
+  // posteriori, «si chiudono nel gestionale come se fossero già stati fatti».
+  // I documenti come nella copia dei dati veri: tre per mese, «elaborata»,
+  // l'extra raccolta a zero righe tranne aprile e luglio.
+  const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto'];
+  let n = 0;
+  const doc = (mese, tipologia, campi = {}) => ({ id: `d${++n}`, tipo: 'ATTIVA', anno: 2026, mese, tipologia, stato: 'elaborata', superato: false, note: '',
+    numero_voci: tipologia === 'EXTRA_RACCOLTA' ? (['Aprile', 'Luglio'].includes(mese) ? 1 : 0) : 300, voci_errore: 0, totale: 123456.78,
+    data_elaborazione: mese === 'Gennaio' ? '2026-09-18T15:06:05.613Z' : '2026-10-06T11:21:06.047Z', ...campi });
+  const docs = [...MESI, 'Settembre'].flatMap(m => ['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(c => doc(m, c)));
+  const extra = [
+    { stato: 'terminato', trasporto_finito_il: '2026-04-14T00:00:00.000Z', tipo_movimento: 'primaria', peso_effettivo: 400 },
+    { stato: 'terminato', trasporto_finito_il: '2026-07-21T00:00:00.000Z', tipo_movimento: 'primaria', peso_effettivo: 460 },
+  ];
+  const OGGI = '2026-10-12';
+  const ultimo = C.meseDaChiudere({ oggi: OGGI }).ultimo;
+  const aperti = C.mesiAncoraAperti({ ultimo, documenti: docs, chiusure: [], movimentiExtra: extra });
+  verifica('oggi gennaio-agosto sono aperti, ognuno con prima_del_gestionale', aperti.map(m => m.mese).join(',') === MESI.join(',') && aperti.every(m => m.prima_del_gestionale === true), JSON.stringify(aperti));
+  const novembre = C.mesiAncoraAperti({ ultimo: C.meseDaChiudere({ oggi: '2026-11-15' }).ultimo, documenti: docs, chiusure: [], movimentiExtra: extra });
+  verifica('il 15/11/2026 settembre e\' fra i mesi aperti ma non e\' di prima del gestionale', novembre.find(m => m.mese === 'Settembre')?.prima_del_gestionale === false);
+
+  const tutti = [...MESI, 'Settembre', 'Ottobre'].map(m => ({ anno: 2026, mese: m }));
+  const p = C.pianoMesiChiusiFuori({ mesi: tutti, oggi: OGGI, documenti: docs, chiusure: [], movimentiExtra: extra });
+  verifica('il piano: 24 documenti in 8 mesi, e dopo nessuno resta aperto', p.documenti_da_chiudere.length === 24 && p.sintesi === "Da segnare chiusi: 24 documenti dell'attiva in 8 mesi. Dopo, nessuno di questi mesi resta aperto.", p.sintesi);
+  verifica('mese per mese: prima aperto, dopo chiuso', p.mesi.length === 8 && p.mesi.every(m => m.prima.aperto && !m.dopo.aperto && m.frase === `${m.etichetta}: chiuso.` && m.esito === 'Dopo è chiuso.'), JSON.stringify(p.mesi.map(m => m.frase)));
+  verifica('canale per canale, coi documenti che si chiudono e com\'erano', p.mesi.every(m => m.canali.map(c => `${c.canale}:${c.azione}:${c.documenti.length}`).join(',') === 'RETE:chiude:1,ACI:chiude:1,EXTRA_RACCOLTA:chiude:1'));
+  const gen = p.mesi[0].canali;
+  verifica('la riga del canale dice quando e\' stato elaborato e quante righe', gen[0].testo === 'Rete: elaborata il 18/09/2026, 300 righe; da «elaborata» a «chiusa».' && gen[2].testo === 'Extra raccolta: elaborata il 18/09/2026, senza righe; da «elaborata» a «chiusa».', JSON.stringify(gen.map(c => c.testo)));
+  verifica('settembre e ottobre non si segnano: si chiudono nel gestionale', p.rifiutati.map(r => r.mese).join(',') === 'Settembre,Ottobre'
+    && /primo mese chiuso nel gestionale/.test(p.rifiutati[0].perche) && /come ogni mese da settembre 2026/.test(p.rifiutati[1].perche), JSON.stringify(p.rifiutati));
+  verifica('nel piano nessun importo', !/123456|123\.456/.test(JSON.stringify(p.mesi)) && !/123456/.test(p.sintesi));
+  const conNumero = C.pianoMesiChiusiFuori({ mesi: [{ anno: 2026, mese: 3 }, { anno: 2026, mese: 'marzo' }, { anno: 2026, mese: 'Brumaio' }, { mese: 'Marzo' }], oggi: OGGI, documenti: docs, chiusure: [] });
+  verifica('il mese col numero o col nome, una volta sola; un mese che non si riconosce si dice', conNumero.mesi.map(m => m.etichetta).join(',') === 'Marzo 2026' && conNumero.rifiutati.length === 2 && conNumero.rifiutati.every(r => /Mese non riconosciuto/.test(r.perche)), JSON.stringify(conNumero));
+  verifica('un mese non ancora finito non si segna', /non è ancora finito/.test(C.pianoMesiChiusiFuori({ mesi: [{ anno: 2026, mese: 'Agosto' }], oggi: '2026-08-20', documenti: docs }).rifiutati[0]?.perche || ''));
+
+  // Che cosa si scrive: lo stato della chiusura vera, mai il giorno ne' il numero della fattura.
+  const quando = '2026-10-12T16:30:00.000Z';
+  const patch = C.patchChiusoFuori({ ...docs[0], note: 'Riaperto il 2026-09-20 da Mario: era "approvata".' }, { utente: 'Mario Rossi', quando, giorno: OGGI });
+  verifica('la scrittura: chiusa, quando e chi, la nota in coda', patch.stato === 'chiusa' && patch.data_chiusura === quando && patch.fattura_confermata_da === 'Mario Rossi'
+    && patch.note === `Riaperto il 2026-09-20 da Mario: era "approvata".\n${C.NOTA_CHIUSO_FUORI}. Segnato chiuso il 12/10/2026 da Mario Rossi: era «elaborata».`, JSON.stringify(patch));
+  verifica('niente giorno ne\' numero della fattura: non si sanno', !('fattura_confermata_il' in patch) && !('fattura_numero' in patch) && !('totale' in patch));
+  verifica('la nota e\' quella decisa dall\'utente', C.NOTA_CHIUSO_FUORI === "Chiuso fuori dal gestionale: fatturato prima dell'avvio, decisione dell'utente dell'11/10/2026");
+  const chiuso = { ...docs[0], ...patch };
+  verifica('chiusoFuoriDalGestionale: si riconosce', C.chiusoFuoriDalGestionale(chiuso) && !C.chiusoFuoriDalGestionale(docs[0]));
+  verifica('riaperto e chiuso davvero, con la conferma della fattura, non lo e\' piu\'', !C.chiusoFuoriDalGestionale({ ...chiuso, fattura_confermata_il: '2026-10-20' }) && !C.chiusoFuoriDalGestionale({ ...chiuso, stato: 'elaborata' }));
+  const riga = C.rigaStoricoChiusoFuori(docs[0], { utente: 'Mario Rossi', il: quando });
+  verifica('la riga dello storico: documento, stato prima e dopo, chi, quando e perche\'', riga.entita === 'DocumentoFatturazione' && riga.record_id === 'd1' && riga.campo === 'stato' && riga.prima === 'elaborata' && riga.dopo === 'chiusa'
+    && riga.operazione === 'update' && riga.utente === 'Mario Rossi' && riga.il === quando && riga.motivo === C.NOTA_CHIUSO_FUORI && riga.origine === C.ORIGINE_CHIUSO_FUORI
+    && riga.riservato === false && riga.anno === 2026 && riga.etichetta === 'Fatturazione attiva · RETE · gennaio 2026', JSON.stringify(riga));
+
+  // Dopo: i documenti chiusi, e tutti i moduli leggono «chiusa».
+  const ids = new Set(p.documenti_da_chiudere.map(d => d.id));
+  const dopo = docs.map(d => (ids.has(d.id) ? { ...d, ...C.patchChiusoFuori(d, { utente: 'Mario Rossi', quando, giorno: OGGI }) } : d));
+  verifica('dopo, i mesi ancora aperti non sono piu\' gennaio-agosto', C.mesiAncoraAperti({ ultimo, documenti: dopo, chiusure: [], movimentiExtra: extra }).length === 0);
+  const att = C.passiAttiva({ periodo: C.periodoDelMese(2026, 0), documenti: dopo, movimentiExtra: extra });
+  const FUORI = "Fatturata fuori dal gestionale, prima dell'avvio: segnata chiusa il 12/10/2026 (decisione dell'utente dell'11/10/2026).";
+  verifica('la chiusura di gennaio: rete e ACI fatte, e si dice come; l\'extra senza righe non serve', att[0].stato === 'fatto' && att[1].stato === 'fatto' && att[0].dettaglio === FUORI && att[1].dettaglio === FUORI && att[2].stato === 'non_serve', JSON.stringify(att.map(x => [x.stato, x.dettaglio])));
+  const aprile = C.passiAttiva({ periodo: C.periodoDelMese(2026, 3), documenti: dopo, movimentiExtra: extra });
+  verifica('aprile: anche l\'extra, con la sua riga, e\' fatta', aprile.every(x => x.stato === 'fatto' && x.dettaglio === FUORI), JSON.stringify(aprile.map(x => [x.stato, x.dettaglio])));
+  verifica('e non dice approvata ne\' «fattura confermata»: qui non c\'e\' mai stata', [...att, ...aprile].filter(x => x.stato === 'fatto').every(x => !x.voci.some(v => /Approvata|fattura confermata|prefattura/i.test(v.testo))), JSON.stringify(att[0].voci));
+  const ancora = C.pianoMesiChiusiFuori({ mesi: tutti.slice(0, 8), oggi: OGGI, documenti: dopo, chiusure: [], movimentiExtra: extra });
+  verifica('rifarlo non tocca niente: gia\' chiusi', ancora.documenti_da_chiudere.length === 0 && ancora.mesi.every(m => m.canali.every(c => c.azione === 'gia_chiusa')) && /^Niente da segnare chiuso\./.test(ancora.sintesi), ancora.sintesi);
+
+  // Un canale senza documento non si chiude: un documento creato apposta direbbe zero euro.
+  const senzaAci = docs.filter(d => !(d.mese === 'Marzo' && d.tipologia === 'ACI'));
+  const marzo = C.pianoMesiChiusiFuori({ mesi: [{ anno: 2026, mese: 'Marzo' }], oggi: OGGI, documenti: senzaAci, chiusure: [] });
+  const aci = marzo.mesi[0].canali.find(c => c.canale === 'ACI');
+  verifica('marzo senza il documento ACI: rete ed extra si chiudono, l\'ACI no, e il mese resta aperto', marzo.documenti_da_chiudere.length === 2 && aci.azione === 'senza_documento' && /nessun documento dell'attiva/.test(aci.testo)
+    && marzo.mesi[0].frase === "Marzo 2026: resta aperto, manca l'elaborazione dell'attiva (ACI)." && marzo.mesi[0].esito === "Resta aperto: manca l'elaborazione dell'attiva (ACI).", JSON.stringify(marzo.mesi[0]));
+  // L'extra raccolta a zero righe con un movimento arrivato dopo: chiusa, non si rielaborerebbe piu'.
+  const vecchia = docs.map(d => (d.mese === 'Luglio' && d.tipologia === 'EXTRA_RACCOLTA' ? { ...d, numero_voci: 0 } : d));
+  const luglio = C.pianoMesiChiusiFuori({ mesi: [{ anno: 2026, mese: 'Luglio' }], oggi: OGGI, documenti: vecchia, chiusure: [], movimentiExtra: extra });
+  const lx = luglio.mesi[0].canali.find(c => c.canale === 'EXTRA_RACCOLTA');
+  verifica('luglio con l\'extra a zero righe e un intervento finito: non si chiude, va rielaborata', lx.azione === 'da_rielaborare' && luglio.documenti_da_chiudere.length === 2
+    && lx.testo === "Extra raccolta: elaborata il 06/10/2026, senza righe, ma nel mese c'è 1 movimento di extra raccolta finito. Non si chiude da qui: manca la rielaborazione dell'attiva, poi si segna chiuso."
+    && luglio.mesi[0].frase === "Luglio 2026: resta aperto, manca la rielaborazione dell'attiva (extra raccolta).", JSON.stringify(luglio.mesi[0]));
+  // Superati e bozze restano come sono; un documento senza canale si chiude una volta.
+  const vari = [
+    doc('Maggio', 'RETE', { id: 'sup', superato: true }), doc('Maggio', 'RETE', { id: 'boz', stato: 'bozza' }),
+    doc('Maggio', 'RETE', { id: 'r5' }), doc('Maggio', 'ACI', { id: 'a5', stato: 'chiusa', fattura_confermata_il: '2026-06-10' }), doc('Maggio', 'EXTRA_RACCOLTA', { id: 'e5' }),
+    doc('Giugno', null, { id: 'tutto6' }),
+  ];
+  const pv = C.pianoMesiChiusiFuori({ mesi: [{ anno: 2026, mese: 'Maggio' }, { anno: 2026, mese: 'Giugno' }], oggi: OGGI, documenti: vari, chiusure: [] });
+  verifica('superati e bozze non si toccano, il gia\' chiuso nemmeno', pv.documenti_da_chiudere.map(d => d.id).join(',') === 'r5,e5,tutto6' && pv.mesi[0].canali[1].azione === 'gia_chiusa', JSON.stringify(pv.documenti_da_chiudere.map(d => d.id)));
+  verifica('il documento senza canale vale per i tre canali e si chiude una volta', pv.mesi[1].canali.every(c => c.azione === 'chiude' && c.documenti[0].id === 'tutto6') && !pv.mesi[1].dopo.aperto);
 }
 
 console.log(`\n${ok} verifiche passate, ${ko} fallite`);
