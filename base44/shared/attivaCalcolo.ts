@@ -25,7 +25,12 @@
 // - una riga senza prezzo non e' "verificata": e' un errore da risolvere;
 // - un terminato senza fine trasporto non entra nel mese ma si segnala, per
 //   canale, e cosi' un terminato del mese con altre date mancanti o incoerenti
-//   (regola dell'utente del 22/09/2026, anomalieDateFormulari).
+//   (regola dell'utente del 22/09/2026, anomalieDateFormulari);
+// - lo stesso formulario ripetuto sullo stesso ordine si segnala, con la regola
+//   della passiva (formulariDoppi), e la riga resta: il ricavo lo decide
+//   l'amministrazione (segnalazione alta del 20/09, corretta il 12/10/2026);
+// - la regione di un ritiro e' quella di regioneDi, la regola unica
+//   dell'11/10/2026, e un ACI senza regione ne' provincia si segnala.
 import { filtraPeriodo, meseToIndice, anomalieDateFormulari } from "./filtroPeriodo.ts";
 import {
   sortTariffe, resolveTariffa, calcolaTotale, fattoreConv, prezzoAttivoExtra, tariffeAttiveValide,
@@ -34,6 +39,9 @@ import {
 } from "./ecotyreTariffe.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
 import { disattivateNelPeriodo } from "./validitaTariffa.ts";
+import { regioneDi } from "./regioneMovimento.ts";
+import { chiaveFormulario, formulariDoppi } from "./formulari.ts";
+import { formatoKg } from "./formato.ts";
 
 export const TIPOLOGIE_ATTIVA = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
 export const UNITA_A_CORPO = '€ a corpo';
@@ -45,10 +53,26 @@ const SOVRACOSTI = [
 ];
 
 const r2 = (v) => Math.round(v * 100) / 100;
+// Gli euro di un testo, all'italiana e senza dipendere dalle impostazioni del server.
+const euroIt = (v) => {
+  const [intero, dec] = Math.abs(r2(Number(v) || 0)).toFixed(2).split('.');
+  return (v < 0 ? '-' : '') + intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
+};
 
-// Regione del ritiro: se il record non la riporta si ricava dalla provincia.
-// La tariffa continua a usare la regione del record.
-const regioneRitiro = (r) => r.regione || PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || '';
+// LA REGIONE DEL RITIRO E' QUELLA DI regioneDi (segnalazione alta del 20/09,
+// corretta il 12/10/2026). Qui si leggeva prima il campo del record, e il prezzo
+// ACI cercava la tariffa con r.regione a uguaglianza esatta: un ritiro senza
+// provincia con «PUGLIA» scritto nel file prendeva la tariffa generica (230 €/t)
+// invece di quella della Puglia (240 €/t), senza un avviso. Ora la regione si
+// legge come in tutto il resto del gestionale - prima la provincia, poi la
+// regione - e si scrive col nome della regione, «Puglia», cosi' le righe di una
+// regione stanno insieme nel riepilogo. Il 10/10 regione e provincia tornavano
+// su tutti i ritiri: nessun numero di oggi cambia.
+const REGIONI = [...new Set(Object.values(PROV_TO_REGION))];
+const regioneRitiro = (r) => {
+  const letta = regioneDi(r);
+  return REGIONI.find(x => x.toUpperCase() === letta.toUpperCase()) || letta;
+};
 
 // Le tariffe valide, la secondaria dell'extra raccolta e il prezzo attivo
 // dell'extra raccolta stanno in ecotyreTariffe.ts dall'11/10/2026, perche' la
@@ -145,9 +169,17 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     if (!(r.peso_effettivo > 0)) continue;
     righe.RETE.push(daTariffa(r, 'RETE', 'TERMINATI_RETE', '', regioneRitiro(r)));
   }
+  // Il prezzo ACI cambia con la regione (240 €/t Campania e Puglia, 230 €/t
+  // Calabria nel 2026): un ritiro senza regione ne' provincia non puo' prendere
+  // quella della sua regione, e deve dirlo invece di passare con la tariffa
+  // senza regione o a zero euro (12/10/2026).
+  const aciSenzaRegione = [];
   for (const r of aci) {
     if (!(r.peso_effettivo > 0)) continue;
-    righe.ACI.push(daTariffa(r, 'ACI', 'ACI', r.regione || '', r.regione || '', { ticket_n: r.numero_ordine_interno || '' }));
+    const regione = regioneRitiro(r);
+    const riga = daTariffa(r, 'ACI', 'ACI', regione, regione, { ticket_n: r.numero_ordine_interno || '' });
+    if (!regione) aciSenzaRegione.push(riga);
+    righe.ACI.push(riga);
   }
 
   for (const r of extra) {
@@ -213,6 +245,60 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
   }
 
   const anomalie = Array.from(anomalieMap.values()).map(a => ({ ...a, tonnellate: r2(a.tonnellate) }));
+  // IL FORMULARIO RIPETUTO SULLO STESSO ORDINE (segnalazione alta del 20/09,
+  // corretta il 12/10/2026). L'attiva faceva una riga di ricavo per ogni record
+  // e non guardava i doppioni: lo stesso FIR due volte su ET26091175 dava due
+  // righe ACI, 940,80 euro, e nessun avviso, mentre la passiva lo stesso caso lo
+  // segnala. La regola ora e' la sua, formulariDoppi di formulari.ts, cosi' i due
+  // moduli dicono la stessa cosa. Lo stesso formulario su ordini diversi non e'
+  // un doppione: e' la ripartizione dell'ACI. Le righe restano: quale tenere lo
+  // decide l'amministrazione, il gestionale lo dice e basta. Un canale per volta:
+  // rete, ACI ed extra raccolta non si mescolano nemmeno qui.
+  const delMesePerCanale = { RETE: rete, ACI: aci, EXTRA_RACCOLTA: extra };
+  for (const tipologia of TIPOLOGIE_ATTIVA) {
+    const conNumero = delMesePerCanale[tipologia].filter(r => !!chiaveFormulario(r));
+    for (const d of formulariDoppi(conNumero)) {
+      const ids = new Set(d.righe.map(x => x.id));
+      const euro = righe[tipologia].filter(x => ids.has(x.origine_record_id)).reduce((s, x) => s + (Number(x.totale) || 0), 0);
+      const kg = d.righe.reduce((s, x) => s + (Number(x.peso_effettivo) || 0), 0);
+      // un peso che manca non e' zero: si scrive «—» (revisione del 13/10/2026)
+      const pesi = d.righe.map(x => (x.peso_effettivo === null || x.peso_effettivo === undefined || x.peso_effettivo === '' ? '—' : `${formatoKg(x.peso_effettivo)} kg`)).join(' + ');
+      // QUANTE VOLTE CONTA DAVVERO IN FATTURA (revisione del 13/10/2026): solo le
+      // copie col peso effettivo fanno una riga di ricavo, le altre si saltano
+      // qui sopra (rete, ACI ed extra raccolta con la stessa condizione). Prima la
+      // frase contava le copie dell'archivio: 1.960 kg + 0 kg diceva «conta 2
+      // volte» su una fattura con una riga sola.
+      const inFattura = d.righe.filter(x => Number(x.peso_effettivo) > 0).length;
+      const senzaPeso = d.righe.length - inFattura;
+      const fattura = inFattura === 0 ? 'nella fattura a Ecotyre non entra, perché nessuna copia ha il peso effettivo'
+        : inFattura === 1 ? `nella fattura a Ecotyre conta una volta (${euroIt(euro)} €)`
+          : `nella fattura a Ecotyre conta ${inFattura} volte (${euroIt(euro)} € in tutto)`;
+      const scartate = senzaPeso === 0 || inFattura === 0 ? ''
+        : senzaPeso === 1 ? ': la copia senza peso effettivo non si fattura' : `: le ${senzaPeso} copie senza peso effettivo non si fatturano`;
+      anomalie.push({
+        tipo: 'formulario_ripetuto', tipologia, regione: regioneRitiro(d.righe[0]), classe: d.righe[0].classe || '', eer_codice: d.righe[0].cer || '', servizio_ecotyre: '',
+        tonnellate: Math.round(kg) / 1000, quanti: d.righe.length, in_fattura: inFattura,
+        ordini: d.righe.map(x => ({ ordine: x.id_ordine || '', numero_fir: x.numero_fir || '' })),
+        descrizione: `Formulario ${d.numero_fir} presente ${d.righe.length} volte sullo stesso ordine ${d.ordine} (${pesi}): è lo stesso ritiro caricato più volte, e ${fattura}${scartate}. Le righe restano: quale tenere lo decide l'amministrazione.`,
+      });
+    }
+  }
+  if (aciSenzaRegione.length) {
+    const kg = aciSenzaRegione.reduce((s, x) => s + (Number(x.quantita) || 0), 0);
+    const aZero = aciSenzaRegione.filter(x => !x.tariffa_id).length;
+    const n = aciSenzaRegione.length;
+    const elenco = aciSenzaRegione.slice(0, 5).map(x => x.ordine || x.numero_fir || '—').join(', ') + (n > 5 ? ` e altri ${n - 5}` : '');
+    const conGenerica = n - aZero;
+    const esito = aZero === n ? (n === 1 ? 'il ritiro è rimasto senza prezzo' : 'questi ritiri sono rimasti senza prezzo')
+      : aZero === 0 ? `${n === 1 ? 'il ritiro ha' : 'questi ritiri hanno'} preso la tariffa ACI senza regione, che può non essere la sua`
+        : `di questi ${conGenerica} ${conGenerica === 1 ? 'ha' : 'hanno'} preso la tariffa ACI senza regione e ${aZero} ${aZero === 1 ? 'è rimasto' : 'sono rimasti'} senza prezzo`;
+    anomalie.push({
+      tipo: 'regione_mancante', tipologia: 'ACI', regione: '', classe: '', eer_codice: '', servizio_ecotyre: '',
+      tonnellate: Math.round(kg) / 1000, quanti: n,
+      ordini: aciSenzaRegione.map(x => ({ ordine: x.ordine, numero_fir: x.numero_fir })),
+      descrizione: `ACI: ${n === 1 ? 'un ritiro del mese' : `${n} ritiri del mese`} senza provincia né regione (${elenco}). Il prezzo ACI cambia con la regione: senza, non si può scegliere quello giusto, e ${esito}. Correggi la provincia nel caricamento.`,
+    });
+  }
   // UNA TARIFFA 'non_attivo' NON VALE MAI (regola unica di validitaTariffa.ts,
   // 11/10/2026). Fino a quel giorno qui valeva nella sua finestra se aveva una
   // data di fine, e nel foglio dell'amministrazione no. Se una cosi' tocca il

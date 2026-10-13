@@ -5,6 +5,12 @@ import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
+// Una provincia del contratto dell'anno senza nessun ritiro (senza_ritiri,
+// computeProvinceMatrixData con i contratti) ha la sua riga a zero: si dice
+// perche' c'e', altrimenti sembra un errore della tabella (revisione del
+// 13/10/2026).
+const MAI_SERVITA = "del contratto, nessun ritiro nell'anno";
+
 export default function ProvinceMatrix({ data }) {
   if (!data) return null;
 
@@ -28,7 +34,7 @@ export default function ProvinceMatrix({ data }) {
               {province_with_zeros.map(p => (
                 <span key={p.provincia} className="text-xs px-2 py-0.5 rounded bg-amber-200 text-amber-900 font-medium">
                   {p.provincia} ({p.regione})
-                  {p.last_zero_pair && ` — ${p.last_zero_pair.start}+${p.last_zero_pair.end}`}
+                  {p.senza_ritiri && p.del_contratto ? ` — ${MAI_SERVITA}` : p.last_zero_pair && ` — ${p.last_zero_pair.start}+${p.last_zero_pair.end}`}
                 </span>
               ))}
             </div>
@@ -38,6 +44,7 @@ export default function ProvinceMatrix({ data }) {
 
       <div className="text-sm text-muted-foreground">
         Anno {current_year} — mese corrente: {current_month}. Le celle rosse indicano 0 FIR nel mese (mese già trascorso).
+        {data.contratto_letto === false && " Il contratto dell'anno non si è potuto leggere: le sue province senza ritiri qui non ci sono."}
       </div>
       {/* Le date obbligatorie dei formulari terminati (regola del 22/09/2026):
           solo se qualcuno le ha da sistemare. */}
@@ -79,6 +86,9 @@ export default function ProvinceMatrix({ data }) {
                       <span className="font-medium">{p.provincia}</span>
                       {p.has_2_consecutive_zeros && (
                         <AlertTriangle className="w-3.5 h-3.5 text-amber-600 inline ml-1.5" />
+                      )}
+                      {p.senza_ritiri && p.del_contratto && (
+                        <span className="block text-[11px] text-amber-700">{MAI_SERVITA}</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right font-semibold">{p.fir_total}</td>

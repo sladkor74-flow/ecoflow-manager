@@ -13,7 +13,7 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { annoDelRecord } from "./regolePredittivita.ts";
 import { targetImpiantoDellAnno, targetPrimariePerRuolo, recordDellAnno } from "./annoTarget.ts";
 import { ripartisciQuota, normalizzaQuote } from "./ripartizioneTarget.ts";
-import { targetDelPortale } from "./targetRaccoglitori.ts";
+import { targetDelPortale, targetMensiliValidi } from "./targetRaccoglitori.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { eTerminato } from "./movimenti.ts";
@@ -163,8 +163,14 @@ export function ripartisciTargetPrimarie({ raccoglitori = [], mensili = [], conf
   }
 
   // I TARGET MENSILI, E L'IMPIANTO SCRITTO SULLE LORO RIGHE.
+  //
+  // Del target mensile scritto due volte (stesso raccoglitore, regione,
+  // impianto, ruolo e mese) vale l'ultimo modificato, come in Target & Status,
+  // negli avvisi e in EcoTyna (targetMensiliValidi, revisione del 13/10/2026):
+  // qui si sommavano, e con 80 t e poi 50 t il mese portava 130 t al sito
+  // scritto sulla riga. Impianti o ruoli diversi restano target diversi.
   const mesiTarget = new Map(); // 'chiave del raccoglitore|regione' -> { tot: [12], scritto: [12] Map }
-  for (const m of recordDellAnno(mensili, anno)) {
+  for (const m of targetMensiliValidi(recordDellAnno(mensili, anno))) {
     const kr = chiave(m.raccoglitore);
     if (!kr) continue;
     const k = kr + '|' + testo(m.regione);

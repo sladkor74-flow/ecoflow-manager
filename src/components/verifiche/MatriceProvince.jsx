@@ -32,6 +32,13 @@ function mesiSenzaRitiri(riga, mesiTrascorsi) {
   return serie.filter(s => s.a - s.da + 1 >= 2);
 }
 
+// Una provincia del contratto dell'anno senza nessun ritiro (del_contratto e
+// senza_ritiri, matriceProvinceRete) ha la sua riga a zero: si dice perche' c'e',
+// altrimenti sembra un errore della tabella. Le stesse parole della matrice
+// delle Primarie (ProvinceMatrix.jsx), revisione del 13/10/2026.
+const MAI_SERVITA = "del contratto, nessun ritiro nell'anno";
+const maiServita = (riga) => !!riga && riga.del_contratto && riga.senza_ritiri;
+
 const DESCRIZIONE = {
   peso: 'Peso effettivo dei ritiri terminati della rete, provincia per provincia e mese per mese. Il mese e\' quello di fine trasporto. ACI ed extra raccolta restano fuori: sono canali a se\'.',
   ritiri: 'Numero di ritiri terminati della rete, cioe\' di formulari, provincia per provincia e mese per mese. Il mese e\' quello di fine trasporto. ACI ed extra raccolta restano fuori: sono canali a se\'.',
@@ -98,7 +105,15 @@ export default function MatriceProvince({ tipo = 'peso' }) {
       ? testoDateRete
       : nSenzaFine > 0 ? `${formatIntero(nSenzaFine)} ${nSenzaFine === 1 ? 'terminato' : 'terminati'} di rete senza fine trasporto, ${nSenzaFine === 1 ? 'escluso' : 'esclusi'} da ogni mese` : '',
     senzaProvincia.ritiri > 0 ? `${formatIntero(senzaProvincia.ritiri)} ${senzaProvincia.ritiri === 1 ? 'ritiro' : 'ritiri'} del ${dati.anno} senza provincia (${formatTonnellate(senzaProvincia.kg / 1000)} t), ${senzaProvincia.ritiri === 1 ? 'escluso' : 'esclusi'} dalle righe e dai totali` : '',
+    // Le province del contratto si aggiungono alla matrice dal 13/10/2026: se i
+    // contratti non si sono letti mancano quelle senza ritiri, e va detto. Una
+    // risposta di prima non ha il campo, e non dice niente.
+    dati && dati.contratto_letto === false ? `il contratto del ${dati.anno} non si è potuto leggere: le sue province senza ritiri qui non ci sono` : '',
   ].filter(Boolean);
+  // Le province del contratto senza ritiri nell'anno: nella tabella hanno la loro
+  // riga a zero, e anche nel file si dice perche' ci sono.
+  const maiServite = dati ? dati.righe.filter(maiServita).map(r => r.provincia) : [];
+  const conRitiri = dati ? dati.righe.filter(r => Number(r.ritiri_totale) > 0) : [];
   const vuoti = new Map();
   if (dati) for (const r of dati.righe) { const s = mesiSenzaRitiri(r, mesiTrascorsi); if (s.length) vuoti.set(r.provincia, s); }
   const gravi = [...vuoti.entries()].filter(([, s]) => s.some(x => x.a - x.da + 1 >= 3));
@@ -137,7 +152,9 @@ export default function MatriceProvince({ tipo = 'peso' }) {
       const sottotitolo = (peso
         ? `Rete, peso effettivo dei ritiri terminati per mese di fine trasporto · totale ${formatTonnellate(dati.totali.kg_totale / 1000)} t`
         : `Rete, numero di ritiri terminati per mese di fine trasporto · totale ${formatIntero(dati.totali.ritiri_totale)}`)
-        // Anche nel file si dice chi e' rimasto fuori dai totali.
+        // Anche nel file si dice chi e' rimasto fuori dai totali, e perche' ci
+        // sono le righe a zero delle province del contratto.
+        + (maiServite.length ? ` · ${maiServite.join(', ')}: ${MAI_SERVITA}` : '')
         + esclusi.map(e => ` · ${e}`).join('');
       const comuni = { nomeFile: titolo, colonne: colonneExport(), righe: dati.righe, totali: totaliExport() };
       // esportaTabella si porta dietro jspdf e xlsx: si carica qui, al click.
@@ -201,7 +218,7 @@ export default function MatriceProvince({ tipo = 'peso' }) {
                   const massimo = Math.max(...serie.map(s => s.a - s.da + 1));
                   return (
                     <li key={provincia}>
-                      <strong>{provincia}</strong> ({riga ? riga.regione : ''}): {serie.map(nomeMesi).join(', ')} — {massimo} mesi di fila senza ritiri
+                      <strong>{provincia}</strong> ({riga ? riga.regione : ''}): {maiServita(riga) ? MAI_SERVITA : serie.map(nomeMesi).join(', ')} — {massimo} mesi di fila senza ritiri
                       {massimo >= 3 ? ', da recuperare subito' : ', da coprire entro il mese prossimo'}
                     </li>
                   );
@@ -228,7 +245,9 @@ export default function MatriceProvince({ tipo = 'peso' }) {
             <Tessera etichetta={peso ? 'Totale raccolto' : 'Totale ritiri'}
               valore={peso ? `${formatTonnellate(dati.totali.kg_totale / 1000)} t` : formatIntero(dati.totali.ritiri_totale)}
               dettaglio={peso ? `${formatKg(dati.totali.kg_totale)} kg` : `${formatTonnellate(dati.totali.kg_totale / 1000)} t raccolte`} />
-            <Tessera etichetta="Province con ritiri" valore={formatIntero(dati.righe.length)} dettaglio={`${new Set(dati.righe.map(r => r.regione)).size} regioni`} />
+            {/* Solo le righe con ritiri: quelle a zero delle province del
+                contratto non sono province servite (13/10/2026). */}
+            <Tessera etichetta="Province con ritiri" valore={formatIntero(conRitiri.length)} dettaglio={`${new Set(conRitiri.map(r => r.regione)).size} regioni`} />
             <Tessera etichetta="Mese migliore" {...mesePiuAlto(dati, peso)} />
             <Tessera etichetta={peso ? 'Media per ritiro' : 'Media ritiri al mese'}
               valore={peso
@@ -258,6 +277,9 @@ export default function MatriceProvince({ tipo = 'peso' }) {
                           className={`w-3.5 h-3.5 inline-block ml-1 -mt-0.5 ${vuoti.get(r.provincia).some(s => s.a - s.da + 1 >= 3) ? 'text-red-700' : 'text-red-500'}`}
                           aria-label="Mesi consecutivi senza ritiri"
                         />
+                      )}
+                      {maiServita(r) && (
+                        <span className="block text-[11px] font-normal text-amber-700">{MAI_SERVITA}</span>
                       )}
                     </td>
                     {dati.mesi.map((m, i) => (

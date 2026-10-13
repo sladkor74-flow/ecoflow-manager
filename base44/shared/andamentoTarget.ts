@@ -50,6 +50,31 @@ export function targetDelPortale(candidati, nomePortale) {
 }
 
 /**
+ * I TARGET MENSILI CHE VALGONO: FRA I DOPPIONI VERI, L'ULTIMO MODIFICATO
+ * (segnalazione alta del 20/09; una regola sola dalla revisione del 13/10/2026).
+ *
+ * Due righe di TargetMensile con lo stesso raccoglitore (nome normalizzato),
+ * regione, impianto (normalizzato), ruolo, mese e anno sono lo stesso target
+ * scritto due volte. La griglia di Target & Status ne mostra una e scrive «vale
+ * l'ultimo modificato»: qui si sceglie la stessa, per updated_date e, a pari
+ * data, quella che viene dopo nell'archivio (ordinamento stabile, come la
+ * griglia). Il 12/10 la regola era entrata solo negli avvisi: l'Andamento, il suo
+ * Excel, la dashboard e il Report generale sommavano ancora, e con 80 t e poi 50
+ * t gli avvisi dicevano 50 e la pagina 130. Ora passano tutti da qui. Righe di
+ * impianti o ruoli diversi restano target diversi e si sommano, come prima.
+ *
+ * Restituisce le righe scelte nell'ordine dell'archivio.
+ */
+export function targetMensiliValidi(records) {
+  const testo = (v) => String(v || '').trim();
+  const identita = (r) => `${normalizzaRagioneSociale(r.raccoglitore || '')}|${testo(r.regione)}|${normalizzaRagioneSociale(r.impianto || '')}|${testo(r.ruolo)}|${r.mese}|${r.anno}`;
+  const elenco = records || [];
+  const scelto = new Map();
+  for (const r of [...elenco].sort((x, y) => String(x.updated_date || '').localeCompare(String(y.updated_date || '')))) scelto.set(identita(r), r);
+  return elenco.filter(r => scelto.get(identita(r)) === r);
+}
+
+/**
  * Le righe dell'Andamento, una per raccoglitore e regione.
  *
  * mensili: le righe di TargetMensile dell'anno; annui: quelle di
@@ -59,7 +84,8 @@ export function targetDelPortale(candidati, nomePortale) {
  *
  * Una riga c'e' se ha un target annuo, un target mensile o del raccolto: un
  * target senza raccolto resta, ed e' proprio quello che il file perdeva. I target
- * di piu' impianti si sommano; il raccolto di due grafie dello stesso nome si
+ * di piu' impianti si sommano, il doppione vero vale una volta sola
+ * (targetMensiliValidi); il raccolto di due grafie dello stesso nome si
  * somma (prima la seconda prendeva il posto della prima). Un target annuo senza
  * regione va alla riga con lo stesso nome, e se sono piu' d'una a quella con piu'
  * raccolto.
@@ -80,8 +106,10 @@ export function righeAndamento({ mensili = [], annui = [], raccolto = [], filtri
     return r;
   };
 
-  // 1. le righe dei target: prima ci sono loro, poi il raccolto le cerca
-  for (const t of mensili) {
+  // 1. le righe dei target: prima ci sono loro, poi il raccolto le cerca. Del
+  // target scritto due volte conta l'ultimo modificato, come negli avvisi
+  // (revisione del 13/10/2026)
+  for (const t of targetMensiliValidi(mensili)) {
     const r = riga(t.raccoglitore, t.regione);
     r.target[t.mese] = (r.target[t.mese] || 0) + (t.non_raccoglie ? 0 : Number(t.target) || 0);
   }

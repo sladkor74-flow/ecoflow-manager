@@ -25,7 +25,7 @@ import { profiloMensile, quotaAttesa, frazioneDelMese, giorniDelMese } from "./a
 import { righeAndamento } from "./andamentoTarget.ts";
 import { daConfermare } from "./annoTarget.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
-import { computeSlaMetrics } from "./primarieReteAnalytics.ts";
+import { computeSlaMetrics, provinceDelContratto } from "./primarieReteAnalytics.ts";
 import { statoMesiAttiva } from "./cruscotto.ts";
 
 const t3 = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 1000) / 1000);
@@ -153,8 +153,18 @@ export function raccoglitoriRete({ righe, anno, giornoDati, oggi, mensili = [], 
  * dice. Un ritiro di questo mese, anche se il mese non e' finito, vuol dire che
  * la provincia ha ripreso: non e' ferma. oggi e' il giorno italiano che passa
  * chi chiama: qui non si legge l'orologio.
+ *
+ * LE PROVINCE DEL CONTRATTO MAI SERVITE (segnalazione alta del 20/09, portata
+ * sul sito dalla revisione del 13/10/2026). delContratto e' l'elenco
+ * { provincia, regione } del contratto dell'anno (provinceDelContratto di
+ * primarieReteAnalytics.ts). Una provincia del contratto senza un ritiro ne'
+ * nell'anno ne' in quello prima non «lavorava» e il riquadro non la diceva mai:
+ * proprio quella da scovare. Ora entra fra le ferme con ultimo '' e
+ * mai_servita, da marzo, quando i due mesi finiti sono tutti e due dell'anno del
+ * contratto: la stessa regola della matrice di Terminati Rete, dove a gennaio e
+ * febbraio una provincia nuova non ha ancora due mesi a zero.
  */
-export function provinceFerme(righe, anno, oggi) {
+export function provinceFerme(righe, anno, oggi, delContratto = []) {
   const a = Number(anno);
   if (a !== Number(String(oggi).slice(0, 4))) return { anno_in_corso: false, dal: null, province: [] };
   const mi = Number(String(oggi).slice(5, 7)) - 1;
@@ -170,6 +180,13 @@ export function provinceFerme(righe, anno, oggi) {
     if (!per.has(provincia)) per.set(provincia, { provincia, regione: r.regione || PROV_TO_REGION[provincia] || 'Altro', ultimo: '' });
     const x = per.get(provincia);
     if (p.giorno > x.ultimo) x.ultimo = p.giorno;
+  }
+  if (annoDal === a) {
+    for (const c of delContratto || []) {
+      const provincia = String((c && c.provincia) || '').toUpperCase().trim();
+      if (!provincia || per.has(provincia)) continue;
+      per.set(provincia, { provincia, regione: c.regione || PROV_TO_REGION[provincia] || 'Altro', ultimo: '', mai_servita: true });
+    }
   }
   const dal = `${annoDal}-${due((assoluto % 12) + 1)}-01`;
   return {
@@ -311,7 +328,9 @@ export function quadroRete({ anno, oggi, giornoDati, commessa, kpi, fonteTarget 
     regioni,
     fuori_contratto: { raccolto_t: t3(fuori.reduce((s, [, t]) => s + t, 0)), regioni: fuori.map(([regione, t]) => ({ regione, raccolto_t: t3(t) })) },
     raccoglitori: raccoglitoriRete({ righe: rete, anno: a, giornoDati, oggi, mensili, annui }),
-    province_ferme: provinceFerme(rete, a, oggi),
+    // con le province del contratto dell'anno: una mai servita e' ferma anche lei
+    // (revisione del 13/10/2026)
+    province_ferme: provinceFerme(rete, a, oggi, provinceDelContratto(commessa, a)),
     tempi: tempiRaccoltaAnno(rete, a),
     senza_fine_trasporto: senzaFine,
   };

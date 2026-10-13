@@ -16,6 +16,7 @@
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
+import { targetMensiliValidi } from "./andamentoTarget.ts";
 
 const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
 const GIORNO = 86400000;
@@ -94,7 +95,12 @@ export function calcolaReportSettimanale({ rete = [], mensili = [], annui = [], 
     r.annuo += Number(a.target_tonnellate) || 0;
     r.con_target = true;
   }
-  for (const t of mensili) {
+  // Del target mensile scritto due volte (stesso raccoglitore, regione, impianto,
+  // ruolo e mese) vale l'ultimo modificato, come in Target & Status, negli avvisi
+  // e in EcoTyna (targetMensiliValidi, revisione del 13/10/2026): qui si
+  // sommavano, e con 80 t e poi 50 t il report diceva 130 di target del mese.
+  // Impianti o ruoli diversi restano target diversi e si sommano.
+  for (const t of targetMensiliValidi(mensili)) {
     const r = riga(t.regione, t.raccoglitore);
     r.con_target = true;
     if (t.mese !== nomeMese) continue;

@@ -50,6 +50,16 @@ export const euroAlChilo = (euroTonnellata) => Math.round((Number(euroTonnellata
 const prezzoTon = (r) => prezzoATonnellata(r.tariffa_valore, r.unita_prezzo || r.unita_misura);
 const prezzoKg = (r) => { const t = prezzoTon(r); return t === null ? null : euroAlChilo(t); };
 
+// IL PREZZO NEL PDF SI SCRIVE CON I SUOI DECIMALI (verifica del 12/10/2026 sul
+// PDF dell'extra raccolta). Col tipo 'euro', fisso a due, la tariffa di rete al
+// chilo usciva «0,20 €» invece di 0,202: nel PDF il prezzo unitario ha il tipo
+// 'prezzoLibero' del corredo (da due a quattro decimali, come cifreItaliane(v, 2, 4)).
+// Il tipo 'euro' resta per l'Excel, che sceglie il formato dal titolo (0,2020
+// al chilo, 240,00 a tonnellata): colonne, valori e totali non cambiano. Chi
+// scrive il PDF (formatAmministrazioneExport.js) da' a esportaTabella tipoPdf al
+// posto di tipo, dove c'e'. Prova: prove/formatAmministrazionePdf.mjs.
+const PREZZO_PDF = 'prezzoLibero';
+
 /**
  * La tabella del mese nel formato dell'amministrazione.
  * Torna { titolo, intestazione, colonne, righe, totale_kg, totale_euro, iKg, iTotale }.
@@ -78,7 +88,7 @@ export function tabellaAmministrazione(tipologia, righe, anno, mese) {
         { titolo: 'Numero FIR', tipo: 'testo', peso: 1.2 },
         { titolo: 'Classe', tipo: 'testo', peso: 1.1 },
         { titolo: 'Quantità (kg)', tipo: 'kg', peso: 0.8 },
-        { titolo: 'Prezzo Unitario (Euro/TON)', tipo: 'euro', peso: 1.1 },
+        { titolo: 'Prezzo Unitario (Euro/TON)', tipo: 'euro', tipoPdf: PREZZO_PDF, peso: 1.1 },
         { titolo: 'Prezzo Totale', tipo: 'euro', peso: 0.9 },
         { titolo: 'Note', tipo: 'testo', peso: 1.6 },
       ],
@@ -113,7 +123,7 @@ export function tabellaAmministrazione(tipologia, righe, anno, mese) {
       { titolo: 'Numero FIR', tipo: 'testo', peso: 1.3 },
       { titolo: 'Classe', tipo: 'testo', peso: 0.7 },
       { titolo: 'Quantità (kg)', tipo: 'kg', peso: 0.9 },
-      { titolo: 'Prezzo Unitario (Euro/Kg)', tipo: 'euro', peso: 1.2 },
+      { titolo: 'Prezzo Unitario (Euro/Kg)', tipo: 'euro', tipoPdf: PREZZO_PDF, peso: 1.2 },
       { titolo: 'Prezzo Totale', tipo: 'euro', peso: 1 },
       { titolo: 'Regione', tipo: 'testo', peso: 1 },
     ],

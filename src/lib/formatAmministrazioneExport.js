@@ -101,7 +101,10 @@ export async function exportAmministrazioneAttivaPdf(tipologia, righe, anno, mes
     intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE  ·  FORMAT AMMINISTRAZIONE',
     titolo: `Fatturazione attiva ${tipologia === 'ACI' ? 'ACI' : 'Rete'} — ${mese} ${anno}`,
     sottotitolo: `${t.righe.length} ${t.righe.length === 1 ? 'riga' : 'righe'}  ·  ${t.totale_kg.toLocaleString('it-IT')} kg`,
-    colonne: t.colonne.map((c, i) => ({ ...c, valore: (r) => r[i] })),
+    // Il prezzo unitario esce coi suoi decimali (tipoPdf della tabella,
+    // 'prezzoLibero'): col tipo 'euro' 0,202 €/kg diventava «0,20 €» e 237,125
+    // «237,13 €». L'Excel resta sul tipo e sul titolo (revisione del 13/10/2026).
+    colonne: t.colonne.map((c, i) => ({ ...c, tipo: c.tipoPdf || c.tipo, valore: (r) => r[i] })),
     righe: t.righe,
     totali: { etichetta: 'TOTALE', valori: { [t.iKg]: t.totale_kg, [t.iTotale]: t.totale_euro } },
   });

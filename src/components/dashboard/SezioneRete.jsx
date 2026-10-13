@@ -113,7 +113,10 @@ export default function SezioneRete({ quadro, arretrato, annoInCorso, daGestire,
                       {ferme.province.length === 1 ? 'Una provincia' : `${intero(ferme.province.length)} province`} senza ritiri {ferme.dal ? `da ${String(ferme.dal.mese).toLowerCase()}${ferme.dal.anno !== anno ? ` ${ferme.dal.anno}` : ''}` : 'negli ultimi due mesi finiti'}:
                     </p>
                     <ul className="text-xs space-y-0.5">
-                      {ferme.province.slice(0, 6).map(p => <li key={p.provincia}>{p.provincia} ({p.regione}), l&apos;ultimo ritiro il {giorno(p.ultimo)}</li>)}
+                      {/* Una provincia del contratto senza ritiri non ha un ultimo
+                          ritiro: si dice che non e' mai stata servita nell'anno
+                          (revisione del 13/10/2026). */}
+                      {ferme.province.slice(0, 6).map(p => <li key={p.provincia}>{p.provincia} ({p.regione}), {p.mai_servita || !p.ultimo ? `del contratto, mai servita nel ${anno}` : <>l&apos;ultimo ritiro il {giorno(p.ultimo)}</>}</li>)}
                       {ferme.province.length > 6 && <li className="text-muted-foreground">e altre {ferme.province.length - 6}</li>}
                     </ul>
                   </>

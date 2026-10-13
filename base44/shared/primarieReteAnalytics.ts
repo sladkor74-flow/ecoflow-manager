@@ -9,6 +9,8 @@ import { classePfu } from "./giacenzaStoccaggi.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
+import { regioniDellAnno } from "./attesoContratto.ts";
+import { commessaDellAnno } from "./annoTarget.ts";
 
 export const TARGET_MIX_CLASSI: Record<string, number> = {
   P: 75,
@@ -24,10 +26,53 @@ export const TARGET_MIX_CLASSI: Record<string, number> = {
 
 // --- 1. Matrice Province ---
 
-export function computeProvinceMatrixData(records, currentMonthIdx = null) {
+const REGIONI_ITALIANE = [...new Set(Object.values(PROV_TO_REGION))];
+
+/**
+ * LE PROVINCE DEL CONTRATTO DI UN ANNO (segnalazione alta del 20/09, corretta il
+ * 12/10/2026): [{ provincia, regione }], dal riparto per regione del contratto
+ * Ecotyre (regioni_json, colonna «Province»). Nel contratto 2026 si legge
+ * «Tutte le provincie» per Campania, Basilicata e Calabria, «BA,BR,TA,LE» per la
+ * Puglia e «CT, SR, TP, AG, CL, EN, RG» per la Sicilia.
+ * - «Tutte...», o la colonna vuota: tutte le province della regione. Una
+ *   provincia segnalata per niente si corregge scrivendo il contratto; una mai
+ *   servita che nessuno vede no.
+ * - Altrimenti le sigle che si riconoscono; un testo senza nessuna sigla non da'
+ *   province, perche' non si inventano.
+ * - Il riparto di ripiego scritto nel codice (contratto non inserito) non dice
+ *   le province: non ne da' nessuna, per non segnalare FG o PA che il contratto
+ *   2026 non comprende.
+ */
+export function provinceDelContratto(commessa, anno) {
+  const { righe, fonte } = regioniDellAnno(commessa, anno);
+  if (fonte !== 'contratto') return [];
+  const out = new Map();
+  for (const r of righe) {
+    const regione = REGIONI_ITALIANE.find(x => x.toUpperCase() === String(r.regione || '').trim().toUpperCase()) || String(r.regione || '').trim();
+    const testo = String(r.province ?? '').trim();
+    const sigle = !testo || /tutt/i.test(testo)
+      ? Object.keys(PROV_TO_REGION).filter(p => PROV_TO_REGION[p] === regione)
+      : testo.toUpperCase().split(/[^A-Z]+/).filter(p => PROV_TO_REGION[p]);
+    for (const p of sigle) if (!out.has(p)) out.set(p, { provincia: p, regione: PROV_TO_REGION[p] || regione });
+  }
+  return [...out.values()];
+}
+
+/**
+ * La matrice dei ritiri per provincia e mese dell'anno in corso.
+ * opzioni.commesse: i contratti Ecotyre (CommessaEcotyre), di qualunque anno:
+ * le province del contratto dell'anno entrano nella matrice anche senza un
+ * ritiro, a zero (provinceDelContratto). Prima la matrice nasceva solo dalle
+ * province con movimenti, e una provincia del contratto mai servita non
+ * compariva e non poteva avere «due mesi consecutivi a zero»: da marzo in poi
+ * restava muta proprio quella da scovare (segnalazione alta del 20/09, corretta
+ * il 12/10/2026). Senza opzioni.commesse la matrice resta quella dei movimenti.
+ */
+export function computeProvinceMatrixData(records, currentMonthIdx = null, opzioni: any = {}) {
   const oggi = oggiRoma();
   const currMonth = currentMonthIdx != null ? currentMonthIdx : Number(oggi.slice(5, 7)) - 1;
   const currYear = Number(oggi.slice(0, 4));
+  const delContratto = opzioni && opzioni.commesse ? provinceDelContratto(commessaDellAnno(opzioni.commesse, currYear), currYear) : [];
 
   const byProvince: Record<string, any> = {};
   // i ritiri contati nella matrice, per le date da sistemare (in fondo)
@@ -68,6 +113,16 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
     contati.push(r);
   }
 
+  // Le province del contratto senza un ritiro nell'anno, a zero: cosi' una mai
+  // servita ha la sua riga e i suoi mesi a zero si contano come quelli delle
+  // altre (12/10/2026).
+  for (const { provincia, regione } of delContratto) {
+    if (byProvince[provincia]) continue;
+    byProvince[provincia] = { provincia, regione, mesi: {}, totale: 0, fir_total: 0 };
+    for (const m of MESI) byProvince[provincia].mesi[m] = 0;
+  }
+  const inContratto = new Set(delContratto.map(p => p.provincia));
+
   const provinceArray = Object.values(byProvince).map((p: any) => {
     const mesiValues = MESI.map((m, idx) => ({
       mese: m,
@@ -105,6 +160,9 @@ export function computeProvinceMatrixData(records, currentMonthIdx = null) {
       mesiValues,
       has_2_consecutive_zeros: has2Consecutive,
       last_zero_pair: lastZeroPair,
+      // del contratto dell'anno; e senza nessun ritiro nell'anno
+      del_contratto: inContratto.has(p.provincia),
+      senza_ritiri: p.totale === 0,
     };
   });
 

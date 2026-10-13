@@ -13,6 +13,7 @@
 
 import { MESI } from './pfuConstants.js';
 import { ripartisciQuota } from './ripartizioneTarget.js';
+import { targetMensiliValidi } from './andamentoTarget.js';
 
 const parole = (k) => k.split(' ').filter(p => p.length > 2);
 
@@ -35,6 +36,12 @@ const t3 = (v) => Math.round(v * 1000) / 1000;
  * mensili: TargetMensile; annui: TargetRaccoglitore; raccolto: by_raccoglitore_impianto
  * del canale RETE; chiave: funzione di normalizzazione dei nomi.
  * Righe per raccoglitore e regione; i target di piu' impianti si sommano.
+ *
+ * Il target mensile scritto due volte (stesso raccoglitore, regione, impianto,
+ * ruolo e mese) vale una volta, l'ultimo modificato: e' targetMensiliValidi,
+ * la regola della griglia, dell'Andamento e degli avvisi (revisione del
+ * 13/10/2026). Prima qui si sommavano e, con 80 t e poi 50 t, il Report
+ * generale diceva 130 dove la griglia mostrava 50.
  */
 export function calcolaReportGenerale({ mensili = [], annui = [], raccolto = [], chiave }) {
   const righe = new Map();
@@ -66,7 +73,7 @@ export function calcolaReportGenerale({ mensili = [], annui = [], raccolto = [],
     r.conTarget = true;
     segnaScritto(r, a.impianto, Number(a.target_tonnellate) || 0);
   }
-  for (const t of mensili) {
+  for (const t of targetMensiliValidi(mensili)) {
     const i = MESI.indexOf(t.mese);
     if (i < 0) continue;
     const r = riga(t.regione, t.raccoglitore);

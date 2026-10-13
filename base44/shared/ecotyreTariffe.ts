@@ -40,6 +40,11 @@ export const tariffaBaseExtraRaccolta = (anno) => TARIFFA_BASE_EXTRA_RACCOLTA[Nu
 export const FATTURANTE_ATTIVA = 'SMOCO Srl';
 
 function normText(v) { return String(v || '').trim().toUpperCase(); }
+// La regione si confronta senza maiuscole e senza spazi in piu' (segnalazione
+// alta del 20/09, corretta il 12/10/2026): una tariffa scritta «PUGLIA», o un
+// ritiro che porta la regione cosi' come arriva dal file, non devono far cadere
+// il prezzo ACI sulla tariffa senza regione.
+function normRegione(v) { return String(v || '').replace(/\s+/g, ' ').trim().toUpperCase(); }
 
 export function sortTariffe(tariffe) {
   return [...tariffe].map(t => ({
@@ -64,7 +69,7 @@ export function findTariffa(tariffeSorted, tipologia, cliente, classe, regione, 
     if (t.tipologia !== tipologia) continue;
     if (t.cliente && normText(t.cliente) !== normText(cliente)) continue;
     if (t.classe_materiale && t.classe_materiale !== classe) continue;
-    if (t.regione && t.regione !== regione) continue;
+    if (t.regione && normRegione(t.regione) !== normRegione(regione)) continue;
     if (t.eer_codice && t.eer_codice !== eer) continue;
     if (servizioEcotyre !== undefined && (t.servizio_ecotyre || '') !== servizioEcotyre) continue;
     if (giorno ? !tariffaValeIl(t, giorno) : !tariffaNonDisattivata(t)) continue;

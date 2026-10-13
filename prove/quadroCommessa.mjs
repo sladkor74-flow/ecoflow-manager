@@ -16,7 +16,8 @@
 // 5. un anno passato fatturato prima del gestionale non e' dodici mesi «da
 //    elaborare»: si guarda dal primo mese con un documento, il resto lo dice la nota;
 // 6. le province ferme sono quelle senza ritiri negli ultimi due mesi finiti, non
-//    quelle con due mesi a zero in qualunque momento dell'anno;
+//    quelle con due mesi a zero in qualunque momento dell'anno; dalla revisione
+//    del 13/10/2026 anche quelle del contratto mai servite, da marzo;
 // 7. un anno chiuso si misura al 31/12, non al giorno dei dati dell'anno dopo.
 // npm run prove
 import * as Q from '../base44/shared/quadroCommessa.ts';
@@ -199,6 +200,31 @@ console.log('6. LE PROVINCE FERME: GLI ULTIMI DUE MESI FINITI');
   verifica('e l\'ultimo ritiro detto e\' quello dell\'anno prima', J(pf(CAMBIO, 2027, '2027-03-15').province.map(p => p.ultimo)) === J(['2026-11-10', '2026-12-15']));
   const passato = pf(RIGHE_PF, 2025, '2026-10-11');
   verifica('un anno passato non si guarda', passato.anno_in_corso === false && passato.province.length === 0);
+}
+{
+  // LE PROVINCE DEL CONTRATTO MAI SERVITE (revisione del 13/10/2026). Prima il
+  // riquadro guardava solo chi aveva ritiri: una provincia del contratto mai
+  // servita non «lavorava» e non si diceva mai. Ora provinceFerme riceve le
+  // province del contratto dell'anno (provinceDelContratto) e quadroRete gliele
+  // passa dal contratto che ha gia'.
+  const contrattoConProvince = { ...contratto, regioni_json: J([{ regione: 'Campania', province: 'Tutte le provincie', target_t: 4400 }, { regione: 'Puglia', province: 'BA,BR,TA,LE', target_t: 2500 }]) };
+  const delContratto = [{ provincia: 'NA', regione: 'Campania' }, { provincia: 'BA', regione: 'Puglia' }, { provincia: 'LE', regione: 'Puglia' }];
+  const RIGHE_C = [prim('A', 'NA', 1000, '2026-09-20'), prim('G', 'LE', 1000, '2025-12-20')];
+  const pfc = (oggi) => Q.provinceFerme(RIGHE_C, Number(oggi.slice(0, 4)), oggi, delContratto);
+  const ott = pfc('2026-10-11');
+  const ba = (ott.province || []).find(p => p.provincia === 'BA');
+  verifica('BA, del contratto e mai servita, e\' ferma: ultimo vuoto e mai_servita', !!ba && ba.regione === 'Puglia' && ba.ultimo === '' && ba.mai_servita === true, J(ott.province));
+  verifica('e viene prima di tutte: e\' ferma da piu\' tempo', (ott.province || [])[0] && ott.province[0].provincia === 'BA', J((ott.province || []).map(p => p.provincia)));
+  verifica('LE, servita l\'anno prima, resta con il suo ultimo ritiro (non «mai servita»)', (ott.province || []).some(p => p.provincia === 'LE' && p.ultimo === '2025-12-20' && !p.mai_servita), J(ott.province));
+  verifica('NA, del contratto e servita a settembre, non e\' ferma', !(ott.province || []).some(p => p.provincia === 'NA'));
+  verifica('a febbraio (dicembre e gennaio) una provincia nuova del contratto non si dice ancora, come nella matrice', !(pfc('2027-02-15').province || []).some(p => p.provincia === 'BA') && !(Q.provinceFerme([], 2026, '2026-02-15', delContratto).province || []).some(p => p.provincia === 'BA'));
+  verifica('a marzo (gennaio e febbraio) si', (Q.provinceFerme([], 2026, '2026-03-15', delContratto).province || []).some(p => p.provincia === 'BA' && p.mai_servita));
+  verifica('senza l\'elenco del contratto il riquadro e\' quello di prima', !(Q.provinceFerme(RIGHE_C, 2026, '2026-10-11').province || []).some(p => p.provincia === 'BA'));
+  // il riquadro della dashboard: quadroRete passa le province del contratto
+  const qr = rete(2026, '2026-10-11', '2026-10-08', 8818.55, contrattoConProvince, RIGHE_C);
+  const ferme = (qr.province_ferme && qr.province_ferme.province) || [];
+  verifica('quadroRete: le province del contratto mai servite sono fra le ferme (AV, BN, CE, SA, BA, BR, TA)', J(ferme.filter(p => p.mai_servita).map(p => p.provincia).sort()) === J(['AV', 'BA', 'BN', 'BR', 'CE', 'SA', 'TA']), J(ferme));
+  verifica('quadroRete senza province nel contratto: nessuna mai servita', !(rete(2026, '2026-10-11', '2026-10-08', 8818.55, contratto, RIGHE_C).province_ferme.province || []).some(p => p.mai_servita));
 }
 
 console.log('7. UN ANNO CHIUSO SI MISURA AL 31/12');

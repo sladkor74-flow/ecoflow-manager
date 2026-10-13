@@ -124,8 +124,11 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
   // si guardano; il resto e' informazione. Dall'11/10/2026 anche un terminato
   // senza peso effettivo (fuori dalla fattura finche' il peso non si scrive) e le
   // righe messe a zero da un'unita' di misura sconosciuta o da una tariffa
-  // disattivata: uscivano in grigio, come se fossero un'informazione.
-  const DA_GUARDARE = ['prezzo_zero', 'prezzo_altro_anno', 'peso_mancante', 'unita_sconosciuta', 'tariffa_disattivata'];
+  // disattivata: uscivano in grigio, come se fossero un'informazione. Dal
+  // 13/10/2026 anche il formulario ripetuto sullo stesso ordine e l'ACI senza
+  // regione ne' provincia (calcolaRigheAttiva, 12/10/2026): sono da decidere o da
+  // correggere, non da leggere e basta.
+  const DA_GUARDARE = ['prezzo_zero', 'prezzo_altro_anno', 'peso_mancante', 'unita_sconosciuta', 'tariffa_disattivata', 'formulario_ripetuto', 'regione_mancante'];
   const daGuardare = (a) => DA_GUARDARE.includes(a.tipo) || String(a.tipo || '').startsWith('date_');
   // Le tonnellate senza prezzo si contano per canale: una somma unica di rete,
   // ACI ed extra raccolta non appartiene a nessuna commessa.

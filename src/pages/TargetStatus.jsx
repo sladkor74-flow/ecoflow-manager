@@ -23,7 +23,8 @@ import { useAuth } from '@/lib/AuthContext';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { tonnellate, percentuale, anniTarget } from '@/lib/target';
 import { annoCorrenteRoma, annoChiuso, commessaDellAnno } from '@/lib/annoTarget';
-import { righeAndamento } from '@/lib/andamentoTarget';
+import { righeAndamento, targetMensiliValidi } from '@/lib/andamentoTarget';
+import { filtraRaccolto } from '@/lib/raccoltoFiltrato';
 import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, profiloMensile, frazioneDelMese, giornoDeiDati } from '@/lib/attesoContratto';
 import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
 import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
@@ -149,7 +150,15 @@ export default function TargetStatus() {
     setParams({ tab, anno: String(a) }, { replace: true });
   };
   const setAnno = (a) => vaiA(scheda, a);
-  const [raccolto, setRaccolto] = useState(null);
+  // IL RACCOLTO DELL'ANNO SI LEGGE SENZA FILTRI (segnalazione alta del 20/09,
+  // corretta il 12/10/2026). I filtri della scheda entravano nella chiamata, e
+  // le card dell'anno, la tabella per contratto e il Report generale ricevevano
+  // il raccolto filtrato: con Mese = Settembre il «Residuo dell'anno» era il
+  // contratto meno settembre. Ora raccoltoAnno e' l'anno intero del canale RETE
+  // e va a quei tre; raccolto e' lo stesso con i filtri applicati in memoria
+  // (filtraRaccolto, src/lib/raccoltoFiltrato.js) e va alle tabelle che li
+  // prevedono. Un filtro cambiato non fa piu' una chiamata.
+  const [raccoltoAnno, setRaccoltoAnno] = useState(null);
   const [raccoltoAci, setRaccoltoAci] = useState(null);
   const [targets, setTargets] = useState([]);
   const [annui, setAnnui] = useState([]);
@@ -166,6 +175,7 @@ export default function TargetStatus() {
   // frattempo) non tocca niente, cosi' i target di un altro anno non restano a
   // video e non si scrivono su quello sbagliato.
   const ultimaLettura = useRef(0);
+  const raccolto = useMemo(() => filtraRaccolto(raccoltoAnno, filters), [raccoltoAnno, filters]);
 
   const loadData = useCallback(async () => {
     const n = ++ultimaLettura.current;
@@ -176,7 +186,7 @@ export default function TargetStatus() {
       // (chiusura dell'audit, 11/10/2026). Il target dell'impianto e' quello di
       // Impianti e stoccaggi, e si confronta in Giacenze.
       const [raccoltoRes, aciRes, targetRes, annuiRes, commessaRes, ultimeFini] = await Promise.all([
-        base44.functions.invoke('computeRaccolto', { filters: { ...filters, anno: [anno], canale: 'rete' } }),
+        base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'rete' } }),
         base44.functions.invoke('computeRaccolto', { filters: { anno: [anno], canale: 'aci' } }).catch(() => null),
         fetchAllClient(base44.entities.TargetMensile, { anno }),
         fetchAllClient(base44.entities.TargetRaccoglitore, { anno }),
@@ -185,7 +195,7 @@ export default function TargetStatus() {
         base44.entities.PrimariaRete.filter({ stato: 'terminato' }, '-trasporto_finito_il', 5).catch(() => []),
       ]);
       if (n !== ultimaLettura.current) return;
-      setRaccolto(raccoltoRes.data);
+      setRaccoltoAnno(raccoltoRes.data);
       setRaccoltoAci(aciRes ? aciRes.data : null);
       setTargets(targetRes);
       setAnnui(annuiRes);
@@ -196,11 +206,11 @@ export default function TargetStatus() {
       console.error(e);
     }
     setLoading(false);
-  }, [filters, anno]);
+  }, [anno]);
 
   useEffect(() => { if (scheda === 'andamento') loadData(); }, [scheda, loadData]);
 
-  const filterOptions = raccolto?.filterOptions || { mesi: MESI, regioni: [], raccoglitori: [], impianti: [] };
+  const filterOptions = raccoltoAnno?.filterOptions || { mesi: MESI, regioni: [], raccoglitori: [], impianti: [] };
 
   // Target e raccolto per raccoglitore e regione: le stesse righe del file Excel
   // (righeAndamento, src/lib/andamentoTarget.js), con il nome del target
@@ -212,6 +222,12 @@ export default function TargetStatus() {
     return righeAndamento({ mensili: targets, annui, raccolto: raccolto.by_raccoglitore, filtri: filters });
   }, [raccolto, targets, annui, filters]);
 
+  // La tabella per regione dell'Andamento. Del target mensile scritto due volte
+  // (stesso raccoglitore, regione, impianto, ruolo e mese) vale l'ultimo
+  // modificato, come nella tabella per raccoglitore qui sopra e nelle card
+  // (targetMensiliValidi, revisione del 13/10/2026): sommava le righe grezze, e
+  // con 80 t e poi 50 t la stessa pagina diceva 50 per raccoglitore e 130 per
+  // regione. Il PDF e la presentazione di regioneData leggono solo il raccolto.
   const regioneData = useMemo(() => {
     if (!raccolto) return [];
     const map = {};
@@ -219,7 +235,7 @@ export default function TargetStatus() {
       if (!map[reg]) { map[reg] = { regione: reg, totale: 0, mesi: {} }; for (const m of MESI) map[reg].mesi[m] = { target: 0, raccolto: 0 }; }
       return map[reg];
     };
-    for (const t of targets) {
+    for (const t of targetMensiliValidi(targets)) {
       if (!t.regione || (filters.regione.length > 0 && !filters.regione.includes(t.regione))) continue;
       if (MESI.includes(t.mese) && !t.non_raccoglie) ensure(t.regione).mesi[t.mese].target += Number(t.target) || 0;
     }
@@ -254,9 +270,13 @@ export default function TargetStatus() {
   // atteso: positivo avanti, negativo indietro). L'atteso del mese e' il suo
   // target per i giorni che i dati coprono (frazioneDelMese), come nel
   // controllo dei target mensili.
+  // Il raccolto e il residuo DELL'ANNO vengono da raccoltoAnno, senza filtri;
+  // lo scarto e' quello dei mesi scelti, sulle righe filtrate, e la card dice
+  // quali altri filtri valgono (12/10/2026).
+  const hasFilters = Object.values(filters).some(v => (Array.isArray(v) ? v.length > 0 : v));
   const kpis = useMemo(() => {
     const contratto = targetAnnuoDellAnno(commessa, anno);
-    const raccoltoTotale = raccolto?.totale_raccolto || 0;
+    const raccoltoTotale = raccoltoAnno?.totale_raccolto || 0;
     const mesiScelti = (filters.mese || []).length > 0 ? filters.mese : [meseDiOggi];
     let raccoltoMese = 0;
     let attesoMese = 0;
@@ -278,23 +298,24 @@ export default function TargetStatus() {
       scartoMese: giornoDati ? raccoltoMese - attesoMese : null,
       attesoMese: giornoDati ? attesoMese : null,
       mesiScarto: mesiScelti,
+      filtriScarto: ['regione', 'raccoglitore', 'impianto'].filter(k => (filters[k] || []).length > 0).map(k => `${k} ${filters[k].join(', ')}`),
+      conFiltri: hasFilters,
       giornoDati,
       // per la presentazione (statusExports.js), con i nomi e il segno di prima
       leftoverTotale: contratto.t === null ? null : contratto.t - raccoltoTotale,
       deltaMeseCorrente: deltaMese,
     };
-  }, [mergedData, raccolto, filters, commessa, anno, giornoDati, meseDiOggi]);
+  }, [mergedData, raccoltoAnno, filters, hasFilters, commessa, anno, giornoDati, meseDiOggi]);
   // Il riepilogo del PDF vuole un elenco di voci: gli si passava l'oggetto delle
   // card, e il PDF si fermava con un errore (11/10/2026).
   const riepilogoPdf = [
     { etichetta: 'Target annuo del contratto', valore: kpis.targetAnnuoTotale, tipo: 't' },
-    { etichetta: 'Raccolto RETE', valore: kpis.raccoltoTotale, tipo: 't' },
+    { etichetta: "Raccolto RETE nell'anno", valore: kpis.raccoltoTotale, tipo: 't' },
     { etichetta: "Residuo dell'anno", valore: kpis.residuoAnno, tipo: 't' },
     // L'etichetta della card: lo scarto e' quello dei mesi scelti nel filtro.
     { etichetta: `Scarto ${(kpis.mesiScarto || []).length ? `di ${kpis.mesiScarto.join(', ').toLowerCase()}` : 'del mese'} sull'atteso`, valore: kpis.scartoMese, tipo: 't' },
   ];
 
-  const hasFilters = Object.values(filters).some(v => (Array.isArray(v) ? v.length > 0 : v));
   const resetFilters = () => setFilters({ mese: [], regione: [], raccoglitore: [], impianto: [] });
 
   return (
@@ -369,9 +390,12 @@ export default function TargetStatus() {
                 <MultiSelect allLabel="Tutti gli impianti" options={filterOptions.impianti || []} selected={filters.impianto} onChange={v => setFilters(p => ({ ...p, impianto: v }))} />
               </div>
             </div>
+            {hasFilters && (
+              <p className="text-xs text-muted-foreground">I filtri valgono per le tabelle per raccoglitore, per regione mese per mese e degli impianti, e per lo scarto sull&apos;atteso. Il raccolto e il residuo dell&apos;anno, la tabella per regione e contratto e il Report generale guardano sempre l&apos;anno intero.</p>
+            )}
           </div>
 
-          {loading || !raccolto ? (
+          {loading || !raccoltoAnno ? (
             <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Caricamento dati…</div>
           ) : (
             <>
@@ -380,16 +404,16 @@ export default function TargetStatus() {
                   trasporto, esclusi dal raccolto contro il target, e quelli contati
                   con un'altra data da sistemare. L'ACI ha la sua riga nella sezione
                   Canale ACI: i due canali non si sommano. */}
-              <RiepilogoDate canale="Rete" riepilogo={raccolto?.date_da_sistemare} esempi />
+              <RiepilogoDate canale="Rete" riepilogo={raccoltoAnno?.date_da_sistemare} esempi />
               <KpiCards kpis={kpis} anno={anno} />
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-3">Raccolta RETE per regione e contratto</h2>
-                <AndamentoRegioni raccolto={raccolto} commessa={commessa} anno={anno} giornoDati={giornoDati} />
+                <AndamentoRegioni raccolto={raccoltoAnno} commessa={commessa} anno={anno} giornoDati={giornoDati} />
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Report generale</h2>
                 <p className="text-xs text-muted-foreground mb-3">Target assegnati e raccolto RETE per regione e raccoglitore; l'impianto di destinazione si legge a consuntivo, mese per mese.</p>
-                <ReportGenerale anno={anno} mensili={targets} annui={annui} raccolto={raccolto} commessa={commessa} />
+                <ReportGenerale anno={anno} mensili={targets} annui={annui} raccolto={raccoltoAnno} commessa={commessa} />
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Target e raccolto per raccoglitore</h2>
