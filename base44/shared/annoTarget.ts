@@ -7,9 +7,15 @@
 // segnata "copiato dal {anno-1}, da confermare"; un anno chiuso (prima di quello
 // in corso, ora italiana) si legge soltanto.
 //
-// Questo file non importa niente apposta: la chiave dei nomi (in pratica
-// normalizzaRagioneSociale) la passa chi chiama, cosi' lo specchio per il
-// browser (src/lib/annoTarget.js) resta identico (prove/specchi.mjs).
+// La chiave dei nomi (in pratica normalizzaRagioneSociale) la passa chi chiama.
+// L'unico import e' contrattoSenzaVariazioni di attesoContratto.ts (decisione
+// dell'utente del 14/10/2026: il contratto si copia senza le variazioni del
+// consorzio), e attesoContratto.ts importa daConfermare da qui: i due file si
+// importano a vicenda. Regge perche' nessuno dei due usa l'altro mentre si
+// carica, solo dentro le funzioni: una costante in cima a uno dei due calcolata
+// con una funzione dell'altro lo romperebbe. Lo specchio per il browser e'
+// src/lib/annoTarget.js (prove/specchi.mjs, che non guarda le righe di import).
+import { contrattoSenzaVariazioni } from "./attesoContratto.ts";
 
 /** L'anno a cui vale un record di configurazione: il suo, o il 2026 se non lo dice. */
 export const annoDelRecord = (r) => Number((r && r.anno) || 2026);
@@ -155,6 +161,20 @@ export const conNotaCopia = (note, anno) => {
  * (GiacenzaSito.target_totale_t, senza record attivo di Target & Status con un
  * target) nascono con quel target e la predittivita' spenta, come fa
  * portaTargetInTargetStatus: la copia non li perde (daGiacenze li conta).
+ *
+ * Il contratto Ecotyre si copia senza le variazioni del consorzio in vigore
+ * (decisione dell'utente del 14/10/2026, contrattoSenzaVariazioni di
+ * attesoContratto.ts): valevano per l'anno prima. La nota che le elenca va
+ * nello storico del contratto copiato, accanto a «copiato dal ..., da
+ * confermare», e senzaVariazioni ({ variazioni, righe, raccoglitori, parti,
+ * nota, motivo }, null se non c'e' niente da dire) la porta a chi mostra
+ * l'anteprima e a chi scrive lo storico delle modifiche. Senza variazioni la
+ * copia e' quella di prima, campo per campo. La regola riceve anche i target dei
+ * raccoglitori che l'anno avra' dopo la copia (quelli che ha gia' e quelli
+ * copiati): se col contratto senza variazioni una regione non torna piu', la
+ * nota lo dice prima che lo dica il cruscotto (revisione del 14/10/2026). Una
+ * variazione superata non si toglie, ma se la sua regione la porta ancora la
+ * nota lo dice, e c'e' la nota anche senza variazioni in vigore.
  */
 export function pianoCopiaAnno({ anno, sorgente = {}, esistenti = {}, regolePrecedenti = {}, chiave, il = new Date().toISOString(), da = '' }) {
   const a = Number(anno), prima = a - 1;
@@ -294,14 +314,24 @@ export function pianoCopiaAnno({ anno, sorgente = {}, esistenti = {}, regolePrec
     }));
   }
 
-  // --- contratto Ecotyre: solo se l'anno non ne ha uno
+  // --- contratto Ecotyre: solo se l'anno non ne ha uno, e senza le variazioni
+  // del consorzio in vigore, che valevano per l'anno prima (14/10/2026)
   let commessa = null;
+  let senzaVariazioni = null;
   const commessaPrima = src('commessa').reduce((x, r) => (x ? piuRecente(x, r) : r), null);
   if (gia('commessa').length) {
     if (commessaPrima) saltati.commessa_esistente++;
   } else if (commessaPrima) {
     const { id: _id, created_date: _c, updated_date: _u, created_by: _b, created_by_id: _bi, is_sample: _s, storico_json: _st, fine_programmazione: _f, ...campi } = commessaPrima;
-    commessa = { ...conValore(campi), anno: a, storico_json: storico() };
+    const senza = contrattoSenzaVariazioni(commessaPrima, a, [...gia('raccoglitori'), ...raccoglitori]);
+    if (!senza.variazioni.length && !senza.nota) {
+      commessa = { ...conValore(campi), anno: a, storico_json: storico() };
+    } else {
+      senzaVariazioni = { variazioni: senza.variazioni, righe: senza.righe, raccoglitori: senza.raccoglitori, parti: senza.parti, nota: senza.nota, motivo: senza.motivo };
+      // la nota della copia resta davanti: daConfermare la cerca nell'ultima voce
+      const voce = { il, da, nota: `${nota} · ${senza.nota}`, prima: null, ...(senza.variazioni.length ? { variazioni_non_copiate: senza.variazioni } : {}) };
+      commessa = { ...conValore({ ...campi, ...senza.campi }), anno: a, storico_json: JSON.stringify([voce]) };
+    }
   }
 
   // --- elenco dei siti delle giacenze: ruoli si', riferimenti e target no
@@ -325,7 +355,7 @@ export function pianoCopiaAnno({ anno, sorgente = {}, esistenti = {}, regolePrec
     }));
   }
 
-  return { impianti, collegamenti, raccoglitori, mensili, commessa, siti, saltati, daGiacenze };
+  return { impianti, collegamenti, raccoglitori, mensili, commessa, siti, saltati, daGiacenze, senzaVariazioni };
 }
 
 /** Quanti record creerebbe il piano. */

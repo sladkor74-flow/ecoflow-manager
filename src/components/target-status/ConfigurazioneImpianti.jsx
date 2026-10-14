@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, Trash2, Edit3, AlertTriangle, Copy, ArrowRightLeft, Wrench, ChevronDown, ChevronRight, CalendarClock, CheckCircle2 } from 'lucide-react';
 import { fetchAllClient } from '@/lib/fetchAllClient';
-import { formatKg } from '@/lib/utils';
+import { formatKg, fmtTon } from '@/lib/utils';
 import { annoDelRecord, annoCorrenteRoma, daConfermare, senzaNotaCopia, commessaDellAnno } from '@/lib/annoTarget';
 import { chiaveNome, conModifica, nomeUtente } from '@/lib/target';
 import { ton, it, testoErrore } from '@/components/predittivita/Comuni';
@@ -338,6 +338,17 @@ function RegoleAnno({ anno, commessa, modificabile, user, scrivi }) {
  * storico no, e la finestra lo dice accanto a «Fatto.», come NuovoAnno e le
  * tariffe (revisione delle migliorie, 11/10/2026). Prima diceva solo «Fatto.».
  * Esportata per la prova (prove/storicoModifiche.mjs).
+ *
+ * Il contratto Ecotyre si copia senza le variazioni del consorzio dell'anno
+ * prima (decisione dell'utente del 14/10/2026): la risposta lo dice in
+ * contratto_senza_variazioni, e la finestra lo mostra prima di confermare e
+ * dopo, coi numeri con e senza e la nota che finisce nello storico del
+ * contratto copiato (prove/copiaSenzaVariazioni.mjs). La nota arriva in parti,
+ * un paragrafo per cosa: le variazioni non copiate, le destinazioni riscritte
+ * dopo una variazione, i target dei raccoglitori che col contratto senza
+ * variazioni non tornano piu', le variazioni superate che la regione porta
+ * ancora (revisione del 14/10/2026). Il titolo «senza le variazioni» c'e' solo
+ * se se ne toglie qualcuna.
  */
 export function DialogoAzione({ azione, anno, onChiudi, onConferma }) {
   const annoInCorso = anno === annoCorrenteRoma();
@@ -353,6 +364,10 @@ export function DialogoAzione({ azione, anno, onChiudi, onConferma }) {
   const aggiornati = !copia && dati && Array.isArray(dati.aggiornati) ? dati.aggiornati : [];
   const daGiacenze = copia && dati ? Number(dati.impianti_da_giacenze) || 0 : 0;
   const nonPortati = !copia && dati && Array.isArray(dati.saltati) ? dati.saltati : [];
+  const senzaVariazioni = copia && dati && dati.contratto_senza_variazioni && numeroConteggio(conteggi.commessa) > 0 ? dati.contratto_senza_variazioni : null;
+  const righeSenza = senzaVariazioni && Array.isArray(senzaVariazioni.righe) ? senzaVariazioni.righe : [];
+  const tolteSenza = senzaVariazioni && Array.isArray(senzaVariazioni.variazioni) ? senzaVariazioni.variazioni : [];
+  const partiSenza = !senzaVariazioni ? [] : Array.isArray(senzaVariazioni.parti) && senzaVariazioni.parti.length ? senzaVariazioni.parti : senzaVariazioni.nota ? [senzaVariazioni.nota] : [];
   const fatto = fase === 'fatto';
   const fuoriStorico = fatto && dati ? notaTraccia(dati) : null;
   const niente = copia ? voci.length === 0 : elenco.length === 0 && aggiornati.length === 0;
@@ -365,7 +380,7 @@ export function DialogoAzione({ azione, anno, onChiudi, onConferma }) {
           <DialogTitle>{titolo}</DialogTitle>
           <DialogDescription>
             {copia
-              ? `Porta nel ${anno} quello che c'era nel ${anno - 1}: impianti (anche quelli che avevano il target solo in Giacenze), stoccaggi collegati, target dei raccoglitori, contratto Ecotyre (solo se il ${anno} non ce l'ha) e siti di Giacenze. Ogni cosa copiata è segnata "copiato dal ${anno - 1}, da confermare" finché non la confermi, qui o nella scheda Target raccoglitori. Quello che nel ${anno} è già scritto a mano non si tocca, e niente si cancella.`
+              ? `Porta nel ${anno} quello che c'era nel ${anno - 1}: impianti (anche quelli che avevano il target solo in Giacenze), stoccaggi collegati, target dei raccoglitori, contratto Ecotyre (solo se il ${anno} non ce l'ha, e senza le variazioni del consorzio del ${anno - 1}) e siti di Giacenze. Ogni cosa copiata è segnata "copiato dal ${anno - 1}, da confermare" finché non la confermi, qui o nella scheda Target raccoglitori. Quello che nel ${anno} è già scritto a mano non si tocca, e niente si cancella.`
               : `Per gli impianti che in Giacenze hanno un target totale ma in Target & Status non hanno ancora il loro impianto del ${anno}, o ce l'hanno con target zero, scrive qui quel target con la predittività spenta. Così Giacenze continua a vedere il loro target. Niente si cancella.`}
           </DialogDescription>
         </DialogHeader>
@@ -405,6 +420,22 @@ export function DialogoAzione({ azione, anno, onChiudi, onConferma }) {
                 <ul className="list-disc pl-6 space-y-0.5">
                   {voci.map(([k, v]) => <li key={k}>{voceConteggio(k, numeroConteggio(v))}{k === 'impianti' && daGiacenze > 0 ? `, di cui ${formatKg(daGiacenze)} con il target preso da Giacenze e la predittività spenta` : ''}</li>)}
                 </ul>
+                {senzaVariazioni && (
+                  <div className="text-amber-900 bg-amber-50 border border-amber-300 rounded px-3 py-2 flex items-start gap-2 break-words">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div className="space-y-1 min-w-0">
+                      {tolteSenza.length > 0 && (
+                        <p className="font-medium">{fatto ? `Il contratto Ecotyre del ${anno} è copiato senza le variazioni del consorzio del ${anno - 1}:` : `Il contratto Ecotyre si copia senza le variazioni del consorzio del ${anno - 1}:`}</p>
+                      )}
+                      {righeSenza.length > 0 && (
+                        <ul className="list-disc pl-5 space-y-0.5">
+                          {righeSenza.map((r, i) => <li key={`${r.cosa}-${i}`}>{r.cosa}: {fmtTon(r.senza_t)} (nel {anno - 1}, con le variazioni, {fmtTon(r.con_t)})</li>)}
+                        </ul>
+                      )}
+                      {partiSenza.map((p, i) => <p key={i}>{p}</p>)}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <>

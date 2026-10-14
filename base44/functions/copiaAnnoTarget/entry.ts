@@ -41,6 +41,18 @@ import { creaConTraccia, traccia, utenteDellaRichiesta, unisciTracce } from "../
 // stoccaggi non sono un numero che fa i conti e non si tracciano. La risposta
 // porta traccia: { scritta, righe, motivo? }; se il registro non si scrive la
 // copia resta.
+//
+// Il contratto Ecotyre si copia senza le variazioni del consorzio in vigore
+// (decisione dell'utente del 14/10/2026, contrattoSenzaVariazioni di
+// attesoContratto.ts): le 100 t di ottobre 2026 in Puglia valevano per il 2026,
+// e prima il 2027 nasceva a 11.650 t col solo «copiato dal 2026, da
+// confermare». Ora nasce a 11.550, la nota che le elenca sta nello storico del
+// contratto copiato, e la risposta (anche della simulazione, per l'anteprima)
+// porta contratto_senza_variazioni: { variazioni, righe, raccoglitori, parti,
+// nota, motivo }; la nota dice anche se i target dei raccoglitori copiati non
+// fanno piu' il contratto. Le righe del contratto nello storico delle modifiche
+// dicono nel motivo quali variazioni non sono copiate. Senza niente da dire,
+// risposta e motivo sono quelli di prima.
 
 const A_BLOCCHI = 100;
 
@@ -104,6 +116,7 @@ export default async function(req) {
     });
     const conteggi = conteggiPiano(piano);
     const risposta = { ok: true, anno, da, simulato: simula, conteggi, saltati: { ...piano.saltati }, impianti_da_giacenze: piano.daGiacenze || 0 };
+    if (piano.senzaVariazioni) risposta.contratto_senza_variazioni = piano.senzaVariazioni;
     if (simula) return Response.json(risposta);
 
     const comeScrive = { utente: utenteDellaRichiesta(user), origine: "Target & Status, copia dell'anno", motivo: `copia dal ${da}, da confermare` };
@@ -134,7 +147,8 @@ export default async function(req) {
     // 3. il resto
     tracce.push((await creaConTraccia(e, 'TargetRaccoglitore', piano.raccoglitori, comeScrive)).traccia);
     tracce.push((await creaConTraccia(e, 'TargetMensile', piano.mensili, comeScrive)).traccia);
-    if (piano.commessa) tracce.push((await traccia(e, 'CommessaEcotyre', null, piano.commessa, comeScrive)).traccia);
+    const comeScriveContratto = piano.senzaVariazioni && piano.senzaVariazioni.motivo ? { ...comeScrive, motivo: `${comeScrive.motivo}; ${piano.senzaVariazioni.motivo}` } : comeScrive;
+    if (piano.commessa) tracce.push((await traccia(e, 'CommessaEcotyre', null, piano.commessa, comeScriveContratto)).traccia);
     tracce.push((await creaConTraccia(e, 'GiacenzaSito', piano.siti, comeScrive)).traccia);
 
     risposta.conteggi = { ...conteggi, collegamenti: collegamenti.length };

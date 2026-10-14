@@ -31,6 +31,7 @@
 // Lo specchio per il browser e' src/lib/attesoContratto.js (prove/specchi.mjs).
 import { daConfermare } from "./annoTarget.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
+import { giornoRoma } from "./giornoItaliano.ts";
 
 /** Il target annuo RETE quando il contratto dell'anno non c'e': solo per questi anni, e lo si dice. */
 export const TARGET_ANNUO_RIPIEGO = { 2025: 11200, 2026: 11550 };
@@ -452,6 +453,255 @@ export function variazioniCheSiChiudono(commessa, valori) {
   const storico = JSON.stringify([...lista(commessa.storico_json), { il: '9999-12-31T23:59:59.999Z', da: '', nota: '', prima }]);
   const dopo = variazioniDelContratto({ ...commessa, ...valori, storico_json: storico });
   return oggi.filter((v, i) => v.in_vigore && dopo[i] && !dopo[i].in_vigore);
+}
+
+// IL CONTRATTO CHE SI COPIA NELL'ANNO DOPO (decisione dell'utente del
+// 14/10/2026). Una variazione del consorzio e' di un mese di quell'anno: le
+// 100 t in piu' di ottobre 2026 in Puglia sono l'assegnazione di quell'ottobre,
+// non un pezzo del contratto. La copia dell'anno (pianoCopiaAnno di
+// annoTarget.ts) portava nel 2027 i numeri variati (11.650 t, Puglia 2.600,
+// ottobre 1.200, IRIGOM 4.550) col solo «copiato dal 2026, da confermare»: la
+// voce della variazione restava nello storico del 2026, i suoi numeri passavano
+// nel 2027, e confermando il 2027 si confermava senza saperlo anche
+// un'assegnazione di un ottobre passato. Ora si copia il contratto di oggi meno
+// ogni variazione in vigore, e una nota le elenca: se il consorzio le conferma
+// anche per l'anno nuovo, si registrano come variazione di quell'anno. Le
+// superate non si tolgono, perche' non sono piu' nei numeri. Il target mensile
+// iniziale, i budget, le classi e la previsione ACI nessuna variazione li tocca,
+// e si copiano come sono.
+//
+// Tre ritocchi dopo la revisione dello stesso giorno:
+// - una variazione si toglie da una riga sola, la prima della sua regione e
+//   della sua destinazione, cioe' quella dove variazioneDelContratto l'ha
+//   scritta: con due righe IRIGOM (4.100 e 450) la copia toglieva 100 t da
+//   tutte e due, 200 t per una variazione di 100;
+// - la destinazione non decide se una variazione e' in vigore (lo decidono la
+//   regione e il mese). Se dopo la variazione la destinazione e' stata
+//   riscritta, per esempio le 100 t spostate da IRIGOM a T_CYCLE, toglierle di
+//   nuovo da IRIGOM faceva un numero che nessuno aveva scritto (4.350): ora la
+//   destinazione si segue nello storico come la regione, le destinazioni
+//   riscritte si copiano come sono e la nota lo dice. Allo stesso modo una
+//   variazione superata da un salvataggio del solo mese lascia le sue
+//   tonnellate nell'annuo e nella regione: si copia com'e' scritta, perche' le
+//   superate non si tolgono, ma la nota lo dice;
+// - i target dei raccoglitori si copiano come sono (pianoCopiaAnno). Se la
+//   variazione era anche nei raccoglitori, il 2027 nasce col contratto senza le
+//   100 t e i raccoglitori con: il cruscotto dice subito «I raccoglitori della
+//   Puglia hanno 100,00 t più del contratto 2027». La nota lo dice prima, coi
+//   numeri, a chi conferma la copia.
+
+// Le tonnellate all'italiana nelle note: due decimali, tre se i chili non sono tondi.
+const tonnellateIt = (v) => {
+  const n = tre(v);
+  const [intero, decimali] = Math.abs(n).toFixed(3).split('.');
+  return `${n < 0 ? '-' : ''}${intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${decimali.endsWith('0') ? decimali.slice(0, 2) : decimali}`;
+};
+const conSegnoIt = (t) => `${Number(t) > 0 ? '+' : ''}${tonnellateIt(t)} t`;
+const inPiuOMeno = (t) => `${tonnellateIt(Math.abs(Number(t) || 0))} t ${Number(t) > 0 ? 'in più' : 'in meno'}`;
+// il giorno italiano di un istante dello storico, gg/mm/aaaa ('' se non c'e')
+const giornoIt = (il) => { const g = giornoRoma(il); return g ? g.split('-').reverse().join('/') : ''; };
+const nomeDest = (s) => String(s || '').trim().toLowerCase();
+// la riga che una variazione scrive: la prima della sua regione o della sua destinazione (findIndex)
+const rigaRegione = (righe, regione) => righe.findIndex(r => r && stessaRegione(r.regione, regione));
+const rigaDestinazione = (righe, destinazione) => righe.findIndex(d => d && nomeDest(d.destinazione) === nomeDest(destinazione));
+
+// Segue nello storico un numero scritto da una variazione (la voce j) fino al
+// contratto di oggi, con la regola di variazioniDelContratto per la regione e il
+// mese: finche' nessun salvataggio lo riscrive, porta la variazione (e quelle
+// registrate dopo sullo stesso numero). riga trova la riga nell'elenco del
+// campo; stessoNumero dice se un'altra variazione scrive lo stesso numero.
+// null se la variazione non l'ha scritto; altrimenti { porta, il }, con il
+// l'istante del salvataggio che l'ha riscritto ('' se lo storico non lo dice).
+function numeroDellaVariazione(commessa, storico, j, campo, riga, stessoNumero) {
+  const leggiRiga = (json) => { const righe = lista(json); const i = riga(righe); return i < 0 ? null : Number(righe[i].target_t) || 0; };
+  const voce = storico[j];
+  const p = voce && voce.prima && typeof voce.prima === 'object' ? voce.prima : null;
+  const scritto = p && campo in p ? leggiRiga(p[campo]) : null;
+  if (scritto === null) return null;
+  let atteso = tre(scritto + (Number(voce.variazione.t) || 0));
+  let ultima = null; // l'ultima voce dopo la variazione che ha scritto il campo
+  const riscritto = () => ({ porta: false, il: ultima && !ultima.variazione ? String(ultima.il || '') : '' });
+  for (let x = j + 1; x < storico.length; x++) {
+    const s = storico[x];
+    const px = s && s.prima && typeof s.prima === 'object' ? s.prima : null;
+    if (!px || !(campo in px)) continue;
+    if (diverso(leggiRiga(px[campo]), atteso)) return riscritto();
+    const vx = s.variazione && typeof s.variazione === 'object' ? s.variazione : null;
+    if (vx && stessoNumero(vx)) atteso = tre(atteso + (Number(vx.t) || 0));
+    ultima = s;
+  }
+  return diverso(leggiRiga(commessa[campo]), atteso) ? riscritto() : { porta: true, il: '' };
+}
+
+/**
+ * Il contratto da copiare nell'anno dopo: quello di oggi senza le variazioni
+ * del consorzio in vigore. Restituisce { campi, variazioni, righe, raccoglitori,
+ * parti, nota, motivo }:
+ * - campi: i numeri senza le variazioni, solo quelli che cambiano (target
+ *   annuo, regioni, target mensile rivisto, destinazioni). Ogni variazione si
+ *   toglie dal target annuo e dalla prima riga della sua regione; dal mese solo
+ *   se ci e' stata scritta (nel_mese); dalla prima riga della sua destinazione
+ *   se la dice, il contratto la ha ancora e nessun salvataggio l'ha riscritta
+ *   dopo (altrimenti le destinazioni restano come sono, e la nota lo dice). Al
+ *   chilo come la variazione, mai sotto zero; un target annuo che manca resta
+ *   mancante. Senza variazioni in vigore e' {}, e la copia e' quella di sempre;
+ * - variazioni: quelle tolte [{ mese_idx, mese, regione, t, destinazione,
+ *   motivo, comunicata_il, nel_mese }];
+ * - righe: [{ cosa, con_t, senza_t }], per l'anteprima della copia;
+ * - raccoglitori: le regioni dove i target annui dei raccoglitori dell'anno
+ *   nuovo (raccoglitori, se chi chiama li passa: quelli che l'anno avra' dopo la
+ *   copia) col contratto senza variazioni non fanno piu' la regione, e prima la
+ *   facevano o ci andavano piu' vicino: [{ regione, raccoglitori_t,
+ *   contratto_t, con_variazioni_t, differenza_t }];
+ * - parti: le frasi della nota, una per cosa (le variazioni non copiate, le
+ *   destinazioni riscritte, i raccoglitori, le superate che la regione porta
+ *   ancora), per l'anteprima;
+ * - nota: le parti in una frase sola, per lo storico del contratto copiato;
+ * - motivo: le variazioni tolte in breve, per lo storico delle modifiche.
+ * nota e motivo sono '' se non c'e' niente da dire o da togliere. annoNuovo e'
+ * l'anno in cui si copia (se manca, quello dopo il contratto).
+ */
+export function contrattoSenzaVariazioni(commessa, annoNuovo = undefined, raccoglitori = undefined) {
+  const vuoto = { campi: {}, variazioni: [], righe: [], raccoglitori: [], parti: [], nota: '', motivo: '' };
+  if (!commessa) return vuoto;
+  const storico = lista(commessa.storico_json);
+  // la voce dello storico di ogni variazione, nell'ordine di variazioniDelContratto
+  const posti = storico.map((s, j) => (s && typeof s === 'object' && s.variazione && typeof s.variazione === 'object' ? j : -1)).filter(j => j >= 0);
+  const tutte = variazioniDelContratto(commessa).map((v, i) => ({ ...v, j: posti[i] }));
+  const tolte = tutte.filter(v => v.in_vigore);
+
+  const nuovo = Number(annoNuovo) || (Number(commessa.anno) ? Number(commessa.anno) + 1 : null);
+  const vecchio = nuovo ? nuovo - 1 : null;
+  const delVecchio = vecchio ? ` del ${vecchio}` : '';
+  const delNuovo = nuovo ? ` ${nuovo}` : '';
+  const perIlNuovo = nuovo ? ` per il ${nuovo}` : '';
+
+  // le superate che la regione porta ancora: si copiano come sono, ma si dice
+  const superate = [];
+  for (const v of tutte) {
+    if (v.in_vigore || v.j === undefined) continue;
+    const n = numeroDellaVariazione(commessa, storico, v.j, 'regioni_json', (righe) => rigaRegione(righe, v.regione), (x) => stessaRegione(x.regione, v.regione));
+    if (!n || !n.porta) continue;
+    const quando = v.superata && giornoIt(v.superata.il) ? ` dal salvataggio del ${giornoIt(v.superata.il)}` : '';
+    const motivoSuo = String(v.motivo || '').trim() ? `, «${String(v.motivo).trim()}»` : '';
+    superate.push(`La variazione di ${String(v.mese || '').toLowerCase()} (${v.regione} ${conSegnoIt(v.t)}${motivoSuo}) è superata${quando} e il contratto si copia come è scritto, ma la regione ${v.regione} non è stata riscritta e porta ancora le sue ${inPiuOMeno(v.t)}. Se il consorzio non le conferma${perIlNuovo}, correggi il contratto copiato nella scheda Commessa Ecotyre.`);
+  }
+  if (!tolte.length && !superate.length) return vuoto;
+
+  const togli = (x, vv) => Math.max(0, tre((Number(x) || 0) - vv.reduce((s, v) => s + (Number(v.t) || 0), 0)));
+  const campi = {};
+  const righe = [];
+  const annuo = commessa.target_annuo_t;
+  if (tolte.length && annuo !== null && annuo !== undefined && annuo !== '' && Number.isFinite(Number(annuo))) {
+    campi.target_annuo_t = togli(annuo, tolte);
+    righe.push({ cosa: 'Target annuo', con_t: Number(annuo), senza_t: campi.target_annuo_t });
+  }
+  // le regioni: ogni variazione dalla prima riga della sua regione
+  const regioni = lista(commessa.regioni_json);
+  const perRegione = new Map();
+  for (const v of tolte) {
+    const i = rigaRegione(regioni, v.regione);
+    if (i >= 0) perRegione.set(i, [...(perRegione.get(i) || []), v]);
+  }
+  const senzaRegioni = regioni.map((r, i) => {
+    const sue = perRegione.get(i);
+    if (!sue) return r;
+    const senza = togli(r.target_t, sue);
+    righe.push({ cosa: r.regione, con_t: Number(r.target_t) || 0, senza_t: senza });
+    return { ...r, target_t: senza };
+  });
+  if (perRegione.size) campi.regioni_json = JSON.stringify(senzaRegioni);
+  // il mese solo per le variazioni che ci sono scritte: una registrata su un
+  // contratto senza profilo e' solo nell'annuo e nella regione
+  const nelMese = tolte.filter(v => v.nel_mese && meseValido(v));
+  const mesi = lista(commessa.target_mensile_json).slice();
+  const mesiToccati = [...new Set(nelMese.map(v => Number(v.mese_idx)))].filter(i => i < mesi.length).sort((a, b) => a - b);
+  for (const i of mesiToccati) {
+    const con = Number(mesi[i]) || 0;
+    mesi[i] = togli(con, nelMese.filter(v => Number(v.mese_idx) === i));
+    righe.push({ cosa: `${NOMI_MESI[i]}, target mensile rivisto`, con_t: con, senza_t: mesi[i] });
+  }
+  if (mesiToccati.length) campi.target_mensile_json = JSON.stringify(mesi);
+  // le destinazioni: dalla prima riga della sua, se la porta ancora
+  const destinazioni = lista(commessa.destinazioni_json);
+  const perDestinazione = new Map();
+  const riscritte = new Map();
+  for (const v of tolte) {
+    if (!nomeDest(v.destinazione)) continue;
+    const i = rigaDestinazione(destinazioni, v.destinazione);
+    if (i < 0) continue;
+    const n = numeroDellaVariazione(commessa, storico, v.j, 'destinazioni_json', (righe) => rigaDestinazione(righe, v.destinazione), (x) => nomeDest(x.destinazione) === nomeDest(v.destinazione));
+    if (!n) continue;
+    if (n.porta) perDestinazione.set(i, [...(perDestinazione.get(i) || []), v]);
+    else {
+      const gia = riscritte.get(i) || { variazioni: [], il: '' };
+      riscritte.set(i, { variazioni: [...gia.variazioni, v], il: n.il || gia.il });
+    }
+  }
+  const senzaDestinazioni = destinazioni.map((d, i) => {
+    const sue = perDestinazione.get(i);
+    if (!sue) return d;
+    const senza = togli(d.target_t, sue);
+    righe.push({ cosa: `Destinazione ${d.destinazione}`, con_t: Number(d.target_t) || 0, senza_t: senza });
+    return { ...d, target_t: senza };
+  });
+  if (perDestinazione.size) campi.destinazioni_json = JSON.stringify(senzaDestinazioni);
+
+  // i raccoglitori dell'anno nuovo, regione per regione, come li confronta il cruscotto
+  const fuori = [];
+  const ilNuovo = Array.isArray(raccoglitori) ? raccoglitori.filter(Boolean) : [];
+  if (ilNuovo.length) {
+    for (const i of [...perRegione.keys()].sort((a, b) => a - b)) {
+      const reg = regioni[i].regione;
+      const con = Number(regioni[i].target_t) || 0;
+      const senza = senzaRegioni[i].target_t;
+      const loro = tre(ilNuovo.filter(x => stessaRegione(x.regione, reg)).reduce((s, x) => s + (Number(x.target_tonnellate) || 0), 0));
+      const scarto = Math.abs(loro - senza);
+      if (scarto >= SOGLIA_VARIAZIONE_T && scarto > Math.abs(loro - con) + MEZZO_CHILO) {
+        fuori.push({ regione: reg, raccoglitori_t: loro, contratto_t: senza, con_variazioni_t: con, differenza_t: tre(loro - senza) });
+      }
+    }
+  }
+
+  const giorno = (g) => (giornoValido(g) ? String(g).split('-').reverse().join('/') : '');
+  // senza parentesi: il motivo scritto dall'utente le ha spesso gia' («... (+100 t)»)
+  const voce = (v) => [
+    `${String(v.mese || '').toLowerCase()}, ${v.regione} ${conSegnoIt(v.t)}`,
+    v.destinazione ? `destinazione ${v.destinazione}` : '',
+    String(v.motivo || '').trim() ? `«${String(v.motivo).trim()}»` : '',
+    giorno(v.comunicata_il) ? `comunicata il ${giorno(v.comunicata_il)}` : '',
+  ].filter(Boolean).join(', ');
+  const breve = (v) => `${String(v.mese || '').toLowerCase()}, ${v.regione} ${conSegnoIt(v.t)}`;
+  const una = tolte.length === 1;
+  const perIl = vecchio ? `per il ${vecchio}` : "per l'anno del contratto";
+  const nelNuovo = nuovo ? ` anche per il ${nuovo}` : " anche per l'anno nuovo";
+  const parti = [];
+  if (tolte.length) {
+    parti.push(una
+      ? `La variazione del consorzio${delVecchio} non è copiata, perché valeva ${perIl}: ${voce(tolte[0])}. Se il consorzio la conferma${nelNuovo}, registrala come variazione${nuovo ? ` del ${nuovo}` : ''} nella scheda Commessa Ecotyre.`
+      : `Le ${tolte.length} variazioni del consorzio${delVecchio} non sono copiate, perché valevano ${perIl}: ${tolte.map(voce).join('; ')}. Se il consorzio le conferma${nelNuovo}, registrale come variazioni${nuovo ? ` del ${nuovo}` : ''} nella scheda Commessa Ecotyre.`);
+  }
+  for (const [i, r] of [...riscritte].sort((a, b) => a[0] - b[0])) {
+    const somma = tre(r.variazioni.reduce((s, v) => s + (Number(v.t) || 0), 0));
+    const quando = giornoIt(r.il) ? ` (salvataggio del ${giornoIt(r.il)})` : '';
+    parti.push(r.variazioni.length === 1
+      ? `La destinazione ${destinazioni[i].destinazione} è stata riscritta dopo la variazione${quando}, quindi la variazione (${conSegnoIt(somma)}) non si toglie dalle destinazioni, che si copiano come sono scritte: controllale nella scheda Commessa Ecotyre.`
+      : `La destinazione ${destinazioni[i].destinazione} è stata riscritta dopo le variazioni${quando}, quindi le ${r.variazioni.length} variazioni (${conSegnoIt(somma)} in tutto) non si tolgono dalle destinazioni, che si copiano come sono scritte: controllale nella scheda Commessa Ecotyre.`);
+  }
+  if (fuori.length) {
+    const laVariazione = una ? 'la variazione' : 'le variazioni';
+    const piuMeno = (d) => `${tonnellateIt(Math.abs(d))} t ${d > 0 ? 'più' : 'meno'}`;
+    parti.push(fuori.length === 1
+      ? `I target dei raccoglitori si copiano come sono, e quelli della ${fuori[0].regione} fanno ${tonnellateIt(fuori[0].raccoglitori_t)} t: ${piuMeno(fuori[0].differenza_t)} del contratto${delNuovo} copiato (${tonnellateIt(fuori[0].contratto_t)} t). Se il consorzio non conferma ${laVariazione}${perIlNuovo}, correggili nella scheda Target raccoglitori; se ${una ? 'la' : 'le'} conferma, ${una ? 'registrandola' : 'registrandole'} tornano a fare il contratto.`
+      : `I target dei raccoglitori si copiano come sono, e non fanno il contratto${delNuovo} copiato: ${fuori.map(f => `${f.regione} ${tonnellateIt(f.raccoglitori_t)} t contro ${tonnellateIt(f.contratto_t)} t (${conSegnoIt(f.differenza_t)})`).join('; ')}. Se il consorzio non conferma ${laVariazione}${perIlNuovo}, correggili nella scheda Target raccoglitori; se ${una ? 'la' : 'le'} conferma, ${una ? 'registrandola' : 'registrandole'} tornano a fare il contratto.`);
+  }
+  parti.push(...superate);
+  const motivo = tolte.length ? `senza ${una ? 'la variazione' : `le ${tolte.length} variazioni`} del consorzio${delVecchio} (${tolte.map(breve).join('; ')})` : '';
+  const variazioni = tolte.map(v => ({
+    mese_idx: Number(v.mese_idx), mese: v.mese || '', regione: v.regione || '', t: tre(v.t),
+    destinazione: v.destinazione || '', motivo: v.motivo || '', comunicata_il: v.comunicata_il || '', nel_mese: !!v.nel_mese,
+  }));
+  return { campi, variazioni, righe, raccoglitori: fuori, parti, nota: parti.join(' '), motivo };
 }
 
 const valoreTarget = (x) => (x && !x.non_raccoglie ? Number(x.target) || 0 : 0);
