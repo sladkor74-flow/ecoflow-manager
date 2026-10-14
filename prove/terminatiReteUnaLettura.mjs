@@ -26,6 +26,12 @@
 // maiuscole, spazi, accenti e punteggiatura contino; dentro i filtri, come in
 // Assegnati Rete, col conteggio dei trovati e di quanti ne ha in tutto
 // l'archivio, e cercando si apre il dettaglio degli ordini. Nessuna richiesta.
+//
+// Decisioni del 13/10/2026: il Dettaglio Ordini ha la colonna PDR (codice e nome
+// del punto di raccolta, troncato come la ragione sociale), cosi' due punti
+// della stessa ditta si distinguono; e il contatore degli alert che non si sono
+// letti dice «—», mai 0 (prima una lettura caduta lo azzerava e il segno
+// spariva).
 import { caricaPagina, clienteFinto, aspetta, trova, testo } from './dati/paginaFinta.mjs';
 
 let ok = 0, ko = 0;
@@ -75,6 +81,8 @@ const { Componente, monta } = await caricaPagina('pages/PrimarieRete', { reali: 
 const c = clienteFinto({ funzioni: FUNZIONI, archivi: { PrimariaRete: ARCHIVIO } });
 globalThis.__CLIENTE_FINTO = c.cliente;
 const r = monta(Componente, {});
+// La pagina prima che gli alert rispondano: niente segno e niente «—».
+const alberoIniziale = r.albero;
 await aspetta();
 
 const ids = (righe) => (righe || []).map(x => x.id).sort().join(',');
@@ -87,6 +95,9 @@ const etichettaDettaglio = () => testo(trova(r.albero, el => el.type && el.type.
 const cercaPdr = () => uno('CercaPdr');
 const cercaId = () => uno('CercaIdOrdine');
 const tabs = () => uno('Tabs');
+// Il contatore degli alert non letti, accanto a «Carica dati»: il testo, vuoto se non c'e'.
+const alertNonLettiIn = (albero) => testo(trova(albero, el => el.type && el.type.__finto === 'Link' && /Alert aperti/.test(testo(el)))[0]).replace(/\s+/g, ' ').trim();
+const alertNonLetti = () => alertNonLettiIn(r.albero);
 // Le richieste partite da un'azione: si azzera il registro prima di farla.
 const richieste = async (azione) => {
   c.azzera();
@@ -114,6 +125,8 @@ console.log("ALL'APERTURA: L'ARCHIVIO UNA VOLTA E I QUATTRO RIQUADRI");
   verifica('i filtri offrono i valori dell\'archivio', JSON.stringify(multi('Trasportatori').props.options) === '["EMMESSE SRL","NAPPI SUD SRL"]'
     && JSON.stringify(multi('Anni').props.options) === '["2026","2025"]', JSON.stringify([multi('Trasportatori').props.options, multi('Anni').props.options]));
   verifica('gli eseguiti si contano su tutto l\'archivio', uno('AvvisoEseguiti')?.props.righe.length === 8);
+  verifica('prima della risposta degli alert: niente segno e niente «—»', !trova(alberoIniziale, 'AlertBadge').length && alertNonLettiIn(alberoIniziale) === '', alertNonLettiIn(alberoIniziale));
+  verifica('letti, il segno col numero e nessun «—»', uno('AlertBadge')?.props.count === 2 && alertNonLetti() === '', `${uno('AlertBadge')?.props.count} «${alertNonLetti()}»`);
 }
 
 console.log('I FILTRI CHE NESSUN RIQUADRO GUARDA NON RILEGGONO NIENTE');
@@ -209,11 +222,31 @@ console.log('UN CARICAMENTO DELLE PRIMARIE RILEGGE TUTTO, UNA VOLTA');
   console.error = erroreVero;
   const avvisoNonCaricati = () => testo(trova(r.albero, el => el.type === 'span' && /^Non (si è caricato|si sono caricati)/.test(testo(el)))[0]);
   verifica('alla nota gli alert non rispondono: lo si dice', /gli alert aperti/.test(avvisoNonCaricati()) && !/matrice/.test(avvisoNonCaricati()), avvisoNonCaricati());
+  // Il contatore non letto dice «—», mai 0 e mai niente (13/10/2026): prima
+  // caricaAlert metteva 0 e il segno spariva, come se gli alert aperti non ci
+  // fossero piu'.
+  verifica('gli alert non letti: niente segno col numero di prima, e il contatore dice «—»', !uno('AlertBadge') && alertNonLetti() === 'Alert aperti: — (non letti)',
+    `${JSON.stringify(uno('AlertBadge')?.props || null)} «${alertNonLetti()}»`);
   alertAperti = 3;
   q = await richieste(() => trova(r.albero, el => el.type === 'button' && testo(el) === 'Riprova')[0]?.props.onClick());
   verifica('«Riprova»: solo gli alert, senza la matrice per provincia', q.letture === 0 && JSON.stringify(q.funzioni) === '["getAlerts"]' && badge() === 3 && avvisoNonCaricati() === '',
     `${JSON.stringify(q)} ${badge()} «${avvisoNonCaricati()}»`);
+  verifica('riletti, il «—» se ne va', alertNonLetti() === '', alertNonLetti());
+  // Una risposta senza il conteggio non e' zero alert.
+  const getAlertsVero = FUNZIONI.getAlerts;
+  FUNZIONI.getAlerts = async () => ({ by_modulo: {} });
+  await richieste(() => c.emetti('UploadLog', { type: 'update', data: { id: 'u9d', tipo_file: 'primarie', esito: 'successo', modalita: 'sostituzione', messaggio: 'ok | moduli collegati aggiornati' } }));
+  verifica('una risposta senza il conteggio: «—», non 0', !uno('AlertBadge') && alertNonLetti() === 'Alert aperti: — (non letti)' && /gli alert aperti/.test(avvisoNonCaricati()),
+    `«${alertNonLetti()}» «${avvisoNonCaricati()}»`);
+  // Zero alert aperti e' un numero vero: nessun segno e nessun «—».
+  FUNZIONI.getAlerts = async () => ({ total: 0 });
+  await richieste(() => trova(r.albero, el => el.type === 'button' && testo(el) === 'Riprova')[0]?.props.onClick());
+  verifica('zero alert aperti: nessun segno, nessun «—», nessun avviso', !uno('AlertBadge') && alertNonLetti() === '' && avvisoNonCaricati() === '',
+    `«${alertNonLetti()}» «${avvisoNonCaricati()}»`);
+  FUNZIONI.getAlerts = getAlertsVero;
   alertAperti = 2;
+  await richieste(() => c.emetti('UploadLog', { type: 'update', data: { id: 'u9e', tipo_file: 'primarie', esito: 'successo', modalita: 'sostituzione', messaggio: 'ok | moduli collegati aggiornati' } }));
+  verifica('e di nuovo il numero del server', badge() === 2, String(badge()));
   // un parziale ha riscritto l'archivio: si rilegge; un rifiuto a dati intatti no
   q = await richieste(async () => {
     c.emetti('UploadLog', { type: 'create', data: { id: 'u10', tipo_file: 'primarie', esito: 'in_corso' } }); await aspetta();
@@ -312,6 +345,49 @@ console.log('IL CAMPO, DA SOLO: CONTEGGIO, PUNTI E TELEFONO');
   verifica('nessun trovato si dice', testo(zero.albero).includes("Nessun ordine trovato in tutto l'archivio"), testo(zero.albero));
   const inLettura = mod.monta(mod.Componente, { value: '315', onChange: () => {}, trovati: null, punti: [] });
   verifica('mentre l\'archivio si legge non si dice zero', !/trovat/.test(testo(inLettura.albero)), testo(inLettura.albero));
+}
+
+console.log('IL DETTAGLIO ORDINI: LA COLONNA PDR');
+{
+  // Decisione del 13/10/2026: la ragione sociale da sola non distingue due punti
+  // della stessa ditta (MASTRIA GOMME SRL, viale Pio X e viale Europa; 71 ditte
+  // con piu' punti nell'archivio dell'11/10/2026). La colonna PDR dice il codice
+  // id_pdr e il nome del punto, troncato come la ragione sociale; a 375 px il
+  // codice resta intero perche' viene prima.
+  const tab = await caricaPagina('components/primarie-rete/PrimarieReteTable', { reali: ['@/hooks/useTableSort'] });
+  const senzaCodice = { ...ARCHIVIO[0], id: 'a9', id_ordine: 'ET26000109', id_pdr: null, punto_di_raccolta: 'PUNTO SENZA CODICE' };
+  const t = tab.monta(tab.Componente, { records: [...ARCHIVIO, senzaCodice], loading: false });
+  await aspetta();
+  const etichette = trova(t.albero, 'SortHeader').map(el => el.props.col.label);
+  verifica('la colonna PDR subito dopo la ragione sociale', etichette.indexOf('PDR') === etichette.indexOf('Ragione Sociale') + 1 && etichette[0] === 'ID Ordine', JSON.stringify(etichette));
+  const righe = () => trova(t.albero, el => el.type === 'tr' && trova(el, 'td').length > 0);
+  const cella = (riga, chiave) => trova(riga, el => el.type === 'td' && el.key === chiave)[0];
+  const rigaDi = (idOrdine) => righe().find(rr => testo(cella(rr, 'id_ordine')).includes(idOrdine));
+  const pdrDi = (idOrdine) => testo(cella(rigaDi(idOrdine), 'pdr'));
+  verifica('due punti della stessa ditta si distinguono: stessa ragione sociale, PDR diverso',
+    testo(cella(rigaDi('ET26000101'), 'ragione_sociale')) === testo(cella(rigaDi('ET26000102'), 'ragione_sociale'))
+      && pdrDi('ET26000101') === '315 · MASTRIA GOMME SRL - VIALE PIO X' && pdrDi('ET26000102') === '317 · MASTRIA GOMME SRL - VIALE EUROPA',
+    JSON.stringify([pdrDi('ET26000101'), pdrDi('ET26000102')]));
+  verifica('il codice e\' un codice: niente punto delle migliaia', pdrDi('ET26000105') === '42872 · EUROGOMME SRL - LAVELLO', pdrDi('ET26000105'));
+  verifica('senza codice la cella dice «—», non 0', pdrDi('ET26000109') === '— · PUNTO SENZA CODICE', pdrDi('ET26000109'));
+  const td = cella(rigaDi('ET26000101'), 'pdr');
+  const classi = (el) => String(el?.props.className || '').split(/\s+/).filter(Boolean);
+  const troncaRagione = classi(cella(rigaDi('ET26000101'), 'ragione_sociale')).filter(k => /^(truncate|max-w-)/.test(k)).sort().join(' ');
+  verifica('il nome si tronca come la ragione sociale, su una riga', troncaRagione === 'max-w-[200px] truncate'
+    && classi(td).filter(k => /^(truncate|max-w-)/.test(k)).sort().join(' ') === troncaRagione && classi(td).includes('whitespace-nowrap'),
+    `${troncaRagione} | ${classi(td).join(' ')}`);
+  const pezzi = trova(td, 'span');
+  verifica('a 375 px il codice resta intero: viene prima del nome, che e\' quello che si taglia',
+    pezzi.length === 2 && testo(pezzi[0]) === '315' && /tabular-nums/.test(pezzi[0].props.className) && testo(pezzi[1]) === ' · MASTRIA GOMME SRL - VIALE PIO X',
+    JSON.stringify(pezzi.map(testo)));
+  verifica('la tabella scorre di lato nel suo riquadro', trova(t.albero, el => el.type === 'div' && /\boverflow-x-auto\b/.test(el.props.className || '') && trova(el, 'table').length === 1).length === 1);
+  verifica('il nome intero e il codice al passaggio del mouse', td?.props.title === 'PDR 315 · MASTRIA GOMME SRL - VIALE PIO X'
+    && cella(rigaDi('ET26000109'), 'pdr')?.props.title === 'senza codice PDR · PUNTO SENZA CODICE', td?.props.title);
+  // Si ordina per codice come numero: 1315 dopo 323, non prima di 223.
+  trova(t.albero, el => el.type && el.type.__finto === 'SortHeader' && el.props.col.key === 'pdr')[0]?.props.onSort('pdr');
+  await aspetta();
+  const ordine = righe().map(rr => testo(trova(cella(rr, 'pdr'), 'span')[0]));
+  verifica('ordinata per PDR: per numero, i senza codice in fondo', JSON.stringify(ordine) === JSON.stringify(['223', '315', '315', '315', '317', '323', '1315', '42872', '—']), JSON.stringify(ordine));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

@@ -1,8 +1,9 @@
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { base44 } from '@/api/base44Client';
 import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
+import { contaDaFare, EVENTO_TODO } from '@/lib/todoSezioni';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory, Boxes,
   Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox, Users, FileCheck2, FileBadge } from
@@ -36,7 +37,7 @@ const NAV_ITEMS = [
 { label: 'Verifiche Fornitori', path: '/verifiche-fornitori', icon: Users },
 { label: 'EcoTyna', path: '/assistente', icon: Sparkles },
 { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
-{ label: 'To-Do List', path: '/todo', icon: CheckSquare },
+{ label: 'To-Do List', path: '/todo', icon: CheckSquare, contatore: 'todo' },
 { label: 'Richieste', path: '/richieste', icon: Inbox, contatore: 'richieste' },
 { label: 'Utenti', path: '/utenti', icon: Users, soloAdmin: true }];
 
@@ -47,6 +48,9 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const [alertQualifica, setAlertQualifica] = useState(0);
   const [richiesteAperte, setRichiesteAperte] = useState(0);
+  const [todoDaFare, setTodoDaFare] = useState(0);
+  const leggiTodo = useRef(null);
+  const eraSuTodo = useRef(false);
   const isAdmin = !!user && user.role === 'admin';
 
   // Il ruolo serve anche fuori dai componenti, per fermare le scritture di chi
@@ -95,6 +99,37 @@ export default function Layout() {
     window.addEventListener(EVENTO_AGGIORNAMENTO, suAggiornamento);
     return () => { attivo = false; clearInterval(intervallo); window.removeEventListener(EVENTO_AGGIORNAMENTO, suAggiornamento); };
   }, []);
+
+  // IL NUMERO DELLA TO-DO LIST (decisioni dell'utente del 13/10/2026, gruppo B):
+  // le attivita' da fare, il «Da fare» della pagina. Come gli altri contatori:
+  // una lettura leggera all'avvio e ogni cinque minuti, delle sole aperte e in
+  // corso (contaDaFare, src/lib/todoSezioni.js), mai l'elenco intero; il
+  // menu resta montato cambiando pagina, quindi non si rilegge a ogni pagina.
+  // In piu' si rilegge una volta quando si esce dalla To-Do List, dove le
+  // attivita' si chiudono e si aggiungono, e la pagina puo' dire il numero
+  // nuovo con EVENTO_TODO senza nessuna lettura.
+  useEffect(() => {
+    let attivo = true;
+    const leggi = async () => {
+      try {
+        const n = await contaDaFare(base44.entities.Todo);
+        if (attivo) setTodoDaFare(n);
+      } catch (_e) { /* il contatore e' accessorio: in caso di errore resta com'era */ }
+    };
+    const suAggiornamento = (e) => {
+      if (e.detail && Number.isFinite(e.detail.da_fare)) setTodoDaFare(e.detail.da_fare);
+    };
+    leggiTodo.current = leggi;
+    leggi();
+    const intervallo = setInterval(leggi, 5 * 60 * 1000);
+    window.addEventListener(EVENTO_TODO, suAggiornamento);
+    return () => { attivo = false; leggiTodo.current = null; clearInterval(intervallo); window.removeEventListener(EVENTO_TODO, suAggiornamento); };
+  }, []);
+  useEffect(() => {
+    const suTodo = location.pathname === '/todo';
+    if (eraSuTodo.current && !suTodo && leggiTodo.current) leggiTodo.current();
+    eraSuTodo.current = suTodo;
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -151,6 +186,13 @@ export default function Layout() {
                     title={isAdmin ? `${richiesteAperte} richieste da valutare` : `${richiesteAperte} tue richieste in attesa`}
                     className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[11px] font-semibold leading-none text-center tabular-nums">
                     {richiesteAperte > 99 ? '99+' : richiesteAperte}
+                  </span>
+                )}
+                {item.contatore === 'todo' && todoDaFare > 0 && (
+                  <span
+                    aria-label={`${todoDaFare} attività da fare`}
+                    className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-sky-600 text-white text-[11px] font-semibold leading-none text-center tabular-nums">
+                    {todoDaFare > 99 ? '99+' : todoDaFare}
                   </span>
                 )}
                 {item.contatore === 'qualifica' && alertQualifica > 0 && (

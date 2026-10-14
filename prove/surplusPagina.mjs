@@ -42,6 +42,10 @@
 //    alle tariffe, il collegamento ?tab=tariffe&sezione=surplus, le date da
 //    confermare nel modulo della scorciatoia. La pagina montata (la scheda che
 //    si apre subito, la fascia, la linguetta) e' in prove/tariffeSiApreSubito.mjs.
+// 11. la fascia conta le tariffe della colonna e il totale e' la somma delle
+//    parti (rilievo del 13/10/2026, «28 tariffe interessate (22 di raccolta, 7
+//    attive)», non riprodotto): una guardia su combinazioni a caso e, sui dati
+//    veri, fascia, colonna e filtro «Con surplus» con lo stesso 29.
 // node prove/surplusPagina.mjs
 import { build } from 'esbuild';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -615,6 +619,68 @@ await sezione('10. LA SEZIONE DEI SURPLUS SI TROVA: LA FASCIA BREVE, IL COLLEGAM
   verifica('e nel 2026 dice la comunicazione del consorzio', modulo26.includes('Date da confermare. Dal 01/10/2026 al 31/12/2026, come la comunicazione del consorzio per il 2026'));
   const nuovo = disegna('CorpoSurplusForm', { bozzaIniziale: v('bozzaVuota')(), surplus: [], fornitori: [], oggi: OGGI, onClose: fun, onSalvato: fun });
   verifica('un surplus nuovo, scritto a mano, non ha l\'avviso', !nuovo.includes('Date da confermare'));
+});
+
+await sezione('11. LA FASCIA CONTA LE TARIFFE DELLA COLONNA, E LE PARTI FANNO IL TOTALE', async () => {
+  // Rilievo del 13/10/2026: la fascia avrebbe detto «28 tariffe interessate (22
+  // di raccolta, 7 attive)». Non si riproduce: tariffeDelleSchede conta ogni
+  // tariffa una volta per surplus, e la mette in uno solo dei gruppi (attive, o
+  // passive per prestazione), quindi il totale e' sempre la somma delle parti.
+  // Qui la guardia: migliaia di combinazioni a caso (canali, «RETE + ACI»,
+  // attive di extra raccolta, surplus senza gruppo, date passate e future,
+  // disattivati, elenchi di fornitori) e, per ogni surplus della fascia, il
+  // totale = la somma delle parti, anche nel testo, e le tariffe contate = quelle
+  // a cui la colonna mette la sua pastiglia.
+  let seme = 13102026;
+  const caso = () => { seme = (seme * 1103515245 + 12345) % 2147483648; return seme / 2147483648; };
+  const uno = (a) => a[Math.floor(caso() * a.length)];
+  const GIORNI = ['2026-01-01', '2026-09-30', '2026-10-01', '2026-10-13', '2026-10-14', '2026-11-01', '2026-12-31', '2027-01-01', null];
+  const periodo = (riserva) => { let d = uno(GIORNI) || riserva, a = uno(GIORNI); if (a && a < d) [d, a] = [a, d]; return [d, a]; };
+  const fornitori = ['f1', 'f2', 'f3'];
+  let scenari = 0, schede = 0;
+  const storti = [];
+  for (let n = 0; n < 5000; n++) {
+    const tariffe = Array.from({ length: 1 + Math.floor(caso() * 10) }, (_, i) => {
+      const attiva = caso() < 0.3;
+      const [dal, al] = periodo('2026-01-01');
+      return { id: `t${i}`, direzione: attiva ? 'ATTIVA' : 'PASSIVA', tipologia: uno(['RETE', 'ACI', 'EXTRA_RACCOLTA', 'TUTTE']),
+        prestazione: attiva ? '' : uno(S.PRESTAZIONI_SURPLUS), fornitore_id: uno(fornitori), fornitore_nome: 'F',
+        data_inizio_validita: dal, data_fine_validita: al, stato: uno(['attivo', 'attivo', 'non_attivo', '']) };
+    });
+    const surplus = Array.from({ length: Math.floor(caso() * 6) }, (_, i) => {
+      const [dal, al] = periodo('2026-10-01');
+      return { id: `s${i}`, gruppo: uno(['g1', 'g1', 'g2', '']), nome: uno(['Fuel Surcharge', 'Accordo']), tipologia: uno(S.CANALI_SURPLUS),
+        prestazione: uno(['RACCOLTA', 'RACCOLTA', 'TRATTAMENTO', 'TRASPORTO_SECONDARIA']), a_chi: uno(['tutti', 'tutti', 'elenco']),
+        fornitori_json: J([{ id: uno(fornitori), nome: 'F' }]), euro_t_passiva: uno([5, 5, null]), euro_t_attiva: uno([5, null, 6]),
+        data_inizio_validita: dal, data_fine_validita: al || '2026-12-31', stato: uno(['attivo', 'attivo', 'non_attivo']) };
+    });
+    const col = new Map(tariffe.map(t => [t.id, S.surplusDellaTariffa(t, surplus, OGGI)]));
+    scenari++;
+    for (const [k, c] of v('tariffeDelleSchede')(tariffe, col, archiviata)) {
+      schede++;
+      const parti = c.attive + Object.values(c.prestazioni).reduce((a, b) => a + b, 0);
+      const numeri = (v('testoTariffe')(c).match(/\d+/g) || []).map(Number);
+      const colonna = tariffe.filter(t => !archiviata(t) && [...col.get(t.id).oggi, ...col.get(t.id).in_arrivo].some(x => v('chiaveDellaVoce')(x) === k)).map(t => t.id).sort();
+      if (parti !== c.totale || (numeri.length > 1 && numeri[0] !== numeri.slice(1).reduce((a, b) => a + b, 0)) || J(colonna) !== J([...c.ids].sort())) {
+        storti.push(`${k}: «${v('testoTariffe')(c)}», colonna ${J(colonna)}`);
+      }
+    }
+  }
+  verifica(`in ${scenari} combinazioni a caso (${schede} surplus in fascia) il totale e' la somma delle parti e le tariffe sono quelle della colonna`, schede > 1000 && storti.length === 0, storti.slice(0, 3).join(' · '));
+
+  // Sui dati veri: la fascia, il filtro «Con surplus» e la colonna dicono lo stesso numero.
+  const CARTELLA = process.env.DATI_VERI || qui('../../dati-veri/');
+  const copie = existsSync(CARTELLA) ? readdirSync(CARTELLA).filter(n => /^treadrider-dati-veri-\d{4}-\d{2}-\d{2}\.json\.gz$/.test(n)).sort() : [];
+  if (!copie.length) { console.log(`  Nessuna copia dei dati veri in ${CARTELLA}: questa parte e' saltata.`); return; }
+  const tariffe = JSON.parse(gunzipSync(readFileSync(CARTELLA + copie[copie.length - 1])).toString('utf8')).archivi.Tariffa || [];
+  const colonna = new Map(tariffe.map(t => [t.id, S.surplusDellaTariffa(t, FUEL, OGGI)]));
+  const fascia = v('tariffeDelleSchede')(tariffe, colonna, archiviata).get('g-fuel') || {};
+  const conPastiglia = tariffe.filter(t => !archiviata(t) && v('haSurplus')(colonna.get(t.id)));
+  const perCanale = (lista) => J(Object.entries(lista.reduce((m, t) => { const k = `${t.direzione === 'ATTIVA' ? 'attiva' : t.prestazione} ${t.tipologia}`; m[k] = (m[k] || 0) + 1; return m; }, {})).sort());
+  verifica('sui dati veri: 29 nella fascia, 29 pastiglie nella colonna, 29 righe col filtro «Con surplus»', fascia.totale === 29 && conPastiglia.length === 29
+    && J([...fascia.ids].sort()) === J(conPastiglia.map(t => t.id).sort()), `${fascia.totale} ${conPastiglia.length}`);
+  verifica('e le parti: 22 di raccolta (17 Rete, 5 ACI) e 7 attive (1 Rete, 5 ACI, 1 Extra raccolta)',
+    perCanale(conPastiglia) === J([['RACCOLTA ACI', 5], ['RACCOLTA RETE', 17], ['attiva ACI', 5], ['attiva EXTRA_RACCOLTA', 1], ['attiva RETE', 1]]), perCanale(conPastiglia));
 });
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

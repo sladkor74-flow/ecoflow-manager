@@ -50,7 +50,7 @@ export default async function(req) {
     const svc = base44.asServiceRole.entities;
     const anniAttiva = anniMesiAttiva(anno, oggi);
     const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct, verificheSedi,
-      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, esecuzioni, finoAl] = await Promise.all([
+      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, esecuzioni, finoAl, surplus] = await Promise.all([
       fetchAll(svc.Alert, { stato: 'aperto' }),
       // Le ultime righe di ogni file, come le leggono i motori: una lettura sola.
       leggiRegistro(svc.UploadLog, TIPI_FILE).then(perTipo => [...perTipo.values()].flat()),
@@ -81,6 +81,11 @@ export default async function(req) {
       // Fino a che giorno arrivano i dati: poche righe per archivio. Se non si
       // riesce a leggere, la freschezza si misura sul giorno del caricamento.
       datiFinoAl(svc, ARCHIVI_DEL_CRUSCOTTO).catch(() => []),
+      // I surplus sulle tariffe, per il promemoria di quello finito l'anno prima
+      // (vociSurplusFiniti, decisioni dell'utente del 13/10/2026): un archivio di
+      // poche righe, letto intero e senza filtro sullo stato, come lo leggono i
+      // calcoli. Una lettura che cade toglie solo il promemoria.
+      fetchAll(svc.SurplusTariffa).catch(() => []),
     ]);
     // Le prefatture dell'anno prima, solo se un suo mese le puo' ancora chiedere.
     const prefattureAnnoPrima = servonoPrefattureAnnoPrima(documenti, anno, oggi)
@@ -124,6 +129,14 @@ export default async function(req) {
         ].filter(Boolean))],
         oggi,
       }),
+      // Del surplus servono solo nome, canale, date, stato e la parte da Ecotyre
+      // (un accordo pagato solo da SMOCO e' riservato e la voce non lo nomina):
+      // mai euro_t_passiva, che e' un costo, e questa funzione la chiama chiunque.
+      surplus: (surplus || []).map(s => ({ nome: s.nome, origine: s.origine, tipologia: s.tipologia, data_inizio_validita: s.data_inizio_validita, data_fine_validita: s.data_fine_validita, stato: s.stato, euro_t_attiva: s.euro_t_attiva })),
+      // I contratti e i target annui dei raccoglitori, gia' letti per l'anno nuovo:
+      // dicono se i raccoglitori fanno il contratto (vociContrattoRaccoglitori,
+      // 14/10/2026).
+      commesse, targetRaccoglitori,
     }));
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

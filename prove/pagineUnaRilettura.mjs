@@ -26,7 +26,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { caricaPagina, clienteFinto, aspetta, trova, orologioFinto } from './dati/paginaFinta.mjs';
+import { caricaPagina, clienteFinto, aspetta, trova, testo, orologioFinto } from './dati/paginaFinta.mjs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -151,6 +151,76 @@ console.log('ASSEGNATI: LA MATRICE UNA VOLTA, E ANCHE IL DETTAGLIO (REGOLA 2)');
   r.smonta();
 }
 
+// UNA LETTURA FALLITA NON RIPARTE DA SOLA (revisione del 13/10/2026, script del
+// revisore R5 assegnati_dettaglio_in_errore.mjs). L'effetto che legge il
+// dettaglio scattava quando gli ordini non c'erano e nessuna lettura era in
+// corso: lo stato che lascia una lettura fallita. Con un errore che persiste
+// erano 51 letture su 51 errori, e a video «Nessun ordine assegnato trovato».
+// Ora l'errore si dice, la lettura si riprova a mano, e un caricamento delle
+// primarie vale come un nuovo tentativo.
+console.log('ASSEGNATI: UNA LETTURA FALLITA SI DICE E SI RIPROVA A MANO');
+{
+  let fallisce = true;
+  let tentativi = 0;
+  const righe = [{ id: 'g1', id_ordine: 'ET10', stato: 'assegnato', ordine_immesso_il: '2026-09-01T08:00:00', anno: 2026, mese: 'Settembre', peso_stimato: 1000 }];
+  // l'archivio che non risponde: ogni lettura di Assegnato fallisce finche' fallisce e' vero
+  const archivi = new Proxy({}, { get: (_t, n) => {
+    if (n !== 'Assegnato') return undefined;
+    tentativi++;
+    // oltre 60 tentativi l'archivio risponde comunque: col codice di prima la
+    // prova finisce (con 61 letture) invece di girare per sempre
+    if (fallisce && tentativi <= 60) throw new Error('Request failed with status code 500');
+    return righe;
+  } });
+  const erroreVero = console.error; console.error = () => {};
+  try {
+    const { r, c, richieste, perPasso } = await monta('pages/Assegnati', {
+      funzioni: { computeAssegnatiMatrix: async () => ({ kpi: {}, matrix: {}, filterOptions: {} }) },
+      archivi, reali: ['@/components/shared/CercaIdOrdine'],
+    });
+    const tabs = () => trova(r.albero, el => el.type && el.type.__finto === 'Tabs' && ['matrix', 'detail'].includes(el.props.value))[0];
+    const tabella = () => trova(r.albero, el => el.type && el.type.__finto === 'AssegnatiTable')[0];
+    const avviso = () => trova(r.albero, el => el.type === 'span' && /Gli ordini non si sono (ri)?letti/.test(testo(el)))[0];
+    const riprova = () => trova(r.albero, el => el.type === 'button' && /Riprova/.test(testo(el)))[0];
+    let q = await richieste(async () => { tabs().props.onValueChange('detail'); await aspetta(200); });
+    verifica('aperto il dettaglio con l\'archivio che non risponde: una lettura sola (erano 51 in 200 giri)', quante(q, 'Assegnato') === 1 && tentativi === 1, `${JSON.stringify(q)} tentativi ${tentativi}`);
+    verifica('la pagina dice che gli ordini non si sono letti, col motivo', !!avviso() && /Request failed with status code 500/.test(testo(avviso())), avviso() ? testo(avviso()) : 'nessun avviso');
+    verifica('e non mostra la tabella, che direbbe «Nessun ordine assegnato trovato»', !tabella(), 'la tabella c\'e\'');
+    q = await richieste(async () => { tabs().props.onValueChange('matrix'); await aspetta(20); tabs().props.onValueChange('detail'); await aspetta(100); });
+    verifica('tornando al dettaglio la lettura non riparte da sola', quante(q, 'Assegnato') === 0, JSON.stringify(q));
+    q = await richieste(async () => { riprova().props.onClick(); await aspetta(100); });
+    verifica('«Riprova» rilegge una volta, e se fallisce ancora lo dice ancora', quante(q, 'Assegnato') === 1 && !!avviso() && !tabella(), `${JSON.stringify(q)} ${!!avviso()}`);
+    fallisce = false;
+    q = await richieste(async () => { riprova().props.onClick(); await aspetta(100); });
+    verifica('quando l\'archivio risponde, «Riprova» porta gli ordini e l\'avviso se ne va', quante(q, 'Assegnato') === 1 && !avviso() && tabella()?.props.records.length === 1, `${JSON.stringify(q)} ${!!avviso()} ${tabella()?.props.records?.length}`);
+    // una rilettura che fallisce col dettaglio a video: gli ordini di prima
+    // restano, e l'avviso dice che sono della lettura di prima
+    fallisce = true;
+    let passi = sequenza('primarie');
+    q = await perPasso(passi);
+    verifica('col dettaglio a video una rilettura fallita: una lettura sola, e la tabella resta con gli ordini di prima',
+      JSON.stringify(q.map(x => quante(x, 'Assegnato'))) === '[0,0,1,0]' && tabella()?.props.records.length === 1, descrivi(passi, q));
+    verifica('e l\'avviso dice che non si sono riletti e che sono quelli di prima', !!avviso() && /Gli ordini non si sono riletti \(Request failed with status code 500\): quelli a video sono della lettura di prima\./.test(testo(avviso())),
+      avviso() ? testo(avviso()) : 'nessun avviso');
+    // un caricamento chiuso vale come un nuovo tentativo, anche dopo un errore
+    await richieste(async () => { tabs().props.onValueChange('matrix'); await aspetta(20); });
+    passi = sequenza('primarie');
+    q = await perPasso(passi);
+    verifica('nella matrice un caricamento fa dimenticare gli ordini, senza leggerli', q.every(x => quante(x, 'Assegnato') === 0), descrivi(passi, q));
+    q = await richieste(async () => { tabs().props.onValueChange('detail'); await aspetta(200); });
+    verifica('riaperto il dettaglio con l\'archivio che non risponde: ancora una lettura sola', quante(q, 'Assegnato') === 1 && !!avviso(), JSON.stringify(q));
+    fallisce = false;
+    passi = sequenza('primarie');
+    q = await perPasso(passi);
+    verifica('col dettaglio a video, la chiusura di un caricamento rilegge e porta gli ordini', JSON.stringify(q.map(x => quante(x, 'Assegnato'))) === '[0,0,1,0]' && !avviso() && tabella()?.props.records.length === 1,
+      descrivi(passi, q));
+    verifica('nessun errore della pagina', r.errori.length === 0, String(r.errori[0] || ''));
+    r.smonta();
+  } finally {
+    console.error = erroreVero;
+  }
+}
+
 console.log('SECONDARIE: TUTTO ALLA CHIUSURA, GLI ALERT ALLA NOTA');
 {
   let alertAperti = 2;
@@ -183,6 +253,44 @@ console.log('SECONDARIE: TUTTO ALLA CHIUSURA, GLI ALERT ALLA NOTA');
   verifica('un caricamento delle primarie non c\'entra', pri.every(x => x.funzioni.length === 0 && Object.keys(x.letture).length === 0), JSON.stringify(pri));
   verifica('l\'iscrizione resta una, e nessun errore', iscrizioni(c) === 1 && r.errori.length === 0, `${iscrizioni(c)} ${String(r.errori[0] || '')}`);
   r.smonta();
+}
+
+// IL CONTATORE DEGLI ALERT CHE NON SI E' LETTO DICE «—», MAI 0 (chiusura del
+// giro, 14/10/2026, come Terminati Rete dal 13/10/2026). Prima una risposta senza
+// il conteggio diventava 0 e il segno spariva, e una lettura caduta lasciava a
+// video il numero di prima.
+console.log('SECONDARIE: GLI ALERT NON LETTI DICONO «—»');
+{
+  let risposta = { total: 4 };
+  const archivio = [{ id: 's1', id_ordine: 'ET20', stato: 'terminato', canale: 'RETE', stoccaggio: 'NAPPI SUD', destinazione: 'IRIGOM SRL', trasporto_finito_il: '2026-09-10T09:00:00', peso_effettivo: 20000 }];
+  const erroreVero = console.error; console.error = () => {};
+  try {
+    const { r, c, richieste } = await monta('pages/Secondarie', {
+      funzioni: {
+        computeSecondarieMatrix: async () => ({ kpi: {}, matrix: {}, filterOptions: {} }),
+        getAlerts: async () => { if (risposta === 'cade') throw new Error('non risponde'); return risposta; },
+      },
+      archivi: { Secondaria: archivio },
+    });
+    const badge = () => trova(r.albero, el => el.type && el.type.__finto === 'AlertBadge')[0]?.props.count ?? null;
+    const nonLetti = () => testo(trova(r.albero, el => el.type && el.type.__finto === 'Link' && /Alert aperti/.test(testo(el)))[0]).replace(/\s+/g, ' ').trim();
+    verifica('con la risposta: il segno col numero, e nessun «—»', badge() === 4 && nonLetti() === '', `${badge()} ${nonLetti()}`);
+    // la nota dei moduli aggiornati rilegge solo gli alert
+    const nota = () => c.emetti('UploadLog', sequenza('secondarie')[3][1]);
+    risposta = 'cade';
+    await richieste(nota);
+    verifica('una lettura che cade: niente segno col numero di prima, e il contatore dice «—»', badge() === null && nonLetti() === 'Alert aperti: — (non letti)', `${badge()} «${nonLetti()}»`);
+    risposta = { by_modulo: {} };
+    await richieste(nota);
+    verifica('una risposta senza il conteggio: «—», non 0', badge() === null && nonLetti() === 'Alert aperti: — (non letti)', `${badge()} «${nonLetti()}»`);
+    risposta = { total: 0 };
+    await richieste(nota);
+    verifica('zero alert letti: nessun segno e nessun «—»', badge() === null && nonLetti() === '', `${badge()} «${nonLetti()}»`);
+    verifica('nessun errore della pagina', r.errori.length === 0, String(r.errori[0] || ''));
+    r.smonta();
+  } finally {
+    console.error = erroreVero;
+  }
 }
 
 console.log('PDR: UNA LETTURA PER CARICAMENTO, ANCHE QUANDO L\'ANAGRAFICA RESTA A META\'');

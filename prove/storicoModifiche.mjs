@@ -19,6 +19,9 @@
 //   8. il surplus sulle tariffe (13/10/2026, il Fuel Surcharge) si traccia come
 //      un prezzo: l'importo ai fornitori riservato, quello da Ecotyre no, i
 //      fornitori dell'elenco per nome e senza contare l'ordine.
+//   9. i recapiti del fornitore che leggono i contratti (cellulare, pec,
+//      referente; decisioni dell'utente del 13/10/2026) si tracciano; lo
+//      stato e gli altri campi del fornitore no, e non costano letture.
 //
 // Revisione delle migliorie (11/10/2026), i rilievi dei revisori:
 //   - un impianto cancellato: EcoTyna diceva in «kg» un target gia' in
@@ -324,7 +327,7 @@ console.log('5. LE FUNZIONI VERE LASCIANO LE RIGHE');
   verifica('e la tariffa nuova le sue', reg2.some(x => x.operazione === 'create' && x.campo === 'valore' && x.dopo === '95'), J(reg2));
 
   const forn = await chiama(ga, { db: DB, corpo: { entita: 'Fornitore', operazione: 'update', id: 'fE', dati: { stato: 'non_attivo' } } });
-  verifica('un fornitore non ha campi tracciati: nessuna riga', forn.stato === 200 && !(forn.db.ModificaDato || []).length);
+  verifica('lo stato di un fornitore non si traccia: nessuna riga', forn.stato === 200 && !(forn.db.ModificaDato || []).length);
 
   const via = await chiama(ga, { db: DB, corpo: { entita: 'Tariffa', operazione: 'delete', id: 't1' } });
   verifica('una tariffa cancellata dice che cosa c\'era', via.stato === 200 && (via.db.ModificaDato || []).some(x => x.operazione === 'delete' && x.campo === 'valore' && x.prima === '300'), J(via.db.ModificaDato));
@@ -451,9 +454,25 @@ console.log('6. ECOTYNA: CHI HA CAMBIATO IL TARGET DI IRIGOM');
   verifica('la conferma non lascia righe: scrive solo la nota', copiate > 0 && conf.traccia.righe === 0 && dopoCopia.db.ModificaDato.length === copiate, J({ copiate, traccia: conf.traccia }));
   const st = await eseguiStrumento({ asServiceRole: { entities: dopoCopia.archivi } }, 'storico_modifiche', { soggetto: 'Irigom', cosa: 'target', anno: nuovo }, { amministratore: true });
   verifica('EcoTyna riceve le righe della copia col loro motivo', st.dati.modifiche.righe.some(x => x.campo === 'target di rete' && x.dopo === 1050 && /copia dal \d{4}, da confermare/.test(x.motivo)), J(st.dati.modifiche));
-  verifica('ma la nota non le dice ancora da confermare, e avverte che la conferma non lascia righe',
-    !/sono valori dell'anno prima, da confermare/.test(st.dati.nota) && /la conferma invece non lascia righe qui/.test(st.dati.nota)
+  verifica('ma la nota non le dice ancora da confermare, e avverte che la conferma in Target & Status non lascia righe',
+    !/sono valori dell'anno prima, da confermare/.test(st.dati.nota) && /confermati in Target & Status invece non lasciano righe qui/.test(st.dati.nota)
     && /non si sa se un valore copiato e' stato confermato dopo/.test(st.dati.nota) && /tariffe preparate per l'anno/.test(st.dati.nota), st.dati.nota);
+
+  // Le tariffe confermate con «Prepara l'anno» lasciano invece la loro riga
+  // (preparaAnno, decisioni dell'utente del 13/10/2026): EcoTyna riceve la riga
+  // della conferma e una nota che la dice, non la frase che la smentisce
+  // (revisione del 14/10/2026: la nota diceva ancora «la conferma invece non
+  // lascia righe qui»).
+  const paConf = await caricaFunzione('preparaAnno');
+  const tarCopiata = { id: 'tC', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'Ecotyre Scrl', valore: 202, unita_misura: '€/t', stato: 'attivo', data_inizio_validita: `${nuovo}-01-01`, data_fine_validita: `${nuovo}-12-31`, note: `copiato dal ${nuovo - 1}, da confermare` };
+  const confT = await chiama(paConf, { db: { Tariffa: [tarCopiata] }, corpo: { anno: nuovo, azione: 'conferma_tariffe', direzione: 'ATTIVA' } });
+  const regT = confT.db.ModificaDato || [];
+  verifica('la conferma di una tariffa in «Prepara l\'anno» lascia la sua riga', regT.length === 1 && /^confermato il valore copiato dall'anno prima/.test(regT[0].motivo), J(regT));
+  const stT = await eseguiStrumento({ asServiceRole: { entities: archivioFinto({ ModificaDato: regT }).archivi } }, 'storico_modifiche', { cosa: 'tariffe' }, { amministratore: true });
+  verifica('EcoTyna riceve la riga della conferma col suo motivo', stT.dati.modifiche.righe.some(x => /^confermato il valore copiato dall'anno prima/.test(x.motivo)), J(stT.dati.modifiche));
+  verifica('e la nota dice che la conferma delle tariffe lascia la riga, senza smentirla',
+    !/la conferma invece non lascia righe/.test(stT.dati.nota) && /tariffe confermate con «Prepara l'anno» lasciano anche la riga della conferma/.test(stT.dati.nota)
+    && /confermato il valore copiato dall'anno prima/.test(stT.dati.nota), stT.dati.nota);
 }
 
 console.log('7. LA FINESTRA DELLA COPIA DICE SE LO STORICO NON SI E\' SCRITTO');
@@ -607,6 +626,67 @@ console.log('8. IL SURPLUS SULLE TARIFFE SI TRACCIA COME UN PREZZO (13/10/2026)'
     ecoAccordo.dati.modifiche.righe.length === 0 && ecoAccordo.dati.riservate_non_dette === 8, J(ecoAccordo.dati));
   const ecoAdmin = await eseguiStrumento(vistaAccordo, 'storico_modifiche', {}, { amministratore: true });
   verifica('all\'amministratore tutte e otto', ecoAdmin.dati.modifiche.righe.length === 8, J(ecoAdmin.dati && ecoAdmin.dati.modifiche && ecoAdmin.dati.modifiche.righe.length));
+}
+
+console.log('9. I RECAPITI DEL FORNITORE CHE LEGGONO I CONTRATTI (13/10/2026)');
+{
+  // Il cellulare (FORNITORE_TEL_2), la pec (FORNITORE_EMAIL_2) e il referente
+  // (FORNITORE_REFERENTE) arrivano nei contratti dall'anagrafica: chi li ha
+  // cambiati, quando e da quale valore si deve sapere. Non sono costi.
+  const emmesse = { id: 'fE', ragione_sociale: 'EMMESSE SRL', stato: 'attivo', cellulare: '333 1234567', pec: 'emmesse@pec.it' };
+  const cambia = modificheDelRecord('Fornitore', { prima: emmesse, dopo: { ...emmesse, cellulare: '333 7654321', referente: 'Mario Rossi' }, patch: { cellulare: '333 7654321', referente: 'Mario Rossi' } });
+  verifica('il cellulare che cambia e il referente che arriva: due righe, col prima vuoto per il referente',
+    J(cambia.map(m => [m.campo, m.prima, m.dopo, m.unita, m.riservato])) === J([['cellulare', '333 1234567', '333 7654321', 'testo', false], ['referente', null, 'Mario Rossi', 'testo', false]]), J(cambia));
+  verifica('la pec riscritta uguale, con gli spazi, non e\' una modifica',
+    modificheDelRecord('Fornitore', { prima: emmesse, dopo: { ...emmesse, pec: ' emmesse@pec.it ' }, patch: { pec: ' emmesse@pec.it ' } }).length === 0);
+  const tolta = modificheDelRecord('Fornitore', { prima: emmesse, dopo: { ...emmesse, pec: null }, patch: { pec: null } });
+  verifica('una pec tolta si registra, col dopo vuoto', tolta.length === 1 && tolta[0].prima === 'emmesse@pec.it' && tolta[0].dopo === null, J(tolta));
+  verifica('lo stato, il nome e i ruoli non si tracciano, e non chiedono letture',
+    !toccaCampiTracciati('Fornitore', { stato: 'non_attivo', ragione_sociale: 'X', ruolo_raccolta: true }) && toccaCampiTracciati('Fornitore', { cellulare: '1' })
+    && modificheDelRecord('Fornitore', { prima: emmesse, dopo: { ...emmesse, stato: 'non_attivo' }, patch: { stato: 'non_attivo' } }).length === 0);
+  verifica('un fornitore nuovo coi recapiti: le righe dei recapiti', J(modificheDelRecord('Fornitore', { dopo: emmesse, operazione: 'create' }).map(m => m.campo).sort()) === J(['cellulare', 'pec']));
+  const righe = righeDiModifica('Fornitore', { record_id: 'fE', prima: emmesse, dopo: { cellulare: '333 7654321' }, patch: { cellulare: '333 7654321' } }, { utente: 'Mario', origine: 'Tariffe & Anagrafiche', il: '2026-10-13T20:00:00.000Z' });
+  verifica('l\'etichetta e\' la ragione sociale, senza anno, e la riga non e\' riservata',
+    righe.length === 1 && righe[0].etichetta === 'EMMESSE SRL' && !('anno' in righe[0]) && righe[0].riservato === false && righe[0].entita === 'Fornitore', J(righe));
+  verifica('i nomi a video', ['cellulare', 'pec', 'referente'].every(c => (campoTracciato('Fornitore', c) || {}).nome === c));
+
+  // Il motore: una modifica dello stato non legge; una dei recapiti legge una volta e registra.
+  const a = archivioFinto({ Fornitore: [emmesse] });
+  await traccia(a.archivi, 'Fornitore', 'fE', { stato: 'non_attivo' }, { utente: 'Mario' });
+  verifica('lo stato si scrive senza lettura e senza righe', a.conti.get === 0 && a.conti.update === 1 && !(a.db.ModificaDato || []).length, J(a.conti));
+  const esito = await traccia(a.archivi, 'Fornitore', 'fE', { referente: 'Mario Rossi' }, { utente: 'Mario', origine: 'Tariffe & Anagrafiche' });
+  verifica('il referente: una lettura, una riga, la traccia scritta', a.conti.get === 1 && esito.traccia.scritta === true && esito.traccia.righe === 1
+    && J((a.db.ModificaDato || []).map(x => [x.campo, x.dopo])) === J([['referente', 'Mario Rossi']]), J({ conti: a.conti, reg: a.db.ModificaDato }));
+  // Cancellare un fornitore lascia la riga di che cosa c'era.
+  const b = archivioFinto({ Fornitore: [emmesse] });
+  await eliminaConTraccia(b.archivi, 'Fornitore', 'fE', { utente: 'Mario' });
+  verifica('un fornitore eliminato lascia i suoi recapiti nello storico',
+    J((b.db.ModificaDato || []).map(r => [r.operazione, r.campo, r.prima]).sort()) === J([['delete', 'cellulare', '333 1234567'], ['delete', 'pec', 'emmesse@pec.it']]), J(b.db.ModificaDato));
+
+  // La funzione vera: la scheda dei fornitori scrive con gestisciAnagrafiche.
+  const ga = await caricaFunzione('gestisciAnagrafiche');
+  const r = await chiama(ga, { db: { Fornitore: [emmesse] }, corpo: { entita: 'Fornitore', operazione: 'update', id: 'fE', dati: { pec: 'nuova@pec.it', referente: 'Anna Bianchi' } } });
+  const reg = r.db.ModificaDato || [];
+  verifica('gestisciAnagrafiche: due righe, con chi e da dove, e la traccia nella risposta',
+    r.stato === 200 && J(reg.map(x => x.campo).sort()) === J(['pec', 'referente']) && reg.every(x => x.utente === 'prova@prova' && x.origine === 'Tariffe & Anagrafiche' && x.etichetta === 'EMMESSE SRL')
+    && r.j.traccia && r.j.traccia.scritta === true && r.j.traccia.righe === 2, J({ reg, t: r.j.traccia }));
+
+  const { testoModifica } = await caricaLibPagine('lib/storicoModifiche');
+  const t1 = testoModifica({ entita: 'Fornitore', campo: 'cellulare', unita: 'testo', prima: '333 1234567', dopo: '333 7654321', operazione: 'update' });
+  verifica('a video: il cellulare di prima e quello di dopo', t1 === 'cellulare: 333 1234567 → 333 7654321', t1);
+  const t2 = testoModifica({ entita: 'Fornitore', campo: 'referente', unita: 'testo', dopo: 'Mario Rossi', operazione: 'update' });
+  verifica('a video: il referente che mancava', t2 === 'referente: — → Mario Rossi', t2);
+
+  // EcoTyna (chiusura del giro, 14/10/2026): l'archivio a parole e le domande che
+  // lo trovano. Senza il nome diceva «Fornitore», e «chi ha cambiato il
+  // cellulare?» non trovava niente.
+  const finto = { asServiceRole: { entities: archivioFinto({ ModificaDato: reg.map((x, i) => ({ id: `rf${i}`, ...x })) }).archivi } };
+  const chiedi = async (cosa) => (await eseguiStrumento(finto, 'storico_modifiche', { cosa }, { amministratore: false })).dati;
+  const perRecapiti = await chiedi('recapiti per i contratti');
+  verifica('EcoTyna dice l\'archivio a parole, non «Fornitore»', perRecapiti.modifiche.righe.length === 2 && perRecapiti.modifiche.righe.every(x => x.archivio === 'anagrafica dei fornitori (recapiti per i contratti)'), J(perRecapiti.modifiche));
+  const trovate = await Promise.all(['cellulare', 'referente', 'anagrafica dei fornitori', 'contratti'].map(chiedi));
+  verifica('e le trova chiedendo del cellulare, del referente, dell\'anagrafica o dei contratti', trovate.every(d => d.modifiche.righe.some(x => x.archivio === 'anagrafica dei fornitori (recapiti per i contratti)')), J(trovate.map(d => d.modifiche.righe.length)));
+  verifica('la nota dice che lo storico registra i recapiti dei fornitori', /i recapiti dei fornitori per i contratti: cellulare, pec, referente/.test(perRecapiti.nota), perRecapiti.nota);
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

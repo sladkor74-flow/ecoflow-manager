@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Loader2, Plus, CheckSquare, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { oggiRoma } from '@/lib/giornoItaliano';
-import { conteggiAttivita, campiCambioStato } from '@/lib/todoSezioni';
+import { conteggiAttivita, campiCambioStato, EVENTO_TODO } from '@/lib/todoSezioni';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import RichiesteEct from '@/components/todo/RichiesteEct';
 import ElencoAttivita, { PRIORITA } from '@/components/todo/ElencoAttivita';
@@ -38,16 +38,31 @@ export default function TodoPage() {
   // chiudono in modo diverso.
   const [sezione, setSezione] = useState('attivita');
 
+  // L'elenco e' completo quando la lettura ha portato meno del massimo: solo
+  // allora il suo «Da fare» e' quello vero, e si puo' dire al menu.
+  const [elencoIntero, setElencoIntero] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await base44.entities.Todo.list('-created_date', 500);
       setTodos(data);
+      setElencoIntero(data.length < 500);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // IL NUMERO DEL MENU SENZA LETTURE (decisioni dell'utente del 13/10/2026;
+  // chiusura del giro, 14/10/2026). Il menu accanto a «To-Do List» dice il «Da
+  // fare» e lo rilegge uscendo da qui e ogni cinque minuti: ogni volta che
+  // l'elenco cambia (letto, un'attivita' aggiunta, chiusa, riaperta, eliminata)
+  // la pagina gli manda il numero con EVENTO_TODO, e il menu cambia subito.
+  // Prima della prima lettura, o con l'elenco tagliato a 500, non manda niente.
+  useEffect(() => {
+    if (!elencoIntero || typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    window.dispatchEvent(new CustomEvent(EVENTO_TODO, { detail: { da_fare: conteggiAttivita(todos).da_fare } }));
+  }, [todos, elencoIntero]);
 
   // Un'attivita' con un ID ordine scritto sopra si chiude da sola quando quell'
   // ordine risulta terminato: il controllo gira a ogni caricamento delle primarie

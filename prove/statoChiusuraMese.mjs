@@ -247,7 +247,8 @@ console.log('UN ANNO PASSATO: DICEMBRE 2025 GUARDATO A OTTOBRE 2026');
 {
   // La fotografia di stanotte e' del 2026 (GATIM 122,17 t da dichiarare): non
   // dice niente di dicembre 2025. E il gestionale fattura da luglio 2026,
-  // congela da agosto 2026, quadra dalla settimana 36 del 2026.
+  // congela da agosto 2026, quadra dalla settimana 36 del 2026 (che dal
+  // 13/10/2026 non conta piu': le quadrature si chiedono dalla 37).
   const r = await chiama({ db: DB, corpo: { anno: 2025 } });
   verifica('risponde su dicembre 2025', r.stato === 200 && r.j.mese && r.j.mese.etichetta === 'Dicembre 2025', JSON.stringify(r.j).slice(0, 200));
   verifica('nessun numero della fotografia del 2026', !/122,17/.test(JSON.stringify(r.j)), JSON.stringify(passo(r, 'dichiarazioni')));
@@ -268,7 +269,14 @@ console.log('SETTEMBRE 2026, IL PRIMO MESE CHIUSO NEL GESTIONALE, NON SCIVOLA');
   const set = await chiama({ db, oggi: '2026-11-15', corpo: { anno: 2026, mese: 'Settembre' } });
   verifica('il 15/11/2026 settembre mai congelato: la passiva di rete e ACI e\' da fare', ['RETE', 'ACI'].every(c => passo(set, `passiva_${c}`).stato === 'da_fare' && passo(set, `passiva_${c}`).manca?.cosa === 'il congelamento della passiva'), JSON.stringify(['RETE', 'ACI'].map(c => passo(set, `passiva_${c}`).voci)));
   verifica('e nessuna voce dice «Prima di ottobre 2026»', !/Prima di ottobre 2026/.test(JSON.stringify(set.j)), (JSON.stringify(set.j).match(/.{0,60}Prima di ottobre 2026.{0,60}/) || [])[0]);
-  verifica('le quadrature delle cinque settimane di settembre si chiedono', passo(set, 'quadrature_fir').stato === 'da_fare' && passo(set, 'quadrature_fir').voci.filter(v => v.stato === 'da_fare').length === 5, JSON.stringify(passo(set, 'quadrature_fir').voci));
+  // Dal 13/10/2026 le quadrature si chiedono dalla settimana 37 del 2026
+  // (decisione dell'utente: «ciò che è vecchio non conta più»): di settembre
+  // quattro settimane, non piu' cinque, e la 36 non serve col suo perche'.
+  verifica('le quadrature delle quattro settimane di settembre dalla 37 si chiedono, la 36 no', passo(set, 'quadrature_fir').stato === 'da_fare'
+    && passo(set, 'quadrature_fir').voci.filter(v => v.stato === 'da_fare').map(v => v.testo.slice(0, 12)).join() === 'Settimana 37,Settimana 38,Settimana 39,Settimana 40'
+    && passo(set, 'quadrature_fir').voci.some(v => v.stato === 'non_serve' && /^Settimana 36 .*dalla settimana 37 del 2026/.test(v.testo)), JSON.stringify(passo(set, 'quadrature_fir').voci));
+  const quattro = await chiama({ db: { ...db, QuadraturaFir: DB.QuadraturaFir.filter(q => q.settimana >= 37) }, oggi: '2026-11-15', corpo: { anno: 2026, mese: 'Settembre' } });
+  verifica('con le quadrature dalla 37 alla 40 settembre ha il passo fatto', passo(quattro, 'quadrature_fir').stato === 'fatto' && passo(quattro, 'quadrature_fir').dettaglio === '4 settimane quadrate.', JSON.stringify(passo(quattro, 'quadrature_fir')));
   const nov = await chiama({ db, oggi: '2026-11-15' });
   const settembre = (nov.j.mesi_aperti || []).find(m => m.etichetta === 'Settembre 2026');
   verifica('e fra i mesi prima ancora aperti, settembre c\'e\' per il congelamento', settembre && settembre.mancano.join(' | ') === 'il congelamento della passiva (rete, ACI ed extra raccolta)', JSON.stringify(nov.j.mesi_aperti));

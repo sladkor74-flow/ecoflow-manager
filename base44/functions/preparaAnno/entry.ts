@@ -7,6 +7,7 @@ import { utenteCorrente, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { annoChiuso, annoCorrenteRoma } from "../../shared/annoTarget.ts";
 import { listaAnno, pianoCopiaTariffe, tariffeDaConfermare, confermaTariffa } from "../../shared/inizializzazioneAnno.ts";
 import { traccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
+import { etichettaDi, annoDi, unitaDelCampo, campoRiservato, testoDelValore, registraModifiche } from "../../shared/campiTracciati.ts";
 
 // L'ANNO NUOVO: CHE COSA GLI MANCA PER COMINCIARE, E QUELLO CHE SI PUO' FARE
 // DA QUI.
@@ -39,11 +40,48 @@ import { traccia, utenteDellaRichiesta, unisciTracce } from "../../shared/tracci
 // tariffa creata dalla copia ha la sua riga in ModificaDato (prezzo, unita',
 // date), con chi ha premuto il pulsante e «copia dal <anno prima>». Cosi' alla
 // domanda «chi ha messo il prezzo del 2027» c'e' una risposta anche quando la
-// risposta e' «la copia, e nessuno l'ha ancora corretto». La conferma tocca
-// solo la nota e passa dallo stesso involucro senza registrare niente. La
-// risposta porta traccia: { scritta, righe, motivo? }.
+// risposta e' «la copia, e nessuno l'ha ancora corretto». La risposta porta
+// traccia: { scritta, righe, motivo? }.
+//
+// ANCHE LA CONFERMA ENTRA NELLO STORICO (decisioni dell'utente del 13/10/2026,
+// gruppo B). La conferma tocca solo la nota, che non e' un campo tracciato, e
+// fino a quel giorno non lasciava nessuna riga: «chi ha confermato il prezzo
+// del 2027, e quando» lo diceva solo la nota della tariffa. Ora ogni tariffa
+// confermata ha la sua riga (righeConferma): il prezzo, uguale prima e dopo,
+// chi ha premuto, quando e «confermato il valore copiato dall'anno prima».
 //
 // Corpo: { anno, azione, direzione, simula }
+
+// Il motivo delle righe della conferma, uguale per tutte: e' quello che si
+// legge nello storico e che EcoTyna trova.
+const MOTIVO_CONFERMA = "confermato il valore copiato dall'anno prima";
+
+/**
+ * LE RIGHE DELLO STORICO DI UNA CONFERMA (decisioni dell'utente del 13/10/2026,
+ * gruppo B). Confermare una tariffa copiata toglie la nota «da confermare» e
+ * non cambia nessun campo tracciato: il motore dello storico, che registra solo
+ * i campi che cambiano, non scriveva niente, e alla domanda «chi ha confermato
+ * il prezzo del 2027, e quando» rispondeva soltanto la nota della tariffa. Qui
+ * una riga per ogni valore confermato: il prezzo, uguale prima e dopo (non e'
+ * cambiato: e' stato controllato), chi, quando, da dove e il motivo
+ * MOTIVO_CONFERMA. Riservata come una modifica della stessa tariffa: il prezzo
+ * di un fornitore lo vede solo l'amministratore.
+ */
+function righeConferma(confermate, { utente = '', origine = '', il = '', anno = 0 } = {}) {
+  return (confermate || []).map((t) => {
+    const valore = testoDelValore(t.valore);
+    const annoTariffa = annoDi('Tariffa', t);
+    return {
+      entita: 'Tariffa', record_id: String(t.id || ''), etichetta: etichettaDi('Tariffa', t), campo: 'valore',
+      ...(valore !== null ? { prima: valore, dopo: valore } : {}),
+      unita: unitaDelCampo('Tariffa', 'valore', t), operazione: 'update', utente, il, origine,
+      motivo: `${MOTIVO_CONFERMA} (${Number(anno) - 1}), sul contratto ${anno}`,
+      riservato: !!campoRiservato('Tariffa', 'valore', t),
+      ...(annoTariffa ? { anno: annoTariffa } : {}),
+    };
+  });
+}
+
 export default async function (req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -106,16 +144,24 @@ export default async function (req) {
       if (!['ATTIVA', 'PASSIVA'].includes(dir)) return Response.json({ error: 'Direzione obbligatoria: ATTIVA o PASSIVA.' }, { status: 400 });
       const daConf = tariffeDaConfermare(tariffe, anno, dir);
       if (simula) return Response.json({ simulazione: true, anno, direzione: dir, quante: daConf.length });
-      const confermate = [], nonConfermate = [], tracceConferma = [];
+      const confermate = [], nonConfermate = [], tracceConferma = [], confermateIntere = [];
       for (const t of daConf) {
         try {
           const scritta = await traccia(svc, 'Tariffa', t.id, confermaTariffa(t, { il: oggiRoma(), da: user && user.email ? user.email : '', anno }), { ...comeScrive, motivo: `confermata sul contratto ${anno}` });
           tracceConferma.push(scritta.traccia);
           confermate.push({ id: t.id, chi: t.fornitore_nome || t.cliente || '', valore: t.valore });
+          confermateIntere.push(t);
         } catch (e) {
           nonConfermate.push({ chi: t.fornitore_nome || t.cliente || '', motivo: e && e.message ? e.message : String(e) });
         }
       }
+      // Una riga dello storico per ogni valore confermato, scritte tutte insieme
+      // (registraModifiche va a blocchi di cento: il limite di richieste). Solo
+      // quelle confermate davvero; se il registro non si scrive le tariffe restano
+      // confermate, e la risposta lo dice (traccia.scritta false).
+      tracceConferma.push(await registraModifiche(svc, righeConferma(confermateIntere, {
+        utente: comeScrive.utente, origine: comeScrive.origine, il: new Date().toISOString(), anno,
+      })));
       const tariffeDopo = await fetchAll(svc.Tariffa);
       const dopo = listaAnno({
         anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,

@@ -238,8 +238,11 @@ verifica('la pagina conta con conteggiAttivita e disegna con ElencoAttivita', /c
 verifica('nessun filtro «Completati» fra i da fare, e nessun «Tutti» che conti tutto', !/setFilterStato\('completato'\)|\['completato'|todos\.length\)/.test(p) && !/Tutti \(\{todos\.length\}\)/.test(p));
 verifica('il cambio di stato passa da campiCambioStato, e solo per l\'amministratore', /Todo\.update\(todo\.id, campiCambioStato\(todo, next, oggiRoma\(\)\)\)/.test(p)
   && /const cambiaStato = async \(todo, next\) => \{\s*if \(!isAdmin\) return;/.test(p) && !/Todo\.update\(todo\.id, \{ stato: next \}\)/.test(p));
-verifica('all\'apertura nessuna scrittura in piu\': due effetti, la lettura e il controllo degli ordini di sempre', (p.match(/useEffect\(/g) || []).length === 2
+// Dal 14/10/2026 c'e' un terzo effetto, che non scrive e non legge: manda al menu
+// il «Da fare» dell'elenco letto (EVENTO_TODO, prove/menuTodo.mjs sezione 3).
+verifica('all\'apertura nessuna scrittura in piu\': la lettura, il controllo degli ordini di sempre e il numero al menu', (p.match(/useEffect\(/g) || []).length === 3
   && /useEffect\(\(\) => \{ load\(\); \}, \[load\]\);/.test(p) && /useEffect\(\(\) => \{ controllaOrdini\(\); \}, \[controllaOrdini\]\);/.test(p)
+  && /useEffect\(\(\) => \{\s*if \(!elencoIntero [^\n]*\n\s*window\.dispatchEvent\(new CustomEvent\(EVENTO_TODO, \{ detail: \{ da_fare: conteggiAttivita\(todos\)\.da_fare \} \}\)\);\s*\}, \[todos, elencoIntero\]\);/.test(p)
   && J([...p.matchAll(/functions\.invoke\('([^']+)'/g)].map(m => m[1])) === J(['controllaTodoOrdini']));
 verifica('le richieste: la tabella e i numeri vengono dalle da fare', /dividiRichieste\(righe, esitoDi\)/.test(e) && /let v = daFare;/.test(e) && /da_fare: daFare\.length/.test(e) && /<RichiesteCompletate/.test(e));
 verifica('fra i filtri delle richieste non ci sono piu\' le chiuse ne\' «Tutte»', !/\['chiuse'|\['tutte'|'Chiuse'|'Tutte'/.test(e));

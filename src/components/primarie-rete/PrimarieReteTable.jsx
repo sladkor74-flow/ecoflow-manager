@@ -7,9 +7,17 @@ import { eTerminato, giornoMovimento, giornoOrdine, meseOrdine, tempiRaccolta, d
 import { giornoRoma } from '@/lib/giornoItaliano';
 import { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
 
+// LA COLONNA PDR (13/10/2026). La ragione sociale da sola non distingue due
+// punti di raccolta della stessa ditta: MASTRIA GOMME SRL ha viale Pio X e
+// viale Europa, e nell'archivio dell'11/10/2026 le ditte con piu' punti sono 71.
+// La colonna dice il codice del punto (id_pdr, la chiave del modulo PDR e della
+// ricerca qui sopra) e il suo nome come lo scrive il portale. Il codice viene
+// prima e non si taglia, anche a 375 px; il nome si tronca come la ragione
+// sociale. Si ordina per codice, come numero.
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
   { key: 'ragione_sociale', label: 'Ragione Sociale' },
+  { key: 'pdr', label: 'PDR', format: 'pdr' },
   { key: 'provincia', label: 'Prov.' },
   { key: 'regione', label: 'Regione' },
   { key: 'destinazione', label: 'Destinazione' },
@@ -29,6 +37,20 @@ const COLUMNS = [
 
 // Le date si mostrano come giorno italiano, 'GG/MM/AAAA'.
 const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+
+// Il codice del punto di raccolta, come numero; null se l'ordine non lo porta
+// (allora la cella dice «—», non 0). E' un codice, non una quantita': si scrive
+// senza il punto delle migliaia (42872, non 42.872).
+const codicePdr = (r) => {
+  if (r.id_pdr == null || String(r.id_pdr).trim() === '') return null;
+  const n = Number(r.id_pdr);
+  return Number.isFinite(n) ? n : null;
+};
+
+// Ragione sociale, punto di raccolta e destinazione si troncano alla stessa
+// larghezza (la cella del PDR ha la sua resa, con la stessa classe).
+const TRONCA = 'truncate max-w-[200px]';
+const TRONCATE = new Set(['ragione_sociale', 'destinazione']);
 
 // Le segnalazioni della colonna Tempi, in ambra: un terminato che non si puo'
 // misurare lo dice, invece di restare vuoto come un ordine ancora aperto.
@@ -78,6 +100,8 @@ export default function PrimarieReteTable({ records, loading }) {
     const nonMisurato = eTerminato(r) && (incoerente(r) || !!(tempi && tempi.prima_dell_immissione));
     return {
       ...r,
+      pdr: codicePdr(r),
+      pdr_nome: String(r.punto_di_raccolta || '').trim(),
       giorno_ordine: senzaPeriodo ? null : giornoOrdine(r) || null,
       fine_trasporto: fine || null,
       mese: senzaPeriodo ? null : meseOrdine(r),
@@ -114,6 +138,14 @@ export default function PrimarieReteTable({ records, loading }) {
           {sorted.sorted.slice(0, 500).map((r, i) => (
             <tr key={r.id} className={`border-t hover:bg-muted/30 ${r.date_da_sistemare ? 'bg-amber-50/60' : i % 2 ? 'bg-muted/10' : ''}`}>
               {COLUMNS.map((col) => {
+                if (col.format === 'pdr') {
+                  return (
+                    <td key={col.key} title={[r.pdr != null ? `PDR ${r.pdr}` : 'senza codice PDR', r.pdr_nome].filter(Boolean).join(' · ')} className={`px-2 py-1.5 whitespace-nowrap ${TRONCA}`}>
+                      <span className="font-medium tabular-nums">{r.pdr != null ? String(r.pdr) : '—'}</span>
+                      {r.pdr_nome && <span className="text-muted-foreground"> · {r.pdr_nome}</span>}
+                    </td>
+                  );
+                }
                 let val = r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'date') val = dataIt(val);
@@ -122,7 +154,7 @@ export default function PrimarieReteTable({ records, loading }) {
                   <td
                     key={col.key}
                     title={isTempi && val === IMMISSIONE_DOPO_RITIRO ? NOTA_IMMISSIONE_DOPO : (isTempi && SEGNALAZIONI.has(val) && r.date_da_sistemare ? r.date_da_sistemare : undefined)}
-                    className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''} ${isTempi && val === 'DOPO SCADENZA' ? 'text-red-600 font-medium' : ''} ${isTempi && val === 'OK' ? 'text-green-600 font-medium' : ''} ${isTempi && SEGNALAZIONI.has(val) ? 'text-amber-600 font-medium' : ''} ${isTempi && val === IMMISSIONE_DOPO_RITIRO ? 'text-muted-foreground' : ''}`}
+                    className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${TRONCATE.has(col.key) ? TRONCA : ''} ${isTempi && val === 'DOPO SCADENZA' ? 'text-red-600 font-medium' : ''} ${isTempi && val === 'OK' ? 'text-green-600 font-medium' : ''} ${isTempi && SEGNALAZIONI.has(val) ? 'text-amber-600 font-medium' : ''} ${isTempi && val === IMMISSIONE_DOPO_RITIRO ? 'text-muted-foreground' : ''}`}
                   >
                     {col.key === 'id_ordine' && <SegnoDate testo={r.date_da_sistemare} />}
                     {val ?? ''}

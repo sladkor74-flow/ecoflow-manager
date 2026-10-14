@@ -125,6 +125,23 @@ export function conteggiAttivita(todos) {
   return { da_fare: daFare.length, aperto: daFare.length - inCorso, in_corso: inCorso, completati: completati.length };
 }
 
+// IL NUMERO ACCANTO ALLA TO-DO LIST NEL MENU (decisioni dell'utente del
+// 13/10/2026, gruppo B). E' il «Da fare» della pagina (conteggiAttivita), letto
+// come gli altri contatori del menu: una lettura leggera all'avvio e ogni
+// cinque minuti, delle sole attivita' da fare - aperte e in corso, lo stato che
+// l'archivio scrive per difetto - e mai l'elenco intero, che coi completati
+// cresce ogni mese. La pagina puo' dire il numero nuovo con l'evento
+// EVENTO_TODO ({ detail: { da_fare } }), senza un'altra lettura.
+export const STATI_DA_FARE = ['aperto', 'in_corso'];
+export const EVENTO_TODO = 'todo-aggiornata';
+const MASSIMO_DA_FARE = 500;
+
+/** Quante attivita' sono da fare, con una lettura sola dell'archivio Todo (l'entita' del client). */
+export async function contaDaFare(Todo) {
+  const righe = await Todo.filter({ stato: { $in: STATI_DA_FARE } }, '-created_date', MASSIMO_DA_FARE);
+  return conteggiAttivita(righe || []).da_fare;
+}
+
 /** I da fare di un filtro della pagina: 'tutti' (aperte + in corso), 'aperto', 'in_corso'. */
 export function daFareDelFiltro(daFare, filtro) {
   if (filtro === 'in_corso') return daFare.filter(t => t.stato === 'in_corso');

@@ -29,7 +29,10 @@
 // pure: il piano mese per mese e canale per canale (pianoMesiChiusiFuori), che
 // cosa si scrive (patchChiusoFuori, rigaStoricoChiusoFuori), e che dopo la
 // chiusura del mese li legga chiusi; la funzione intera, sui dati veri, in
-// prove/mesiChiusiFuori.mjs. npm run prove
+// prove/mesiChiusiFuori.mjs.
+// Decisioni dell'utente del 13/10/2026: le quadrature FIR si chiedono dalla
+// settimana 37 del 2026 (PRIMA_SETTIMANA_DA_QUADRARE), «ciò che è vecchio non
+// conta più»: settembre non chiede piu' la 36. npm run prove
 import * as C from '../base44/shared/chiusuraMese.ts';
 import { fotografiaDelGiorno, leggiFotografia } from '../base44/shared/indicatoriGiorno.ts';
 import { freschezzaArchivi } from '../base44/shared/cruscotto.ts';
@@ -412,21 +415,41 @@ console.log('QUADRATURE FIR');
   verifica('e non dice che sono «cominciate dopo»: il mese si e\' chiuso fuori', nessuna(C.periodoDelMese(2025, 11)).dettaglio === 'Nessuna settimana del mese da quadrare. Il gestionale chiude i mesi da settembre 2026: dicembre 2025 si è chiuso fuori.', nessuna(C.periodoDelMese(2025, 11)).dettaglio);
   verifica('il mese che si chiude adesso si', nessuna(SETTEMBRE).stato === 'da_fare' && nessuna(SETTEMBRE).voci.length === 5);
   // Il confine non scivola (12/10/2026): senza nessuna quadratura, settembre
-  // guardato a novembre chiede le sue cinque settimane, e agosto nessuna.
+  // guardato a novembre chiede le sue settimane, e agosto nessuna.
+  // Dal 13/10/2026 (decisione dell'utente, «ciò che è vecchio non conta più»)
+  // le settimane si chiedono dalla 37 del 2026: settembre ne chiede quattro, la
+  // 36 (31/08-06/09) non piu'.
   const aNovembre = C.passoQuadrature({ periodo: SETTEMBRE, quadrature: [], oggi: '2026-11-15' });
-  verifica('il 15/11/2026, senza nessuna quadratura, settembre chiede le sue cinque settimane', aNovembre.stato === 'da_fare' && aNovembre.voci.filter(v => v.stato === 'da_fare').length === 5, JSON.stringify(aNovembre.voci));
+  verifica('il 15/11/2026, senza nessuna quadratura, settembre chiede le sue quattro settimane dalla 37', aNovembre.stato === 'da_fare'
+    && aNovembre.voci.filter(v => v.stato === 'da_fare').map(v => v.testo.slice(0, 12)).join() === 'Settimana 37,Settimana 38,Settimana 39,Settimana 40'
+    && aNovembre.manca.cosa === 'le quadrature FIR di 4 settimane', JSON.stringify(aNovembre));
   const agostoNessuna = C.passoQuadrature({ periodo: C.periodoDelMese(2026, 7), quadrature: [], oggi: '2026-11-15' });
-  verifica('e agosto, anche la settimana 36 che comincia il 31/08, non le chiede', agostoNessuna.stato === 'non_serve' && agostoNessuna.voci.every(v => /le quadrature si chiedono da settembre 2026, il primo mese chiuso nel gestionale\.$/.test(v.testo)), JSON.stringify(agostoNessuna.voci));
-  // La prima quadratura e' della settimana 37: la 36 (31/08-06/09) si chiede a
-  // settembre, che ne ha sei giorni, e non ad agosto, che ne ha uno.
+  verifica('e agosto, anche la settimana 36 che comincia il 31/08, non le chiede, col perche\'', agostoNessuna.stato === 'non_serve'
+    && agostoNessuna.voci.every(v => v.stato === 'non_serve' && /: le quadrature si chiedono dalla settimana 37 del 2026, quello che c'è prima non conta più\.$/.test(v.testo))
+    && agostoNessuna.dettaglio === 'Nessuna settimana del mese da quadrare. Il gestionale chiude i mesi da settembre 2026: agosto 2026 si è chiuso fuori.', JSON.stringify(agostoNessuna));
+  // La prima quadratura caricata e' la 37, come nel gestionale vero: settembre
+  // e' fatto con le sue quattro, e la 36 non e' una mancanza.
   const da37 = [37, 38, 39, 40].map(s => q(s, 'completata', piena));
   const set37 = C.passoQuadrature({ periodo: SETTEMBRE, quadrature: da37, oggi: '2026-11-15' });
-  verifica('prima quadratura la 37: settembre chiede anche la 36', set37.stato === 'da_fare' && set37.voci.some(v => v.stato === 'da_fare' && /^Settimana 36 \(31\/08–06\/09\): non ancora fatta\.$/.test(v.testo)), JSON.stringify(set37.voci));
+  verifica('dalla 37 alla 40 quadrate: settembre e\' fatto, e la 36 non serve', set37.stato === 'fatto' && set37.dettaglio === '4 settimane quadrate.'
+    && set37.voci[0].stato === 'non_serve' && /^Settimana 36 \(31\/08–06\/09\): le quadrature si chiedono dalla settimana 37 del 2026/.test(set37.voci[0].testo), JSON.stringify(set37));
   const ago37 = C.passoQuadrature({ periodo: C.periodoDelMese(2026, 7), quadrature: da37 });
   verifica('e agosto no', ago37.stato === 'non_serve', JSON.stringify(ago37.voci));
-  // Una quadratura di prima di settembre e' il confine, com'era: dalla 33 in poi.
+  // Una quadratura della 36 da chiarire non tiene aperto settembre: non conta piu'.
+  const con36 = C.passoQuadrature({ periodo: SETTEMBRE, quadrature: [...da37, q(36, 'completata', [{ canale: 'RETE', conformita: 'parziale', incongruenti: 2 }])] });
+  verifica('una 36 caricata e da chiarire non tiene aperto settembre', con36.stato === 'fatto' && con36.voci[0].stato === 'non_serve', JSON.stringify(con36.voci));
+  // Una quadratura caricata prima di settembre non e' piu' un confine: fino al
+  // 13/10/2026, con la 33, agosto chiedeva la 34, la 35 e la 36.
   const ago33 = C.passoQuadrature({ periodo: C.periodoDelMese(2026, 7), quadrature: [q(33, 'completata', piena)] });
-  verifica('con la prima quadratura della settimana 33, agosto chiede dalla 34 in poi', ago33.stato === 'da_fare' && ago33.voci.filter(v => v.stato === 'da_fare').map(v => v.testo.slice(0, 12)).join() === 'Settimana 34,Settimana 35,Settimana 36' && ago33.voci.some(v => v.stato === 'non_serve' && /prima della prima quadratura caricata/.test(v.testo)), JSON.stringify(ago33.voci));
+  verifica('con una quadratura della settimana 33, agosto non chiede niente', ago33.stato === 'non_serve' && !ago33.voci.some(v => v.stato === 'da_fare'), JSON.stringify(ago33.voci));
+  // Il confine, scritto una volta e fisso.
+  verifica('il confine e\' la settimana 37 del 2026', C.PRIMA_SETTIMANA_DA_QUADRARE && C.PRIMA_SETTIMANA_DA_QUADRARE.anno === 2026 && C.PRIMA_SETTIMANA_DA_QUADRARE.settimana === 37 && Object.isFrozen(C.PRIMA_SETTIMANA_DA_QUADRARE)
+    && typeof C.settimanaDaQuadrare === 'function' && !C.settimanaDaQuadrare(2026, 36) && C.settimanaDaQuadrare(2026, 37) && C.settimanaDaQuadrare(2026, 53) && C.settimanaDaQuadrare(2027, 1) && !C.settimanaDaQuadrare(2025, 52));
+  // Gli anni dopo chiedono tutte le loro settimane.
+  const gen27 = C.passoQuadrature({ periodo: C.periodoDelMese(2027, 0), quadrature: [] });
+  verifica('gennaio 2027 chiede tutte le sue settimane', gen27.stato === 'da_fare' && gen27.voci.length > 0 && gen27.voci.every(v => v.stato === 'da_fare'), JSON.stringify(gen27.voci));
+  const dic26 = C.passoQuadrature({ periodo: C.periodoDelMese(2026, 11), quadrature: [] });
+  verifica('dicembre 2026 chiede dalla 49 alla 53', dic26.voci.filter(v => v.stato === 'da_fare').length === 5, JSON.stringify(dic26.voci));
 }
 
 console.log('IL MESE INTERO E LA SUA RIGA');

@@ -150,6 +150,37 @@ export function scostamenti(siti) {
 }
 
 /**
+ * GLI STOCCAGGI ACI CHE NON QUADRANO COL PORTALE (decisioni dell'utente del
+ * 13/10/2026, gruppo B).
+ *
+ * La rilevazione di uno stoccaggio a portale e' per classe, e la classe 9 e'
+ * l'ACI: un piazzale che la ha (oggi Nappi Sud) ha una riga ACI con il suo
+ * confronto, «nappi sud|ACI». Fino al 13/10/2026 quella riga stava fuori dal
+ * verdetto della notte, e una giacenza ACI fuori dal portale la diceva solo la
+ * sezione Impianti della dashboard, in un conteggio («ACI negli stoccaggi, a
+ * parte: 0 su 1»): «Da gestire» taceva. Ora diventa una voce come uno stoccaggio
+ * della rete, ma sempre a parte: e' un altro canale, e le due liste non si
+ * mescolano mai. Stessa regola di scostamenti (tolleranza compresa), e ogni
+ * voce porta canale: 'ACI'. voci sono le righe della fotografia (vociSito):
+ * cosi' la dashboard la legge anche da una fotografia scritta prima di oggi.
+ */
+export function scostamentiAci(voci) {
+  return scostamenti((voci || []).filter(v => v && canaleDellaVoce(v) === 'ACI'
+    && v.giacenza_portale_t !== null && v.giacenza_portale_t !== undefined))
+    .map(x => ({ ...x, canale: 'ACI' }));
+}
+
+/** La frase degli stoccaggi ACI che non quadrano: '' se quadrano tutti. */
+export function notaAci(fuoriAci) {
+  const f = fuoriAci || [];
+  if (!f.length) return '';
+  const primi = f.slice(0, 3).map(x => `${x.sito} ${x.scarto_t > 0 ? '+' : ''}${tt(x.scarto_t)} t`);
+  const altri = f.length - primi.length;
+  return `${f.length === 1 ? 'Uno stoccaggio ACI (classe 9) si scosta' : `${f.length} stoccaggi ACI (classe 9) si scostano`} dal portale: `
+    + primi.join(', ') + (altri > 0 ? ` e altri ${altri}` : '') + '.';
+}
+
+/**
  * «Un impianto», «uno stoccaggio», «2 impianti e uno stoccaggio»: chi si
  * scosta, col nome giusto. Uno scostamento senza il segno dello stoccaggio e'
  * un impianto, come nelle fotografie scritte prima del 12/10/2026.
@@ -243,10 +274,15 @@ export function fotografiaDelGiorno(siti, { giorno, anno, doppioni } = {}) {
   // su 6, con Nappi Sud), il guardiano su 5, e uno stoccaggio della rete che non
   // quadrava lo diceva la sezione Impianti della dashboard e «Da gestire» no. Ora
   // le righe sono le stesse della pagina: gli impianti, e gli stoccaggi con il
-  // loro canale di rete (canaleDellaVoce). L'ACI degli stoccaggi resta fuori dal
-  // verdetto, come nella dashboard, dove sta a parte.
+  // loro canale di rete (canaleDellaVoce). L'ACI degli stoccaggi non entra nel
+  // conto della rete, come nella dashboard, dove sta a parte.
   const conConfronto = voci.filter(v => canaleDellaVoce(v) === 'RETE' && v.giacenza_portale_t !== null);
   const fuori = scostamenti(conConfronto);
+  // Dal 13/10/2026 uno stoccaggio ACI che non quadra fa «da guardare» come uno
+  // della rete, e la nota lo dice in una frase sua (scostamentiAci). In
+  // scostamenti_json restano gli scostamenti della rete, come prima: la
+  // dashboard li conta per canale, e chi li legge non li deve dividere.
+  const fuoriAci = scostamentiAci(voci);
   const dopp = doppioni || [];
   return {
     giorno,
@@ -254,8 +290,8 @@ export function fotografiaDelGiorno(siti, { giorno, anno, doppioni } = {}) {
     // Un doppione fa «da guardare» quanto uno scostamento: finche' c'e', i
     // numeri dipendono da quale modulo si guarda, e questo e' peggio di un
     // numero fuori di mezza tonnellata, perche' non si vede da nessuna parte.
-    esito: (fuori.length || dopp.length) ? 'da_guardare' : 'in_linea',
-    nota: notaDelGiorno(fuori, conConfronto.length, dopp, conConfronto.filter(v => v.ruolo === 'stoc').length),
+    esito: (fuori.length || fuoriAci.length || dopp.length) ? 'da_guardare' : 'in_linea',
+    nota: [notaDelGiorno(fuori, conConfronto.length, dopp, conConfronto.filter(v => v.ruolo === 'stoc').length), notaAci(fuoriAci)].filter(Boolean).join(' '),
     siti_json: JSON.stringify(voci),
     totali_json: JSON.stringify(totaliGiorno(voci)),
     scostamenti_json: JSON.stringify(fuori),

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { eTerminato, giornoElenco, settimanaIso, annoPerFiltro, dateDaSistemare, testoDate, MESI_MOVIMENTI } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
-import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route, CalendarRange } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Route, CalendarRange, AlertTriangle } from 'lucide-react';
 import AlertBadge from '@/components/alerts/AlertBadge';
 import SecondarieUpload from '@/components/secondarie/SecondarieUpload';
 import SecondarieKpi from '@/components/secondarie/SecondarieKpi';
@@ -55,7 +56,13 @@ export default function Secondarie() {
   const [loading, setLoading] = useState(true);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [alertCount, setAlertCount] = useState(0);
+  // Gli alert aperti del modulo: undefined finche' non si sono letti la prima
+  // volta (non si mostra niente), null se getAlerts non ha risposto o ha
+  // risposto senza il conteggio (si mostra «—», non letto), altrimenti il numero.
+  // Come in Terminati Rete (13/10/2026): prima una risposta senza conteggio
+  // diventava 0, e una lettura caduta lasciava a video il numero di prima
+  // (chiusura del giro, 14/10/2026).
+  const [alertCount, setAlertCount] = useState(undefined);
   const [filters, setFilters] = useState(() => filtriVuoti('Rete'));
   const [viewMode, setViewMode] = useState('matrix');
   const [searchIdOrdine, setSearchIdOrdine] = useState('');
@@ -153,10 +160,15 @@ export default function Secondarie() {
   useEffect(() => {
     const n = ++ultimoAlert.current;
     (async () => {
+      let totale = null;
       try {
         const res = await base44.functions.invoke('getAlerts', { modulo: 'secondarie', solo_aperti: true });
-        if (n === ultimoAlert.current) setAlertCount(res.data?.total || 0);
-      } catch { /* il contatore degli avvisi non e' essenziale */ }
+        // Un valore mancante non e' zero.
+        totale = Number.isFinite(res.data?.total) ? res.data.total : null;
+      } catch (e) {
+        console.error(e);
+      }
+      if (n === ultimoAlert.current) setAlertCount(totale);
     })();
   }, [versione, versioneAlert]);
 
@@ -243,6 +255,13 @@ export default function Secondarie() {
         </div>
         <div className="flex items-center gap-2">
           {alertCount > 0 && <AlertBadge count={alertCount} modulo="secondarie" />}
+          {/* Gli alert non letti: «—», mai 0 e mai niente. Porta alla pagina
+              degli alert, dove si possono guardare lo stesso. */}
+          {alertCount === null && (
+            <Link to="/alert-engine" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-muted text-muted-foreground hover:bg-muted/70">
+              <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" /> Alert aperti: — <span className="font-normal">(non letti)</span>
+            </Link>
+          )}
           <button onClick={() => handleExport('matrix')} disabled={exporting} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <LayoutGrid className="w-4 h-4" />} Excel Sintesi {canale}
           </button>

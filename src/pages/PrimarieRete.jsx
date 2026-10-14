@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { eTerminato, giornoMovimento, giornoElenco, meseElenco, annoElenco, dateDaSistemare } from '@/lib/movimenti';
 import { base44 } from '@/api/base44Client';
-import { Loader2, Upload, MapPin, BarChart3, Clock, Table2, Filter, X } from 'lucide-react';
+import { Loader2, Upload, MapPin, BarChart3, Clock, Table2, Filter, X, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import AlertBadge from '@/components/alerts/AlertBadge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -81,7 +81,11 @@ export default function PrimarieRete() {
   const [provinceData, setProvinceData] = useState(null);
   const [mixData, setMixData] = useState(null);
   const [slaData, setSlaData] = useState(null);
-  const [alertCount, setAlertCount] = useState(0);
+  // Gli alert aperti del modulo: undefined finche' non si sono letti la prima
+  // volta (non si mostra niente), null se getAlerts non ha risposto (si mostra
+  // «—», non letto), altrimenti il numero (13/10/2026: prima una lettura caduta
+  // metteva 0 e il segno spariva, come se non ci fossero alert aperti).
+  const [alertCount, setAlertCount] = useState(undefined);
   // Chi sta ancora calcolando: ogni scheda aspetta il suo riquadro, e l'elenco
   // degli ordini resta a video mentre si ricalcola il mix.
   const [inCorso, setInCorso] = useState({ fissi: true, mix: true, sla: true });
@@ -143,8 +147,11 @@ export default function PrimarieRete() {
       fallito = true;
     }
     if (!seqAlert.valida(mia)) return;
-    setAlertCount(dato?.total || 0);
-    setNonCaricati(p => ({ ...p, alert: fallito }));
+    // Un valore mancante non e' zero: senza risposta, o con una risposta senza
+    // il conteggio, il contatore dice «—» e l'avviso sopra la pagina lo spiega.
+    const totale = !fallito && Number.isFinite(dato?.total) ? dato.total : null;
+    setAlertCount(totale);
+    setNonCaricati(p => ({ ...p, alert: totale === null }));
   }, [seqAlert]);
 
   const caricaFissi = useCallback(async () => {
@@ -323,6 +330,13 @@ export default function PrimarieRete() {
         </div>
         <div className="flex items-center gap-2">
           {alertCount > 0 && <AlertBadge count={alertCount} modulo="primarie_rete" />}
+          {/* Gli alert non letti: «—», mai 0 e mai niente (13/10/2026). Porta alla
+              pagina degli alert, dove si possono guardare lo stesso. */}
+          {alertCount === null && (
+            <Link to="/alert-engine" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-muted text-muted-foreground hover:bg-muted/70">
+              <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" /> Alert aperti: — <span className="font-normal">(non letti)</span>
+            </Link>
+          )}
           <Link to="/caricamento-dati" className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
             <Upload className="w-4 h-4" /> Carica dati
           </Link>

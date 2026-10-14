@@ -629,10 +629,12 @@ const mancaAlVuoto = (n) => (n.con_peso > 0 ? "la rielaborazione dell'attiva" : 
  * archivi.
  *
  * I passi che prima non si facevano nel gestionale - l'attiva elaborata, la
- * passiva congelata, i consuntivi dei fornitori, le quadrature FIR - si
- * chiedono da qui, o dal primo fatto scritto se e' di prima (un mese gia'
- * trattato qui resta com'era). Mai da dopo: settembre si chiude nel gestionale
- * anche se il primo congelamento fosse quello di ottobre.
+ * passiva congelata, i consuntivi dei fornitori - si chiedono da qui, o dal
+ * primo fatto scritto se e' di prima (un mese gia' trattato qui resta com'era).
+ * Mai da dopo: settembre si chiude nel gestionale anche se il primo
+ * congelamento fosse quello di ottobre. Le quadrature FIR hanno un confine loro,
+ * fisso anche quello: la settimana 37 del 2026 (PRIMA_SETTIMANA_DA_QUADRARE,
+ * decisione dell'utente del 13/10/2026).
  *
  * Fino a questa revisione, senza nessun fatto scritto il primo mese era «quello
  * che si chiude adesso», e scivolava col calendario: sulla copia dei dati veri
@@ -877,39 +879,55 @@ export function passiPassiva({ periodo, chiusure = [], consuntivi = [], document
 const NOME_CANALE_QUADRATURA = { RETE: 'rete', ACI: 'ACI', 'EXTRA RACCOLTA': 'extra raccolta' };
 
 /**
+ * LA PRIMA SETTIMANA DA QUADRARE: LA 37 DEL 2026 (decisione dell'utente del
+ * 13/10/2026). Alla domanda se la settimana 36 (31/08-06/09) andasse ancora
+ * quadrata l'utente ha risposto che, siamo a ottobre e settembre e' fatturato,
+ * «ciò che è vecchio non conta più»: come per i report settimanali, che si
+ * cancellano dopo quaranta giorni dal caricamento. Le quadrature FIR si
+ * chiedono dalla settimana 37 del 2026 (07/09-13/09), la prima caricata nel
+ * gestionale; la 36 e quelle di prima non si chiedono piu', nemmeno se una loro
+ * quadratura c'e' ed e' da chiarire.
+ *
+ * E' scritta una volta, qui, ed e' fissa come PRIMO_MESE_DEL_GESTIONALE: non
+ * dipende da oggi ne' dalla prima quadratura caricata. Fino al 13/10/2026
+ * settembre chiedeva anche la 36, che ha sei giorni a settembre, e un mese di
+ * prima chiedeva le settimane dalla prima quadratura caricata in poi.
+ */
+export const PRIMA_SETTIMANA_DA_QUADRARE = Object.freeze({ anno: 2026, settimana: 37 });
+const chiaveSettimana = (anno, s) => Number(anno) * 100 + Number(s);
+const CONFINE_QUADRATURE = chiaveSettimana(PRIMA_SETTIMANA_DA_QUADRARE.anno, PRIMA_SETTIMANA_DA_QUADRARE.settimana);
+/** Se una settimana si quadra: dalla 37 del 2026 in poi. */
+export const settimanaDaQuadrare = (anno, settimana) => chiaveSettimana(anno, settimana) >= CONFINE_QUADRATURE;
+
+/**
  * LE QUADRATURE FIR DELLE SETTIMANE DEL MESE: la stampa dei formulari contro
  * portale e gestionale, una settimana per volta (QuadraturaFir). Fatta vuol dire
- * completata e piena su ogni canale; parziale e' da chiarire. Da settembre
- * 2026, il primo mese chiuso nel gestionale (PRIMO_MESE_DEL_GESTIONALE), si
- * chiedono tutte le settimane del mese; nei mesi di prima solo quelle dalla
- * prima quadratura caricata in poi, se ce n'e' una. Una settimana con la sua
- * quadratura si guarda sempre. Fino al 12/10/2026, senza nessuna quadratura il
- * confine era il mese che si chiude adesso, e scivolava col calendario.
+ * completata e piena su ogni canale; parziale e' da chiarire. Si chiedono tutte
+ * le settimane del mese dalla 37 del 2026 in poi (PRIMA_SETTIMANA_DA_QUADRARE);
+ * quelle di prima non servono, col perche'. Un mese tutto di prima - agosto
+ * 2026 e gli altri chiusi fuori dal gestionale - non ha quadrature da chiedere.
  */
 export function passoQuadrature({ periodo, quadrature = [] }) {
   const p = nuovoPasso('quadrature_fir', 'Quadrature FIR delle settimane',
     'La quadratura confronta, settimana per settimana, la stampa dei formulari con il portale e con il gestionale: dice che i carichi del mese ci sono tutti, e una volta sola, prima di fatturarli e di pagarli.',
     '/verifiche?tab=quadratura-fir');
   const settimane = settimaneDelMese(periodo);
-  const chiaveSett = (anno, s) => Number(anno) * 100 + Number(s);
-  const prima = primoMese(quadrature, (q) => (q && Number(q.anno) && Number(q.settimana) ? chiaveSett(q.anno, q.settimana) : null));
-  // Un mese da settembre 2026 in poi chiede tutte le sue settimane.
-  const dalGestionale = indiceMese(periodo.anno, periodo.mese_idx) >= PARTENZA;
-  // Il confine di un mese di prima: la prima quadratura, se e' di prima di
-  // settembre 2026; altrimenti settembre 2026, e il mese si e' chiuso fuori.
-  const w0 = settimaneDelMese(PRIMO_MESE_DEL_GESTIONALE)[0];
-  const confineFatto = prima !== null && prima < chiaveSett(w0.anno, w0.settimana);
+  const confine = `dalla settimana ${PRIMA_SETTIMANA_DA_QUADRARE.settimana} del ${PRIMA_SETTIMANA_DA_QUADRARE.anno}`;
   const quando = (q) => String((q && (q.verificata_il || q.avviata_il || q.created_date)) || '');
   const canaleDetto = (x) => NOME_CANALE_QUADRATURA[x.canale] || minuscolo(x.canale);
   let daFare = 0, nonServe = 0;
   const settimaneDaFare = [];
   for (const w of settimane) {
     const nome = `Settimana ${w.settimana} (${it(w.lunedi).slice(0, 5)}–${it(w.domenica).slice(0, 5)})`;
+    if (!settimanaDaQuadrare(w.anno, w.settimana)) {
+      nonServe++;
+      p.voci.push(voce('non_serve', `${nome}: le quadrature si chiedono ${confine}, quello che c'è prima non conta più.`));
+      continue;
+    }
     const q = (quadrature || []).filter(x => x && Number(x.anno) === w.anno && Number(x.settimana) === w.settimana)
       .sort((a, b) => quando(b).localeCompare(quando(a)))[0] || null;
     const no = (testo) => { daFare++; settimaneDaFare.push(w.settimana); p.voci.push(voce('da_fare', `${nome}: ${testo}`)); };
     if (!q) {
-      if (!dalGestionale && (prima === null || chiaveSett(w.anno, w.settimana) < prima)) { nonServe++; p.voci.push(voce('non_serve', `${nome}: ${confineFatto ? 'prima della prima quadratura caricata' : `le quadrature si chiedono da ${minuscolo(PRIMO_MESE_DEL_GESTIONALE.etichetta)}, il primo mese chiuso nel gestionale`}.`)); continue; }
       no('non ancora fatta.');
       continue;
     }
@@ -925,7 +943,12 @@ export function passoQuadrature({ periodo, quadrature = [] }) {
   }
   if (!settimane.length || nonServe === settimane.length) {
     p.stato = 'non_serve';
-    p.dettaglio = confineFatto ? 'Nessuna settimana del mese da quadrare: le quadrature sono cominciate dopo.' : `Nessuna settimana del mese da quadrare. ${chiusoFuori(periodo)}.`;
+    // Un mese di prima di settembre 2026 si e' chiuso fuori dal gestionale, e lo
+    // si dice; un mese del gestionale tutto prima della 37 non c'e', ma se ci
+    // fosse direbbe il confine.
+    p.dettaglio = indiceMese(periodo.anno, periodo.mese_idx) < PARTENZA
+      ? `Nessuna settimana del mese da quadrare. ${chiusoFuori(periodo)}.`
+      : `Nessuna settimana del mese da quadrare: le quadrature si chiedono ${confine}.`;
     return p;
   }
   const contano = settimane.length - nonServe;

@@ -382,6 +382,54 @@ export function createClientFromRequest() {
   const vera = await chiama({ anno, azione: 'copia_tariffe' });
   verifica('dopo la copia: niente scritto, e la scartata torna col motivo', vera.stato === 200 && vera.scritte.length === 0 && vera.j.creati === 0 && vera.j.scartate.length === 1, JSON.stringify({ s: vera.stato, w: vera.scritte, c: vera.j.creati, sc: vera.j.scartate }));
 }
+
+// LA CONFERMA DEI VALORI COPIATI ENTRA NELLO STORICO (decisioni dell'utente del
+// 13/10/2026, gruppo B). Confermare toglie la nota «da confermare» e non cambia
+// nessun campo tracciato: fino a quel giorno lo storico delle modifiche non
+// registrava niente, e «chi ha confermato il prezzo del 2027, e quando» lo
+// diceva solo la nota. Ora una riga per ogni valore confermato, con chi, quando
+// e «confermato il valore copiato dall'anno prima»; il banco e' quello delle
+// funzioni intere (prove/dati/bancoFunzioni.mjs), che tiene ModificaDato.
+console.log('LA CONFERMA DELLE TARIFFE COPIATE LASCIA LA SUA RIGA NELLO STORICO');
+{
+  const { caricaFunzione, chiama } = await import('./dati/bancoFunzioni.mjs');
+  const pa = await caricaFunzione('preparaAnno');
+  const anno = Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome', year: 'numeric' }).format(new Date())) + 1;
+  const nota = `copiato dal ${anno - 1}, da confermare`;
+  const dell = (p) => ({ unita_misura: '€/t', stato: 'attivo', data_inizio_validita: `${anno}-01-01`, data_fine_validita: `${anno}-12-31`, ...p });
+  const DB = { Tariffa: [
+    dell({ id: 'a1', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'Ecotyre Scrl', servizio_ecotyre: 'TRASP_TRATT', valore: 202, note: nota }),
+    dell({ id: 'a2', direzione: 'ATTIVA', tipologia: 'ACI', cliente: 'Ecotyre Scrl', valore: 190, note: `${nota} · accordo di giugno` }),
+    dell({ id: 'a3', direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 210 }),
+    dell({ id: 'p1', direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_nome: 'EMMESSE SRL', fornitore_id: 'fE', valore: 90, note: nota }),
+  ] };
+  const sim = await chiama(pa, { db: DB, corpo: { anno, azione: 'conferma_tariffe', direzione: 'ATTIVA', simula: true } });
+  verifica('in simulazione dice quante, e non scrive niente, nemmeno nello storico', sim.stato === 200 && sim.j.quante === 2 && sim.scritte.length === 0, JSON.stringify({ j: sim.j, s: sim.scritte }));
+
+  const r = await chiama(pa, { db: DB, corpo: { anno, azione: 'conferma_tariffe', direzione: 'ATTIVA' } });
+  const reg = r.db.ModificaDato || [];
+  verifica('due tariffe attive confermate, due righe nello storico, una per valore', r.stato === 200 && r.j.confermate === 2 && reg.length === 2
+    && reg.map(x => x.record_id).sort().join() === 'a1,a2', JSON.stringify({ j: r.j.confermate, reg }));
+  verifica('il prezzo, uguale prima e dopo: e\' stato controllato, non cambiato', reg.length === 2 && reg.every(x => x.entita === 'Tariffa' && x.campo === 'valore' && x.operazione === 'update' && x.prima === x.dopo)
+    && (reg.find(x => x.record_id === 'a1') || {}).dopo === '202' && (reg.find(x => x.record_id === 'a2') || {}).dopo === '190', JSON.stringify(reg));
+  verifica('chi, quando, da dove e perche\'', reg.length === 2 && reg.every(x => x.utente === 'prova@prova' && x.origine === 'Nuovo anno, tariffe' && x.il && x.il === reg[0].il
+    && x.motivo === `confermato il valore copiato dall'anno prima (${anno - 1}), sul contratto ${anno}`), JSON.stringify(reg));
+  verifica('con l\'etichetta e l\'anno della tariffa, l\'unita\' e il segno: l\'attiva non e\' un costo', reg.length === 2 && reg.every(x => x.anno === anno && x.unita === '€/t' && x.riservato === false && /^Ecotyre Scrl · attiva · (RETE|ACI)/.test(x.etichetta)), JSON.stringify(reg));
+  verifica('le righe si scrivono insieme, una scrittura sola nel registro', r.scritte.filter(s => s.entita === 'ModificaDato').length === 1, JSON.stringify(r.scritte));
+  verifica('e la risposta porta la traccia con le due righe', r.j.traccia && r.j.traccia.scritta === true && r.j.traccia.righe === 2, JSON.stringify(r.j.traccia));
+  const dopo = r.db.Tariffa;
+  verifica('la nota della copia se ne va, il resto della nota resta, e chi ha confermato e\' scritto', !daConfermare(dopo.find(x => x.id === 'a1')) && /accordo di giugno/.test(dopo.find(x => x.id === 'a2').note) && /^Confermata sul contratto/.test(dopo.find(x => x.id === 'a1').note) && /prova@prova/.test(dopo.find(x => x.id === 'a1').note), JSON.stringify(dopo));
+  verifica('la tariffa gia\' confermata e la passiva non si toccano', !r.scritte.some(s => s.entita === 'Tariffa' && ['a3', 'p1'].includes(s.id)) && daConfermare(dopo.find(x => x.id === 'p1')), JSON.stringify(r.scritte));
+
+  const p = await chiama(pa, { db: DB, corpo: { anno, azione: 'conferma_tariffe', direzione: 'PASSIVA' } });
+  const regP = p.db.ModificaDato || [];
+  verifica('la passiva: la sua riga, riservata, perche\' il prezzo di un fornitore e\' un costo', p.stato === 200 && regP.length === 1 && regP[0].record_id === 'p1' && regP[0].riservato === true && regP[0].prima === '90' && regP[0].dopo === '90' && /^EMMESSE SRL · RACCOLTA · RETE/.test(regP[0].etichetta), JSON.stringify(regP));
+
+  const niente = await chiama(pa, { db: r.db, corpo: { anno, azione: 'conferma_tariffe', direzione: 'ATTIVA' } });
+  verifica('ripetuta, non c\'e\' niente da confermare e nessuna riga in piu\'', niente.stato === 200 && niente.j.confermate === 0 && (niente.db.ModificaDato || []).length === 2 && !niente.scritte.length, JSON.stringify({ j: niente.j.confermate, s: niente.scritte }));
+  const utente = await chiama(pa, { db: DB, ruolo: 'user', corpo: { anno, azione: 'conferma_tariffe', direzione: 'ATTIVA' } });
+  verifica('chi non e\' amministratore non conferma e non scrive', utente.stato !== 200 && !utente.scritte.length, JSON.stringify({ s: utente.stato, w: utente.scritte }));
+}
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');
 process.exit(ko ? 1 : 0);

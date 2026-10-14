@@ -11,8 +11,12 @@
 // restano separati anche qui.
 import { giornoRoma } from "./giornoItaliano.ts";
 import { statoRichiesta } from "./richiesteEct.ts";
-import { giorniFa, chiSiScosta } from "./indicatoriGiorno.ts";
-import { formatoKg } from "./formato.ts";
+import { giorniFa, chiSiScosta, notaDelGiorno, scostamentiAci, notaAci } from "./indicatoriGiorno.ts";
+import { surplusNonDisattivati, NOMI_ORIGINE } from "./surplus.ts";
+import { campoRiservato } from "./campiTracciati.ts";
+import { formatoKg, formatoTonnellate } from "./formato.ts";
+import { commessaDellAnno } from "./annoTarget.ts";
+import { regioniDellAnno, scartiDalContratto } from "./attesoContratto.ts";
 import { statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE_REGISTRO } from "./registroCaricamenti.ts";
 
 export const MESI_CRUSCOTTO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -245,7 +249,7 @@ const SEZIONE_AREA = {
   'Alert': 'generale', 'Target raccoglitori': 'rete', 'Date obbligatorie': 'generale', 'Caricamento dati': 'dati',
   'Manutenzione': 'dati', 'Arretrato': 'rete', 'Fatturazione attiva': 'fatturazione', 'Fatturazione passiva': 'economia',
   'Qualifica fornitori': 'generale', 'Richieste ECT': 'rete', 'Punti di raccolta': 'generale', 'Giacenze': 'impianti',
-  'Dichiarazioni': 'impianti', 'Nuovo anno': 'generale',
+  'Dichiarazioni': 'impianti', 'Nuovo anno': 'generale', 'Surplus sulle tariffe': 'fatturazione',
 };
 export const SEZIONI_DASHBOARD = ['rete', 'aci', 'extra', 'impianti', 'fatturazione', 'economia', 'dati', 'generale'];
 /** La sezione di una voce: la sua, se l'ha scritta; altrimenti quella della sua area. */
@@ -356,11 +360,142 @@ export function nomeRegola(v) {
   return frase.charAt(0).toUpperCase() + frase.slice(1);
 }
 
+// IL SURPLUS DELL'ANNO PRIMA E' FINITO (decisioni dell'utente del 13/10/2026,
+// gruppo B).
+//
+// Il Fuel Surcharge del consorzio vale dal 01/10/2026 al 31/12/2026, e i
+// contratti sono annuali senza tacito rinnovo: un surplus non si copia mai da
+// solo nell'anno nuovo (preparaAnno non lo porta, regola 5 del 13/10/2026). Se
+// il consorzio lo rinnova, il 1° gennaio nessuno se ne accorge: la passiva e
+// l'attiva di gennaio escono senza la riga, e la differenza salta fuori solo al
+// confronto con la prefattura, a febbraio. Dal 01/01/2027 la dashboard lo
+// ricorda: «Fuel Surcharge del 2026: finito il 31/12/2026», col collegamento
+// alla linguetta Surplus delle tariffe.
+//
+// La voce c'e' solo se un surplus e' finito l'anno prima (fine di validita'
+// nell'anno prima, non disattivato) e nell'anno in corso non ce n'e' nessuno
+// con lo stesso nome: scritto quello nuovo, sparisce da sola. Una voce per
+// nome, coi canali che il surplus aveva (un record per canale), mai sommati.
+// Solo i surplus con l'importo da Ecotyre: quelli pagati solo da SMOCO, un
+// accordo commerciale coi fornitori, sono costi riservati all'amministratore
+// in ogni campo (campoRiservato), e questo elenco lo vede chiunque.
+//
+// Il nome si confronta come lo confronta conflittiSurplus (surplus.ts, che non
+// esporta la sua chiaveNome): senza accenti, maiuscole e segni.
+const chiaveNomeSurplus = (v) => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const giornoSurplus = (v) => String(v || '').trim().slice(0, 10);
+const ORDINE_CANALI_SURPLUS = ['RETE', 'ACI', 'EXTRA_RACCOLTA'];
+const CANALE_DETTO = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra raccolta' };
+// «rete, ACI ed extra raccolta», «rete e ACI»: «ed» solo davanti a una e.
+const elencoE = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} ${/^e/i.test(xs[xs.length - 1]) ? 'ed' : 'e'} ${xs[xs.length - 1]}` : xs[0] || '');
+
+/** Le voci dei surplus finiti l'anno prima e non riscritti nell'anno di oggi. */
+export function vociSurplusFiniti(surplus, oggi) {
+  const anno = Number(String(oggi || '').slice(0, 4));
+  if (!anno) return [];
+  const vivi = surplusNonDisattivati(surplus).filter(s => s && chiaveNomeSurplus(s.nome));
+  // Un surplus dell'anno di oggi con lo stesso nome, di qualunque canale: e'
+  // stato riscritto, e la voce non serve piu'.
+  const toccaLAnno = (s) => {
+    const dal = giornoSurplus(s.data_inizio_validita), al = giornoSurplus(s.data_fine_validita);
+    return (!dal || dal <= `${anno}-12-31`) && (!al || al >= `${anno}-01-01`);
+  };
+  const riscritti = new Set(vivi.filter(toccaLAnno).map(s => chiaveNomeSurplus(s.nome)));
+  const gruppi = new Map();
+  for (const s of vivi) {
+    if (giornoSurplus(s.data_fine_validita).slice(0, 4) !== String(anno - 1)) continue;
+    if (campoRiservato('SurplusTariffa', 'nome', s)) continue;
+    const k = chiaveNomeSurplus(s.nome);
+    if (riscritti.has(k)) continue;
+    if (!gruppi.has(k)) gruppi.set(k, []);
+    gruppi.get(k).push(s);
+  }
+  const it = (g) => (g ? g.split('-').reverse().join('/') : '');
+  return [...gruppi.entries()].sort(([a], [b]) => a.localeCompare(b, 'it')).map(([k, righe]) => {
+    const nome = String(righe[0].nome || '').trim();
+    const dal = righe.map(s => giornoSurplus(s.data_inizio_validita)).filter(Boolean).sort()[0] || '';
+    const al = righe.map(s => giornoSurplus(s.data_fine_validita)).sort().pop();
+    const canali = ORDINE_CANALI_SURPLUS.filter(c => righe.some(s => String(s.tipologia || '').toUpperCase() === c)).map(c => CANALE_DETTO[c]);
+    const consorzio = righe.some(s => String(s.origine || '').toUpperCase() === 'CONSORZIO');
+    const origine = consorzio ? NOMI_ORIGINE.CONSORZIO : NOMI_ORIGINE.ACCORDO_COMMERCIALE;
+    return {
+      area: 'Surplus sulle tariffe', gravita: 'info',
+      titolo: `${nome} del ${anno - 1}: finito il ${it(al)}`,
+      dettaglio: `${nome} (${origine})${dal ? `, dal ${it(dal)} al ${it(al)}` : `, fino al ${it(al)}`}${canali.length ? `, valeva su ${elencoE(canali)}` : ''}. `
+        + `Nel ${anno} non c'è: ${consorzio ? 'se il consorzio lo rinnova' : "se l'accordo si rinnova"}, va riscritto con le date nuove nella linguetta «Surplus» delle tariffe. `
+        + 'Non si copia da solo nell’anno nuovo, perché i contratti sono annuali: senza, attiva e passiva escono senza la sua riga.',
+      link: '/fatturazione?tab=tariffe&sezione=surplus',
+      chiave: `surplus-finito:${k}|${anno - 1}`,
+      sezione: 'fatturazione',
+    };
+  });
+}
+
+// I RACCOGLITORI CHE NON FANNO IL CONTRATTO (chiusura del giro delle decisioni,
+// 14/10/2026, sulla richiesta dell'utente dello stesso giorno).
+//
+// L'utente aveva aggiunto le 100 t di ottobre del consorzio al target di SMOCO in
+// Puglia, nella scheda dei raccoglitori (11.650 t), e il contratto era rimasto a
+// 11.550: la dashboard, l'atteso, l'Andamento ed EcoTyna leggono il contratto e
+// non si muovevano, e niente lo diceva fuori da quella scheda («non sto notando
+// che da altre parti la modifica viene interessata, compresa la dashboard»). La
+// scheda ora avvisa (scartiDalContratto di attesoContratto.ts) e apre la
+// variazione gia' compilata; qui la stessa regola sugli stessi numeri della sua
+// tabella per regione: la somma dei target annui dei raccoglitori dell'anno,
+// regione per regione com'e' scritta, contro il riparto del contratto
+// (regioni_json; senza riparto la scheda non confronta, e nemmeno qui). Sotto
+// mezza tonnellata e' un arrotondamento (SOGLIA_VARIAZIONE_T): sui dati veri
+// dell'11/10/2026 Campania 4.400,38 contro 4.400 e Calabria 1.649,62 contro 1.650
+// non fanno nessuna voce. Un target senza regione la scheda lo mette dove il
+// raccoglitore raccoglie di piu', che qui non si sa: non si conta, e la voce lo
+// dice. Nessuna lettura in piu': cruscottoOperativo legge gia' target annui e
+// contratti per l'anno nuovo.
+/** Le regioni dove i target annui dei raccoglitori non fanno il contratto: al piu' una voce. */
+export function vociContrattoRaccoglitori(commesse, targetRaccoglitori, anno) {
+  const commessa = commessaDellAnno(commesse, anno);
+  if (!commessa) return [];
+  const contratto = regioniDellAnno(commessa, anno);
+  if (contratto.fonte !== 'contratto') return [];
+  const dellAnno = (targetRaccoglitori || []).filter(t => t && Number(t.anno) === Number(anno));
+  // Un anno senza nessun target dei raccoglitori non e' uno scarto da registrare:
+  // i target mancano, e lo dice la voce dell'anno nuovo.
+  if (!dellAnno.length) return [];
+  const regioni = [...new Set([...contratto.righe.map(r => r.regione), ...dellAnno.map(t => t.regione).filter(Boolean)])];
+  const perRegione = regioni.map(reg => {
+    const c = contratto.righe.find(r => r.regione === reg);
+    return { regione: reg, annuo: dellAnno.filter(t => t.regione === reg).reduce((s, t) => s + (Number(t.target_tonnellate) || 0), 0), contratto: c ? c.target_t : null };
+  });
+  const scarti = scartiDalContratto(commessa, perRegione, []);
+  if (!scarti.length) return [];
+  const t = (v) => formatoTonnellate(Math.abs(v));
+  const piuMeno = (d) => (d > 0 ? 'più' : 'meno');
+  const senzaRegione = dellAnno.filter(x => !x.regione && Number(x.target_tonnellate) > 0).length;
+  const uno = scarti.length === 1 ? scarti[0] : null;
+  const titolo = uno
+    ? `I raccoglitori della ${uno.regione} hanno ${t(uno.differenza_t)} t ${piuMeno(uno.differenza_t)} del contratto ${anno}`
+    : `In ${scarti.length} regioni i target dei raccoglitori non fanno il contratto ${anno}`;
+  const righe = scarti.map(s => `${s.regione}: raccoglitori ${formatoTonnellate(s.raccoglitori_t)} t, contratto ${formatoTonnellate(s.contratto_t)} t (${s.differenza_t > 0 ? '+' : '-'}${t(s.differenza_t)} t)`);
+  const dettaglio = `${righe.join(' · ')}. `
+    + 'Se è una variazione del consorzio, va registrata nel contratto («Registra la variazione» nella scheda Target raccoglitori, o «Variazione del contratto» nella scheda Commessa Ecotyre): '
+    + 'finché non c\'è, la dashboard, l\'atteso alla data, l\'Andamento ed EcoTyna dicono il contratto di prima. Se invece il contratto è giusto, vanno corretti i target dei raccoglitori.'
+    + (senzaRegione ? ` ${senzaRegione === 1 ? 'Un target annuo senza regione non è contato' : `${senzaRegione} target annui senza regione non sono contati`}: la scheda lo mette nella regione dove il raccoglitore raccoglie di più.` : '');
+  return [{
+    area: 'Target raccoglitori', gravita: 'attenzione', titolo, dettaglio,
+    link: `/target-status?tab=raccoglitori&anno=${anno}`,
+    chiave: `contratto-raccoglitori:${anno}`,
+    sezione: 'rete',
+    // Nascosta, torna se cambiano le regioni o il verso, o se una differenza cresce.
+    firma: `${anno}|${scarti.map(s => `${s.regione}${s.differenza_t > 0 ? '+' : '-'}`).join(',')}`,
+    misure: scarti.map(s => Math.abs(s.differenza_t)),
+  }];
+}
+
 /**
  * L'elenco unico delle cose da gestire. Ogni voce: { area, gravita, titolo,
  * dettaglio, link }. dati: { oggi, adessoMs, anno, alertAperti, uploadLogs,
  * tipiFile, assegnatiRete, assegnatiAci, documenti, prefatture, riepilogoQualifica,
- * richiesteEct, verificheSedi, annoNuovo, fotografiaGiorno }.
+ * richiesteEct, verificheSedi, annoNuovo, fotografiaGiorno, surplus, commesse,
+ * targetRaccoglitori }.
  *
  * annoNuovo e' il risultato di listaAnno per l'anno dopo: decide da se' se
  * valga la pena dirlo (avvicinandosi), e qui si scrive soltanto.
@@ -531,13 +666,32 @@ export function cruscotto(dati) {
   // niente. Ora la fotografia li porta tutti e due (indicatoriGiorno.ts), e il
   // titolo dice chi si scosta: «Uno stoccaggio non quadra», «2 impianti e uno
   // stoccaggio non quadrano».
-  const scost = (fg && fg.scostamenti) || [];
+  //
+  // Le righe di scostamenti_json sono della rete; se una ne arrivasse col
+  // canale ACI resta fuori da questa voce, che e' della rete. Il dettaglio e'
+  // la riga del guardiano per la sola rete (notaDelGiorno): la nota intera,
+  // dal 13/10/2026, puo' dire anche gli stoccaggi ACI, che hanno la voce loro.
+  const scost = ((fg && fg.scostamenti) || []).filter(x => x && x.canale !== 'ACI');
   if (scost.length) {
     const quali = chiSiScosta(scost);
     voce('Giacenze', 'attenzione',
       `${quali.testo.charAt(0).toUpperCase()}${quali.testo.slice(1)} ${quali.uno ? 'non quadra' : 'non quadrano'} col portale`,
-      `${fg.nota} Controllo del ${ilGiorno(fg.giorno)}.`,
+      `${notaDelGiorno(scost, 0, (fg && fg.doppioni) || [])} Controllo del ${ilGiorno(fg.giorno)}.`,
       '/giacenze', { chiave: 'giacenze:scostamenti' });
+  }
+  // GLI STOCCAGGI ACI CHE NON QUADRANO (decisioni dell'utente del 13/10/2026,
+  // gruppo B). Uno stoccaggio con la giacenza ACI (classe 9) a portale - oggi
+  // Nappi Sud - che non quadra diventa una voce la mattina, come uno della
+  // rete, ma sua: i canali non si mescolano. Si legge dalle righe della
+  // fotografia con la regola del guardiano (scostamentiAci), quindi anche da una
+  // fotografia scritta prima di quel giorno. Prima lo diceva solo il conteggio
+  // della sezione Impianti, «ACI negli stoccaggi, a parte».
+  const scostAci = fg ? scostamentiAci(fg.siti || []) : [];
+  if (scostAci.length) {
+    voce('Giacenze', 'attenzione',
+      `${scostAci.length === 1 ? 'Uno stoccaggio ACI non quadra' : `${scostAci.length} stoccaggi ACI non quadrano`} col portale`,
+      `${notaAci(scostAci)} È la giacenza ACI del piazzale, la classe 9 della rilevazione a portale: sta a parte dalla rete, e si guarda in Giacenze sul canale ACI. Controllo del ${ilGiorno(fg.giorno)}.`,
+      '/giacenze', { chiave: 'giacenze:scostamenti-aci', sezione: 'impianti' });
   }
   // IL DOPPIONE SI PRESENTA COME DOPPIONE.
   //
@@ -592,6 +746,16 @@ export function cruscotto(dati) {
       // La scheda prepara l'anno dopo quello scelto: per aprire il 2027 si sceglie il 2026.
       `/target-status?tab=nuovo-anno&anno=${an.anno - 1}`, { chiave: `anno-nuovo:${an.anno}` });
   }
+
+  // I SURPLUS DELL'ANNO PRIMA CHE SONO FINITI (decisioni dell'utente del
+  // 13/10/2026, gruppo B): vociSurplusFiniti, qui sopra. dati.surplus sono i
+  // SurplusTariffa letti da chi chiama; senza, la voce non c'e'.
+  for (const v of vociSurplusFiniti(dati.surplus, oggi)) voci.push(v);
+
+  // I RACCOGLITORI CHE NON FANNO IL CONTRATTO (14/10/2026): vociContrattoRaccoglitori,
+  // qui sopra. dati.commesse e dati.targetRaccoglitori sono i CommessaEcotyre e i
+  // TargetRaccoglitore letti da chi chiama; senza, la voce non c'e'.
+  for (const v of vociContrattoRaccoglitori(dati.commesse, dati.targetRaccoglitori, anno)) voci.push(v);
 
   const tutte = unisciPresidi(voci, dati.presidi);
   tutte.sort((a, b) => GRAVITA[a.gravita] - GRAVITA[b.gravita] || a.area.localeCompare(b.area, 'it'));

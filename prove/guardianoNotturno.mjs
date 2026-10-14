@@ -14,8 +14,15 @@
 //
 // Qui si prova la regola e le tre prudenze: una riga per giorno e non una per
 // apertura di pagina, nessun anno cablato in uno scheduler, e un guardiano che
-// smette di girare lo deve dire. npm run prove
+// smette di girare lo deve dire. Dalle decisioni dell'utente del 13/10/2026
+// anche lo stoccaggio ACI (classe 9) che non quadra: «da guardare» e una voce
+// sua in «Da gestire», mai insieme alla rete. npm run prove
 import { fotografiaDelGiorno, vociSito, scostamenti, totaliGiorno, notaDelGiorno, leggiFotografia, giorniFa, mesiAperti, chiSiScosta } from '../base44/shared/indicatoriGiorno.ts';
+// Dal 13/10/2026 (lo stoccaggio ACI in «Da gestire»): col codice di prima non
+// ci sono, e la prova lo dice invece di fermarsi.
+import * as G from '../base44/shared/indicatoriGiorno.ts';
+const scostamentiAci = typeof G.scostamentiAci === 'function' ? G.scostamentiAci : () => [{ manca: 'scostamentiAci' }];
+const notaAci = typeof G.notaAci === 'function' ? G.notaAci : () => 'manca notaAci';
 import { cruscotto } from '../base44/shared/cruscotto.ts';
 import { readFileSync } from 'node:fs';
 
@@ -149,8 +156,13 @@ console.log('GLI STOCCAGGI DELLA RETE NEL VERDETTO (12/10/2026)');
   verifica('e la nota lo chiama stoccaggio, col nome e il numero', storto.nota === 'Uno stoccaggio si scosta dal portale: NAPPI SUD SRL +1,20 t.', storto.nota);
   const sc = JSON.parse(storto.scostamenti_json);
   verifica('lo scostamento porta il segno dello stoccaggio', sc.length === 1 && sc[0].stoccaggio === true && sc[0].chiave === 'nappi sud|RETE', J(sc));
+  // Lo stoccaggio ACI (classe 9) che non quadra: fino al 13/10/2026 restava
+  // fuori dal verdetto e da «Da gestire»; ora fa «da guardare» come uno della
+  // rete, con la sua frase, e resta fuori dal conto della rete.
   const aciStorto = fotografiaDelGiorno([...DUE, piazzale('RETE'), piazzale('ACI', { giacenza_calcolata_t: 3, scarto_t: 3, quadra: false })], { giorno: '2026-10-12', anno: 2026 });
-  verifica("l'ACI del piazzale resta fuori dal verdetto, come nella dashboard dove sta a parte", aciStorto.esito === 'in_linea', aciStorto.nota);
+  verifica("lo stoccaggio ACI che non quadra fa «da guardare», con la sua frase dopo quella della rete", aciStorto.esito === 'da_guardare'
+    && aciStorto.nota === 'Tutti gli impianti e gli stoccaggi della rete con un confronto a portale quadrano (3). Uno stoccaggio ACI (classe 9) si scosta dal portale: NAPPI SUD SRL +3,00 t.', aciStorto.nota);
+  verifica('e non entra negli scostamenti della rete', JSON.parse(aciStorto.scostamenti_json).length === 0, aciStorto.scostamenti_json);
   const misto = fotografiaDelGiorno([
     ...DUE.map(s => (s.chiave === 'tcycle' ? { ...s, giacenza_calcolata_t: 366, scarto_t: 1.2, quadra: false } : s)),
     piazzale('RETE', { giacenza_calcolata_t: 25.08, scarto_t: -0.8, quadra: false }),
@@ -168,6 +180,29 @@ console.log('GLI STOCCAGGI DELLA RETE NEL VERDETTO (12/10/2026)');
   verifica('un impianto solo resta «Un impianto non quadra col portale»', !!v3 && v3.titolo === 'Un impianto non quadra col portale', v3 && v3.titolo);
   // Una fotografia scritta prima del 12/10 (senza il segno) si legge lo stesso.
   verifica('uno scostamento di una riga vecchia, senza il segno, e\' un impianto', chiSiScosta([{ sito: 'Gatim', chiave: 'gatim' }]).testo === 'un impianto' && chiSiScosta([{ sito: 'NAPPI SUD SRL', chiave: 'nappi sud|RETE' }]).testo === 'uno stoccaggio');
+
+  // LO STOCCAGGIO ACI IN «DA GESTIRE» (decisioni dell'utente del 13/10/2026,
+  // gruppo B). Una voce sua, mai insieme alla rete: i canali non si mescolano.
+  const tutteDi = (riga) => cruscotto({ ...base, fotografiaGiorno: leggiFotografia(riga) }).da_gestire;
+  const aciDi = (riga) => tutteDi(riga).find(x => x.chiave === 'giacenze:scostamenti-aci');
+  const va = aciDi(aciStorto);
+  verifica('lo stoccaggio ACI che non quadra diventa una voce di «Da gestire», sua', !!va && va.titolo === 'Uno stoccaggio ACI non quadra col portale' && va.area === 'Giacenze' && va.gravita === 'attenzione' && va.sezione === 'impianti' && va.link === '/giacenze'
+    && /^Uno stoccaggio ACI \(classe 9\) si scosta dal portale: NAPPI SUD SRL \+3,00 t\. /.test(va.dettaglio) && /Controllo del 12\/10\/2026\.$/.test(va.dettaglio), va && `${va.titolo} | ${va.dettaglio}`);
+  verifica('e la voce della rete non c\'e\', perche\' la rete quadra', !tutteDi(aciStorto).some(x => x.chiave === 'giacenze:scostamenti'), J(tutteDi(aciStorto).map(x => x.chiave)));
+  const tuttiEDue = fotografiaDelGiorno([...DUE, piazzale('RETE', { giacenza_calcolata_t: 27.08, scarto_t: 1.2, quadra: false }), piazzale('ACI', { giacenza_calcolata_t: 3, scarto_t: 3, quadra: false })], { giorno: '2026-10-12', anno: 2026 });
+  const vr = voceDi(tuttiEDue), va2 = aciDi(tuttiEDue);
+  verifica('rete e ACI fuori tutti e due: due voci, e ognuna dice solo il suo canale', !!vr && !!va2 && vr.titolo === 'Uno stoccaggio non quadra col portale'
+    && vr.dettaglio === 'Uno stoccaggio si scosta dal portale: NAPPI SUD SRL +1,20 t. Controllo del 12/10/2026.' && !/ACI/.test(vr.dettaglio) && /\+3,00 t/.test(va2.dettaglio) && !/\+1,20 t/.test(va2.dettaglio), J([vr, va2]));
+  verifica('lo stoccaggio ACI che quadra non dice niente', !aciDi(fotografiaDelGiorno([...DUE, piazzale('RETE'), piazzale('ACI')], { giorno: '2026-10-12', anno: 2026 })));
+  // Dentro la tolleranza della quadratura non e' uno scostamento, come per la rete.
+  verifica('dentro la tolleranza non e\' una voce', !aciDi(fotografiaDelGiorno([...DUE, piazzale('ACI', { giacenza_calcolata_t: 25.881, scarto_t: 0.001, quadra: false })], { giorno: '2026-10-12', anno: 2026 })));
+  // Una fotografia scritta prima del 13/10/2026 ha le righe dei siti: la voce
+  // si legge da li', anche se la sua nota non diceva niente dell'ACI.
+  const vecchiaRiga = { ...aciStorto, esito: 'in_linea', nota: 'Tutti gli impianti e gli stoccaggi della rete con un confronto a portale quadrano (3).' };
+  verifica('anche da una fotografia scritta prima', !!aciDi(vecchiaRiga), J(tutteDi(vecchiaRiga).map(x => x.chiave)));
+  verifica('scostamentiAci prende solo le righe ACI con un confronto a portale', J(scostamentiAci(JSON.parse(tuttiEDue.siti_json)).map(x => [x.sito, x.chiave, x.canale, x.stoccaggio, x.scarto_t])) === J([['NAPPI SUD SRL', 'nappi sud|ACI', 'ACI', true, 3]])
+    && scostamentiAci([{ sito: 'Y', chiave: 'y|ACI', ruolo: 'stoc', giacenza_portale_t: null, scarto_t: 4, quadra: false }]).length === 0);
+  verifica('notaAci, al plurale e con gli altri', notaAci([]) === '' && notaAci([1, 2, 3, 4].map(i => ({ sito: `S${i}`, scarto_t: -i }))) === '4 stoccaggi ACI (classe 9) si scostano dal portale: S1 -1,00 t, S2 -2,00 t, S3 -3,00 t e altri 1.');
 }
 
 console.log('I MESI ANCORA APERTI, PER LA CHIUSURA DEL MESE (12/10/2026)');

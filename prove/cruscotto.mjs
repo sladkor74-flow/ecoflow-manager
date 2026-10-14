@@ -1,7 +1,9 @@
 // Prova del cruscotto (base44/shared/cruscotto.ts): l'elenco unico delle cose da
 // gestire, l'arretrato, i caricamenti, i mesi della fatturazione. In fondo le
 // dichiarazioni riconosciute a portale (base44/shared/agganciaDichiarazioni.ts),
-// da cui dipendono la quadratura e i mesi "caricati". npm run prove
+// da cui dipendono la quadratura e i mesi "caricati". Dalle decisioni
+// dell'utente del 13/10/2026 anche la voce del surplus dell'anno prima finito
+// (vociSurplusFiniti: il Fuel Surcharge del 2026, dal 01/01/2027). npm run prove
 import { cruscotto, etaArretrato, statoMesiAttiva, nomeRegola } from '../base44/shared/cruscotto.ts';
 import * as C from '../base44/shared/cruscotto.ts';
 import { statoCaricamenti as statoDeiMotori } from '../base44/shared/reportSettimanali.ts';
@@ -537,6 +539,119 @@ console.log('IL DOPPIONE DICE QUELLO CHE FANNO I DUE MODULI (revisione della chi
   const v = r.da_gestire.find(x => x.area === 'Dichiarazioni');
   verifica('la voce dice che i due moduli contano la prima riga', v && /Giacenze e Dichiarazioni contano la prima riga e ignorano le altre/.test(v.dettaglio) && /370\.000 kg di troppo, nelle righe ignorate/.test(v.dettaglio), v && v.dettaglio);
   verifica('e non dice piu\' che le giacenze le sommano', v && !/le sommano/.test(v.dettaglio) && !/di troppo nelle giacenze/.test(v.dettaglio), v && v.dettaglio);
+}
+
+console.log('IL SURPLUS DELL\'ANNO PRIMA E\' FINITO (decisioni dell\'utente del 13/10/2026)');
+{
+  // Il Fuel Surcharge del consorzio vale dal 01/10/2026 al 31/12/2026, un record
+  // per canale. I contratti sono annuali: non si copia da solo nel 2027, e se il
+  // consorzio lo rinnova la dashboard lo deve ricordare dal 01/01/2027, finche'
+  // non e' riscritto con lo stesso nome.
+  const J = (x) => JSON.stringify(x);
+  const vsf = typeof C.vociSurplusFiniti === 'function' ? C.vociSurplusFiniti : () => [{ manca: 'vociSurplusFiniti' }];
+  const fuel = (tipologia, p = {}) => ({ id: `fs-${tipologia}`, gruppo: 'fs', nome: 'Fuel Surcharge', origine: 'CONSORZIO', riferimento: 'comunicazione del consorzio', tipologia, prestazione: 'RACCOLTA', a_chi: 'tutti',
+    euro_t_passiva: 5, euro_t_attiva: 5, data_inizio_validita: '2026-10-01', data_fine_validita: '2026-12-31', stato: 'attivo', ...p });
+  const FUEL = ['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(c => fuel(c));
+  verifica('nel 2026, mentre vale e il 31/12, niente', vsf(FUEL, '2026-10-13').length === 0 && vsf(FUEL, '2026-12-31').length === 0, J(vsf(FUEL, '2026-12-31')));
+  const v = vsf(FUEL, '2027-01-01');
+  verifica('il 01/01/2027 una voce sola per i tre canali, col titolo che dice nome, anno e fine', v.length === 1 && v[0].titolo === 'Fuel Surcharge del 2026: finito il 31/12/2026', J(v));
+  verifica('il dettaglio: chi, quando, su quali canali, e che cosa fare se il consorzio lo rinnova', String((v[0] || {}).dettaglio || '').startsWith('Fuel Surcharge (consorzio Ecotyre), dal 01/10/2026 al 31/12/2026, valeva su rete, ACI ed extra raccolta. Nel 2027 non c\'è: se il consorzio lo rinnova, va riscritto con le date nuove nella linguetta «Surplus» delle tariffe.'), v[0] && v[0].dettaglio);
+  verifica('porta alla linguetta dei surplus, nella sezione della fatturazione, come informazione', v[0] && v[0].link === '/fatturazione?tab=tariffe&sezione=surplus' && v[0].sezione === 'fatturazione' && v[0].gravita === 'info' && v[0].area === 'Surplus sulle tariffe' && v[0].chiave === 'surplus-finito:fuel surcharge|2026', J(v[0]));
+  verifica('nessun importo nella voce: l\'elenco lo vede chiunque', v.length === 1 && !!v[0].dettaglio && !/€|5,00|\b5\b/.test(`${v[0].titolo} ${v[0].dettaglio}`), v[0] && v[0].dettaglio);
+  verifica('resta finche\' non e\' riscritto: a giugno 2027 c\'e\' ancora', vsf(FUEL, '2027-06-15').length === 1);
+  const rinnovato = [...FUEL, fuel('RETE', { id: 'fs27', nome: 'FUEL SURCHARGE', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-03-31' })];
+  verifica('riscritto per il 2027 con lo stesso nome (maiuscole e spazi non contano), anche su un canale solo: sparisce', vsf(rinnovato, '2027-01-10').length === 0, J(vsf(rinnovato, '2027-01-10')));
+  const inArrivo = [...FUEL, fuel('ACI', { id: 'fs27b', data_inizio_validita: '2027-04-01', data_fine_validita: '2027-06-30' })];
+  verifica('anche se nel 2027 comincia piu\' tardi: e\' scritto, e la voce non serve', vsf(inArrivo, '2027-01-10').length === 0);
+  const altroNome = [...FUEL, fuel('RETE', { id: 'x27', nome: 'Contributo straordinario', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31' })];
+  verifica('un surplus del 2027 con un altro nome non lo sostituisce', vsf(altroNome, '2027-01-10').length === 1);
+  const disattivatoNel27 = [...FUEL, fuel('RETE', { id: 'fs27c', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-03-31', stato: 'non_attivo' })];
+  verifica('uno del 2027 disattivato non conta come riscritto', vsf(disattivatoNel27, '2027-01-10').length === 1);
+  verifica('quelli disattivati del 2026 non si ricordano', vsf(FUEL.map(s => ({ ...s, stato: 'non_attivo' })), '2027-01-10').length === 0);
+  verifica('il 2028 non ricorda il surplus del 2026', vsf(FUEL, '2028-01-10').length === 0);
+  // Un accordo commerciale pagato solo da SMOCO e' un costo riservato in ogni
+  // campo (campoRiservato): il suo nome non finisce nell'elenco di tutti.
+  const accordo = fuel('RETE', { id: 'acc', nome: 'Accordo Gatim', origine: 'ACCORDO_COMMERCIALE', euro_t_attiva: null, data_inizio_validita: '2026-07-01', data_fine_validita: '2026-09-30' });
+  verifica('un accordo pagato solo da SMOCO non si dice a tutti', vsf([accordo], '2027-01-10').length === 0);
+  const accordoAttivo = vsf([{ ...accordo, euro_t_attiva: 2 }], '2027-01-10');
+  verifica('un accordo con l\'importo da Ecotyre si ricorda, con le sue parole', accordoAttivo.length === 1 && /Accordo Gatim \(accordo commerciale\), dal 01\/07\/2026 al 30\/09\/2026, valeva su rete\./.test(String(accordoAttivo[0].dettaglio || '')) && /se l'accordo si rinnova/.test(String(accordoAttivo[0].dettaglio || '')), J(accordoAttivo));
+  verifica('due canali si dicono «rete e ACI»', (vsf(FUEL.slice(0, 2), '2027-01-10')[0] || {}).dettaglio?.includes('valeva su rete e ACI.'), J(vsf(FUEL.slice(0, 2), '2027-01-10')));
+  verifica('senza surplus o senza giorno, niente', vsf(null, '2027-01-10').length === 0 && vsf(FUEL, '').length === 0);
+  // Nella dashboard intera: c'e' coi surplus letti, non c'e' senza.
+  const base = { oggi: '2027-01-04', anno: 2027, adessoMs: Date.parse('2027-01-04T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [] };
+  const conS = cruscotto({ ...base, surplus: FUEL }).da_gestire.find(x => x.area === 'Surplus sulle tariffe');
+  verifica('in «Da gestire» il 04/01/2027, nella sezione della fatturazione', !!conS && conS.sezione === 'fatturazione' && conS.titolo === 'Fuel Surcharge del 2026: finito il 31/12/2026', J(conS));
+  verifica('senza i surplus letti la voce non c\'e\'', !cruscotto(base).da_gestire.some(x => x.area === 'Surplus sulle tariffe'));
+}
+
+// LA FUNZIONE DELLA DASHBOARD E LE DUE VOCI DEL 13-14/10/2026 (chiusura del giro,
+// 14/10/2026). cruscottoOperativo non leggeva SurplusTariffa e non passava i
+// surplus: il promemoria del Fuel Surcharge finito non sarebbe uscito mai. E i
+// target annui dei raccoglitori che non fanno il contratto (le 100 t di ottobre in
+// Puglia scritte solo nel target di SMOCO, richiesta dell'utente del 14/10/2026)
+// li diceva solo la scheda dei raccoglitori. Qui la regola e poi la funzione vera
+// sul banco, chiamata da chi non e' amministratore.
+const { caricaFunzione, chiama } = await import('./dati/bancoFunzioni.mjs');
+const funzioneCruscotto = await caricaFunzione('cruscottoOperativo');
+const OraVera = Date;
+const alle = async (iso, f) => {
+  const ms = OraVera.parse(iso);
+  globalThis.Date = class extends OraVera { constructor(...a) { if (a.length) super(...a); else super(ms); } static now() { return ms; } };
+  try { return await f(); } finally { globalThis.Date = OraVera; }
+};
+const J2 = (x) => JSON.stringify(x);
+const REGIONI_2026 = [{ regione: 'Campania', province: 'Tutte', target_t: 4400 }, { regione: 'Puglia', province: 'BA,BR,TA,LE', target_t: 2500 }, { regione: 'Basilicata', target_t: 500 }, { regione: 'Calabria', target_t: 1650 }, { regione: 'Sicilia', target_t: 2500 }];
+const COMMESSA_2026 = { id: 'c26', anno: 2026, target_annuo_t: 11550, regioni_json: JSON.stringify(REGIONI_2026), updated_date: '2026-03-01T10:00:00.000000' };
+// I target annui dell'11/10/2026 per regione: Campania 4.400,38 e Calabria
+// 1.649,62 sono arrotondamenti, sotto mezza tonnellata.
+const TR = (id, raccoglitore, regione, t) => ({ id, anno: 2026, raccoglitore, regione, target_tonnellate: t });
+const TARGET_11_10 = [TR('a', 'Ecorecuperi Srl', 'Campania', 2391.38), TR('b', 'Nappi Sud Srl A Socio Unico', 'Campania', 2009), TR('c', 'PNEUSERVICE CONVERSANO SRL', 'Puglia', 650), TR('d', 'SMOCO S.r.l.', 'Puglia', 1850),
+  TR('e', 'ECOLOGICAL SYSTEMS SRL', 'Basilicata', 300), TR('f', 'SMOCO S.r.l.', 'Basilicata', 200), TR('g', 'GATIM S.R.L.', 'Calabria', 949.62), TR('h', 'SMOCO S.r.l.', 'Calabria', 700), TR('i', 'GREEN TYRE PROJECT SRL', 'Sicilia', 2500)];
+const CON_PUGLIA = TARGET_11_10.map(t => (t.id === 'd' ? { ...t, target_tonnellate: 1950 } : t));
+
+console.log('I RACCOGLITORI CHE NON FANNO IL CONTRATTO (14/10/2026)');
+{
+  const vcr = typeof C.vociContrattoRaccoglitori === 'function' ? C.vociContrattoRaccoglitori : () => [{ manca: 'vociContrattoRaccoglitori' }];
+  verifica('coi target dell\'11/10/2026 nessuna voce: sotto mezza tonnellata e\' un arrotondamento', vcr([COMMESSA_2026], TARGET_11_10, 2026).length === 0, J2(vcr([COMMESSA_2026], TARGET_11_10, 2026)));
+  const v = vcr([COMMESSA_2026], CON_PUGLIA, 2026);
+  verifica('SMOCO in Puglia a 1.950 t: una voce, che dice regione, quanto e il verso', v.length === 1 && v[0].titolo === 'I raccoglitori della Puglia hanno 100,00 t più del contratto 2026', J2(v));
+  verifica('il dettaglio: i due numeri, la differenza e che cosa fare', v[0] && String(v[0].dettaglio).startsWith('Puglia: raccoglitori 2.600,00 t, contratto 2.500,00 t (+100,00 t). Se è una variazione del consorzio, va registrata nel contratto')
+    && /la dashboard, l'atteso alla data, l'Andamento ed EcoTyna dicono il contratto di prima/.test(v[0].dettaglio), v[0] && v[0].dettaglio);
+  verifica('porta alla scheda dei raccoglitori dell\'anno, nella sezione della rete, con la sua chiave', v[0] && v[0].link === '/target-status?tab=raccoglitori&anno=2026' && v[0].sezione === 'rete' && v[0].area === 'Target raccoglitori'
+    && v[0].gravita === 'attenzione' && v[0].chiave === 'contratto-raccoglitori:2026' && J2(v[0].misure) === '[100]', J2(v[0]));
+  const registrata = { ...COMMESSA_2026, target_annuo_t: 11650, regioni_json: JSON.stringify(REGIONI_2026.map(r => (r.regione === 'Puglia' ? { ...r, target_t: 2600 } : r))) };
+  verifica('registrata la variazione nel contratto, la voce sparisce', vcr([registrata], CON_PUGLIA, 2026).length === 0);
+  const due = vcr([COMMESSA_2026], [...CON_PUGLIA.filter(t => t.id !== 'i'), TR('i', 'GREEN TYRE PROJECT SRL', 'Sicilia', 2300)], 2026);
+  verifica('due regioni, una in piu\' e una in meno: una voce sola che le dice tutte e due', due.length === 1 && due[0].titolo === 'In 2 regioni i target dei raccoglitori non fanno il contratto 2026'
+    && /Puglia: raccoglitori 2\.600,00 t, contratto 2\.500,00 t \(\+100,00 t\) · Sicilia: raccoglitori 2\.300,00 t, contratto 2\.500,00 t \(-200,00 t\)\./.test(due[0].dettaglio), J2(due));
+  const senza = vcr([COMMESSA_2026], [...CON_PUGLIA, { id: 'z', anno: 2026, raccoglitore: 'ALFA', regione: '', target_tonnellate: 30 }], 2026);
+  verifica('un target senza regione non si conta, e la voce lo dice', senza.length === 1 && /Un target annuo senza regione non è contato/.test(senza[0].dettaglio), J2(senza));
+  verifica('senza contratto dell\'anno, senza riparto per regione o di un altro anno: niente', vcr([], CON_PUGLIA, 2026).length === 0 && vcr([{ ...COMMESSA_2026, regioni_json: '[]' }], CON_PUGLIA, 2026).length === 0
+    && vcr([COMMESSA_2026], CON_PUGLIA.map(t => ({ ...t, anno: 2027 })), 2026).length === 0);
+  verifica('fra due contratti dello stesso anno vale il modificato per ultimo, come in Target & Status', vcr([registrata, { ...COMMESSA_2026, updated_date: '2026-01-01T00:00:00.000000' }].map((c, i) => (i === 0 ? { ...c, updated_date: '2026-10-14T10:00:00.000000' } : c)), CON_PUGLIA, 2026).length === 0);
+  const base = { oggi: '2026-10-14', anno: 2026, adessoMs: Date.parse('2026-10-14T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [] };
+  verifica('nella dashboard intera c\'e\' coi contratti e i target letti, e non c\'e\' senza', cruscotto({ ...base, commesse: [COMMESSA_2026], targetRaccoglitori: CON_PUGLIA }).da_gestire.some(x => x.chiave === 'contratto-raccoglitori:2026')
+    && !cruscotto(base).da_gestire.some(x => x.chiave === 'contratto-raccoglitori:2026'));
+}
+
+console.log('LA FUNZIONE DELLA DASHBOARD PASSA SURPLUS, CONTRATTI E TARGET (chiusura del giro, 14/10/2026)');
+{
+  const fuel = (tipologia) => ({ id: `fs-${tipologia}`, gruppo: 'fs', nome: 'Fuel Surcharge', origine: 'CONSORZIO', riferimento: 'comunicazione del consorzio', tipologia, prestazione: 'RACCOLTA', a_chi: 'tutti',
+    euro_t_passiva: 5, euro_t_attiva: 5, data_inizio_validita: '2026-10-01', data_fine_validita: '2026-12-31', stato: 'attivo' });
+  const accordo = { ...fuel('RETE'), id: 'acc', gruppo: 'acc', nome: 'Accordo riservato Gatim', origine: 'ACCORDO_COMMERCIALE', riferimento: 'lettera Gatim', euro_t_passiva: 3.21, euro_t_attiva: null };
+  const db = { SurplusTariffa: [...['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(fuel), accordo], CommessaEcotyre: [COMMESSA_2026], TargetRaccoglitore: CON_PUGLIA };
+  const gen = await alle('2027-01-04T08:00:00.000Z', () => chiama(funzioneCruscotto, { db, ruolo: 'user', corpo: { anno: 2027 } }));
+  const voci = (gen.j && gen.j.da_gestire) || [];
+  verifica('il 04/01/2027 la funzione risponde a chi non e\' amministratore', gen.stato === 200 && Array.isArray(gen.j.da_gestire), J2([gen.stato, gen.j && gen.j.error]));
+  verifica('e il promemoria del Fuel Surcharge c\'e\': la funzione legge i surplus e li passa', voci.some(x => x.titolo === 'Fuel Surcharge del 2026: finito il 31/12/2026'), J2(voci.map(x => x.titolo)));
+  const tutto = J2(gen.j);
+  verifica('nella risposta nessun costo e nessun accordo pagato solo da SMOCO', !/euro_t_passiva|3,21|3\.21|Accordo riservato|lettera Gatim/.test(tutto), tutto.slice(0, 300));
+  verifica('la funzione legge i surplus una volta, interi, e non scrive niente', gen.scritte.length === 0);
+  const ott = await alle('2026-10-14T08:00:00.000Z', () => chiama(funzioneCruscotto, { db, ruolo: 'user', corpo: { anno: 2026 } }));
+  const vc = ((ott.j && ott.j.da_gestire) || []).find(x => x.chiave === 'contratto-raccoglitori:2026');
+  verifica('il 14/10/2026, con SMOCO in Puglia a 1.950 t, la dashboard dice che i raccoglitori non fanno il contratto', !!vc && vc.titolo === 'I raccoglitori della Puglia hanno 100,00 t più del contratto 2026', J2([ott.stato, ott.j && ott.j.error, vc]));
+  const pari = await alle('2026-10-14T08:00:00.000Z', () => chiama(funzioneCruscotto, { db: { ...db, TargetRaccoglitore: TARGET_11_10 }, ruolo: 'user', corpo: { anno: 2026 } }));
+  verifica('coi target dell\'11/10/2026 la voce non c\'e\'', pari.stato === 200 && !((pari.j && pari.j.da_gestire) || []).some(x => x.chiave === 'contratto-raccoglitori:2026'));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
