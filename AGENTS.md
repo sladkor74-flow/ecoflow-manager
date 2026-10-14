@@ -249,7 +249,9 @@ coppie diventano 31** (aggiunta all'elenco dalla chiusura del giro, il
 la pagina Alert Engine e per `runAlertEngine`. `surplusVisibile.ts` (la parte
 attiva del surplus per chi non e' amministratore) non ha uno specchio: la usa
 solo la funzione `leggiSurplus`, e nel browser `src/lib/leggiSurplus.js` chiama
-la funzione.
+la funzione. Con la variazione del contratto (14/10/2026) non entrano coppie:
+`contrattoRete.ts` lo usano solo gli strumenti di EcoTyna, e
+`src/lib/eventiDati.js` (l'annuncio dei target cambiati) e' solo delle pagine.
 
 **Gli import in `src/lib` vanno bene in tutte due le forme.** La convenzione e'
 l'alias `@/` (39 dei 92 file; 12 usano un relativo, fra cui i cinque che prendono
@@ -293,6 +295,12 @@ con un heredoc e un template literal ha scritto `/s+/` al posto di `/\s+/` in
 confronto sbagliavano uguale. Le regex si scrivono con Edit, e la prova ha un
 caso che lo vede («Valle  d'Aosta» con due spazi, «Ba ilicata» non e'
 Basilicata).
+
+**Un testo sostitutivo che finisce con uno spazio lo perde** (14/10/2026).
+Sostituendo `raccolto: ` (con lo spazio in coda) lo strumento di modifica ha
+scritto `raccolto:'Raccolto per canale'`, e `prove/assistentePagina.mjs` ha
+dato «etichetta per raccolto». Il pezzo da sostituire si fa finire su un
+carattere che non sia uno spazio, e dopo la modifica si guarda il diff.
 
 ### Le librerie pesanti si caricano quando servono (10/10/2026)
 
@@ -4607,7 +4615,8 @@ nella scheda dei raccoglitori.
   la quota nazionale e spalmava le 100 t di ottobre anche su Campania e Sicilia.
   La usano l'Andamento di Target & Status, la tabella delle regioni della
   dashboard (`getDashboardRaccolta`) ed EcoTyna (`assistente.ts`): queste due
-  dalla chiusura del giro del 14/10/2026.
+  dalla chiusura del giro del 14/10/2026. Dal giro dopo anche lo strumento
+  `contratto_ecotyre`, con `contrattoDellaRete` (vedi piu' sotto).
 - **Le variazioni a parole** (giro del 14/10/2026). I numeri si muovono da se',
   ma EcoTyna, la dashboard e la card dell'Andamento dicevano solo 11.650 t. Ora
   dicono anche da dove vengono, solo per le variazioni in vigore
@@ -4637,6 +4646,88 @@ nella scheda dei raccoglitori.
   del perche' aperto: lato server il
   popover del pulsante «i» non si disegna, e la prova sostituisce `Perche` con
   un contenitore che mostra quello che avrebbe dentro).
+- **Le pagine gia' aperte si aggiornano da sole** (richiesta dell'utente del
+  14/10/2026, testuale: *«falla tu la registrazione ed aggiorna tutto, ma fai in
+  modo che quando si faccia una tale variazione i moduli collegati come la
+  dashboard si aggiornino di conseguenza»*). Le funzioni leggono contratto e
+  target quando sono chiamate, ma le pagine li chiedono quando si aprono. Chi
+  scrive contratto o target, a scrittura riuscita, chiama
+  `annunciaTarget({ anno, parti, origine })` (`src/lib/eventiDati.js`, solo
+  delle pagine; parti `contratto`, `annui`, `mensili`). Per la stessa scheda
+  c'e' l'evento della finestra `target-cambiati`, per le altre un
+  `BroadcastChannel`. Niente localStorage, ogni passo in un try. Annunciano la
+  variazione, il salvataggio della commessa, ogni scrittura della griglia dei
+  raccoglitori e la copia dell'anno di Impianti e stoccaggi (le parti che dice
+  di aver scritto; se si ferma a meta', quelle della simulazione, perche' una
+  parte puo' essere gia' scritta). Chi mostra quei numeri usa
+  `useTargetCambiati(interessa, rileggi)` e rilegge solo la parte toccata: una
+  volta per raffica (1,5 s), non piu' di una ogni 30 s, a scheda nascosta al
+  ritorno, mai due insieme. Chi ha scritto non rilegge per se' stesso
+  (`useOrigine`).
+  - Dashboard: il quadro se il cambio e' dell'anno a video. «Da gestire» se
+    cambiano contratto o target annui dell'anno in corso o di quello dopo, per
+    la voce «Nuovo anno» (revisione del 14/10/2026). I mensili dell'anno dopo
+    non fanno rileggere niente.
+  - Target & Status: Andamento, Commessa, Target raccoglitori e il report
+    generale rileggono il contratto o i target cambiati, mai il raccolto.
+  - La pagina scrive «… riletti alle hh:mm»; se la rilettura cade, dice che i
+    numeri a video sono di prima.
+  - L'annuncio non esce dal browser: un altro computer, o un browser senza
+    `BroadcastChannel`, vede i numeri nuovi riaprendo la pagina (per questo il
+    punto dopo). La copia dell'anno che scrive solo i siti di Giacenze non si
+    annuncia: la voce «Target e siti» della dashboard gia' aperta se ne accorge
+    ricaricando. Per un caso cosi' raro non c'e' una parte in piu'.
+- **Chi scrive la commessa la rilegge subito prima** (revisione del
+  14/10/2026). L'annuncio non arriva da un altro computer, e `storico_json` si
+  riscrive intero: partendo dal record letto all'apertura, una variazione
+  registrata nel frattempo spariva dai numeri senza avviso, e il «prima» diceva
+  il target di allora. Rileggono il contratto dell'anno prima di scrivere, con
+  una lettura per salvataggio, la variazione («fresca»), la scheda Commessa
+  Ecotyre e `RegoleAnno` di Impianti e stoccaggi (fine della programmazione e
+  chili per viaggio: il primo inventario l'aveva liquidata con «niente»).
+  Storico e «prima» si scrivono da quello riletto. La scheda Commessa confronta
+  campo per campo tre versioni: il record da cui vengono i numeri a video,
+  quello riletto e quello a video (`riallineaAlContratto`).
+  - Un campo cambiato solo altrove prende il valore salvato.
+  - Un campo cambiato qui e li' blocca la scrittura: la scheda lo dice, mostra
+    l'avviso «esce dai numeri» se una variazione ne uscirebbe, e si salva
+    premendo di nuovo.
+  - Altrimenti si scrive l'unione, e il messaggio dice che cosa viene dal
+    salvato.
+  - Un contratto creato altrove mentre qui si scriveva il primo si aggiorna:
+    non se ne crea un secondo.
+  - Lo stesso confronto vale quando l'annuncio arriva con modifiche a video.
+  `prove/variazioneContratto.mjs` cerca ancora nel sorgente della scheda
+  `const valori = valoriDa(dati, anno);`: chi tocca il salvataggio guarda
+  anche `riallineaAlContratto` e `scriviContratto(dati, fresca)`, dove ora si
+  decide che cosa si scrive.
+- **Chi legge il target del contratto** (inventario del 14/10/2026, in breve).
+  - Quando e' chiamato, quindi coi numeri del momento: `getDashboardRaccolta`
+    (quadro e regioni), `cruscottoOperativo` («Da gestire»: raccoglitori contro
+    contratto e «Nuovo anno»), EcoTyna (`situazioneGestionale`,
+    `contratto_ecotyre`, `target_raccoglitori`), la predittivita'
+    (`predittivitaDati`: fine della programmazione e chili per viaggio).
+  - Le pagine, all'apertura e all'annuncio: Dashboard, Target & Status,
+    Impianti e stoccaggi.
+  - Solo regioni e province del contratto, non le tonnellate:
+    `matriceProvinceRete`, `computeProvinceMatrix`, `runAlertEngine` (province
+    inattive).
+  - **Restano fotografie del loro giorno**, ed e' giusto cosi': gli alert dei
+    target mensili (`checkTargetAlerts`, alle 9, che legge i target dei
+    raccoglitori e non il contratto), i PDF e gli Excel gia' scaricati, i Word
+    dei contratti ai subfornitori. Nessuna funzione che salva un conto legge il
+    target del contratto.
+  - La copia dell'anno (`pianoCopiaAnno` di `annoTarget.ts`) porta nel nuovo
+    anno il contratto coi numeri della variazione (11.650, Puglia 2.600, ottobre
+    1.200, IRIGOM 4.550) ma senza la sua voce nello storico, solo «copiato dal
+    2026, da confermare». Copiare il contratto senza le variazioni o portarle
+    come nota e' una domanda aperta per l'utente.
+- **EcoTyna legge il contratto con `contratto_ecotyre`**, non con la somma dei
+  raccoglitori: vedi «EcoTyna: le domande sui dati non sono domande di norma».
+- Prove: `prove/aggiornamentoDopoVariazione.mjs`, col calendario fermo al
+  14/10/2026 e al 15/11/2026 per la voce «Nuovo anno»: con la data vera sarebbe
+  diventata rossa dal 01/01/2027 senza che il codice cambiasse. Per EcoTyna
+  `prove/ecotynaContratto.mjs` e `prove/pianoContrattoEcotyre.mjs`.
 
 Sulla copia dei dati veri dell'11/10/2026, con la variazione di ottobre (+100 t
 in Puglia, IRIGOM): target annuo 11.550 → 11.650; Puglia 2.500 → 2.600; ottobre
@@ -4646,7 +4737,13 @@ sola parte di ottobre passata, 100 t per 8 giorni su 31), scarto +129,32 →
 invariate, nella dashboard, nell'Andamento e in EcoTyna; residuo 2.731,45 →
 2.831,45; proiezione 11.721,90 t (101,49%) → 11.788,37 t (101,19%). Prove: `prove/variazioneContratto.mjs` (le regole, l'avviso,
 la dashboard intera, l'Andamento ed EcoTyna sui dati veri, la finestra
-disegnata), `prove/targetAttesoAllaData.mjs`.
+disegnata), `prove/targetAttesoAllaData.mjs`. Con i dati fino al 12/10, i
+numeri del sito del 14/10/2026: atteso del totale 8.830,901 → 8.869,611 t,
+Puglia 1.911,45 → 1.950,16 t, e `contratto_ecotyre` dice gli stessi. Con
+Impianti e stoccaggi aperta prima della variazione e salvata dopo, l'atteso
+della Puglia al 12/10 passava da 1.950,160 a 1.979,500 t e il totale da
+8.869,611 a 8.869,681 t, con le variazioni da 1 a 0. Dalla revisione del
+14/10/2026 restano 1.950,160 e 8.869,611 t, con la variazione in vigore.
 
 ### L'Andamento di Target & Status: le stesse parole in pagina, Excel, PDF e presentazione (11/10/2026)
 
@@ -5190,6 +5287,66 @@ istruita, e sono state misurate sul codice:
   Le giacenze senza un numero («RETE: —» col perche', mai 0,00) e lo strumento
   `giacenze` che dice il perche' dell'anno una volta sola: punto 24 di
   «Giacenze e Dichiarazioni: lo stesso numero».
+- **Il contratto lo dice `contratto_ecotyre`** (variazione del contratto,
+  14/10/2026). Registrata la variazione di ottobre, a *«Qual è oggi il target
+  annuo 2026 del contratto Ecotyre sulla rete, e com'è messa la Puglia rispetto
+  all'atteso?»* il pianificatore sceglieva `target_raccoglitori`, che il
+  contratto non lo legge: «11.650,00 t, come risulta dal modulo Target &
+  Status» era la somma dei target dei raccoglitori (quel giorno uguale per
+  caso; prima della variazione 11.650 contro 11.550), e sulla Puglia il dato
+  «non è filtrato per area geografica». Con gli strumenti che rispondono,
+  `chiediAssistente` non legge il riepilogo `situazioneGestionale`, che le
+  regioni le ha.
+  - **I numeri sono quelli della dashboard.** `contratto_ecotyre`
+    (`strumentiAssistente.ts`) da' target annuo del contratto, raccolto, % del
+    target, atteso alla data e scarto, residuo, proiezione, ritmo, le regioni
+    (contratto, di cui variazioni, atteso, raccolto, scarto, %), le variazioni
+    in vigore e superate a parole (`testoVariazioni` e
+    `testoVariazioniSuperate` di `assistente.ts`) e i mesi chiesti; dice
+    `regioni_di_ripiego` quando il riparto e' il ripiego, che la dashboard
+    mostra senza dirlo. Li conta `contrattoDellaRete`
+    (`base44/shared/contrattoRete.ts`), cioe' `getDashboardRaccolta` per un
+    anno con le stesse regole e lo stesso ordine delle somme, piu' `quadroRete`
+    di `quadroCommessa.ts`; nessuna lettura per regione.
+    `prove/ecotynaContratto.mjs` li confronta campo per campo con la funzione
+    vera, sui dati veri. Una regola nuova della dashboard sul contratto va
+    portata anche li': altrimenti la prova diventa rossa, ed e' giusto cosi'.
+    E' una copia sorvegliata, non ancora una regola sola: il passo dopo e' che
+    `getDashboardRaccolta` chiami `contrattoDellaRete`.
+  - **`target_raccoglitori` non e' il contratto.** `somma_target_raccoglitori_t`
+    (prima `target_totale_t`) e' la somma dei raccoglitori; il contratto c'e'
+    accanto (blocco `contratto_ecotyre`), e `nota_livelli` spiega i due
+    livelli. Le differenze raccoglitori meno contratto si calcolano solo contro
+    il contratto vero, come la scheda e il cruscotto
+    (`vociContrattoRaccoglitori`): il totale solo con `fonte_target`
+    'contratto', le regioni solo con `fonte_regioni` 'contratto', e solo se ci
+    sono i target dei raccoglitori dell'anno (senza, la differenza era
+    -11.650). Altrimenti `confronto_col_contratto_perche` dice perche'. Una
+    differenza col ripiego non e' una variazione da registrare.
+  - **Con la regione chiesta**, ogni raccoglitore porta `nella_regione_chiesta`
+    (target, fatto, residuo, %), e sono quelli i numeri da dire. Il fatto per
+    regione dei raccoglitori segue l'Andamento: regione della provincia, poi
+    «Altro». Il raccolto per regione del contratto segue invece la dashboard:
+    campo regione, poi provincia (`regioneDellaDashboard`). Ognuno e' lo
+    specchio del suo modulo. Sui dati veri dell'11/10 le due regole danno gli
+    stessi numeri (0 righe diverse su 10.035).
+  - **Il giorno dell'atteso e' `atteso_alla_data.al`.** `dati_fino_al` dello
+    strumento e' il giorno della misura della dashboard (`giornoDellaMisura`):
+    il 31/12 per un anno chiuso (con `anno_chiuso`), mai l'ultima fine
+    trasporto dell'anno dopo; null per un anno senza ritiri.
+  - **La scelta dello strumento.** Nel catalogo `contratto_ecotyre` sta prima
+    di `target_raccoglitori`, con le parole delle domande (contratto, target
+    annuo, atteso, regione, «come stiamo»), e `target_raccoglitori` rimanda a
+    lui. Fra le regole del pianificatore (`istruzioniPiano` di
+    `pianoAssistente.ts`, chiusura del giro) c'e' quella esplicita: contratto,
+    target annuo, atteso, scarto, una regione rispetto al contratto o «come
+    stiamo» vanno a `contratto_ecotyre`; `target_raccoglitori` solo per i
+    singoli raccoglitori. La regola 3-septdecies delle istruzioni della
+    risposta (`chiediAssistente`) dice quali numeri dire e con che giorno. In
+    chat lo strumento si chiama «Contratto Ecotyre» (`ETICHETTE_STRUMENTO`).
+  Prove: `prove/ecotynaContratto.mjs`; `prove/pianoContrattoEcotyre.mjs` (la
+  scelta la fa il modello, quindi si prova il testo che gli arriva);
+  `prove/assistentePagina.mjs` per l'etichetta.
 - **Un nome solo, EcoTyna**, nel menu, nel titolo della pagina e in tutti i
   testi a video (prima «Assistente» e «Chiedi all'Assistente»). Nell'elenco dei
   moduli di una richiesta 'Assistente' e' il valore che si salva, e resta:
