@@ -19,6 +19,7 @@ import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
 import VariazioneContratto, { AvvisiScarti, inizialeDaScarto } from '@/components/target-status/VariazioneContratto';
 import { scartiDalContratto } from '@/lib/attesoContratto';
+import { annunciaTarget, useTargetCambiati, useOrigine } from '@/lib/eventiDati';
 
 
 // Target dei raccoglitori: l'unico punto in cui si scrivono.
@@ -43,6 +44,16 @@ import { scartiDalContratto } from '@/lib/attesoContratto';
 // in cima c'e' un avviso (scartiDalContratto di attesoContratto) col pulsante
 // che apre la variazione del contratto gia' compilata: regione, differenza e,
 // se dallo storico dei target mensili si capisce, il mese e la destinazione.
+//
+// LE PAGINE GIA' APERTE (14/10/2026, richiesta dell'utente: «fai in modo che
+// quando si faccia una tale variazione i moduli collegati come la dashboard si
+// aggiornino di conseguenza»). Ogni target scritto qui si annuncia
+// (annunciaTarget, src/lib/eventiDati.js): la dashboard e l'Andamento aperti in
+// un'altra scheda rileggono i target, una volta per raffica di celle. E questa
+// scheda, aperta in un'altra scheda del browser, rilegge solo quello che e'
+// cambiato altrove: il contratto dopo una variazione (l'avviso «I raccoglitori
+// della Puglia hanno 100,00 t più del contratto» sparisce), i target annui o
+// mensili scritti da un'altra scheda. Il raccolto no: non e' cambiato.
 const ORIGINE = 'Target & Status, target dei raccoglitori';
 
 function Storico({ json, formato }) {
@@ -425,7 +436,39 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     setCaricando(false);
   }, [anno, toast]);
 
-  useEffect(() => { carica(); }, [carica]);
+  // La lettura intera in volo: una rilettura la aspetta (potrebbe essere partita
+  // prima del cambio e arrivare dopo).
+  const letturaIntera = useRef(null);
+  useEffect(() => { letturaIntera.current = carica(); }, [carica]);
+
+  // Il contratto o i target cambiati in un'altra scheda (vedi in testa).
+  const origine = useOrigine('raccoglitori');
+  const annuncia = (parti) => annunciaTarget({ anno, parti, origine });
+  useTargetCambiati(
+    (m) => (m.anno === Number(anno) && m.origine !== origine ? m.parti.map(p => `${p}|${m.anno}`) : []),
+    async (cosa) => {
+      const annoQui = Number(anno);
+      const parti = cosa.filter(c => c.endsWith(`|${annoQui}`)).map(c => c.split('|')[0]);
+      if (!parti.length) return;
+      if (letturaIntera.current) await letturaIntera.current.catch(() => {});
+      const n = ultimaLettura.current;
+      try {
+        const [comm, a, m] = await Promise.all([
+          parti.includes('contratto') ? base44.entities.CommessaEcotyre.filter({ anno: annoQui }) : null,
+          parti.includes('annui') ? fetchAllClient(base44.entities.TargetRaccoglitore, { anno: annoQui }) : null,
+          parti.includes('mensili') ? fetchAllClient(base44.entities.TargetMensile, { anno: annoQui }) : null,
+        ]);
+        // una lettura intera partita nel frattempo (un import) vale lei
+        if (n !== ultimaLettura.current) return;
+        if (comm) setCommessa(comm.reduce((x, r) => (!x || String(r.updated_date || r.created_date || '') > String(x.updated_date || x.created_date || '') ? r : x), null));
+        if (a) setAnnui(a);
+        if (m) setMensili(m);
+      } catch (e) {
+        if (n !== ultimaLettura.current) return;
+        toast({ title: `${parti.includes('contratto') ? 'Il contratto o i target sono cambiati' : 'I target sono cambiati'} in un'altra scheda, ma non si sono riletti`, description: `${e.message || String(e)}: a video ci sono i numeri di prima, ricarica la pagina.`, variant: 'destructive' });
+      }
+    },
+  );
 
   const trasportatori = useMemo(() => new Set(raccolto.map(r => chiaveNome(r.raccoglitore))), [raccolto]);
 
@@ -539,6 +582,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       const storico_json = conModifica(r.storico_json, { utente, nota, prima: { target: r.target ?? null, non_raccoglie: !!r.non_raccoglie } });
       const esito = await scriviConTraccia('TargetMensile', r.id, { target, non_raccoglie, storico_json }, { origine: ORIGINE, motivo: nota });
       setMensili(prev => prev.map(x => (x.id === r.id ? { ...x, target, non_raccoglie, storico_json, updated_date: new Date().toISOString() } : x)));
+      annuncia(['mensili']);
       avvisaTraccia(esito);
     } else {
       const esito = await scriviConTraccia('TargetMensile', null, {
@@ -546,6 +590,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
         storico_json: conModifica('[]', { utente, nota, prima: null }),
       }, { origine: ORIGINE, motivo: nota });
       setMensili(prev => [...prev, esito.record]);
+      annuncia(['mensili']);
       avvisaTraccia(esito);
     }
   };
@@ -557,6 +602,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       const storico_json = conModifica(r.storico_json, { utente, nota, prima: { target_tonnellate: r.target_tonnellate ?? null, attivo_dal: r.attivo_dal || '' } });
       const esito = await scriviConTraccia('TargetRaccoglitore', r.id, { target_tonnellate, attivo_dal, storico_json }, { origine: ORIGINE, motivo: nota });
       setAnnui(prev => prev.map(x => (x.id === r.id ? { ...x, target_tonnellate, attivo_dal, storico_json } : x)));
+      annuncia(['annui']);
       avvisaTraccia(esito);
     } else {
       const esito = await scriviConTraccia('TargetRaccoglitore', null, {
@@ -564,6 +610,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
         storico_json: conModifica('[]', { utente, nota, prima: null }),
       }, { origine: ORIGINE, motivo: nota });
       setAnnui(prev => [...prev, esito.record]);
+      annuncia(['annui']);
       avvisaTraccia(esito);
     }
   };
@@ -581,16 +628,21 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     const nota = `impianto: ${impianto || 'non indicato'}${r2 ? ' (piazzale)' : ''}`;
     const a = riga.annuo;
     const esiti = [];
-    if (a) {
-      const storico_json = conModifica(a.storico_json, { utente, nota, prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '', impianto: a.impianto || '' } });
-      esiti.push(await scriviConTraccia('TargetRaccoglitore', a.id, { impianto, ruolo: r2, storico_json }, { origine: ORIGINE, motivo: nota }));
-      setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, impianto, ruolo: r2, storico_json } : x)));
-    }
-    for (const m of Object.values(riga.mesi)) {
-      if (!m) continue;
-      const storico_json = conModifica(m.storico_json, { utente, nota, prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie, impianto: m.impianto || '' } });
-      esiti.push(await scriviConTraccia('TargetMensile', m.id, { impianto, ruolo: r2, storico_json }, { origine: ORIGINE, motivo: nota }));
-      setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, impianto, ruolo: r2, storico_json } : x)));
+    // Anche a meta' (una scrittura caduta dopo la prima) qualcosa e' cambiato: si annuncia lo stesso.
+    try {
+      if (a) {
+        const storico_json = conModifica(a.storico_json, { utente, nota, prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '', impianto: a.impianto || '' } });
+        esiti.push(await scriviConTraccia('TargetRaccoglitore', a.id, { impianto, ruolo: r2, storico_json }, { origine: ORIGINE, motivo: nota }));
+        setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, impianto, ruolo: r2, storico_json } : x)));
+      }
+      for (const m of Object.values(riga.mesi)) {
+        if (!m) continue;
+        const storico_json = conModifica(m.storico_json, { utente, nota, prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie, impianto: m.impianto || '' } });
+        esiti.push(await scriviConTraccia('TargetMensile', m.id, { impianto, ruolo: r2, storico_json }, { origine: ORIGINE, motivo: nota }));
+        setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, impianto, ruolo: r2, storico_json } : x)));
+      }
+    } finally {
+      if (esiti.length) annuncia(['annui', 'mensili']);
     }
     avvisaTraccia(...esiti);
   };
@@ -600,18 +652,23 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   const confermaRighe = async (daFare) => {
     const utente = nomeUtente(user);
     setConfermando(daFare.length === 1 ? `${daFare[0].chiave}|${daFare[0].regione}|${daFare[0].impiantoChiave}` : 'tutte');
+    // Un target confermato smette di essere «da confermare» e torna nei conti
+    // (dashboard, alert): si annuncia, anche se la conferma si ferma a meta'.
+    const confermati = new Set();
     try {
       for (const riga of daFare) {
         const a = riga.annuo;
         if (a && daConfermare(a)) {
           const storico_json = conModifica(a.storico_json, { utente, nota: 'confermato', prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '' } });
           await scriviConTraccia('TargetRaccoglitore', a.id, { storico_json }, { origine: ORIGINE });
+          confermati.add('annui');
           setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, storico_json } : x)));
         }
         for (const m of Object.values(riga.mesi)) {
           if (!m || !daConfermare(m)) continue;
           const storico_json = conModifica(m.storico_json, { utente, nota: 'confermato', prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie } });
           await scriviConTraccia('TargetMensile', m.id, { storico_json }, { origine: ORIGINE });
+          confermati.add('mensili');
           setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, storico_json } : x)));
         }
       }
@@ -619,6 +676,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     } catch (e) {
       toast({ title: 'Conferma non riuscita', description: e.message || String(e), variant: 'destructive' });
     }
+    if (confermati.size) annuncia([...confermati]);
     setConfermando(null);
   };
 
@@ -631,6 +689,7 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       storico_json: conModifica('[]', { utente: nomeUtente(user), nota: 'nuova riga', prima: null }),
     }, { origine: ORIGINE, motivo: 'nuova riga' });
     setAnnui(prev => [...prev, esito.record]);
+    annuncia(['annui']);
     avvisaTraccia(esito);
   };
 
@@ -840,11 +899,12 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
           scritta, senza rileggere tutta la scheda. */}
       {isAdmin && commessa && (
         <VariazioneContratto anno={anno} commessa={commessa} user={user} aperta={!!variazione} iniziale={variazione}
-          onChiudi={() => setVariazione(null)} onSalvata={(scritta) => setCommessa(scritta)} />
+          onChiudi={() => setVariazione(null)} onSalvata={(scritta) => setCommessa(scritta)} origine={origine} />
       )}
 
+      {/* Un import riscrive target annui e mensili: si annuncia e si rilegge la scheda. */}
       <ImportaReportGenerale open={importa && isAdmin} onClose={() => setImporta(false)} anno={anno} annui={annui} mensili={mensili} user={user} solaLettura={!isAdmin}
-        onImportato={async () => { setImporta(false); await carica(); }} />
+        onImportato={async () => { setImporta(false); annuncia(['annui', 'mensili']); const lettura = carica(); letturaIntera.current = lettura; await lettura; }} />
     </div>
   );
 }

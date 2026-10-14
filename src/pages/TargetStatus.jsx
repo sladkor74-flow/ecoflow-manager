@@ -27,6 +27,7 @@ import { righeAndamento, targetMensiliValidi } from '@/lib/andamentoTarget';
 import { filtraRaccolto } from '@/lib/raccoltoFiltrato';
 import { targetAnnuoDellAnno, regioniDellAnno, attesoDellaRegione, profiloMensile, frazioneDelMese, giornoDeiDati, variazioniDelContratto } from '@/lib/attesoContratto';
 import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
+import { useTargetCambiati, testoRilettura, oraRoma } from '@/lib/eventiDati';
 import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
 
 // Target & Status: unico punto in cui si scrivono i target.
@@ -176,6 +177,9 @@ export default function TargetStatus() {
   // terminato, mai oltre oggi (giornoDeiDati). '' se non si sa.
   const [giornoDati, setGiornoDati] = useState('');
   const [loading, setLoading] = useState(false);
+  // La riga che dice che l'Andamento si e' riletto per un cambio fatto in
+  // un'altra scheda (14/10/2026, vedi useTargetCambiati qui sotto).
+  const [riletto, setRiletto] = useState(null);
   // Il mese di oggi e' quello italiano, non quello del dispositivo (11/10/2026).
   const meseDiOggi = MESI[Number(oggiRoma().slice(5, 7)) - 1];
   const [meseSelezionato, setMeseSelezionato] = useState(meseDiOggi);
@@ -186,9 +190,11 @@ export default function TargetStatus() {
   const ultimaLettura = useRef(0);
   const raccolto = useMemo(() => filtraRaccolto(raccoltoAnno, filters), [raccoltoAnno, filters]);
 
-  const loadData = useCallback(async () => {
+  const leggiTutto = useCallback(async () => {
     const n = ++ultimaLettura.current;
     setLoading(true);
+    // la riga di una rilettura parziale (qui sotto) non vale piu': si rilegge tutto
+    setRiletto(null);
     try {
       // Il target mensile per impianto (ImpiantoTarget) non si legge piu': non
       // l'ha mai scritto nessuno, e la tabella mostrava zero con un delta verde
@@ -216,8 +222,68 @@ export default function TargetStatus() {
     }
     setLoading(false);
   }, [anno]);
+  // La lettura intera in volo: una rilettura dei target la aspetta, perche' i
+  // suoi numeri potrebbero essere di prima del cambio e arrivare dopo.
+  const letturaInCorso = useRef(null);
+  const loadData = useCallback(() => {
+    const lettura = leggiTutto();
+    letturaInCorso.current = lettura;
+    return lettura;
+  }, [leggiTutto]);
 
   useEffect(() => { if (scheda === 'andamento') loadData(); }, [scheda, loadData]);
+
+  // IL CONTRATTO O I TARGET CAMBIATI IN UN'ALTRA SCHEDA (14/10/2026, richiesta
+  // dell'utente: «fai in modo che quando si faccia una tale variazione i moduli
+  // collegati come la dashboard si aggiornino di conseguenza»). Nella stessa
+  // scheda l'Andamento si rilegge intero quando ci si torna (l'effetto qui
+  // sopra): una variazione registrata nella scheda Commessa e' gia' nei numeri.
+  // Aperto in un'altra scheda del browser, invece, restava col contratto letto
+  // all'apertura. Ora, a un cambio dell'anno a video annunciato da chi scrive
+  // (src/lib/eventiDati.js), l'Andamento rilegge solo la parte toccata - il
+  // contratto, i target annui o i target mensili dei raccoglitori - e non il
+  // raccolto, che non e' cambiato: card, tabella per regione e contratto,
+  // Report generale, tabelle per raccoglitore e per regione e Canale ACI
+  // ripartono da li'. Una volta per raffica, a scheda visibile; chi e' su
+  // un'altra scheda della pagina non rilegge, perche' tornando all'Andamento
+  // la pagina rilegge tutto.
+  const attuale = useRef({ anno, scheda });
+  attuale.current = { anno, scheda };
+  useTargetCambiati(
+    (m) => (scheda === 'andamento' && m.anno === anno ? m.parti.map(p => `${p}|${m.anno}`) : []),
+    async (cosa) => {
+      const annoQui = anno;
+      const parti = cosa.filter(c => c.endsWith(`|${annoQui}`)).map(c => c.split('|')[0]);
+      if (!parti.length) return;
+      if (letturaInCorso.current) await letturaInCorso.current.catch(() => {});
+      if (attuale.current.anno !== annoQui || attuale.current.scheda !== 'andamento') return;
+      const n = ultimaLettura.current;
+      let motivoErrore = '';
+      let letti = null;
+      try {
+        const [comm, annuiNuovi, mensiliNuovi] = await Promise.all([
+          parti.includes('contratto') ? base44.entities.CommessaEcotyre.filter({ anno: annoQui }) : null,
+          parti.includes('annui') ? fetchAllClient(base44.entities.TargetRaccoglitore, { anno: annoQui }) : null,
+          parti.includes('mensili') ? fetchAllClient(base44.entities.TargetMensile, { anno: annoQui }) : null,
+        ]);
+        letti = { comm, annuiNuovi, mensiliNuovi };
+      } catch (e) {
+        motivoErrore = (e && e.message) || String(e);
+      }
+      // Una lettura intera partita nel frattempo (anno cambiato, «Aggiorna») vale lei.
+      if (n !== ultimaLettura.current) return;
+      if (letti) {
+        if (letti.comm) setCommessa(commessaDellAnno(letti.comm, annoQui));
+        if (letti.annuiNuovi) setAnnui(letti.annuiNuovi);
+        if (letti.mensiliNuovi) setTargets(letti.mensiliNuovi);
+      }
+      setRiletto({
+        testo: testoRilettura({ parti, anno: annoQui, dove: "in un'altra scheda", esiti: [{ nome: 'Andamento', motivo: motivoErrore }], ora: oraRoma() }),
+        errore: !!motivoErrore,
+        anno: annoQui,
+      });
+    },
+  );
 
   const filterOptions = raccoltoAnno?.filterOptions || { mesi: MESI, regioni: [], raccoglitori: [], impianti: [] };
 
@@ -417,6 +483,11 @@ export default function TargetStatus() {
                   con un'altra data da sistemare. L'ACI ha la sua riga nella sezione
                   Canale ACI: i due canali non si sommano. */}
               <RiepilogoDate canale="Rete" riepilogo={raccoltoAnno?.date_da_sistemare} esempi />
+              {riletto && riletto.anno === anno && (
+                <p role="status" className={`text-xs rounded-md px-3 py-1.5 ${riletto.errore ? 'text-amber-900 bg-amber-50 border border-amber-300' : 'text-muted-foreground bg-muted/40'}`}>
+                  {riletto.testo}{riletto.errore ? ' Oppure premi «Aggiorna».' : ''}
+                </p>
+              )}
               <KpiCards kpis={kpis} anno={anno} />
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-3">Raccolta RETE per regione e contratto</h2>

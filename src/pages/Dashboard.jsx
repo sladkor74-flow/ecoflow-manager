@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Loader2, AlertTriangle, CalendarCheck, ChevronDown, ChevronRight } from 'lucide-react';
@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { oggiRoma } from '@/lib/giornoItaliano';
 import { anniDaScegliere, annoDiOggi, meseDiLavoro } from '@/lib/periodoPagine';
 import { smista, nascondi, leggiMemoria, scriviMemoria } from '@/lib/avvisiNascosti';
+import { useTargetCambiati, testoRilettura, oraRoma } from '@/lib/eventiDati';
 import EsportaPdf from '@/components/shared/EsportaPdf';
 import IntestazioneCommessa, { IndiceSezioni } from '@/components/dashboard/IntestazioneCommessa';
 import DaGestire from '@/components/dashboard/DaGestire';
@@ -69,28 +70,107 @@ export default function Dashboard() {
 
   // Il cruscotto: le voci da gestire, gli ordini aperti, la freschezza dei dati,
   // i mesi dell'attiva, gli impianti della notte. E' di oggi: non segue l'anno.
+  // Le letture si numerano: vale l'ultima partita, anche quando una rilettura
+  // (qui sotto, il contratto cambiato) parte mentre la prima e' ancora in volo.
   const [cruscotto, setCruscotto] = useState(null);
   const [erroreCruscotto, setErroreCruscotto] = useState('');
-  useEffect(() => {
-    let vivo = true;
-    base44.functions.invoke('cruscottoOperativo', {})
-      .then(r => { if (vivo) setCruscotto(r.data); })
-      .catch(e => { if (vivo) setErroreCruscotto(motivo(e)); });
-    return () => { vivo = false; };
+  const letturaCruscotto = useRef(0);
+  const cruscottoAVideo = useRef(false);
+  cruscottoAVideo.current = !!cruscotto;
+  const leggiCruscotto = useCallback((rilettura = false) => {
+    const n = ++letturaCruscotto.current;
+    return base44.functions.invoke('cruscottoOperativo', {})
+      .then(r => {
+        if (n !== letturaCruscotto.current) return null;
+        setCruscotto(r.data);
+        setErroreCruscotto('');
+        return '';
+      })
+      .catch(e => {
+        if (n !== letturaCruscotto.current) return null;
+        // Una rilettura che cade lascia a video l'elenco di prima, e la riga
+        // della rilettura lo dice; senza un elenco a video vale l'errore di sempre.
+        if (!rilettura || !cruscottoAVideo.current) setErroreCruscotto(motivo(e));
+        return motivo(e);
+      });
   }, []);
+  useEffect(() => {
+    leggiCruscotto();
+    return () => { letturaCruscotto.current++; };
+  }, [leggiCruscotto]);
 
   // Il quadro dell'anno scelto.
   const [raccolta, setRaccolta] = useState({ anno: null, dati: null, errore: '' });
-  useEffect(() => {
-    let vivo = true;
-    setRaccolta({ anno, dati: null, errore: '' });
-    base44.functions.invoke('getDashboardRaccolta', { anno: [anno] })
-      .then(r => { if (vivo) setRaccolta({ anno, dati: r.data, errore: '' }); })
-      .catch(e => { if (vivo) setRaccolta({ anno, dati: null, errore: motivo(e) }); });
-    return () => { vivo = false; };
+  const letturaQuadro = useRef(0);
+  const leggiQuadro = useCallback((rilettura = false) => {
+    const n = ++letturaQuadro.current;
+    // La rilettura non svuota il quadro: i numeri di prima restano a video finche'
+    // arrivano i nuovi, e il margine, che parte a quadro pronto, non riparte.
+    if (!rilettura) setRaccolta({ anno, dati: null, errore: '' });
+    return base44.functions.invoke('getDashboardRaccolta', { anno: [anno] })
+      .then(r => {
+        if (n !== letturaQuadro.current) return null;
+        setRaccolta({ anno, dati: r.data, errore: '' });
+        return '';
+      })
+      .catch(e => {
+        if (n !== letturaQuadro.current) return null;
+        if (!rilettura) setRaccolta({ anno, dati: null, errore: motivo(e) });
+        else setRaccolta(x => (x.anno === anno && x.dati ? x : { anno, dati: null, errore: motivo(e) }));
+        return motivo(e);
+      });
   }, [anno]);
+  useEffect(() => {
+    leggiQuadro();
+    return () => { letturaQuadro.current++; };
+  }, [leggiQuadro]);
   const raccoltaPronta = raccolta.anno === anno && (raccolta.dati || raccolta.errore);
   const quadro = raccolta.anno === anno && raccolta.dati ? raccolta.dati.quadro : null;
+
+  // IL CONTRATTO O I TARGET CAMBIATI IN UN'ALTRA SCHEDA (14/10/2026, richiesta
+  // dell'utente dopo la variazione di ottobre in Puglia: «fai in modo che quando
+  // si faccia una tale variazione i moduli collegati come la dashboard si
+  // aggiornino di conseguenza»). La dashboard legge il contratto quando si apre:
+  // aperta in un'altra scheda restava a 11.550 t finche' non la si ricaricava.
+  // Target & Status ora lo annuncia (src/lib/eventiDati.js) e qui si rilegge
+  // solo la parte toccata, una volta per raffica e a scheda visibile:
+  // - il quadro, se il cambio e' dell'anno a video (contratto, target annui o
+  //   mensili dei raccoglitori: getDashboardRaccolta li legge tutti e tre);
+  // - l'elenco «Da gestire», se cambiano contratto o target annui dell'anno in
+  //   corso: la voce «I raccoglitori della Puglia hanno 100,00 t più del
+  //   contratto» (vociContrattoRaccoglitori) li confronta, e dopo la variazione
+  //   deve sparire. Per i target mensili no: la voce «Target raccoglitori» viene
+  //   dagli alert, che riscrive il controllo delle 9 (checkTargetAlerts), e
+  //   rileggere il cruscotto non la cambierebbe;
+  // - l'elenco «Da gestire» anche se cambiano contratto o target annui
+  //   dell'anno dopo (revisione del 14/10/2026): la voce «Nuovo anno»
+  //   (cruscotto.ts, listaAnno) conta il contratto Ecotyre e i target dei
+  //   raccoglitori del prossimo anno, e da novembre, salvata la commessa 2027 o
+  //   fatta la copia in un'altra scheda, restava a dire che mancavano. A gennaio e
+  //   febbraio la voce guarda l'anno appena cominciato, che e' l'anno in corso.
+  // Margine e chiusura del mese non leggono i target: restano come sono.
+  const [riletto, setRiletto] = useState(null);
+  useTargetCambiati(
+    (m) => {
+      const cosa = [];
+      if (m.anno === anno) cosa.push(`quadro|${m.anno}`);
+      if ((m.anno === annoOggi || m.anno === annoOggi + 1) && m.parti.some(p => p === 'contratto' || p === 'annui')) cosa.push('cruscotto');
+      return cosa.length ? [...cosa, ...m.parti.map(p => `parte|${p}|${m.anno}`)] : [];
+    },
+    async (cosa) => {
+      const lavori = [];
+      if (cosa.includes(`quadro|${anno}`)) lavori.push(leggiQuadro(true).then(m => ({ nome: 'quadro', motivo: m })));
+      if (cosa.includes('cruscotto')) lavori.push(leggiCruscotto(true).then(m => ({ nome: 'elenco «Da gestire»', motivo: m })));
+      if (!lavori.length) return;
+      // null: superata da una lettura partita dopo, che vale lei
+      const esiti = (await Promise.all(lavori)).filter(e => e.motivo !== null);
+      if (!esiti.length) return;
+      const cambi = cosa.filter(c => c.startsWith('parte|')).map(c => c.split('|'));
+      const parti = [...new Set(cambi.map(c => c[1]))];
+      const anni = [...new Set(cambi.map(c => c[2]))].sort();
+      setRiletto({ testo: testoRilettura({ parti, anno: anni.join(' e '), esiti, ora: oraRoma() }), errore: esiti.some(e => e.motivo) });
+    },
+  );
 
   // Il margine dell'anno scelto: solo per l'amministratore, e solo dopo che le
   // prime due hanno risposto (stessa somma di letture, meno picco nel minuto).
@@ -205,6 +285,10 @@ export default function Dashboard() {
         errore={!!raccolta.errore}
         azioni={esporta}
       />
+
+      {riletto && (
+        <p role="status" className={`text-xs rounded-md px-3 py-1.5 ${riletto.errore ? 'text-amber-900 bg-amber-50 border border-amber-300' : 'text-muted-foreground bg-muted/40'}`}>{riletto.testo}</p>
+      )}
 
       <IndiceSezioni voci={indice} contaPerSezione={segni} onVai={vai} />
 

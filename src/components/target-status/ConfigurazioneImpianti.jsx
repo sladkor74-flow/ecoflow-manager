@@ -9,11 +9,12 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, Trash2, Edit3, AlertTriangle, Copy, ArrowRightLeft, Wrench, ChevronDown, ChevronRight, CalendarClock, CheckCircle2 } from 'lucide-react';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { formatKg } from '@/lib/utils';
-import { annoDelRecord, annoCorrenteRoma, daConfermare, senzaNotaCopia } from '@/lib/annoTarget';
+import { annoDelRecord, annoCorrenteRoma, daConfermare, senzaNotaCopia, commessaDellAnno } from '@/lib/annoTarget';
 import { chiaveNome, conModifica, nomeUtente } from '@/lib/target';
 import { ton, it, testoErrore } from '@/components/predittivita/Comuni';
 import { scriviConTraccia, eliminaConTraccia, avvisoTraccia, notaTraccia } from '@/lib/scriviConTraccia';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
+import { annunciaTarget, useOrigine } from '@/lib/eventiDati';
 
 // Impianti e stoccaggi dell'anno, in Target & Status (27/09/2026): l'unico
 // punto in cui si scrivono. Per ogni anno gli impianti col loro target di rete,
@@ -269,20 +270,33 @@ function RegoleAnno({ anno, commessa, modificabile, user, scrivi }) {
   const fineUsata = (commessa && commessa.fine_programmazione) || (anno === 2026 ? FINE_2026 : '');
   const kgUsati = (commessa && Number(commessa.kg_per_viaggio)) || KG_PER_VIAGGIO_PREDEFINITI;
 
+  // Si scrive sul contratto com'e' adesso, riletto subito prima (revisione del
+  // 14/10/2026): lo storico della commessa (storico_json) si riscrive intero, e
+  // partendo da quello letto all'apertura della scheda una variazione registrata
+  // nel frattempo, in un'altra scheda o su un altro computer, spariva dallo
+  // storico, cioe' dai numeri (variazioniDelContratto: dashboard, Andamento,
+  // atteso della regione), e il «prima» diceva il target di allora. Come fa la
+  // variazione (VariazioneContratto, «fresca»): una lettura per salvataggio.
+  // Fine della programmazione e chili per viaggio non cambiano il target: il
+  // salvataggio non si annuncia alle altre pagine.
   const salva = async () => {
     if (fine && !fine.startsWith(`${anno}-`)) { await scrivi(() => Promise.reject(new Error(`La fine della programmazione deve essere un giorno del ${anno}.`))); return; }
     const chili = kg.trim() ? daChili(kg) : null;
     if (kg.trim() && chili === null) { await scrivi(() => Promise.reject(new Error('Scrivi i chili per viaggio come numero intero, per esempio 13000.'))); return; }
     setSalvando(true);
-    await scrivi(() => scriviConTraccia('CommessaEcotyre', commessa.id, {
-      fine_programmazione: fine || null,
-      kg_per_viaggio: chili,
-      storico_json: conModifica(commessa.storico_json, {
-        utente: nomeUtente(user),
-        nota: 'fine della programmazione e chili per viaggio',
-        prima: { target_annuo_t: commessa.target_annuo_t ?? null, fine_programmazione: commessa.fine_programmazione || null, kg_per_viaggio: commessa.kg_per_viaggio ?? null },
-      }),
-    }, { origine: ORIGINE, motivo: 'fine della programmazione e chili per viaggio' }), `Regole del ${anno} salvate`);
+    await scrivi(async () => {
+      const fresca = commessaDellAnno(await base44.entities.CommessaEcotyre.filter({ anno }), anno);
+      if (!fresca) throw new Error(`il contratto del ${anno} non si trova più: ricarica la pagina`);
+      return scriviConTraccia('CommessaEcotyre', fresca.id, {
+        fine_programmazione: fine || null,
+        kg_per_viaggio: chili,
+        storico_json: conModifica(fresca.storico_json, {
+          utente: nomeUtente(user),
+          nota: 'fine della programmazione e chili per viaggio',
+          prima: { target_annuo_t: fresca.target_annuo_t ?? null, fine_programmazione: fresca.fine_programmazione || null, kg_per_viaggio: fresca.kg_per_viaggio ?? null },
+        }),
+      }, { origine: ORIGINE, motivo: 'fine della programmazione e chili per viaggio' });
+    }, `Regole del ${anno} salvate`);
     setSalvando(false);
   };
 
@@ -634,8 +648,24 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
     }
   };
   const chiudiAzione = () => { azioneCorrente.current++; setAzione(null); };
+  // La copia dell'anno scrive contratto, target annui e mensili dei raccoglitori:
+  // lo si dice alle pagine gia' aperte (annunciaTarget, src/lib/eventiDati.js,
+  // revisione del 14/10/2026), che rileggono la loro parte. La dashboard aperta a
+  // novembre, per esempio, contava ancora il contratto del 2027 fra le cose che
+  // mancano all'anno nuovo. Se la copia si ferma a meta' si annuncia quello che
+  // la simulazione voleva scrivere: una parte puo' essere gia' scritta.
+  const origine = useOrigine('impianti');
+  const annunciaCopia = (conteggi) => {
+    const c = conteggi || {};
+    const parti = [
+      numeroConteggio(c.commessa) > 0 ? 'contratto' : '',
+      numeroConteggio(c.raccoglitori) > 0 ? 'annui' : '',
+      numeroConteggio(c.mensili) > 0 ? 'mensili' : '',
+    ].filter(Boolean);
+    if (parti.length) annunciaTarget({ anno, parti, origine });
+  };
   const conferma = async () => {
-    const { tipo } = azione;
+    const { tipo, dati: simulazione } = azione;
     const funzione = tipo === 'copia' ? 'copiaAnnoTarget' : 'portaTargetInTargetStatus';
     const n = ++azioneCorrente.current;
     setAzione(a => ({ ...a, fase: 'eseguo' }));
@@ -643,8 +673,10 @@ export default function ConfigurazioneImpianti({ anno, solaLettura = false, user
       const res = await base44.functions.invoke(funzione, { anno, simula: false });
       const d = (res && res.data) || res || {};
       if (d.error) throw new Error(d.error);
+      if (tipo === 'copia') annunciaCopia(d.conteggi);
       if (n === azioneCorrente.current) setAzione({ tipo, fase: 'fatto', dati: d, errore: null });
     } catch (e) {
+      if (tipo === 'copia') annunciaCopia(simulazione && simulazione.conteggi);
       if (n === azioneCorrente.current) setAzione({ tipo, fase: 'fatto', dati: null, errore: `${testoErrore(e)}. Quello che è stato scritto resta: puoi riprovare, completa solo quello che manca.` });
     }
     await load();

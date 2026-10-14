@@ -11,6 +11,7 @@ import { commessaDellAnno } from '@/lib/annoTarget';
 import { variazioneDelContratto, storicoConVariazione } from '@/lib/attesoContratto';
 import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
 import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
+import { annunciaTarget } from '@/lib/eventiDati';
 
 // LA VARIAZIONE DEL CONTRATTO IN CORSO D'ANNO (richiesta dell'utente del 14/10/2026).
 //
@@ -29,6 +30,13 @@ import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 // Si apre dalla scheda Commessa Ecotyre e, gia' compilata, dall'avviso della
 // scheda Target raccoglitori. Solo l'amministratore, e mai su un anno chiuso:
 // chi monta il componente lo sa (isAdmin della pagina).
+//
+// Scritta la variazione, lo si dice alle pagine gia' aperte (annunciaTarget,
+// src/lib/eventiDati.js, richiesta dell'utente del 14/10/2026: «fai in modo
+// che quando si faccia una tale variazione i moduli collegati come la
+// dashboard si aggiornino di conseguenza»): la dashboard e l'Andamento aperti
+// in un'altra scheda rileggono il contratto. origine e' quella di chi monta la
+// finestra, che si rimette da se' la commessa scritta e non rilegge.
 
 const ORIGINE = 'Target & Status, variazione del contratto';
 // 'AAAA-MM-GG' come gg/mm/aaaa
@@ -196,7 +204,7 @@ export const inizialeDaScarto = (s) => ({
  * la variazione si applica a quello, perche' a video puo' esserci una lettura di
  * qualche minuto prima. onSalvata riceve la commessa scritta.
  */
-export default function VariazioneContratto({ anno, commessa, user, aperta, onChiudi, iniziale = null, onSalvata }) {
+export default function VariazioneContratto({ anno, commessa, user, aperta, onChiudi, iniziale = null, onSalvata, origine = '' }) {
   const { toast } = useToast();
   const [mese, setMese] = useState('');
   const [regione, setRegione] = useState('');
@@ -255,6 +263,8 @@ export default function VariazioneContratto({ anno, commessa, user, aperta, onCh
       const storico_json = storicoConVariazione(fresca.storico_json, { il: new Date().toISOString(), da: nomeUtente(user), voce: v, prima: esito.prima });
       const motivoTraccia = `variazione del contratto, ${MESI[v.mese_idx].toLowerCase()} ${v.regione} ${conSegno(v.t)} t: ${v.motivo} (comunicata il ${giorno(v.comunicata_il)})`;
       const scritta = await scriviConTraccia('CommessaEcotyre', fresca.id, { ...esito.patch, storico_json }, { origine: ORIGINE, motivo: motivoTraccia });
+      // Il contratto e' scritto (anche se la traccia no): le pagine aperte lo rileggono.
+      annunciaTarget({ anno, parti: ['contratto'], origine });
       const avviso = avvisoTraccia(scritta);
       const riassunto = esito.righe.map(r => `${r.cosa} ${tonnellate(r.dopo_t)} t`).join(', ');
       toast(avviso ? { ...avviso, title: 'Variazione registrata, ma fuori dallo storico delle modifiche' } : { title: 'Variazione registrata nel contratto', description: riassunto });

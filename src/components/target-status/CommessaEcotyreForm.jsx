@@ -12,6 +12,7 @@ import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
 import VariazioneContratto, { ElencoVariazioni, avvisoVariazioniChiuse } from '@/components/target-status/VariazioneContratto';
 import { variazioniDelContratto, variazioniCheSiChiudono } from '@/lib/attesoContratto';
+import { annunciaTarget, useTargetCambiati, useOrigine } from '@/lib/eventiDati';
 
 // Commessa Ecotyre dell'anno, cioe' quanto richiede il contratto: target annuo e
 // per regione, ripartizione per classe, target mensile iniziale e rivisto, budget
@@ -38,6 +39,27 @@ import { variazioniDelContratto, variazioniCheSiChiudono } from '@/lib/attesoCon
 // regione o il mese che una variazione aveva scritto, la variazione esce dai
 // numeri e resta in elenco barrata (revisione del 14/10/2026): la scheda lo
 // dice prima di salvare (variazioniCheSiChiudono), non dopo.
+//
+// LE ALTRE SCHEDE APERTE (14/10/2026, richiesta dell'utente: «fai in modo che
+// quando si faccia una tale variazione i moduli collegati come la dashboard si
+// aggiornino di conseguenza»). Un salvataggio si annuncia alle pagine gia'
+// aperte (annunciaTarget, src/lib/eventiDati.js), che rileggono il contratto.
+// E questa scheda, aperta in un'altra scheda del browser mentre di qua si
+// registra una variazione, rilegge il contratto: senza modifiche a video lo
+// rimette com'e'; con modifiche non salvate le tiene e rimette come salvate le
+// parti che non erano state toccate (riallineaAlContratto), cosi' l'avviso
+// «esce dai numeri» confronta il contratto di adesso e lo storico scrive il
+// «prima» vero. Prima restava il contratto letto all'apertura, e salvarla
+// avrebbe tolto la variazione senza dire niente.
+//
+// L'ANNUNCIO NON ARRIVA DAPPERTUTTO (revisione del 14/10/2026): da un altro
+// computer, o da un browser senza il canale fra le schede, non arriva niente.
+// Per questo il salvataggio rilegge il contratto subito prima di scrivere (una
+// lettura per salvataggio, come la variazione): se nel frattempo e' cambiato,
+// le parti non toccate a video prendono i numeri salvati e si scrive l'unione;
+// se una parte e' cambiata qui e li', non si scrive niente e la scheda lo dice,
+// con l'avviso «esce dai numeri» se una variazione ne uscirebbe: si salva
+// premendo di nuovo. Lo storico e il «prima» si scrivono da quello riletto.
 
 const ORIGINE = 'Target & Status, commessa Ecotyre';
 const testo = (v) => (v === null || v === undefined || v === '' ? '' : String(v).replace('.', ','));
@@ -88,6 +110,54 @@ function valoriDa(dati, anno) {
     destinazioni_json: JSON.stringify(dati.destinazioni.filter(d => d.destinazione.trim()).map(d => ({ destinazione: d.destinazione.trim(), target_t: numero(d.target), trattamento: d.trattamento.trim() }))),
     target_prezzo_regioni_json: JSON.stringify(dati.prezzo_regioni.filter(p => p.regione.trim()).map(p => ({ regione: p.regione.trim(), target_t: numero(p.target), prezzo: numero(p.prezzo) }))),
   };
+}
+
+// I campi che il salvataggio scrive: per ognuno la sua parte a video e come si chiama.
+const CAMPI = [
+  ['target_annuo_t', 'target_annuo_t', 'il target annuo'],
+  ['regioni_json', 'regioni', 'le regioni'],
+  ['classi_json', 'classi', 'la ripartizione per classe'],
+  ['target_mensile_iniziale_json', 'mensile_iniziale', 'il target mensile iniziale'],
+  ['target_mensile_json', 'mensile', 'il target mensile rivisto'],
+  ['budget_rete_json', 'rete', 'il budget RETE'],
+  ['budget_aci_json', 'aci', 'il budget ACI'],
+  ['destinazioni_json', 'destinazioni', 'le quantità per destinazione'],
+  ['target_prezzo_regioni_json', 'prezzo_regioni', 'la previsione ACI per regione'],
+];
+const elenco = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} e ${xs[xs.length - 1]}`);
+
+/**
+ * I numeri a video quando il contratto, sotto, e' cambiato (revisione del
+ * 14/10/2026). base: il record da cui vengono i numeri a video (null se non
+ * c'era); fresca: il contratto riletto adesso; dati: quello che c'e' a video.
+ * Campo per campo, coi valori ripuliti come li scrive il salvataggio:
+ * - cambiato solo li': a video va il valore salvato (aggiornati);
+ * - cambiato qui e li' in modo diverso: resta quello a video (conflitti);
+ * - cambiato solo qui, o in nessuno dei due: resta quello a video.
+ * Restituisce { dati, aggiornati, conflitti }, coi nomi delle parti.
+ */
+export function riallineaAlContratto({ base, fresca, dati, anno }) {
+  const prima = valoriDa(statoDaRecord(base), anno);
+  const adesso = valoriDa(statoDaRecord(fresca), anno);
+  const qui = valoriDa(dati, anno);
+  const salvati = statoDaRecord(fresca);
+  const nuovi = { ...dati };
+  const aggiornati = [];
+  const conflitti = [];
+  for (const [campo, parte, nome] of CAMPI) {
+    if (adesso[campo] === prima[campo]) continue;
+    if (qui[campo] === prima[campo]) { nuovi[parte] = salvati[parte]; aggiornati.push(nome); } else if (qui[campo] !== adesso[campo]) conflitti.push(nome);
+  }
+  return { dati: nuovi, aggiornati, conflitti };
+}
+
+/** Che cosa dice la scheda quando ha rimesso a video le parti salvate altrove. */
+export function avvisoRiallineo({ anno, dove, aggiornati = [], conflitti = [], fermato = false }) {
+  const pezzi = [`Mentre modificavi, il contratto del ${anno} è stato salvato ${dove}${aggiornati.length ? `: per ${elenco(aggiornati)} ora a video c'è quello salvato, che non avevi toccato` : ''}.`];
+  if (conflitti.length) pezzi.push(`Avevi cambiato anche tu ${elenco(conflitti)}: lì a video restano i tuoi numeri, e salvando prendono il posto di quelli salvati; per ripartire dal contratto salvato ricarica la pagina.`);
+  else pezzi.push('Le tue modifiche restano.');
+  if (fermato) pezzi.push(`Non ho salvato niente: controlla e premi di nuovo «Salva commessa ${anno}».`);
+  return pezzi.join(' ');
 }
 
 // Tabella con righe modificabili: colonne [{ chiave, etichetta, numero, classe }].
@@ -151,6 +221,8 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
   const [modificato, setModificato] = useState(false);
   const [nota, setNota] = useState('');
   const [variazioneAperta, setVariazioneAperta] = useState(false);
+  // Il contratto salvato in un'altra scheda mentre qui c'erano modifiche (14/10/2026).
+  const [cambiatoAltrove, setCambiatoAltrove] = useState('');
 
   // Le letture si numerano: una superata da un'altra non tocca niente. Senza,
   // cambiando anno in fretta poteva restare a video la commessa di un altro anno,
@@ -167,6 +239,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
       setDati(statoDaRecord(r));
       setModificato(false);
       setNota('');
+      setCambiatoAltrove('');
     } catch (e) {
       if (n !== ultimaLettura.current) return;
       toast({ title: 'Caricamento non riuscito', description: e.message || String(e), variant: 'destructive' });
@@ -174,7 +247,53 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
     setCaricando(false);
   }, [anno, toast]);
 
-  useEffect(() => { carica(); }, [carica]);
+  // La prima lettura in volo: una rilettura la aspetta, perche' potrebbe essere
+  // partita prima del cambio e arrivare dopo.
+  const primaLettura = useRef(null);
+  useEffect(() => { primaLettura.current = carica(); }, [carica]);
+
+  // Il contratto cambiato in un'altra scheda (vedi in testa): una lettura sola,
+  // del contratto dell'anno; il consuntivo non si rilegge, non e' cambiato.
+  const origine = useOrigine('commessa');
+  // Quello che c'e' a video adesso, anche se la lettura e' partita qualche disegno fa.
+  const modificatoOra = useRef(false);
+  modificatoOra.current = modificato;
+  const datiOra = useRef(dati);
+  datiOra.current = dati;
+  const recordOra = useRef(record);
+  recordOra.current = record;
+  useTargetCambiati(
+    (m) => (m.anno === Number(anno) && m.origine !== origine && m.parti.includes('contratto') ? [`contratto|${m.anno}`] : []),
+    async (cosa) => {
+      if (!cosa.includes(`contratto|${Number(anno)}`)) return;
+      if (primaLettura.current) await primaLettura.current.catch(() => {});
+      const n = ++ultimaLettura.current;
+      try {
+        const r = piuRecente(await base44.entities.CommessaEcotyre.filter({ anno }));
+        if (n !== ultimaLettura.current) return;
+        // questa lettura ha superato quelle in volo: tocca a lei chiudere l'attesa
+        setCaricando(false);
+        if (r && Number(r.anno) !== Number(anno)) return;
+        if (modificatoOra.current) {
+          // le modifiche a video restano; le parti non toccate prendono i numeri salvati
+          const allineati = r ? riallineaAlContratto({ base: recordOra.current, fresca: r, dati: datiOra.current, anno }) : null;
+          setRecord(r);
+          if (allineati) setDati(allineati.dati);
+          if (allineati && (allineati.aggiornati.length || allineati.conflitti.length)) {
+            setCambiatoAltrove(avvisoRiallineo({ anno, dove: 'in un\'altra scheda', aggiornati: allineati.aggiornati, conflitti: allineati.conflitti }));
+          }
+        } else {
+          setRecord(r);
+          setDati(statoDaRecord(r));
+          setCambiatoAltrove('');
+        }
+      } catch (e) {
+        if (n !== ultimaLettura.current) return;
+        setCaricando(false);
+        setCambiatoAltrove(`Il contratto del ${anno} è cambiato in un'altra scheda, ma non si è riletto (${e.message || String(e)}): ricarica la pagina prima di salvare.`);
+      }
+    },
+  );
 
   // La pagina sa se ci sono modifiche non salvate, per chiedere prima di cambiare anno o scheda.
   useEffect(() => { if (onModificato) onModificato(isAdmin && modificato); }, [onModificato, isAdmin, modificato]);
@@ -250,26 +369,56 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
     setImportando(false);
   };
 
+  // Scrive i numeri sul contratto riletto (fresca), o ne crea uno se l'anno non
+  // l'ha: quelli a video o, se nel frattempo il contratto e' cambiato altrove,
+  // la loro unione con quello salvato. Storico e «prima» vengono da fresca.
+  const scriviContratto = async (dati, fresca) => {
+    const valori = valoriDa(dati, anno);
+    if (!fresca) return scriviConTraccia('CommessaEcotyre', null, { ...valori, storico_json: conModifica('[]', { utente: nomeUtente(user), nota, prima: null }) }, { origine: ORIGINE, motivo: nota });
+    const prima = Object.fromEntries(Object.keys(valori).filter(k => k !== 'anno').map(k => [k, fresca[k] ?? null]));
+    return scriviConTraccia('CommessaEcotyre', fresca.id, { ...valori, storico_json: conModifica(fresca.storico_json, { utente: nomeUtente(user), nota, prima }) }, { origine: ORIGINE, motivo: nota });
+  };
+
   const salva = async () => {
-    const tuttiNumeri = [dati.target_annuo_t, ...dati.regioni.map(r => r.target), ...dati.classi.map(c => c.percentuale), ...dati.mensile_iniziale, ...dati.mensile, ...dati.rete, ...dati.aci,
+    const tuttiNumeri =[dati.target_annuo_t, ...dati.regioni.map(r => r.target), ...dati.classi.map(c => c.percentuale), ...dati.mensile_iniziale, ...dati.mensile, ...dati.rete, ...dati.aci,
       ...dati.destinazioni.map(d => d.target), ...dati.prezzo_regioni.flatMap(p => [p.target, p.prezzo])];
     if (tuttiNumeri.some(v => Number.isNaN(leggiNumero(v)) || (leggiNumero(v) ?? 0) < 0)) {
       toast({ title: 'Valori non validi', description: 'Nei campi numerici scrivi solo numeri, per esempio 11550 o 851,29.', variant: 'destructive' });
       return;
     }
-    const valori = valoriDa(dati, anno);
     setSalvando(true);
     let esito = null;
     try {
-      if (record) {
-        const prima = Object.fromEntries(Object.keys(valori).filter(k => k !== 'anno').map(k => [k, record[k] ?? null]));
-        if (Number(record.anno) !== Number(anno)) throw new Error(`a video c'è la commessa del ${record.anno}, non del ${anno}: ricarica la pagina`);
-        esito = await scriviConTraccia('CommessaEcotyre', record.id, { ...valori, storico_json: conModifica(record.storico_json, { utente: nomeUtente(user), nota, prima }) }, { origine: ORIGINE, motivo: nota });
-      } else {
-        esito = await scriviConTraccia('CommessaEcotyre', null, { ...valori, storico_json: conModifica('[]', { utente: nomeUtente(user), nota, prima: null }) }, { origine: ORIGINE, motivo: nota });
+      if (record && Number(record.anno) !== Number(anno)) throw new Error(`a video c'è la commessa del ${record.anno}, non del ${anno}: ricarica la pagina`);
+      // Il contratto com'e' adesso, non quello letto all'apertura (vedi in testa).
+      const fresca = piuRecente(await base44.entities.CommessaEcotyre.filter({ anno }));
+      if (fresca && Number(fresca.anno) !== Number(anno)) throw new Error(`la commessa letta non è del ${anno}: ricarica la pagina`);
+      if (record && !fresca) throw new Error(`il contratto del ${anno} non si trova più: ricarica la pagina`);
+      let daScrivere = dati;
+      let presiDalSalvato = [];
+      if (fresca) {
+        const allineati = riallineaAlContratto({ base: record, fresca, dati, anno });
+        if (allineati.conflitti.length) {
+          // Cambiato qui e li': non si scrive, si mostra e si chiede di confermare.
+          setRecord(fresca);
+          setDati(allineati.dati);
+          setCambiatoAltrove(avvisoRiallineo({ anno, dove: 'altrove (in un\'altra scheda o su un altro computer)', aggiornati: allineati.aggiornati, conflitti: allineati.conflitti, fermato: true }));
+          setSalvando(false);
+          return;
+        }
+        daScrivere = allineati.dati;
+        presiDalSalvato = allineati.aggiornati;
       }
+      esito = await scriviContratto(daScrivere, fresca);
+      // Il contratto e' scritto: le pagine aperte (dashboard, Andamento, le altre schede) lo rileggono.
+      annunciaTarget({ anno, parti: ['contratto'], origine });
       const avviso = avvisoTraccia(esito);
-      toast(avviso ? { ...avviso, title: `Commessa ${anno} salvata, ma fuori dallo storico` } : { title: `Commessa ${anno} salvata` });
+      const unione = presiDalSalvato.length
+        ? `Nel frattempo il contratto era stato salvato altrove: per ${elenco(presiDalSalvato)} vale quello salvato, che non avevi toccato; le tue modifiche sono scritte.`
+        : '';
+      toast(avviso
+        ? { ...avviso, title: `Commessa ${anno} salvata, ma fuori dallo storico`, description: [avviso.description, unione].filter(Boolean).join(' ') }
+        : { title: `Commessa ${anno} salvata`, ...(unione ? { description: unione } : {}) });
       await carica();
     } catch (e) {
       toast({ title: 'Salvataggio non riuscito', description: e.message || String(e), variant: 'destructive' });
@@ -306,6 +455,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
       </div>
 
       {!record && !modificato && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">La commessa {anno} non è ancora stata inserita.</p>}
+      {cambiatoAltrove && <p role="status" className="text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">{cambiatoAltrove}</p>}
       {isAdmin && modificato && (
         <div className="flex items-center justify-between gap-3 flex-wrap text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
           <span>
@@ -454,7 +604,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
       )}
 
       {isAdmin && record && (
-        <VariazioneContratto anno={anno} commessa={record} user={user} aperta={variazioneAperta} onChiudi={() => setVariazioneAperta(false)} onSalvata={carica} />
+        <VariazioneContratto anno={anno} commessa={record} user={user} aperta={variazioneAperta} onChiudi={() => setVariazioneAperta(false)} onSalvata={carica} origine={origine} />
       )}
     </div>
   );
