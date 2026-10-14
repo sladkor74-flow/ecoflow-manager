@@ -70,7 +70,12 @@ const nomeSicuro = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '-').trim();
 
 // Il font dei PDF (Helvetica) non ha frecce, puntini di sospensione e simili: lasciati
 // cosi' diventano segni a caso e allargano la riga. Si scrivono con caratteri che ha.
-const perPdf = (t) => String(t ?? '').replace(/[→➜➔]/g, '>').replace(/←/g, '<').replace(/…/g, '...').replace(/[≤]/g, '<=').replace(/[≥]/g, '>=').replace(/[⋮]/g, ':').replace(/[\u2028\u2029]/g, ' ');
+// Anche il meno tipografico (U+2212) di tSegno e i trattini U+2010-2012 (chiusura
+// del 15/10/2026): fuori dalla codifica del font, jspdf scriveva l'intera stringa
+// in due byte per lettera e la cella usciva illeggibile, senza errori. Il caso era
+// il PDF del quadro con una variazione del consorzio in meno, «Puglia (−100,00 t)»
+// (prove/riepilogoSettimanale.mjs, sezione 9).
+const perPdf = (t) => String(t ?? '').replace(/[\u2212\u2010-\u2012]/g, '-').replace(/[→➜➔]/g, '>').replace(/←/g, '<').replace(/…/g, '...').replace(/[≤]/g, '<=').replace(/[≥]/g, '>=').replace(/[⋮]/g, ':').replace(/[\u2028\u2029]/g, ' ');
 
 /**
  * Foglio Excel col blocco di testa del documento, intestazioni, righe e totali

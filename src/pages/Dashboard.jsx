@@ -15,6 +15,7 @@ import SezioneImpianti from '@/components/dashboard/SezioneImpianti';
 import SezioneFatturazione from '@/components/dashboard/SezioneFatturazione';
 import SezioneEconomia from '@/components/dashboard/SezioneEconomia';
 import FreschezzaDati from '@/components/dashboard/FreschezzaDati';
+import RiepilogoSettimanale from '@/components/dashboard/RiepilogoSettimanale';
 import { vociDalMargine, unisciVoci, contaPerSezione, riassuntoControlli } from '@/components/dashboard/vociDashboard';
 
 // La chiusura del mese legge una dozzina di archivi (statoChiusuraMese): si
@@ -282,6 +283,24 @@ export default function Dashboard() {
   const segni = (id) => (id === 'da-gestire' ? visibili.length : visibiliDi(id));
   const sezioneProps = (id) => ({ daGestire: visibiliDi(id), onDaGestire });
 
+  // IL RIEPILOGO DELLA SETTIMANA PER LA DIREZIONE (14/10/2026, fra le cose da
+  // creare approvate dall'utente). Il PDF si fa coi numeri gia' a video: quadro,
+  // cruscotto, l'elenco unico (tutte le voci, anche quelle nascoste a video) e,
+  // per l'amministratore, il margine. La sola lettura in piu' e' il raccolto
+  // della settimana, che il quadro non ha (conta per mese): parte al clic, mai
+  // all'apertura, ed e' una lettura filtrata sulla settimana. Si prepara quando
+  // ogni lettura ha risposto, coi dati o con un errore, che il PDF dice.
+  const leggiSettimana = useCallback((dal) => base44.functions.invoke('riepilogoSettimana', { dal })
+    .then(r => ({ dati: r.data, errore: '' }))
+    .catch(e => ({ dati: null, errore: motivo(e) })), []);
+  const prontoRiepilogo = !!raccoltaPronta && !!(cruscotto || erroreCruscotto) && (!isAdmin || !!margineAnno || !!margineErrore);
+  const datiRiepilogo = {
+    quadro, erroreQuadro: raccolta.anno === anno ? raccolta.errore : '',
+    cruscotto, erroreCruscotto, voci, mesiAttiva, notaAttiva, annoInCorso,
+    margine: margineAnno, erroreMargine: margineErrore,
+    utente: user ? (user.full_name || user.email || '') : '',
+  };
+
   const esporta = (
     <div className="flex items-center gap-2 flex-wrap">
       {isAdmin && (
@@ -299,6 +318,7 @@ export default function Dashboard() {
           return argomentiQuadroPdf({ quadro, impianti, annoInCorso, mesiAttiva, margine: margineAnno, conEconomia, isAdmin });
         }}
       />
+      <RiepilogoSettimanale oggi={oggi} anno={anno} isAdmin={isAdmin} pronto={prontoRiepilogo} dati={datiRiepilogo} leggiSettimana={leggiSettimana} />
     </div>
   );
 

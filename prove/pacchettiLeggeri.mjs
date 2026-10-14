@@ -129,6 +129,9 @@ verifica('ma i grafici la Dashboard li raggiunge, a richiesta (il rilevatore li 
 const sezioni = ['SezioneRete', 'SezioneAci', 'SezioneExtra'].map(s => ingresso(`src/components/dashboard/${s}.jsx`));
 verifica('le tre sezioni dei canali sono pezzi a parte, chiesti a richiesta', sezioni.every(Boolean) && sezioni.every(s => !sDash.has(s)), JSON.stringify(sezioni));
 verifica('e il modulo del PDF del quadro anche', !!ingresso('src/components/dashboard/esportaQuadro.js') && !sDash.has(ingresso('src/components/dashboard/esportaQuadro.js')));
+// Il riepilogo della settimana per la direzione (14/10/2026): all'apertura solo
+// il pulsante; il modulo che fa il PDF (e jspdf con lui) arriva al clic.
+verifica('e il modulo del riepilogo della settimana anche', !!ingresso('src/lib/riepilogoSettimanale.js') && !sDash.has(ingresso('src/lib/riepilogoSettimanale.js')));
 
 console.log('4. TARGET & STATUS: LA PRESENTAZIONE E LE SCHEDE CHIUSE ARRIVANO A PARTE');
 const ts = ingresso('src/pages/TargetStatus.jsx');
@@ -171,6 +174,9 @@ for (const s of ['SezioneRete', 'SezioneAci', 'SezioneExtra']) {
 verifica('Dashboard.jsx: le tre sezioni dentro un Suspense', /<Suspense fallback=\{[\s\S]*?\}>\s*<SezioneRete [\s\S]*?<SezioneAci [\s\S]*?<SezioneExtra [\s\S]*?<\/Suspense>/.test(d));
 verifica('Dashboard.jsx: e si chiedono al primo disegno, mentre arrivano i dati', /useEffect\(\(\) => \{ preparaSezioni\(\)\.catch\(\(\) => \{\}\); \}, \[\]\);/.test(d));
 verifica('Dashboard.jsx: il modulo del PDF del quadro si prende al clic', !/^import .*esportaQuadro/m.test(d) && /await import\('@\/components\/dashboard\/esportaQuadro'\)/.test(d));
+const rs = existsSync(join(RADICE, 'src/components/dashboard/RiepilogoSettimanale.jsx')) ? senzaCommenti(sorgente('src/components/dashboard/RiepilogoSettimanale.jsx')) : '';
+verifica('RiepilogoSettimanale.jsx: il modulo del riepilogo si prende al clic, e nessuno lo importa in testa',
+  /import\('@\/lib\/riepilogoSettimanale'\)/.test(rs) && !/^import .*riepilogoSettimanale'/m.test(rs) && !/^import .*riepilogoSettimanale'/m.test(d));
 
 const t = senzaCommenti(sorgente('src/pages/TargetStatus.jsx'));
 for (const s of SCHEDE) {

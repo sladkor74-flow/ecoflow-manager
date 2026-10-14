@@ -8,7 +8,8 @@
 //    getDashboardRaccolta e, per l'amministratore e con l'anno scelto,
 //    calcolaMargine. Non piu' getDashboardStats (tolta) ne' il pannello dei
 //    target (checkTargetAlerts), e la chiusura del mese si scarica e si legge
-//    solo quando si apre.
+//    solo quando si apre. Il raccolto della settimana del riepilogo per la
+//    direzione (riepilogoSettimana, 14/10/2026) solo al clic sul suo pulsante.
 // 2. I numeri a video sono quelli delle funzioni: le sezioni si disegnano con
 //    React lato server su un quadro fatto da quadroCommessa.ts, e il testo deve
 //    dire al carattere i numeri del kpi, all'italiana; senza contratto «—», mai
@@ -48,7 +49,14 @@ const componenti = FILE.map(f => [f, sorgente(f)]);
 
 console.log('1. LE RICHIESTE ALL\'APERTURA');
 const chiamate = (testo) => [...testo.matchAll(/functions\.invoke\(\s*'([^']+)'/g)].map(m => m[1]);
-verifica('la pagina chiama solo cruscottoOperativo, getDashboardRaccolta e calcolaMargine', J([...new Set(chiamate(pagina))].sort()) === J(['calcolaMargine', 'cruscottoOperativo', 'getDashboardRaccolta']), J(chiamate(pagina)));
+// Il riepilogo della settimana (14/10/2026) legge il raccolto della settimana,
+// che il quadro non ha: solo al clic, dentro leggiSettimana, che la pagina passa
+// al pulsante. Tolta quella, all'apertura restano le tre di sempre.
+const LEGGI_SETTIMANA = /const leggiSettimana = useCallback\(\(dal\) => base44\.functions\.invoke\('riepilogoSettimana', \{ dal \}\)[\s\S]*?, \[\]\);/;
+const allApertura = chiamate(pagina.replace(LEGGI_SETTIMANA, ''));
+verifica('all\'apertura la pagina chiama solo cruscottoOperativo, getDashboardRaccolta e calcolaMargine', J([...new Set(allApertura)].sort()) === J(['calcolaMargine', 'cruscottoOperativo', 'getDashboardRaccolta']), J(allApertura));
+verifica('il raccolto della settimana solo in leggiSettimana, passata al pulsante del riepilogo e mai chiamata dalla pagina', LEGGI_SETTIMANA.test(pagina) && J(chiamate(pagina).filter(c => c === 'riepilogoSettimana')) === J(['riepilogoSettimana'])
+  && /leggiSettimana=\{leggiSettimana\}/.test(pagina) && (pagina.match(/leggiSettimana\(/g) || []).length === 0, J(chiamate(pagina)));
 verifica('nessun componente della dashboard (fuori dalla chiusura) chiama una funzione da se\'', componenti.every(([, s]) => chiamate(s).length === 0), componenti.filter(([, s]) => chiamate(s).length).map(([f]) => f).join());
 const tutto = pagina + componenti.map(([, s]) => s).join('\n');
 const senzaCommenti = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -68,7 +76,7 @@ console.log('2. I NUMERI A VIDEO SONO QUELLI DELLE FUNZIONI');
 const CLIENT_FINTO = 'export const base44 = { functions: { invoke: async (n) => { (globalThis.__CHIESTE = globalThis.__CHIESTE || []).push(n); return { data: {} }; } } };';
 const ESTENSIONI = ['', '.js', '.jsx', '.ts'];
 const daAlias = (p) => { const base = qui('../src/' + p.slice(2)); return ESTENSIONI.map(e => base + e).find(f => existsSync(f) && !/[\\/]$/.test(f) && /\.\w+$/.test(f)) || base; };
-const nomi = ['QuadroInBreve', 'SezioneRete', 'SezioneAci', 'SezioneExtra', 'SezioneImpianti', 'SezioneFatturazione', 'SezioneEconomia', 'FreschezzaDati', 'DaGestire'];
+const nomi = ['QuadroInBreve', 'SezioneRete', 'SezioneAci', 'SezioneExtra', 'SezioneImpianti', 'SezioneFatturazione', 'SezioneEconomia', 'FreschezzaDati', 'DaGestire', 'RiepilogoSettimanale'];
 const INGRESSO = `
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server.browser';
@@ -284,6 +292,23 @@ verifica('l\'economia: euro all\'italiana, due decimali', eco.includes('€ 1.23
   verifica('l\'anno dall\'indirizzo; senza, quello in corso in Italia', admin.includes('Commessa Ecotyre 2025') && altro.includes(`Commessa Ecotyre ${annoOggi}`));
   verifica('l\'amministratore ha l\'economia nell\'indice e la casella del PDF', admin.includes('Economia') && admin.includes('con l\'economia'));
   verifica('chi non e\' amministratore no: niente economia, niente casella, niente euro', !/Economia|con l'economia|€/.test(altro), (altro.match(/.{0,40}(Economia|€).{0,40}/) || [])[0]);
+  // Il riepilogo della settimana per la direzione (14/10/2026): il pulsante per
+  // tutti, che aspetta i numeri; costi e margine li nomina solo all'amministratore.
+  verifica('il riepilogo della settimana c\'e\' per tutti, e aspetta i numeri della dashboard', [admin, altro].every(x => x.includes('Riepilogo della settimana (PDF)') && x.includes('appena finita')) && altro.includes('Il riepilogo si prepara quando i numeri della dashboard sono arrivati.'), altro.slice(0, 300));
+  // La pagina chiede oggi all'orologio vero: la settimana appena finita tocca il
+  // 2025 solo nei primi giorni del 2026, e allora il pulsante aspetta i numeri.
+  const oggiVero = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+  const lunediPrima = new Date(Date.parse(`${oggiVero}T00:00:00Z`) - (((new Date(`${oggiVero}T00:00:00Z`).getUTCDay() + 6) % 7) + 7) * 864e5);
+  const tocca2025 = [lunediPrima.getUTCFullYear(), new Date(+lunediPrima + 6 * 864e5).getUTCFullYear()].includes(2025);
+  verifica('...e guardando il 2025 dice di scegliere l\'anno della settimana, invece di mescolarli', tocca2025 ? admin.includes('Il riepilogo si prepara quando') : /è del \d{4}(?: e del \d{4})?: per il riepilogo scegli/.test(admin), (admin.match(/Settimana.{0,300}/) || [''])[0]);
+  // Costi e margine li nomina solo all'amministratore. Al primo disegno il
+  // pulsante aspetta i numeri e la nota e' la stessa per tutti: la differenza
+  // si vede col pulsante pronto, come la pagina lo passa quando ogni lettura ha
+  // risposto. Revisione del 15/10/2026: la verifica di prima guardava il primo
+  // disegno e non poteva fallire, nemmeno dando la frase dei costi a chiunque.
+  const pulsante = (isAdmin) => testo(disegna('RiepilogoSettimanale', { oggi: '2026-10-14', anno: 2026, isAdmin, pronto: true, dati: {}, leggiSettimana: async () => ({ dati: null, errore: '' }) }));
+  verifica('...costi e margine nominati solo all\'amministratore, col pulsante pronto: la pagina gli passa isAdmin', /<RiepilogoSettimanale [^>]*isAdmin=\{isAdmin\}/.test(pagina)
+    && pulsante(true).includes('La tua copia, da amministratore, ha anche costi e margine.') && pulsante(false).includes('Da girare alla direzione') && !/costi e margine/.test(pulsante(false)), pulsante(false).slice(0, 300));
   verifica('al primo disegno nessuna chiamata: le letture partono dagli effetti', !(globalThis.__CHIESTE || []).length, J(globalThis.__CHIESTE));
 }
 
