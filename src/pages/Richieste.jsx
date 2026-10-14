@@ -15,11 +15,18 @@ import { Loader2, Inbox, Send, Check, X, Hammer, Clock } from 'lucide-react';
 // arriva all'amministratore, che la valuta, la esegue e risponde. Cosi' resta
 // traccia di cosa e' stato chiesto, da chi e com'e' finita.
 
+// Le voci del menu, nello stesso ordine, e «Altro» in fondo. Dalla chiusura del
+// 15/10/2026 ci sono anche Dashboard, Omologhe, Dichiarazioni RENTRI,
+// Dichiarazioni Impianti, Verifiche Fornitori, Richieste, Guida e Utenti: la
+// Guida dice «scegli il modulo, se non e' nell'elenco scegli Altro», e chi
+// chiedeva una correzione su una di quelle pagine doveva scegliere Altro per una
+// pagina che c'e'. Una voce nuova del menu va aggiunta anche qui
+// (prove/guida.mjs, sezione 1).
 const MODULI = [
-  'Caricamento Dati', 'Assegnati Rete', 'Assegnati ACI', 'PDR', 'Terminati Rete', 'Terminati ACI',
+  'Dashboard', 'Caricamento Dati', 'Assegnati Rete', 'Assegnati ACI', 'PDR', 'Terminati Rete', 'Terminati ACI',
   'Secondarie', 'Terziarie', 'Giacenze', 'Extra Raccolta', 'Target & Status', 'Report', 'Report Mensile',
-  'Alert & Controllo', 'Fatturazione', 'Qualifica Fornitori', 'Verifiche', 'Assistente',
-  'Predittività Secondarie', 'To-Do List', 'Altro',
+  'Alert & Controllo', 'Fatturazione', 'Qualifica Fornitori', 'Omologhe', 'Dichiarazioni RENTRI', 'Dichiarazioni Impianti',
+  'Verifiche', 'Verifiche Fornitori', 'Assistente', 'Predittività Secondarie', 'To-Do List', 'Richieste', 'Guida', 'Utenti', 'Altro',
 ];
 // Il valore 'Assistente' resta quello che si salva sulla richiesta (le richieste
 // gia' aperte lo portano); a video l'assistente si chiama EcoTyna (chiusura

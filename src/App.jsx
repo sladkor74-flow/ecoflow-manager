@@ -57,6 +57,7 @@ const DichiarazioniRentri = lazy(() => import('@/pages/DichiarazioniRentri'));
 const DichiarazioniImpianti = lazy(() => import('@/pages/DichiarazioniImpianti'));
 const Verifiche = lazy(() => import('@/pages/Verifiche'));
 const VerificheFornitori = lazy(() => import('@/pages/VerificheFornitori'));
+const Guida = lazy(() => import('@/pages/Guida'));
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -116,6 +117,7 @@ const AuthenticatedApp = () => {
           <Route path="/omologhe" element={<PageErrorBoundary><Omologhe /></PageErrorBoundary>} />
           <Route path="/dichiarazioni-rentri" element={<PageErrorBoundary><DichiarazioniRentri /></PageErrorBoundary>} />
           <Route path="/dichiarazioni-impianti" element={<PageErrorBoundary><DichiarazioniImpianti /></PageErrorBoundary>} />
+          <Route path="/guida" element={<PageErrorBoundary><Guida /></PageErrorBoundary>} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

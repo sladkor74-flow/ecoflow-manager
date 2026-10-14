@@ -6,7 +6,7 @@ import { EVENTO_AGGIORNAMENTO } from '@/lib/qualifica';
 import { contaDaFare, EVENTO_TODO } from '@/lib/todoSezioni';
 import {
   LayoutDashboard, Upload, ClipboardList, Truck, Factory, Boxes,
-  Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox, Users, FileCheck2, FileBadge } from
+  Ship, Warehouse, Target, FileText, CheckSquare, Menu, LogOut, Recycle, BarChart3, Shield, LineChart, Car, MapPin, ShieldCheck, ClipboardCheck, Sparkles, FileBarChart, Inbox, Users, FileCheck2, FileBadge, BookOpen } from
 'lucide-react';
 import { caricaLivello, proteggiScritture } from '@/lib/permessi';
 import { osservaTabelle } from '@/lib/tabelleScorrevoli';
@@ -39,6 +39,10 @@ const NAV_ITEMS = [
 { label: 'Predittività Secondarie', path: '/predittivita-secondarie', icon: LineChart },
 { label: 'To-Do List', path: '/todo', icon: CheckSquare, contatore: 'todo' },
 { label: 'Richieste', path: '/richieste', icon: Inbox, contatore: 'richieste' },
+// La guida per chi usa il gestionale (14/10/2026): per tutti, accanto a
+// Richieste. Ogni voce di questo elenco ha la sua parte in src/lib/guida.js,
+// e prove/guida.mjs cade se un modulo nuovo arriva senza.
+{ label: 'Guida', path: '/guida', icon: BookOpen },
 { label: 'Utenti', path: '/utenti', icon: Users, soloAdmin: true }];
 
 

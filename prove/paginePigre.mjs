@@ -11,7 +11,7 @@
 // portandosi dietro tutto cio' che importa. Nessun errore, nessuna prova di
 // logica rotta: solo il pacchetto che ricresce.
 // npm run prove
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
@@ -36,7 +36,19 @@ const pigre = righeDi(app).map(r => r.match(PAGINA_PIGRA)).filter(Boolean);
 console.log('NESSUNA PAGINA IMPORTATA IN TESTA');
 verifica('nessun import statico di pagina in App.jsx', statiche.length === 0,
   statiche.map(m => m[1]).join(', '));
-verifica('e ce ne sono ventisette pigre', pigre.length === 27, String(pigre.length));
+// OGNI PAGINA DEL GESTIONALE E' PIGRA (14/10/2026). Prima la prova contava
+// ventisette pigre: la Guida, arrivata lo stesso giorno di altri lavori in
+// parallelo, avrebbe chiesto di riscrivere il numero a ogni pagina nuova, e un
+// numero riscritto a mano non controlla niente. Ora ogni file di src/pages e'
+// pigro in App.jsx, tranne le pagine dell'accesso, che App.jsx non instrada.
+const FUORI_DALLE_ROTTE = new Set(['ForgotPassword', 'Login', 'OAuthConsent', 'Register', 'ResetPassword']);
+const pagineDelGestionale = readdirSync(qui('../src/pages')).filter(n => /\.jsx$/.test(n)).map(n => n.replace(/\.jsx$/, ''))
+  .filter(n => !FUORI_DALLE_ROTTE.has(n));
+const nonPigre = pagineDelGestionale.filter(n => !pigre.some(m => m[2] === `@/pages/${n}`));
+verifica('ogni pagina del gestionale e\' pigra in App.jsx', nonPigre.length === 0, nonPigre.join(', '));
+verifica('e nessuna pigra punta a un file che non c\'e\'', pigre.every(m => pagineDelGestionale.includes(m[2].replace('@/pages/', ''))), pigre.map(m => m[2]).filter(p => !pagineDelGestionale.includes(p.replace('@/pages/', ''))).join(', '));
+verifica('ce ne sono almeno ventotto, la Guida compresa', pigre.length >= 28 && pigre.some(m => m[1] === 'Guida' && m[2] === '@/pages/Guida'), String(pigre.length));
+verifica('le pagine dell\'accesso restano fuori dalle rotte', !pigre.some(m => FUORI_DALLE_ROTTE.has(m[2].replace('@/pages/', ''))));
 verifica('ogni pagina pigra ha un nome diverso', new Set(pigre.map(m => m[1])).size === pigre.length);
 verifica('e un percorso diverso', new Set(pigre.map(m => m[2])).size === pigre.length);
 
