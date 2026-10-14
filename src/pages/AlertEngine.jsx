@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, Plus, Trash2, Power, PowerOff, Shield, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Loader2, Plus, Trash2, Power, PowerOff, Shield, AlertTriangle, RefreshCw, Bug } from 'lucide-react';
 import AlertsPanel from '@/components/alerts/AlertsPanel';
+// Il registro degli errori del sito (14/10/2026): una scheda del solo
+// amministratore, che legge l'archivio solo quando si apre.
+import ErroriSito from '@/components/alerts/ErroriSito';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
@@ -68,8 +71,25 @@ const dataConfigurazione = (r) => {
   return g ? g.split('-').reverse().join('/') : '';
 };
 
+// La scheda da aprire: «?tab=errori» viene dalla voce «Errori del sito» di «Da
+// gestire» (cruscotto.ts, 14/10/2026). Solo il valore della scheda, nient'altro
+// dell'indirizzo.
+const SCHEDE = new Set(['alerts', 'regole', 'errori']);
+const schedaDallIndirizzo = () => {
+  try {
+    const t = new URLSearchParams((typeof window !== 'undefined' && window.location && window.location.search) || '').get('tab');
+    return SCHEDE.has(t) ? t : 'alerts';
+  } catch (_e) {
+    return 'alerts';
+  }
+};
+
 export default function AlertEngine() {
-  const { isAdmin } = usePermessi();
+  const { isAdmin, user } = usePermessi();
+  // La scheda degli errori e' del solo amministratore: chi non lo e' e arriva
+  // con ?tab=errori vede gli alert.
+  const [scheda, setScheda] = useState(schedaDallIndirizzo);
+  const schedaAperta = scheda === 'errori' && !isAdmin ? 'alerts' : scheda;
   const [regole, setRegole] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -161,11 +181,21 @@ export default function AlertEngine() {
 
       <BannerSolaLettura cosa="gli alert" />
 
-      <Tabs defaultValue="alerts">
-        <TabsList>
+      <Tabs value={schedaAperta} onValueChange={setScheda}>
+        {/* Con la terza linguetta dell'amministratore la barra a 375 px non ci
+            sta piu' su una riga: va a capo, come in Fatturazione (revisione del
+            15/10/2026). */}
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="alerts"><AlertTriangle className="w-4 h-4 mr-1.5" /> Alert Attivi</TabsTrigger>
           <TabsTrigger value="regole"><Shield className="w-4 h-4 mr-1.5" /> Gestione Regole</TabsTrigger>
+          {isAdmin && <TabsTrigger value="errori"><Bug className="w-4 h-4 mr-1.5" /> Errori del sito</TabsTrigger>}
         </TabsList>
+
+        {isAdmin && (
+          <TabsContent value="errori" className="mt-4">
+            <ErroriSito isAdmin={isAdmin} utente={user} />
+          </TabsContent>
+        )}
 
         <TabsContent value="alerts" className="mt-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -1,4 +1,10 @@
 import React from 'react';
+// Il registro degli errori del sito (14/10/2026): una pagina che si rompe la
+// vedeva solo chi l'aveva davanti. Ora finisce nel registro che l'amministratore
+// legge in Alert & Controllo, col solo percorso della pagina e il messaggio
+// ripulito (src/lib/registroErrori.js). Se il registro non c'e' o non riesce a
+// scrivere, qui non cambia niente.
+import { segnalaErrorePagina } from '@/lib/registroErrori';
 
 export default class PageErrorBoundary extends React.Component {
   constructor(props) {
@@ -12,6 +18,7 @@ export default class PageErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('PageErrorBoundary caught:', error, errorInfo);
+    segnalaErrorePagina(error, errorInfo);
   }
 
   handleReset = () => {

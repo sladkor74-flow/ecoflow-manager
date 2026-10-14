@@ -19,6 +19,7 @@ import { commessaDellAnno } from "./annoTarget.ts";
 import { regioniDellAnno, scartiDalContratto } from "./attesoContratto.ts";
 import { statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE_REGISTRO } from "./registroCaricamenti.ts";
 import { ordiniEseguiti, voceEseguiti } from "./ordiniEseguiti.ts";
+import { vociPromemoriaCopia, AREA_COPIA } from "./promemoriaCopia.ts";
 
 export const MESI_CRUSCOTTO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 // I tre documenti di un mese della fatturazione attiva, uno per canale.
@@ -251,6 +252,7 @@ const SEZIONE_AREA = {
   'Manutenzione': 'dati', 'Arretrato': 'rete', 'Fatturazione attiva': 'fatturazione', 'Fatturazione passiva': 'economia',
   'Qualifica fornitori': 'generale', 'Richieste ECT': 'rete', 'Punti di raccolta': 'generale', 'Giacenze': 'impianti',
   'Dichiarazioni': 'impianti', 'Nuovo anno': 'generale', 'Surplus sulle tariffe': 'fatturazione',
+  'Errori del sito': 'dati', [AREA_COPIA]: 'dati',
 };
 export const SEZIONI_DASHBOARD = ['rete', 'aci', 'extra', 'impianti', 'fatturazione', 'economia', 'dati', 'generale'];
 /** La sezione di una voce: la sua, se l'ha scritta; altrimenti quella della sua area. */
@@ -258,8 +260,11 @@ export const sezioneDellaVoce = (v) => (v && SEZIONI_DASHBOARD.includes(v.sezion
 
 // Le aree di cui EcoTyna sa leggere i dati coi suoi strumenti
 // (strumentiAssistente.ts): per le altre - i lavori della notte, l'anno nuovo -
-// non c'e' niente da chiederle, e il pulsante non si mostra.
-const AREE_SENZA_ECOTYNA = new Set(['Manutenzione', 'Nuovo anno']);
+// non c'e' niente da chiederle, e il pulsante non si mostra. Dal 14/10/2026
+// nemmeno per gli errori del sito: EcoTyna non legge quel registro, che e' del
+// solo amministratore. Ne' per la copia di sicurezza (chiusura del 15/10/2026):
+// e' un file che si scarica, non un dato da chiedere.
+const AREE_SENZA_ECOTYNA = new Set(['Manutenzione', 'Nuovo anno', 'Errori del sito', AREA_COPIA]);
 export const siChiedeAEcotyna = (v) => !!v && !AREE_SENZA_ECOTYNA.has(v.area) && v.origine !== 'presidi';
 
 /** La voce dell'elenco per un alert delle date obbligatorie. */
@@ -491,12 +496,93 @@ export function vociContrattoRaccoglitori(commesse, targetRaccoglitori, anno) {
   }];
 }
 
+// GLI ERRORI DEL SITO (migliorie del 14/10/2026, approvate dall'utente: «per me
+// ok sulle cose da sistemare, sulla velocità e su quanto da creare, procedi
+// pure»).
+//
+// Un errore visto da un collega - una pagina che si rompe, una chiamata che non
+// riesce - l'amministratore lo scopriva solo se il collega glielo diceva. Le
+// pagine ora lo annotano da se' (ErroreSito, src/lib/registroErrori.js) e qui
+// diventa una voce: quanti errori non ancora segnati visti da ieri (giorno
+// italiano dell'errore, ieri e oggi), e i piu' frequenti. Una voce sola, area
+// «Errori del sito», sezione dati, collegamento alla scheda «Errori del sito» di
+// Alert & Controllo, dove si segnano visti e la voce sparisce. Solo per
+// l'amministratore: cruscottoOperativo legge il registro (una lettura, filtrata
+// sui non visti e limitata a LIMITE_ERRORI_CRUSCOTTO righe, le piu' recenti) solo
+// quando chiede lui; senza righe lette la voce non c'e'. Il titolo dice
+// «almeno» solo se la lettura e' piena E sono tutte righe da ieri: se fra le
+// lette c'e' una riga piu' vecchia, quelle da ieri sono arrivate tutte (vengono
+// prima) e il conto e' esatto (revisione del 15/10/2026). Grave («attenzione»)
+// con una pagina che si rompe, un errore non preso o un errore del server; le
+// altre (rete, limite di richieste, richieste rifiutate) sono un'informazione.
+// Il numero sale da solo con gli errori: nascosta, torna se sale o se entra un
+// errore di un altro genere (elementi), non per un giorno in piu'. Gli elementi
+// sono nomi da leggere - il messaggio fra «», la chiamata e la pagina - perche'
+// l'etichetta «tornata» li mostra (revisione del 15/10/2026: erano le impronte
+// interne del registro, una chiave tecnica lunga che a 375 px usciva dallo
+// schermo). Gli utenti si contano per created_by_id, che la piattaforma
+// restituisce sempre (l'email, created_by, no).
+export const LIMITE_ERRORI_CRUSCOTTO = 200;
+const ERRORI_GRAVI = new Set(['pagina', 'non_preso', 'server']);
+// I conti delle volte sono interi col punto delle migliaia: la stessa scrittura
+// dei chili (formatoKg), che e' quella di un intero qualunque.
+const intero = (n) => formatoKg(n);
+const giornoPrimaDi = (g) => {
+  const s = String(g || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  return new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) - 86400000).toISOString().slice(0, 10);
+};
+
+/** La voce degli errori del sito non ancora visti, da ieri: al piu' una. */
+export function vociErroriSito(errori, oggi) {
+  if (!Array.isArray(errori) || !errori.length) return [];
+  const ieri = giornoPrimaDi(oggi);
+  if (!ieri) return [];
+  const recenti = errori.filter(r => r && r.visto !== true && String(r.giorno || '').slice(0, 10) >= ieri);
+  if (!recenti.length) return [];
+  const gruppi = new Map();
+  for (const r of recenti) {
+    const k = String(r.impronta || [r.tipo, r.coinvolto_tipo, r.coinvolto, r.pagina, r.messaggio].map(x => x || '').join('|'));
+    const g = gruppi.get(k) || { messaggio: r.messaggio || '', pagina: r.pagina || '', coinvolto: r.coinvolto || '', volte: 0 };
+    g.volte += Math.max(1, Math.round(Number(r.volte) || 1));
+    gruppi.set(k, g);
+  }
+  const n = [...gruppi.values()].reduce((s, g) => s + g.volte, 0);
+  const ordinati = [...gruppi.entries()].sort((a, b) => b[1].volte - a[1].volte || a[0].localeCompare(b[0]));
+  // Nel nome il messaggio si accorcia: l'etichetta della voce tornata ne mostra tre.
+  const corto = (m) => (m.length > 80 ? `${m.slice(0, 79).trimEnd()}…` : m);
+  const nome = (g, accorcia = (m) => m) => `«${accorcia(g.messaggio || 'senza messaggio')}»${g.coinvolto ? ` (${g.coinvolto})` : ''} in ${g.pagina || '/'}`;
+  const descrivi = (g) => `${nome(g)}, ${intero(g.volte)} ${g.volte === 1 ? 'volta' : 'volte'}`;
+  const primi = ordinati.slice(0, 3).map(([, g]) => descrivi(g));
+  const altri = ordinati.length - primi.length;
+  const utenti = new Set(recenti.map(r => r.created_by_id || r.created_by).filter(Boolean)).size;
+  const troncato = errori.length >= LIMITE_ERRORI_CRUSCOTTO && !errori.some(r => r && String(r.giorno || '').slice(0, 10) < ieri);
+  const titolo = troncato
+    ? `Almeno ${intero(n)} errori del sito da ieri`
+    : `${n === 1 ? 'Un errore del sito' : `${intero(n)} errori del sito`} da ieri`;
+  const dettaglio = `${ordinati.length === 1 ? (n === 1 ? 'È questo' : 'Sempre lo stesso') : 'I più frequenti'}: ${primi.join(' · ')}`
+    + `${altri > 0 ? ` · e ${altri === 1 ? 'un altro errore' : `altri ${intero(altri)} errori`} diversi` : ''}.`
+    + `${utenti ? ` ${utenti === 1 ? 'Lo ha incontrato un utente' : `Li hanno incontrati ${intero(utenti)} utenti`}.` : ''}`
+    + ' Si guardano in Alert & Controllo, nella scheda «Errori del sito», e lì si segnano visti.';
+  return [{
+    area: 'Errori del sito',
+    gravita: recenti.some(r => ERRORI_GRAVI.has(r.tipo)) ? 'attenzione' : 'info',
+    titolo, dettaglio,
+    link: '/alert-engine?tab=errori',
+    chiave: 'errori-sito',
+    sezione: 'dati',
+    firma: 'errori-sito',
+    misure: [n],
+    elementi: [...new Set(ordinati.slice(0, 20).map(([, g]) => nome(g, corto)))],
+  }];
+}
+
 /**
  * L'elenco unico delle cose da gestire. Ogni voce: { area, gravita, titolo,
  * dettaglio, link }. dati: { oggi, adessoMs, anno, alertAperti, uploadLogs,
  * tipiFile, assegnatiRete, assegnatiAci, documenti, prefatture, riepilogoQualifica,
  * richiesteEct, verificheSedi, annoNuovo, fotografiaGiorno, surplus, commesse,
- * targetRaccoglitori, eseguiti }.
+ * targetRaccoglitori, eseguiti, erroriSito, copieSicurezza, amministratore }.
  *
  * annoNuovo e' il risultato di listaAnno per l'anno dopo: decide da se' se
  * valga la pena dirlo (avvicinandosi), e qui si scrive soltanto.
@@ -779,6 +865,21 @@ export function cruscotto(dati) {
   // qui sopra. dati.commesse e dati.targetRaccoglitori sono i CommessaEcotyre e i
   // TargetRaccoglitore letti da chi chiama; senza, la voce non c'e'.
   for (const v of vociContrattoRaccoglitori(dati.commesse, dati.targetRaccoglitori, anno)) voci.push(v);
+
+  // GLI ERRORI DEL SITO (14/10/2026): vociErroriSito, qui sopra. dati.erroriSito
+  // sono le righe di ErroreSito non viste, lette da chi chiama e solo per
+  // l'amministratore; senza, la voce non c'e'.
+  for (const v of vociErroriSito(dati.erroriSito, oggi)) voci.push(v);
+
+  // IL PROMEMORIA DELLA COPIA DI SICUREZZA (migliorie del 14/10/2026, agganciato
+  // alla chiusura del 15/10/2026). La regola sta in promemoriaCopia.ts: nessuna
+  // copia negli ultimi sette giorni, mai fatta o l'ultima incompleta. Fino a
+  // questa chiusura non la chiamava nessuno, e la sezione di Caricamento Dati
+  // prometteva «dopo sette giorni la dashboard te lo ricorda» a vuoto.
+  // dati.copieSicurezza e' la riga piu' recente di CopiaSicurezza, letta da chi
+  // chiama solo per l'amministratore (dati.amministratore); senza lettura (null)
+  // la voce non c'e': un registro non letto non e' «mai fatta».
+  for (const v of vociPromemoriaCopia({ righe: dati.copieSicurezza, oggi, amministratore: dati.amministratore === true })) voci.push(v);
 
   const tutte = unisciPresidi(voci, dati.presidi);
   tutte.sort((a, b) => GRAVITA[a.gravita] - GRAVITA[b.gravita] || a.area.localeCompare(b.area, 'it'));

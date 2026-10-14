@@ -40,7 +40,7 @@
 //    sono costi (revisione del 14/10/2026).
 //
 // node prove/chiLeggeCosa.mjs
-import { existsSync, readdirSync, readFileSync, statSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -107,17 +107,58 @@ const lettureDirette = (t, nome) => {
 
 const SRC = fileSotto('src');
 
+// LA COPIA DI SICUREZZA E' L'UNICA ECCEZIONE (chiusura del 15/10/2026). La
+// copia (src/lib/copiaSicurezza.js, migliorie del 14/10/2026) legge per nome
+// TUTTI gli archivi, contratti e modelli compresi, e li scrive nel file che resta
+// sul PC: senza, non sarebbe una copia di tutto. E' dell'amministratore, che
+// questi archivi li legge comunque (sezione 1): la pagina la disegna solo a lui
+// e la libreria chiede al server chi e' collegato prima di qualunque lettura.
+// Le verifiche della sezione 2 tengono l'eccezione onesta: se una delle due
+// guardie sparisce, la copia torna un lettore come gli altri e la prova cade.
+const COPIA_SICUREZZA = 'src/lib/copiaSicurezza.js';
+const guardieDellaCopia = (libreria = sorgente(COPIA_SICUREZZA), paginaCaricamento = sorgente('src/pages/CaricamentoDati.jsx')) => {
+  const lib = codice(libreria);
+  const ruolo = lib.search(/if \(!io \|\| io\.role !== 'admin'\) throw errore\('non_amministratore'/);
+  const primaLettura = lib.indexOf('client.entities');
+  const scarica = lib.slice(lib.indexOf('export async function scaricaCopiaSicurezza'));
+  const pagina = codice(paginaCaricamento);
+  const componente = 'src/components/caricamento/CopiaSicurezza.jsx';
+  const chiImportaLaLibreria = SRC.filter(p => /from '@\/lib\/copiaSicurezza'/.test(sorgente(p)));
+  const chiImportaLaSezione = SRC.filter(p => /from '@\/components\/caricamento\/CopiaSicurezza'/.test(sorgente(p)));
+  return {
+    libreria: ruolo >= 0 && primaLettura > ruolo && scarica.indexOf('await leggiCopia(') >= 0 && scarica.indexOf('await leggiCopia(') < scarica.indexOf('client.entities'),
+    pagina: /\{isAdmin && <CopiaSicurezza\b/.test(pagina) && (pagina.match(/<CopiaSicurezza\b/g) || []).length === 1
+      && J(chiImportaLaSezione) === J(['src/pages/CaricamentoDati.jsx']) && J(chiImportaLaLibreria) === J([componente]),
+  };
+};
+
 await sezione('2. NESSUNA PAGINA LEGGE CONTRATTI E MODELLI DAL BROWSER', async () => {
   for (const nome of ['ContrattoFornitore', 'ModelloContratto']) {
     const lettori = SRC.flatMap(p => lettureDirette(sorgente(p), nome).map(x => `${p}:${x}`));
     verifica(`${nome}: nessuna lettura dal browser`, lettori.length === 0, '\n    ' + lettori.join('\n    '));
     // Il nome fra virgolette serve solo ad aprire il file (apriFile): un nome
     // passato a un lettore generico (entities[nome]) sarebbe una lettura che le
-    // regole qui sopra non vedono.
+    // regole qui sopra non vedono. Fuori, la sola copia di sicurezza
+    // dell'amministratore (qui sopra, COPIA_SICUREZZA).
     const citati = SRC.flatMap(p => codice(sorgente(p)).split('\n').map((r, i) => ({ p, i, r })))
-      .filter(x => new RegExp(`['"\`]${nome}['"\`]`).test(x.r) && !new RegExp(`linkFile\\(\\s*'${nome}'`).test(x.r));
-    verifica(`${nome}: il nome fra virgolette solo per aprire il file`, citati.length === 0, '\n    ' + citati.map(x => `${x.p}:${x.i + 1}: ${x.r.trim().slice(0, 140)}`).join('\n    '));
+      .filter(x => x.p !== COPIA_SICUREZZA && new RegExp(`['"\`]${nome}['"\`]`).test(x.r) && !new RegExp(`linkFile\\(\\s*'${nome}'`).test(x.r));
+    verifica(`${nome}: il nome fra virgolette solo per aprire il file (e nella copia di sicurezza dell'amministratore)`, citati.length === 0, '\n    ' + citati.map(x => `${x.p}:${x.i + 1}: ${x.r.trim().slice(0, 140)}`).join('\n    '));
   }
+  const g = guardieDellaCopia();
+  verifica('la copia di sicurezza chiede al server se chi e\' collegato e\' l\'amministratore prima di qualunque lettura', g.libreria);
+  verifica('e la pagina la disegna solo all\'amministratore, in Caricamento Dati e da nessun\'altra parte', g.pagina);
+  verifica('l\'eccezione serve ancora: la copia nomina contratti e modelli', /'ContrattoFornitore'/.test(sorgente(COPIA_SICUREZZA)) && /'ModelloContratto'/.test(sorgente(COPIA_SICUREZZA)));
+  // Le controprove delle due guardie, sui sorgenti cambiati qui: senza il
+  // controllo del ruolo, col controllo dopo la prima lettura, o con la sezione
+  // disegnata a tutti, l'eccezione non vale piu'.
+  const lib = sorgente(COPIA_SICUREZZA), car = sorgente('src/pages/CaricamentoDati.jsx');
+  const RUOLO = /if \(!io \|\| io\.role !== 'admin'\) throw errore\('non_amministratore'[^\n]*\n/;
+  const senzaRuolo = lib.replace(RUOLO, '');
+  const ruoloDopo = lib.replace(RUOLO, '').replace(/const impronta = await improntaRegistro\(Log, ritmo\);\n/, (m) => m + (lib.match(RUOLO) || [''])[0]);
+  const aTutti = car.replace(/\{isAdmin && <CopiaSicurezza\b/, '{<CopiaSicurezza');
+  verifica('controprova: senza il controllo del ruolo, o col controllo dopo la prima lettura, la guardia della libreria cade',
+    senzaRuolo !== lib && ruoloDopo !== lib && ruoloDopo !== senzaRuolo && !guardieDellaCopia(senzaRuolo).libreria && !guardieDellaCopia(ruoloDopo).libreria);
+  verifica('controprova: con la sezione disegnata a tutti la guardia della pagina cade', aTutti !== car && !guardieDellaCopia(lib, aTutti).pagina);
   // La scheda Contratti legge dalla funzione, che manda i valori e i prezzi al
   // solo amministratore.
   const anno = sorgente('src/components/qualifica/ContrattiAnno.jsx');
@@ -285,6 +326,11 @@ const INTERVENTI = [iv('A'), iv('C', { trasportatore: 'SMOCO S.R.L.', peso_effet
 const IMPORT_PERMESSI = "import { usePermessi } from '@/lib/permessi';";
 const IMPORT_FILE = "import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRaccoltaExport';";
 const cartella = mkdtempSync(join(tmpdir(), 'chi-legge-'));
+// La cartella delle copie delle pagine si toglie alla fine, anche se la prova
+// cade a meta' (l'evento exit arriva anche dopo un errore non preso): prima
+// ne restava una nella cartella temporanea a ogni giro (chiusura del 15/10/2026).
+const togliCartella = () => rmSync(cartella, { recursive: true, force: true });
+process.on('exit', togliCartella);
 
 await sezione('8. L\'EXTRA RACCOLTA CON L\'ARCHIVIO CHIUSO: CHI NON E\' AMMINISTRATORE VEDE IL FUEL SURCHARGE', async () => {
   const V = await import('../base44/shared/surplusVisibile.ts');
@@ -499,6 +545,49 @@ await sezione('10. LO STORICO DELLE MODIFICHE NON RACCONTA UN COSTO A CHI NON E\
   verifica('e cosi\' le due righe scritte a mano (i mesi chiusi fuori, la conferma della copia d\'anno)',
     /motivo: NOTA_CHIUSO_FUORI, riservato: false,/.test(chiusiFuori) && /riservato: !!campoRiservato\('Tariffa', 'valore', t\),/.test(preparaAnno));
 });
+
+await sezione('11. IL REGISTRO DEGLI ERRORI DEL SITO LO LEGGE SOLO L\'AMMINISTRATORE (14/10/2026)', async () => {
+  // Le pagine annotano i loro errori in ErroreSito (src/lib/registroErrori.js):
+  // un messaggio d'errore puo' dire chi lavorava su che cosa, e il registro e'
+  // dell'amministratore. Ognuno crea la riga del suo errore, nessuno la rilegge
+  // se non lui: ne' dall'archivio, ne' da una pagina, ne' da una funzione che
+  // gira col ruolo di servizio e risponde a tutti.
+  const rls = ENTITA('ErroreSito').rls || {};
+  verifica('la lettura e la scrittura che non e\' una create sono dell\'amministratore; la create di tutti', soloAdmin(rls.read) && soloAdmin(rls.update) && soloAdmin(rls.delete) && rls.create === true, J(rls));
+  const righe = [{ id: 'e1', created_by_id: 'u-user', created_by: 'utente@prova', messaggio: 'x' }, { id: 'e2', created_by_id: 'u-admin', created_by: 'amministratore@prova', messaggio: 'y' }];
+  const AMMINISTRATORE = { role: 'admin', id: 'u-admin', email: 'amministratore@prova' };
+  const UTENTE = { role: 'user', id: 'u-user', email: 'utente@prova' };
+  verifica('all\'amministratore tutte le righe, a chi non lo e\' nessuna, nemmeno la sua', righe.filter(r => passaLaRegola(rls.read, r, AMMINISTRATORE)).length === 2 && righe.filter(r => passaLaRegola(rls.read, r, UTENTE)).length === 0);
+  verifica('il file dice perche\', con la data e la prova', /14\/10\/2026/.test(sorgente('base44/entities/ErroreSito.jsonc')) && /prove\/chiLeggeCosa\.mjs/.test(sorgente('base44/entities/ErroreSito.jsonc')));
+  // Chi lo nomina nel browser: la libreria che crea le righe, la guardia delle
+  // scritture e la scheda dell'amministratore. In piu' puo' nominarlo la copia di
+  // sicurezza (src/lib/copiaSicurezza.js, migliorie dello stesso giorno), che
+  // legge ogni archivio per l'amministratore e chiede al server chi e' collegato
+  // prima di leggere. Nessun altro.
+  const CHI_LO_NOMINA = ['src/lib/registroErrori.js', 'src/lib/permessi.js', 'src/components/alerts/ErroriSito.jsx'];
+  const PUO_NOMINARLO = [...CHI_LO_NOMINA, 'src/lib/copiaSicurezza.js'];
+  const nominano = SRC.filter(p => /\bErroreSito\b|\bARCHIVIO_ERRORI\b/.test(codice(sorgente(p)))).map(p => p.replace(/\\/g, '/'));
+  verifica('nel browser lo nominano solo la libreria, la guardia, la scheda dell\'amministratore (e la copia di sicurezza)',
+    CHI_LO_NOMINA.every(p => nominano.some(n => n.endsWith(p))) && nominano.every(n => PUO_NOMINARLO.some(p => n.endsWith(p))), J(nominano));
+  const lib = codice(sorgente('src/lib/registroErrori.js'));
+  // Dal 15/10/2026 la riga si crea sull'archivio crudo (un tentativo solo,
+  // senza i ritentativi del limite di richieste): sempre e solo la create.
+  verifica('la libreria lo usa solo per creare la riga', /crudi\.ErroreSito\.create\(riga\)/.test(lib) && (lib.match(/\.ErroreSito\./g) || []).length === 1
+    && !/ErroreSito\.(list|filter|get|update|delete|bulkUpdate|bulkCreate|deleteMany|updateMany)\b/.test(lib));
+  const scheda = codice(sorgente('src/components/alerts/ErroriSito.jsx'));
+  verifica('la scheda legge solo se chi guarda e\' l\'amministratore (e la pagina la mostra solo a lui)', /const leggi = useCallback\(async \(\) => \{\s*if \(!isAdmin\) return;/.test(scheda)
+    && /\{isAdmin && \(\s*<TabsContent value="errori"/.test(sorgente('src/pages/AlertEngine.jsx')));
+  // La scheda dell'amministratore: per dire chi, legge gli utenti (una volta) e
+  // nient'altro oltre al registro.
+  verifica('la scheda legge il registro e, per chi, gli utenti: nessun altro archivio', (scheda.match(/base44\.entities\.(\w+)/g) || []).every(x => /\.(ErroreSito|User)$/.test(x))
+    && /base44\.entities\.User\.list\(/.test(scheda), J((scheda.match(/base44\.entities\.(\w+)/g) || [])));
+  const funzioni = fileSotto('base44/functions').filter(p => /\bErroreSito\b/.test(codice(sorgente(p)))).map(p => p.replace(/\\/g, '/'));
+  verifica('fra le funzioni lo legge solo la dashboard, col ruolo di servizio e solo per l\'amministratore', funzioni.length === 1 && funzioni[0].endsWith('base44/functions/cruscottoOperativo/entry.ts')
+    && /eAmministratore\(user\)\s*\?\s*svc\.ErroreSito\.filter\(/.test(sorgente('base44/functions/cruscottoOperativo/entry.ts')), J(funzioni));
+});
+
+togliCartella();
+verifica('la cartella temporanea delle copie delle pagine non resta', !existsSync(cartella), cartella);
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

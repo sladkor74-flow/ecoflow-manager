@@ -64,6 +64,24 @@ for (const nome of LIBERE) {
   verifica('cancellare resta all\'amministratore', rls.delete && rls.delete.user_condition && rls.delete.user_condition.role === 'admin', JSON.stringify(rls.delete));
 }
 
+// IL REGISTRO DEGLI ERRORI DEL SITO (14/10/2026). Una terza scrittura di chi
+// non e' amministratore, ma piu' stretta delle due di sopra: CREA la riga del
+// suo errore (src/lib/registroErrori.js) e basta. Non la legge - il registro e'
+// dell'amministratore - e non la modifica ne' la cancella. Nel browser non sta
+// fra le ENTITA_LIBERE, che lasciano passare ogni scrittura, ma in
+// SOLO_CREAZIONE, che lascia passare la sola create.
+console.log('\nERRORESITO: OGNUNO CREA IL SUO ERRORE, IL RESTO E\' DELL\'AMMINISTRATORE');
+{
+  const rls = ENTITA('ErroreSito').rls || {};
+  const soloAdmin = (x) => !!x && JSON.stringify(x) === JSON.stringify({ user_condition: { role: 'admin' } });
+  verifica('un utente non amministratore puo\' creare la riga del suo errore, senza condizioni su created_by_id', rls.create === true, JSON.stringify(rls.create));
+  verifica('la lettura e\' del solo amministratore', soloAdmin(rls.read), JSON.stringify(rls.read));
+  verifica('modificare e cancellare restano all\'amministratore', soloAdmin(rls.update) && soloAdmin(rls.delete), JSON.stringify(rls));
+  const solo = permessi.match(/SOLO_CREAZIONE = new Set\(\[([^\]]*)\]\)/);
+  verifica('src/lib/permessi.js lascia passare la sola create, e solo di ErroreSito', !!solo && solo[1].trim() === "'ErroreSito'"
+    && /if \(metodo === 'create' && SOLO_CREAZIONE\.has\(nome\)\) return valore;/.test(permessi.replace(/\r/g, '')), solo && solo[1]);
+}
+
 console.log('\nLE REGOLE RLS DI TUTTE LE ENTITA\'');
 const file = readdirSync(new URL('../base44/entities/', import.meta.url)).filter(n => n.endsWith('.jsonc'));
 verifica('ci sono tutte le entita\' (piu\' di cinquanta)', file.length > 50, String(file.length));

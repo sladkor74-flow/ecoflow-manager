@@ -654,5 +654,122 @@ console.log('LA FUNZIONE DELLA DASHBOARD PASSA SURPLUS, CONTRATTI E TARGET (chiu
   verifica('coi target dell\'11/10/2026 la voce non c\'e\'', pari.stato === 200 && !((pari.j && pari.j.da_gestire) || []).some(x => x.chiave === 'contratto-raccoglitori:2026'));
 }
 
+// GLI ERRORI DEL SITO (migliorie del 14/10/2026). Le pagine annotano i loro
+// errori in ErroreSito (src/lib/registroErrori.js, prove/registroErrori.mjs);
+// la dashboard dell'amministratore li dice in «Da gestire»: quanti non visti da
+// ieri e i piu' frequenti. A chi non e' amministratore niente, e la funzione non
+// legge nemmeno il registro.
+console.log('GLI ERRORI DEL SITO IN «DA GESTIRE» (14/10/2026)');
+{
+  const ves = typeof C.vociErroriSito === 'function' ? C.vociErroriSito : () => [{ manca: 'vociErroriSito' }];
+  const err = (id, giorno, altro = {}) => ({ id, giorno, tipo: 'server', messaggio: 'Request failed with status code 500', pagina: '/giacenze', coinvolto_tipo: 'funzione', coinvolto: 'calcolaGiacenze',
+    volte: 2, visto: false, created_by: 'anna@smoco.it', ...altro, impronta: altro.impronta || `server|funzione|${altro.coinvolto ?? 'calcolaGiacenze'}|${altro.pagina || '/giacenze'}|${altro.messaggio || 'Request failed with status code 500'}` });
+  const ERRORI = [
+    err('a', '2026-10-14', { volte: 3 }),
+    err('b', '2026-10-13', { created_by: 'luca@smoco.it' }),
+    err('c', '2026-10-13', { tipo: 'rete', messaggio: 'Network Error', pagina: '/assegnati', coinvolto: 'Assegnato.filter', coinvolto_tipo: 'archivio', volte: 1 }),
+    err('d', '2026-10-12', { messaggio: 'vecchio', volte: 9 }),
+    err('e', '2026-10-14', { messaggio: 'gia visto', volte: 7, visto: true }),
+  ];
+  const v = ves(ERRORI, '2026-10-14');
+  verifica('una voce sola: gli errori non visti da ieri (6), contati con le loro volte', v.length === 1 && v[0].titolo === '6 errori del sito da ieri', J2(v));
+  verifica('il dettaglio: i piu\' frequenti, con chiamata, pagina e volte, e quanti utenti', v[0] && v[0].dettaglio === 'I più frequenti: «Request failed with status code 500» (calcolaGiacenze) in /giacenze, 5 volte · «Network Error» (Assegnato.filter) in /assegnati, 1 volta. Li hanno incontrati 2 utenti. Si guardano in Alert & Controllo, nella scheda «Errori del sito», e lì si segnano visti.', v[0] && v[0].dettaglio);
+  verifica('porta alla scheda degli errori, sezione dati, attenzione (c\'e\' un errore del server), con chiave e misure', v[0] && v[0].link === '/alert-engine?tab=errori' && v[0].sezione === 'dati' && v[0].area === 'Errori del sito'
+    && v[0].gravita === 'attenzione' && v[0].chiave === 'errori-sito' && J2(v[0].misure) === '[6]' && v[0].elementi.length === 2, J2(v[0]));
+  const soloRete = ves([ERRORI[2]], '2026-10-14');
+  verifica('un errore di rete solo: un\'informazione, «È questo», un utente', soloRete.length === 1 && soloRete[0].gravita === 'info' && soloRete[0].titolo === 'Un errore del sito da ieri'
+    && soloRete[0].dettaglio.startsWith('È questo: «Network Error» (Assegnato.filter) in /assegnati, 1 volta. Lo ha incontrato un utente.'), J2(soloRete));
+  verifica('niente voce: nessun errore, solo errori vecchi o gia\' visti, o registro non letto (null)', ves([], '2026-10-14').length === 0 && ves([ERRORI[3], ERRORI[4]], '2026-10-14').length === 0 && ves(null, '2026-10-14').length === 0);
+  const tanti = Array.from({ length: C.LIMITE_ERRORI_CRUSCOTTO }, (_, i) => err('t' + i, '2026-10-14', { volte: 1, coinvolto: 'f' + (i % 5) }));
+  verifica('oltre il limite della lettura il titolo dice «almeno»', ves(tanti, '2026-10-14')[0].titolo === `Almeno ${C.LIMITE_ERRORI_CRUSCOTTO} errori del sito da ieri`, ves(tanti, '2026-10-14')[0].titolo);
+  verifica('il 1° del mese «da ieri» guarda l\'ultimo del mese prima', ves([err('m', '2026-09-30')], '2026-10-01').length === 1);
+  // Revisione del 15/10/2026.
+  // «Almeno» solo se le righe lette sono tutte da ieri: con dentro una riga piu'
+  // vecchia, quelle da ieri (che vengono prima) sono arrivate tutte.
+  const pienaConVecchie = [...Array.from({ length: 10 }, (_, i) => err('o' + i, '2026-10-14', { volte: 1 })), ...Array.from({ length: C.LIMITE_ERRORI_CRUSCOTTO - 10 }, (_, i) => err('s' + i, '2026-09-20', { volte: 1 }))];
+  verifica('lettura piena ma con righe vecchie dentro: il conto da ieri e\' esatto, senza «almeno»', ves(pienaConVecchie, '2026-10-14')[0].titolo === '10 errori del sito da ieri', ves(pienaConVecchie, '2026-10-14')[0].titolo);
+  // Gli elementi sono nomi da leggere, non la chiave interna del registro: la
+  // voce nascosta che torna li mostra nell'etichetta.
+  verifica('gli elementi della voce: il messaggio fra «», la chiamata e la pagina', J2(v[0] && v[0].elementi) === J2(['«Request failed with status code 500» (calcolaGiacenze) in /giacenze', '«Network Error» (Assegnato.filter) in /assegnati']), J2(v[0] && v[0].elementi));
+  const A = await import('../src/lib/avvisiNascosti.js');
+  const nascosta = A.nascondi(ves([ERRORI[1]], '2026-10-13')[0], '2026-10-13', { giorni: 7 });
+  const nuovoGenere = err('n', '2026-10-15', { tipo: 'richiesta', messaggio: 'Entity ConsuntivoFornitore with id [codice] not found', pagina: '/verifiche-fornitori', coinvolto_tipo: 'archivio', coinvolto: 'ConsuntivoFornitore.filter', volte: 1, impronta: 'richiesta|archivio|ConsuntivoFornitore.filter|/verifiche-fornitori|Entity ConsuntivoFornitore with id [codice] not found' });
+  const etichetta = A.testoTornata(A.percheTorna(nascosta, ves([ERRORI[1], nuovoGenere], '2026-10-15')[0], '2026-10-15'));
+  verifica('nascosta e tornata per un errore di un altro genere: l\'etichetta si legge, senza la chiave interna', etichetta === 'tornata: c\'è un nome nuovo, «Entity ConsuntivoFornitore with id [codice] not found» (ConsuntivoFornitore.filter) in /verifiche-fornitori'
+    && !/\|/.test(etichetta), etichetta);
+  const lungo = ves([err('l', '2026-10-14', { messaggio: 'parola '.repeat(40).trim() })], '2026-10-14')[0];
+  verifica('un messaggio lungo nell\'elemento si accorcia (nel dettaglio resta intero)', lungo.elementi[0].length < 130 && lungo.elementi[0].includes('…') && lungo.dettaglio.includes('parola '.repeat(40).trim()), lungo.elementi[0]);
+  // Gli utenti si contano per created_by_id: la lettura dell'amministratore non
+  // restituisce created_by (sulla copia dei dati veri dell'11/10/2026, 31.923
+  // righe con created_by_id e nessuna con created_by).
+  const comeDallaLettura = ERRORI.map(({ created_by, ...r }) => ({ ...r, created_by_id: created_by === 'luca@smoco.it' ? 'u-luca' : 'u-anna' }));
+  const vId = ves(comeDallaLettura, '2026-10-14');
+  verifica('righe senza email, con created_by_id: la voce dice lo stesso quanti utenti', vId[0] && vId[0].dettaglio.includes('Li hanno incontrati 2 utenti.'), vId[0] && vId[0].dettaglio);
+  const base = { oggi: '2026-10-14', anno: 2026, adessoMs: Date.parse('2026-10-14T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [] };
+  const voceDash = cruscotto({ ...base, erroriSito: ERRORI }).da_gestire.find(x => x.chiave === 'errori-sito');
+  verifica('nella dashboard intera c\'e\', senza EcoTyna (non legge quel registro), e non c\'e\' senza le righe', !!voceDash && voceDash.ecotyna === false && voceDash.sezione === 'dati'
+    && !cruscotto(base).da_gestire.some(x => x.chiave === 'errori-sito'), J2(voceDash));
+
+  // La funzione vera sul banco: legge il registro solo per l'amministratore.
+  // Le righe come le restituisce la piattaforma: created_by_id, senza email.
+  const db = { ErroreSito: comeDallaLettura };
+  const comeAdmin = await alle('2026-10-14T08:00:00.000Z', () => chiama(funzioneCruscotto, { db, ruolo: 'admin', corpo: { anno: 2026 } }));
+  const vAdmin = ((comeAdmin.j && comeAdmin.j.da_gestire) || []).find(x => x.chiave === 'errori-sito');
+  verifica('all\'amministratore la funzione porta la voce, con quanti utenti (per created_by_id)', comeAdmin.stato === 200 && !!vAdmin && vAdmin.titolo === '6 errori del sito da ieri'
+    && vAdmin.dettaglio.includes('Li hanno incontrati 2 utenti.'), J2([comeAdmin.stato, comeAdmin.j && comeAdmin.j.error, vAdmin]));
+  const comeUtente = await alle('2026-10-14T08:00:00.000Z', () => chiama(funzioneCruscotto, { db, ruolo: 'user', corpo: { anno: 2026 } }));
+  verifica('a chi non e\' amministratore niente: ne\' la voce ne\' un messaggio o un\'email del registro nella risposta', comeUtente.stato === 200 && !((comeUtente.j && comeUtente.j.da_gestire) || []).some(x => x.chiave === 'errori-sito')
+    && !/anna@smoco|u-anna|u-luca|calcolaGiacenze|Network Error|errori del sito/.test(J2(comeUtente.j)), J2(comeUtente.j).slice(0, 200));
+  verifica('e la funzione non scrive niente', comeAdmin.scritte.length === 0 && comeUtente.scritte.length === 0);
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../base44/functions/cruscottoOperativo/entry.ts', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('una lettura sola, filtrata sui non visti e limitata, e solo per l\'amministratore', (src.match(/ErroreSito\./g) || []).length === 1
+    && /eAmministratore\(user\)\s*\?\s*svc\.ErroreSito\.filter\(\{ visto: false \}, '-created_date', LIMITE_ERRORI_CRUSCOTTO\)\.catch\(\(\) => null\)\s*:\s*Promise\.resolve\(null\)/.test(src));
+}
+
+// IL PROMEMORIA DELLA COPIA DI SICUREZZA (migliorie del 14/10/2026, agganciato
+// alla chiusura del 15/10/2026). La regola (base44/shared/promemoriaCopia.ts,
+// prove/copiaSicurezza.mjs) c'era, ma nessuno la chiamava: Caricamento Dati
+// prometteva «dopo sette giorni la dashboard te lo ricorda» e la dashboard
+// taceva. Qui l'elenco intero e la funzione vera: la voce c'e' per
+// l'amministratore, dopo sette giorni o senza nessuna copia; a chi non lo e'
+// niente, e la funzione non legge nemmeno il registro.
+console.log('IL PROMEMORIA DELLA COPIA DI SICUREZZA IN «DA GESTIRE» (chiusura del 15/10/2026)');
+{
+  const base = { oggi: '2026-10-14', anno: 2026, adessoMs: Date.parse('2026-10-14T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], richiesteEct: [] };
+  const copia = (giorno, altro = {}) => ({ id: 'cs-' + giorno, giorno, il: `${giorno}T17:30:00.000Z`, created_date: `${giorno}T17:30:01.000000`, utente: 'Mario Rossi', nome_file: `treadrider-copia-${giorno}.json.gz`, archivi: 71, righe: 32145, kb: 3700, non_letti: 0, archivi_non_letti: '', attesi_mancanti: '', ...altro });
+  const vocePer = (dati) => cruscotto({ ...base, ...dati }).da_gestire.find(x => x.chiave === 'copia-sicurezza');
+  const otto = vocePer({ copieSicurezza: [copia('2026-10-06')], amministratore: true });
+  verifica('all\'amministratore, con l\'ultima copia di otto giorni fa, la voce c\'e\': informazione, sezione dati, porta alla sezione della copia, senza EcoTyna',
+    !!otto && otto.titolo === 'L\'ultima copia di sicurezza è del 06/10/2026: scaricane una' && otto.gravita === 'info' && otto.sezione === 'dati'
+    && otto.link === '/caricamento-dati#copia-sicurezza' && otto.ecotyna === false && otto.area === 'Copia di sicurezza', J2(otto));
+  verifica('con una copia di sei giorni fa niente', !vocePer({ copieSicurezza: [copia('2026-10-08')], amministratore: true }));
+  const mai = vocePer({ copieSicurezza: [], amministratore: true });
+  verifica('mai fatta: lo dice, come attenzione', !!mai && mai.titolo === 'Non è mai stata scaricata una copia di sicurezza: scaricane una' && mai.gravita === 'attenzione', J2(mai));
+  verifica('registro non letto (null) o non passato: nessuna voce, non e\' «mai»', !vocePer({ copieSicurezza: null, amministratore: true }) && !vocePer({ amministratore: true }));
+  verifica('a chi non e\' amministratore niente, nemmeno con le righe', !vocePer({ copieSicurezza: [copia('2026-09-01')], amministratore: false }) && !vocePer({ copieSicurezza: [] }));
+  const incompleta = vocePer({ copieSicurezza: [copia('2026-10-13', { non_letti: 1, archivi_non_letti: 'Omologa' })], amministratore: true });
+  verifica('l\'ultima copia incompleta: la voce dice quale archivio manca', !!incompleta && /senza un archivio/.test(incompleta.titolo) && /\(Omologa\)/.test(incompleta.dettaglio), J2(incompleta));
+
+  // La funzione vera sul banco.
+  const comeAdmin = await alle('2026-10-14T08:00:00.000Z', () => chiama(funzioneCruscotto, { db: { CopiaSicurezza: [copia('2026-10-06')] }, ruolo: 'admin', corpo: { anno: 2026 } }));
+  const vAdmin = ((comeAdmin.j && comeAdmin.j.da_gestire) || []).find(x => x.chiave === 'copia-sicurezza');
+  verifica('all\'amministratore la funzione porta il promemoria dell\'ultima copia', comeAdmin.stato === 200 && !!vAdmin && vAdmin.titolo === 'L\'ultima copia di sicurezza è del 06/10/2026: scaricane una', J2([comeAdmin.stato, comeAdmin.j && comeAdmin.j.error, vAdmin]));
+  verifica('e della riga non manda chi l\'ha fatta ne\' il nome del file', !/Mario Rossi|treadrider-copia-/.test(J2(comeAdmin.j)));
+  const recente = await alle('2026-10-14T08:00:00.000Z', () => chiama(funzioneCruscotto, { db: { CopiaSicurezza: [copia('2026-10-12')] }, ruolo: 'admin', corpo: { anno: 2026 } }));
+  verifica('con una copia di due giorni fa la funzione non lo dice', recente.stato === 200 && !((recente.j && recente.j.da_gestire) || []).some(x => x.chiave === 'copia-sicurezza'));
+  const maiAdmin = await alle('2026-10-14T08:00:00.000Z', () => chiama(funzioneCruscotto, { db: {}, ruolo: 'admin', corpo: { anno: 2026 } }));
+  verifica('senza nessuna copia nel registro la funzione dice «mai»', ((maiAdmin.j && maiAdmin.j.da_gestire) || []).some(x => x.chiave === 'copia-sicurezza' && /mai stata scaricata/.test(x.titolo)));
+  const comeUtente = await alle('2026-10-14T08:00:00.000Z', () => chiama(funzioneCruscotto, { db: { CopiaSicurezza: [copia('2026-09-01')] }, ruolo: 'user', corpo: { anno: 2026 } }));
+  verifica('a chi non e\' amministratore niente: ne\' la voce ne\' la copia nominata', comeUtente.stato === 200 && !((comeUtente.j && comeUtente.j.da_gestire) || []).some(x => x.chiave === 'copia-sicurezza')
+    && !/copia di sicurezza|01\/09\/2026/i.test(J2(comeUtente.j)), J2(comeUtente.j).slice(0, 200));
+  verifica('e la funzione non scrive niente', comeAdmin.scritte.length === 0 && comeUtente.scritte.length === 0);
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../base44/functions/cruscottoOperativo/entry.ts', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('una lettura sola, di una riga, la piu\' recente, e solo per l\'amministratore', (src.match(/CopiaSicurezza\./g) || []).length === 1
+    && /eAmministratore\(user\)\s*\?\s*svc\.CopiaSicurezza\.list\('-created_date', 1\)\.catch\(\(\) => null\)\s*:\s*Promise\.resolve\(null\)/.test(src)
+    && /amministratore: eAmministratore\(user\),/.test(src));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

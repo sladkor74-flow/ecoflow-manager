@@ -2,7 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { cruscotto, anniMesiAttiva, servonoPrefattureAnnoPrima } from "../../shared/cruscotto.ts";
+import { cruscotto, anniMesiAttiva, servonoPrefattureAnnoPrima, LIMITE_ERRORI_CRUSCOTTO } from "../../shared/cruscotto.ts";
+import { eAmministratore } from "../../shared/permessi.ts";
 import { leggiRegistro } from "../../shared/registroCaricamenti.ts";
 import { datiFinoAl, finoAlPerTipo, ARCHIVI_DEL_CRUSCOTTO } from "../../shared/statoArchivi.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
@@ -36,6 +37,22 @@ import { leggiEseguiti } from "../../shared/ordiniEseguitiLettura.ts";
 // unico. La stessa fotografia porta alla dashboard la sezione degli impianti
 // (quadroImpianti, cruscotto.ts): quadratura e da dichiarare per canale, senza
 // rifare nessun conto.
+//
+// GLI ERRORI DEL SITO (migliorie del 14/10/2026). Le pagine annotano i loro
+// errori in ErroreSito, che legge solo l'amministratore. Qui il registro si legge
+// SOLO quando chiede lui, con una lettura sola: le righe non ancora viste, le
+// piu' recenti, al piu' LIMITE_ERRORI_CRUSCOTTO. A chi non e' amministratore non
+// si legge e non arriva niente, perche' questa funzione gira col ruolo di
+// servizio e risponde a tutti. Della riga passano solo i campi che la voce
+// usa (vociErroriSito, cruscotto.ts). Una lettura che cade toglie solo la voce.
+//
+// LA COPIA DI SICUREZZA (migliorie del 14/10/2026, agganciata alla chiusura del
+// 15/10/2026). L'amministratore la scarica da Caricamento Dati e il registro
+// CopiaSicurezza ne tiene una riga per copia. Per il promemoria di «Da gestire»
+// (vociPromemoriaCopia, promemoriaCopia.ts) basta la riga piu' recente: una
+// lettura sola, di una riga, e solo quando chiede lui. A chi non e'
+// amministratore non si legge e non arriva niente: la copia la scarica solo lui.
+// Una lettura che cade vale null, e la voce non c'e' (non e' «mai fatta»).
 // Payload: { anno? }
 const TIPI_FILE = ['primarie', 'secondarie', 'terziarie', 'ordini_non_dichiarati', 'dichiarazioni_trattamento', 'pdr'];
 
@@ -51,7 +68,8 @@ export default async function(req) {
     const svc = base44.asServiceRole.entities;
     const anniAttiva = anniMesiAttiva(anno, oggi);
     const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct, verificheSedi,
-      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, esecuzioni, finoAl, surplus, eseguiti] = await Promise.all([
+      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, esecuzioni, finoAl, surplus, eseguiti, erroriSito,
+      copieSicurezza] = await Promise.all([
       fetchAll(svc.Alert, { stato: 'aperto' }),
       // Le ultime righe di ogni file, come le leggono i motori: una lettura sola.
       leggiRegistro(svc.UploadLog, TIPI_FILE).then(perTipo => [...perTipo.values()].flat()),
@@ -93,6 +111,16 @@ export default async function(req) {
       // Un archivio che non risponde vale null e la voce dice che non e' letto
       // (leggiEseguiti, ordiniEseguitiLettura.ts): mai un «nessuno» falso.
       leggiEseguiti(svc),
+      // Il registro degli errori del sito: solo per l'amministratore, una
+      // lettura filtrata sui non visti e limitata (14/10/2026).
+      eAmministratore(user)
+        ? svc.ErroreSito.filter({ visto: false }, '-created_date', LIMITE_ERRORI_CRUSCOTTO).catch(() => null)
+        : Promise.resolve(null),
+      // L'ultima copia di sicurezza: solo per l'amministratore, una riga sola
+      // (chiusura del 15/10/2026).
+      eAmministratore(user)
+        ? svc.CopiaSicurezza.list('-created_date', 1).catch(() => null)
+        : Promise.resolve(null),
     ]);
     // Le prefatture dell'anno prima, solo se un suo mese le puo' ancora chiedere.
     const prefattureAnnoPrima = servonoPrefattureAnnoPrima(documenti, anno, oggi)
@@ -146,6 +174,20 @@ export default async function(req) {
       commesse, targetRaccoglitori,
       // Le righe in «eseguito» di ogni archivio, per la voce unica (14/10/2026).
       eseguiti,
+      // Gli errori del sito non visti, per la voce dell'amministratore: solo i
+      // campi che la voce usa (14/10/2026). Chi, per created_by_id: la lettura
+      // non restituisce created_by, l'email (revisione del 15/10/2026).
+      erroriSito: Array.isArray(erroriSito)
+        ? erroriSito.map(r => ({ giorno: r.giorno, tipo: r.tipo, messaggio: r.messaggio, pagina: r.pagina, coinvolto_tipo: r.coinvolto_tipo, coinvolto: r.coinvolto,
+          volte: r.volte, impronta: r.impronta, visto: r.visto, created_by_id: r.created_by_id, created_by: r.created_by }))
+        : null,
+      // L'ultima copia di sicurezza, per il promemoria dell'amministratore: solo
+      // i campi che la regola usa, mai chi l'ha fatta o il nome del file
+      // (chiusura del 15/10/2026).
+      copieSicurezza: Array.isArray(copieSicurezza)
+        ? copieSicurezza.map(r => ({ giorno: r.giorno, il: r.il, created_date: r.created_date, non_letti: r.non_letti, archivi_non_letti: r.archivi_non_letti }))
+        : null,
+      amministratore: eAmministratore(user),
     }));
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

@@ -1,0 +1,158 @@
+{
+  "name": "ErroreSito",
+  "type": "object",
+  // IL REGISTRO DEGLI ERRORI DEL SITO (migliorie del 14/10/2026, approvate
+  // dall'utente: «per me ok sulle cose da sistemare, sulla velocità e su quanto
+  // da creare, procedi pure»).
+  //
+  // Il fatto: un errore di rete o una pagina che si rompe, visti da un collega,
+  // l'amministratore li scopriva solo se il collega glielo diceva. Qui ogni
+  // pagina del gestionale annota da se' gli errori che incontra
+  // (src/lib/registroErrori.js): una pagina che si rompe (PageErrorBoundary), un
+  // errore che nessuno ha preso (window error e unhandledrejection) e una
+  // chiamata a una funzione o a un archivio che non riesce (429, rete, 5xx, 4xx).
+  // L'amministratore li legge in Alert & Controllo, «Errori del sito», e la
+  // dashboard gli dice in «Da gestire» quanti ne sono arrivati da ieri.
+  //
+  // Che cosa NON c'e', apposta: l'indirizzo intero della pagina (solo il
+  // percorso, mai la query string ne' l'hash, dove possono stare un token o un
+  // filtro), i contenuti dei file, i token, le email dentro i messaggi.
+  // Il messaggio passa da una funzione sola che lo ripulisce (pulisciMessaggio,
+  // prove/registroErrori.mjs). Chi ha visto l'errore lo dice la piattaforma, non
+  // il browser: nessuno puo' intestare un errore a un altro. La lettura
+  // restituisce created_by_id e non created_by, l'email (revisione del
+  // 15/10/2026, sulla copia dei dati veri dell'11/10): la scheda
+  // dell'amministratore risale all'email con una lettura sola degli utenti.
+  //
+  // Le righe non servono oltre 40 giorni (la conservazione a 40 giorni, AGENTS.md):
+  // le toglie l'amministratore dalla pagina, col pulsante «Togli quelli più
+  // vecchi di 40 giorni». Nessuna cancellazione automatica.
+  "properties": {
+    "giorno": {
+      "type": "string",
+      "format": "date",
+      "description": "Il giorno italiano dell'errore, AAAA-MM-GG: lo usano i filtri (ultimi 7 o 30 giorni, da ieri) e la pulizia dopo 40 giorni"
+    },
+    "il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Il momento della prima volta in questa riga"
+    },
+    "ultimo_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Il momento dell'ultima volta contata in questa riga"
+    },
+    "pagina": {
+      "type": "string",
+      "description": "Il percorso della pagina, per esempio /giacenze: mai la query string ne' l'hash"
+    },
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "pagina",
+        "non_preso",
+        "limite",
+        "rete",
+        "server",
+        "richiesta"
+      ],
+      "description": "pagina: la pagina si e' rotta. non_preso: un errore che nessuno ha preso. limite: troppe richieste (429). rete: la richiesta non e' arrivata. server: errore del server (5xx). richiesta: richiesta rifiutata (4xx)"
+    },
+    "messaggio": {
+      "type": "string",
+      "description": "Il messaggio ripulito (pulisciMessaggio): niente token, email, indirizzi coi parametri, contenuti di file. Al piu' 300 caratteri"
+    },
+    "dove": {
+      "type": "string",
+      "description": "Le prime righe della pila dell'errore, ripulite, quando ci sono: il file del codice e la riga"
+    },
+    "coinvolto_tipo": {
+      "type": "string",
+      "enum": [
+        "funzione",
+        "archivio"
+      ],
+      "description": "Per una chiamata fallita: se era una funzione o un archivio"
+    },
+    "coinvolto": {
+      "type": "string",
+      "description": "Il nome della funzione, o dell'archivio col metodo (Assegnato.filter)"
+    },
+    "stato_http": {
+      "type": "number",
+      "description": "Lo stato della risposta (429, 500, 404...). Assente se la richiesta non ha avuto risposta"
+    },
+    "versione": {
+      "type": "string",
+      "description": "La versione del codice della pagina, quando si sa (il nome del pacchetto pubblicato)"
+    },
+    "sessione": {
+      "type": "string",
+      "description": "Un codice a caso della scheda del browser: le righe della stessa sessione"
+    },
+    "volte": {
+      "type": "number",
+      "default": 1,
+      "description": "Quante volte lo stesso errore e' successo in questa riga: un errore uguale nella stessa sessione si conta, non si riscrive"
+    },
+    "impronta": {
+      "type": "string",
+      "description": "La chiave dell'errore uguale: tipo, chiamata, pagina e messaggio. Con lei si raggruppa"
+    },
+    "visto": {
+      "type": "boolean",
+      "default": false,
+      "description": "Segnato visto dall'amministratore: la dashboard dice solo gli errori non visti"
+    },
+    "visto_da": {
+      "type": "string",
+      "description": "Chi lo ha segnato visto"
+    },
+    "visto_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando e' stato segnato visto"
+    }
+  },
+  "required": [
+    "giorno",
+    "tipo",
+    "messaggio"
+  ],
+  // CHI LEGGE E CHI SCRIVE (14/10/2026).
+  //
+  // - create: true, come RichiestaUtente. Chiunque sia collegato annota il
+  //   proprio errore, altrimenti il registro vedrebbe solo quelli
+  //   dell'amministratore, cioe' proprio quelli che non servono. Niente
+  //   condizione su created_by_id: quel campo lo riempie la piattaforma, quindi
+  //   non aggiunge difese, e se il motore la valutasse sul dato in arrivo, dove
+  //   created_by_id non c'e' ancora, ogni annotazione cadrebbe in silenzio
+  //   (AGENTS.md, «Quando la piattaforma modifica il codice da sola»). Nel
+  //   browser src/lib/permessi.js lascia passare la sola create
+  //   (SOLO_CREAZIONE).
+  // - read: solo l'amministratore. Un messaggio d'errore puo' dire chi lavorava
+  //   su che cosa: non e' una cosa da far leggere a tutti.
+  // - update e delete: solo l'amministratore, che segna visti gli errori e
+  //   toglie quelli piu' vecchi di 40 giorni.
+  // Prove: prove/scrittureDegliUtenti.mjs, prove/chiLeggeCosa.mjs (sezione 11),
+  // prove/registroErrori.mjs.
+  "rls": {
+    "create": true,
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

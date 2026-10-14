@@ -21,6 +21,12 @@ export const MESSAGGIO_SOLA_LETTURA =
 // Le uniche cose che un utente scrive sono le proprie: la richiesta
 // all'amministratore e le esercitazioni del corso.
 const ENTITA_LIBERE = new Set(['RichiestaUtente', 'EsercitazioneRT']);
+// Il registro degli errori del sito (14/10/2026): chiunque sia collegato CREA la
+// riga del proprio errore (src/lib/registroErrori.js), altrimenti il registro
+// vedrebbe solo quelli dell'amministratore. Della create e basta: segnarli visti
+// e toglierli resta dell'amministratore, come nella regola dell'archivio
+// (base44/entities/ErroreSito.jsonc).
+const SOLO_CREAZIONE = new Set(['ErroreSito']);
 const METODI_SCRITTURA = ['create', 'update', 'delete', 'bulkCreate', 'bulkUpdate', 'bulkDelete', 'deleteMany', 'updateMany'];
 
 let ruoloCorrente = null;
@@ -106,6 +112,7 @@ export function proteggiScritture() {
         get(g, metodo) {
           const valore = g[metodo];
           if (typeof valore !== 'function' || !METODI_SCRITTURA.includes(metodo)) return valore;
+          if (metodo === 'create' && SOLO_CREAZIONE.has(nome)) return valore;
           return async (...args) => {
             if (await ruolo() !== 'admin') throw new Error(MESSAGGIO_SOLA_LETTURA);
             return valore.apply(g, args);
