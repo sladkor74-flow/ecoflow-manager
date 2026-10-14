@@ -20,13 +20,15 @@
 // che li somma non esiste.
 
 import { fetchAll } from "./fetchAll.ts";
-import { contaFormulari } from "./formulari.ts";
+import { contaFormulari, MINIMO_ACI_KG } from "./formulari.ts";
 import { normalizzaRagioneSociale, risolviNome } from "./normalizzaRagioneSociale.ts";
 import { chiaveLettura, nuovaCache } from "./cacheLetture.ts";
 import { regioneDi } from "./regioneMovimento.ts";
 import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
-import { eTerminato, eEseguito, giornoMovimento, riepilogoEseguiti } from "./movimenti.ts";
+import { eTerminato, eEseguito, giornoMovimento, riepilogoEseguiti, periodoMovimento, chiaveOrdine } from "./movimenti.ts";
+import { etaArretrato } from "./cruscotto.ts";
+import { CHIAVE_SCELTA } from "./pianoAssistente.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale, caricamentiAperti, contaDistinti } from "./quadraturaFirDati.ts";
 import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoVociDate, voceDate } from "./reportSettimanali.ts";
@@ -34,7 +36,7 @@ import { situazioneGestionale, terminatiSenzaFine, totaleGiacenze, senzaFileDelP
 import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } from "./dichiarazioniImpianti.ts";
-import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
+import { giorniAllaScadenza, fasciaScadenza, distanza } from "./omologhe.ts";
 import { documentoDelRequisito } from "./qualificaFornitori.ts";
 import { applicaControlloClasse, targetAnnuoSoggetto } from "./classeAlbo.ts";
 import { eContrattoRaccoltaEStoccaggio } from "./segnapostiContratto.ts";
@@ -220,7 +222,86 @@ function leggiArchivio(ctx, svc, entita, filtro = null) {
   return ctx && typeof ctx.leggi === 'function' ? ctx.leggi(chiaveLettura(entita, filtro), fn) : fn();
 }
 
-async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione, raccoglitore, destinazione }, ctx = null) {
+// IL PUNTO DI RACCOLTA CHIESTO, CON LA REGOLA DELLA PAGINA (richiesta dell'utente
+// del 14/10/2026: EcoTyna deve cercare nel modulo giusto, e «se e quando e'
+// stato chiuso un ordine di un PDR» e' una domanda dei Terminati). La regola e'
+// quella del campo «PDR» dei Terminati Rete (CercaPdr.jsx, 12/10/2026): un
+// numero da solo («42872», «PDR 42872») e' il codice id_pdr e vale UGUALE, non
+// contenuto, perche' «31» dentro 315, 1310 e 23100 darebbe tre punti diversi;
+// altrimenti il nome come lo scrive il portale, punto_di_raccolta o
+// ragione_sociale, con tutte le parole in qualunque ordine, senza badare a
+// maiuscole, accenti e punteggiatura. Le funzioni non leggono src, quindi la
+// regola e' scritta anche qui: prove/ecotynaModuliGiusti.mjs la confronta con
+// quella della pagina sui dati veri, ordine per ordine. Accetta in piu' il
+// numero detto a voce («PDR n. 42872», «codice 42872»): e' sempre il codice.
+const normalizzaPdr = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** Il PDR chiesto: { chiesto, codice (numero o null), parole }; null se non c'e' niente da cercare. */
+export function pdrChiesto(testo) {
+  const chiesto = String(testo ?? '').trim();
+  if (!chiesto) return null;
+  const m = chiesto.match(/^\s*(?:(?:pdr|p\.d\.r\.|punto di raccolta)\s*)?(?:(?:n|nr|num|numero|cod|codice)\.?\s*)?#?\s*(\d+)\s*$/i);
+  const parole = chiesto.split(/\s+/).map(normalizzaPdr).filter(Boolean);
+  if (!m && !parole.length) return null;
+  return { chiesto, codice: m ? Number(m[1]) : null, parole };
+}
+
+/** Vero se l'ordine e' del PDR chiesto (pdrChiesto): per codice uguale o per nome, tutte le parole. */
+export function delPdr(r, pdr) {
+  if (!pdr) return true;
+  if (pdr.codice !== null) return !!r && r.id_pdr != null && r.id_pdr !== '' && Number(r.id_pdr) === pdr.codice;
+  const nomi = `${normalizzaPdr(r && r.punto_di_raccolta)}|${normalizzaPdr(r && r.ragione_sociale)}`;
+  return pdr.parole.every(p => nomi.includes(p));
+}
+
+// Il comune come lo scrive il portale («LAVELLO», «Lavello», «Làvello»): uguale, non contenuto.
+const stessoComune = (a, b) => normalizzaPdr(a) === normalizzaPdr(b);
+
+/**
+ * IL COMUNE CHIESTO, RICONOSCIUTO O NO (revisione del 14/10/2026). Un comune
+ * scritto male o diverso dal portale («Lavelo» per LAVELLO) dava uno zero
+ * «vero», mentre provincia, PDR e raccoglitore che non si riconoscono danno un
+ * numero non calcolabile: un nome che non si riconosce non fa zero. Si guarda
+ * fra i comuni delle righe gia' lette (tutto l'archivio del canale, di ogni
+ * anno), senza letture in piu'; se non c'e', si propongono i comuni scritti a
+ * una o due lettere di distanza, ma non si sceglie al posto di chi chiede.
+ * Restituisce { chiesto, trovato, nome, simili }, o null se non c'e' comune.
+ */
+function comuneRiconosciuto(righe, chiesto) {
+  const scritto = String(chiesto ?? '').trim();
+  if (!scritto) return null;
+  const cercato = normalizzaPdr(scritto);
+  const nomi = new Map();
+  for (const r of righe || []) {
+    const k = normalizzaPdr(r && r.comune);
+    if (k && !nomi.has(k)) nomi.set(k, String(r.comune).trim());
+  }
+  if (nomi.has(cercato)) return { chiesto: scritto, trovato: true, nome: nomi.get(cercato), simili: [] };
+  const tetto = cercato.length >= 8 ? 2 : 1;
+  const simili = [...nomi.entries()].filter(([k]) => distanza(k, cercato, tetto) <= tetto).map(([, n]) => n).sort().slice(0, 5);
+  return { chiesto: scritto, trovato: false, nome: '', simili };
+}
+
+/** Che cosa dire di un comune che non si e' riconosciuto, coi comuni vicini. */
+const avvisoComune = (comune, dove) => `Il comune "${comune.chiesto}" non risulta fra ${dove}, di nessun anno: o e' scritto diversamente dal portale${comune.simili.length ? ` (forse ${comune.simili.join(', ')})` : ''}, o li' non ci sono mai stati ordini. Il numero non si calcola, e non e' zero.`;
+
+/**
+ * I punti di raccolta delle righe, uno per codice, col numero di ordini e
+ * l'ultimo giorno di fine trasporto: dicono di quale PDR si sta parlando, e se
+ * un nome ne prende piu' d'uno («MASTRIA GOMME» ha due punti) lo dicono tutti.
+ */
+function puntiDelPdr(righe) {
+  const per = new Map();
+  for (const r of righe || []) {
+    const codice = r.id_pdr != null && r.id_pdr !== '' ? Number(r.id_pdr) : null;
+    const k = codice !== null ? `#${codice}` : `@${normalizzaPdr(r.punto_di_raccolta || r.ragione_sociale)}`;
+    if (!per.has(k)) per.set(k, { pdr: codice, nome: String(r.punto_di_raccolta || r.ragione_sociale || '').trim(), comune: String(r.comune || '').trim(), provincia: String(r.provincia || '').trim(), ordini: 0 });
+    per.get(k).ordini++;
+  }
+  return [...per.values()].sort((a, b) => b.ordini - a.ordini);
+}
+
+async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione, raccoglitore, destinazione, pdr: pdrScritto, comune }, ctx = null) {
   const svc = base44.asServiceRole.entities;
   const entita = canale === 'ACI' ? 'PrimariaAci' : canale === 'EXTRA_RACCOLTA' ? 'ExtraRaccolta' : 'PrimariaRete';
   // I terminati sono il raccolto. Gli "eseguito" sono il limbo del portale e si
@@ -271,12 +352,19 @@ async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione,
   // inventato (che con la sigla vuota avrebbe preso le righe senza provincia):
   // non trova niente, e il raccolto lo dice come numero non calcolabile.
   const prov = provinciaChiesta(provincia);
+  // Il punto di raccolta e il comune (14/10/2026): servono agli ordini chiusi di
+  // un PDR («quando e' stato chiuso l'ultimo ritiro del PDR 42872?») e di un
+  // comune. Senza, valgono come prima: nessun filtro.
+  const pdr = pdrChiesto(pdrScritto);
+  const comuneChiesto = String(comune ?? '').trim();
 
   const stessoLuogo = (r) => {
     if (prov && (!prov.sigla || String(r.provincia || '').toUpperCase().trim() !== prov.sigla)) return false;
     if (regione && normalizzaRagioneSociale(regioneDi(r)) !== normalizzaRagioneSociale(regione)) return false;
     if (chiaviRacc && !chiaviRacc.has(chiave(r.trasportatore))) return false;
     if (chiaviDest && !chiaviDest.has(chiave(r.destinazione))) return false;
+    if (pdr && !delPdr(r, pdr)) return false;
+    if (comuneChiesto && !stessoComune(r.comune, comuneChiesto)) return false;
     return true;
   };
   const nelPeriodo = (r) => {
@@ -309,7 +397,528 @@ async function movimenti(base44, { canale, anno, mese, mesi, provincia, regione,
       ? { nell_anno: contaFormulari(delCanale.filter(r => String(r.provincia || '').toUpperCase().trim() === prov.sigla && meseDi(r.trasporto_finito_il, anno) >= 0)) }
       : {}),
   } : null;
-  return { righe, date: dateObbligatorie(delLuogo, modulo), soggetti, periodo, riserva, provincia: provincia_ };
+  // Del PDR chiesto, i punti che il filtro ha riconosciuto fra tutti gli ordini
+  // del canale (terminati ed «eseguito», di ogni anno): con un nome possono
+  // essere piu' d'uno, e nessuno vuol dire che quel PDR nel canale non c'e'.
+  const pdr_ = pdr ? { ...pdr, punti: puntiDelPdr(perNomi.filter(r => delPdr(r, pdr))) } : null;
+  // E il comune chiesto, fra quelli degli ordini del canale di ogni anno.
+  const comune_ = comuneRiconosciuto(perNomi, comuneChiesto);
+  return { righe, date: dateObbligatorie(delLuogo, modulo), soggetti, periodo, riserva, provincia: provincia_, delLuogo, pdr: pdr_, comune: comune_ };
+}
+
+/**
+ * Che cosa dire dei filtri di movimenti(): la provincia, il periodo e i nomi
+ * che non si sono riconosciuti, e quando il numero non si puo' calcolare.
+ * Stava dentro raccolto; dal 14/10/2026 la usano raccolto e ordini_chiusi, che
+ * leggono gli stessi terminati con gli stessi filtri e devono dire le stesse
+ * cose con le stesse parole.
+ */
+async function esitoDeiFiltri(base44, { canale, anno, p, soggetti, periodo, luogo, righe }) {
+  // LA PROVINCIA CHE NON TROVA NIENTE SI DICE (segnalazione alta A74 del
+  // 20/09, corretta il 12/10/2026). Una provincia che non si riconosce rende
+  // il numero non calcolabile, come un soggetto che non si riconosce; una
+  // riconosciuta che non trova formulari e' uno zero vero, ma va detto perche'
+  // e' zero: la provincia non ne ha nell'anno, o non ne ha con gli altri filtri.
+  const provinciaIgnota = !!(luogo && !luogo.sigla);
+  const altriFiltri = [
+    periodo.nomi.length ? `il periodo (${periodo.nomi.join(', ')})` : '',
+    p.raccoglitore ? `il raccoglitore "${p.raccoglitore}"` : '',
+    p.destinazione ? `la destinazione "${p.destinazione}"` : '',
+    p.regione ? `la regione "${p.regione}"` : '',
+    p.comune ? `il comune "${p.comune}"` : '',
+    p.pdr ? `il punto di raccolta "${p.pdr}"` : '',
+  ].filter(Boolean);
+  const avvisoProvincia = !luogo ? ''
+    : provinciaIgnota ? `"${luogo.chiesta}" non e' una provincia che riconosco: scrivi la sigla (per esempio BA) o il nome per esteso (Bari). Senza la provincia il numero non si calcola, e non e' zero.`
+    : righe.length ? ''
+    : luogo.nell_anno ? `Con la provincia di ${luogo.nome} (${luogo.sigla}) il filtro non trova nessun formulario terminato del canale ${canale}: nel ${anno} la provincia ne ha ${luogo.nell_anno}, ma nessuno con ${altriFiltri.join(', ') || 'gli altri filtri chiesti'}.`
+    : `Nel canale ${canale} non c'e' nessun formulario terminato della provincia di ${luogo.nome} (${luogo.sigla}) in tutto il ${anno}: la provincia e' riconosciuta, ma il filtro non trova niente.`;
+  // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
+  const avvisoPeriodo = periodo.ignorati.length
+    ? `${periodo.ignorati.map(x => `"${x}"`).join(', ')} non ${periodo.ignorati.length === 1 ? 'e\' un mese' : 'sono mesi'}: ${periodo.nomi.length ? `ho preso ${periodo.nomi.join(', ')} ${anno}` : `ho preso tutto l'anno ${anno}`}.`
+    : '';
+  // UN NOME CHE NON SI RICONOSCE NON FA ZERO. Un soggetto chiesto e non
+  // trovato, o ambiguo, rende il numero non calcolabile: scrivere 0,00 t
+  // sarebbe una risposta falsa, e chi legge non ha modo di accorgersene.
+  const nonRisolti = Object.entries(soggetti).filter(([, e]) => !e.trovato);
+  const avvisoSoggetto = nonRisolti.map(([ruolo, e]) => (e.come === 'ambiguo'
+    ? `"${e.chiesto}" non basta a capire di chi si parla: in archivio ci sono ${e.alternative.join(', ')}. Rifai la domanda con il nome per esteso: sono soggetti diversi e non si sommano.`
+    : `"${e.chiesto}" non risulta fra i ${ruolo === 'raccoglitore' ? 'raccoglitori' : 'siti di destinazione'} del canale ${canale}${e.alternative.length ? `. Forse intendevi: ${e.alternative.join(', ')}` : ''}.`)).join(' ');
+  const calcolabile = nonRisolti.length === 0 && !provinciaIgnota;
+  // UN NOME CHE QUI NON C'E' PUO' ESSERCI ALTROVE. L'anagrafica dei fornitori
+  // e' una tabella piccola e dice che cosa fa un soggetto: meglio rispondere
+  // "Silvano Renato trasporta le secondarie, non raccoglie" che "non risulta
+  // fra i raccoglitori", che manda l'utente a sbattere (visto in produzione il
+  // 30/09/2026: ha rifatto la domanda due volte con lo stesso esito).
+  let inAnagrafica = '';
+  if (nonRisolti.length) {
+    try {
+      const fornitori = await fetchAll(base44.asServiceRole.entities.Fornitore, { stato: 'attivo' });
+      const nomi = fornitori.map(x => x.ragione_sociale);
+      inAnagrafica = nonRisolti.map(([, e]) => {
+        const f = risolviNome(nomi, e.chiesto);
+        if (!f.trovato) return '';
+        const rec = fornitori.find(x => normalizzaRagioneSociale(x.ragione_sociale) === f.chiavi[0]);
+        if (!rec) return '';
+        const ruoli = [
+          rec.ruolo_raccolta ? 'raccoglie le primarie' : '',
+          rec.ruolo_trasporto_secondaria ? 'trasporta le secondarie' : '',
+          rec.ruolo_stoccaggio ? 'ha uno stoccaggio' : '',
+          rec.ruolo_trattamento ? 'tratta il materiale' : '',
+        ].filter(Boolean);
+        return `"${e.chiesto}" in anagrafica e' ${rec.ragione_sociale}${ruoli.length ? `, e ${ruoli.join(', ')}` : ', senza nessun ruolo indicato'}. Fra i raccoglitori delle primarie del canale ${canale} non compare: o non raccoglie, o raccoglie in un altro canale.`;
+      }).filter(Boolean).join(' ');
+    } catch (_e) { /* l'anagrafica aiuta, non e' indispensabile */ }
+  }
+  const risolti = Object.entries(soggetti).filter(([, e]) => e.trovato)
+    .map(([ruolo, e]) => `${ruolo}: ${e.nomi[0]}${e.come === 'esatto' ? '' : ` (scritto "${e.chiesto}")`}`);
+  return { provinciaIgnota, avvisoProvincia, avvisoPeriodo, avvisoSoggetto, calcolabile, inAnagrafica, risolti };
+}
+
+// I giorni fra due giorni 'AAAA-MM-GG', sul calendario e senza fusi.
+const giorniTra = (a, b) => Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 86400000);
+
+/**
+ * Le righe raggruppate per una chiave, con gli ORDINI distinti (chiaveOrdine:
+ * lo stesso ordine su piu' righe vale uno), i formulari e le tonnellate.
+ * La usano gli strumenti degli ordini, che contano ordini e non formulari.
+ */
+function perChiaveOrdini(righe, chiaveDi) {
+  const m = new Map();
+  righe.forEach((r, i) => {
+    const k = chiaveDi(r) || 'N/D';
+    if (!m.has(k)) m.set(k, { nome: k, ordini: new Set(), righe: [], kg: 0 });
+    const x = m.get(k);
+    x.ordini.add(chiaveOrdine(r, i));
+    x.righe.push(r);
+    x.kg += peso(r);
+  });
+  return [...m.values()]
+    .map(x => ({ nome: x.nome, ordini: x.ordini.size, formulari: contaFormulari(x.righe), tonnellate: t3(x.kg) }))
+    .sort((a, b) => b.ordini - a.ordini || b.tonnellate - a.tonnellate);
+}
+
+const contaOrdini = (righe) => new Set(righe.map((r, i) => chiaveOrdine(r, i))).size;
+
+// Il punto di raccolta di un ordine a parole: «42872 · EUROGOMME SRL - LAVELLO».
+const pdrDi = (r) => {
+  const nome = String(r.punto_di_raccolta || r.ragione_sociale || r.produttore || '').trim();
+  return r.id_pdr != null && r.id_pdr !== '' ? `${r.id_pdr} · ${nome}` : nome || 'N/D';
+};
+
+/**
+ * GLI ORDINI APERTI: GLI ASSEGNATI (richiesta dell'utente del 14/10/2026).
+ *
+ * «Quanti ordini ci sono aperti sulla provincia di Siracusa?» EcoTyna rispondeva
+ * con le Richieste ECT, cioe' le richieste arrivate via email, perche' nessuno
+ * strumento leggeva gli Assegnati: il pianificatore prendeva il nome che ci
+ * somigliava di piu'. Qui si leggono gli archivi delle pagine Assegnati Rete e
+ * Assegnati ACI (e le schede «assegnato» dell'extra raccolta) e si conta come
+ * la pagina (computeAssegnatiMatrix): un ordine per riga, la provincia in sigla
+ * maiuscola, l'eta' dell'arretrato con etaArretrato del cruscotto. Una lettura
+ * dell'archivio degli aperti, piu' la pagina breve degli «eseguito» del canale
+ * (la stessa di movimenti(), che con la cache della domanda non si ripete).
+ *
+ * Un aperto non e' un movimento: il suo giorno e' l'immissione, e si contano
+ * tutti, qualunque sia il giorno di immissione (come la pagina). Per questo lo
+ * strumento non prende anno e mese: il periodo della domanda, travasato dal
+ * piano, avrebbe tolto gli ordini aperti da prima di quel mese.
+ */
+async function ordiniAperti(base44, p, ctx) {
+  const oggi = oggiRoma();
+  const canale = canaleChiesto(p.canale) || 'RETE';
+  const avvisoCanale = canaleChiesto(p.canale) ? ''
+    : `${p.canale ? `"${p.canale}" non e' un canale` : 'Canale non indicato'}: questi sono gli ordini aperti della RETE (Assegnati Rete). Quelli dei demolitori (ACI) e dell'extra raccolta sono a parte e non si sommano: per loro rifai la domanda col canale.`;
+  const svc = base44.asServiceRole.entities;
+  const extra = canale === 'EXTRA_RACCOLTA';
+  const entita = canale === 'ACI' ? 'AssegnatoAci' : extra ? 'ExtraRaccolta' : 'Assegnato';
+  const modulo = canale === 'ACI' ? 'Assegnati ACI' : extra ? 'Extra Raccolta' : 'Assegnati Rete';
+  const [letti, eseguitiLetti] = await Promise.all([
+    leggiArchivio(ctx, svc, entita),
+    // L'extra raccolta non ha il limbo: le sue schede sono assegnate o terminate.
+    extra ? Promise.resolve([]) : leggiArchivio(ctx, svc, canale === 'ACI' ? 'PrimariaAci' : 'PrimariaRete', { stato: 'eseguito' }).catch(() => null),
+  ]);
+  // Negli archivi degli Assegnati ci sono solo ordini assegnati (archivioPrimaria,
+  // primarie.ts) e la pagina li conta tutti; dell'extra raccolta si prendono le
+  // schede «assegnato», come la pagina Extra Raccolta (statoExtra).
+  const aperti = extra ? letti.filter(r => String(r.stato || '').toLowerCase().trim() === 'assegnato') : letti;
+  const limboCanale = (eseguitiLetti || []).filter(eEseguito);
+
+  const prov = provinciaChiesta(p.provincia);
+  const pdr = pdrChiesto(p.pdr);
+  const comune = String(p.comune ?? '').trim();
+  const regione = String(p.regione ?? '').trim();
+  const classe = String(p.classe ?? '').trim().toUpperCase();
+  const minimoGiorni = Number(p.da_almeno_giorni) > 0 ? Math.floor(Number(p.da_almeno_giorni)) : 0;
+  // Il raccoglitore e' il trasportatore a cui l'ordine e' assegnato, riconosciuto
+  // come nel raccolto (risolviNome): un nome scritto a meta' non fa zero.
+  const perNomi = aperti.concat(limboCanale);
+  const soggetto = p.raccoglitore ? { chiesto: String(p.raccoglitore), ...risolviNome(perNomi.map(r => r.trasportatore), p.raccoglitore) } : null;
+  const chiaviRacc = soggetto ? new Set(soggetto.trovato ? soggetto.chiavi : []) : null;
+  const giorniDi = (r) => { const g = giornoRoma(r.ordine_immesso_il); return g ? giorniTra(g, oggi) : null; };
+  const passa = (r) => {
+    if (prov && (!prov.sigla || String(r.provincia || '').toUpperCase().trim() !== prov.sigla)) return false;
+    if (regione && normalizzaRagioneSociale(regioneDi(r)) !== normalizzaRagioneSociale(regione)) return false;
+    if (comune && !stessoComune(r.comune, comune)) return false;
+    if (pdr && !delPdr(r, pdr)) return false;
+    if (classe && String(r.classe || '').trim().toUpperCase() !== classe) return false;
+    if (chiaviRacc && !chiaviRacc.has(normalizzaRagioneSociale(r.trasportatore))) return false;
+    return true;
+  };
+  const delLuogo = aperti.filter(passa);
+  const righe = minimoGiorni ? delLuogo.filter(r => { const g = giorniDi(r); return g !== null && g >= minimoGiorni; }) : delLuogo;
+
+  // Il PDR che fra gli aperti non c'e': o non ha ordini aperti (e allora e' uno
+  // zero vero, e si dice il suo ultimo ritiro), o non e' un punto di raccolta
+  // del canale. Lo si vede dai terminati, che solo in questo caso si leggono
+  // (con la cache della domanda, la stessa lettura di movimenti()). Lo stesso
+  // per il comune (revisione del 14/10/2026): uno che non c'e' ne' fra gli aperti
+  // ne' fra i chiusi non fa uno zero «vero». Una lettura sola per tutti e due.
+  const pdrFraAperti = !pdr || perNomi.some(r => delPdr(r, pdr));
+  const comuneFraAperti = !comune || perNomi.some(r => stessoComune(r.comune, comune));
+  let pdrNeiChiusi = null;
+  let comuneEsito = comune && comuneFraAperti ? comuneRiconosciuto(perNomi, comune) : null;
+  let chiusiNonLetti = false;
+  if (!pdrFraAperti || !comuneFraAperti) {
+    try {
+      const chiusi = (await leggiArchivio(ctx, svc, extra ? 'ExtraRaccolta' : canale === 'ACI' ? 'PrimariaAci' : 'PrimariaRete', { stato: 'terminato' }))
+        .filter(r => terminato(r));
+      if (!pdrFraAperti) {
+        const delSuo = chiusi.filter(r => delPdr(r, pdr));
+        const ultimo = delSuo.map(r => giornoMovimento(r)).filter(Boolean).sort().pop() || null;
+        pdrNeiChiusi = { punti: puntiDelPdr(delSuo), ultimo_ritiro: ultimo };
+      }
+      if (!comuneFraAperti) comuneEsito = comuneRiconosciuto(perNomi.concat(chiusi), comune);
+    } catch (_e) { chiusiNonLetti = true; }
+  }
+  const provinciaIgnota = !!(prov && !prov.sigla);
+  const soggettoIgnoto = !!(soggetto && !soggetto.trovato);
+  // Senza la lettura dei terminati non si sa se il PDR esiste: lo zero degli
+  // aperti resta vero, e non si dice che il PDR non c'e'. Lo stesso il comune.
+  const pdrIgnoto = !!(pdr && !chiusiNonLetti && !pdrFraAperti && !(pdrNeiChiusi && pdrNeiChiusi.punti.length));
+  const comuneIgnoto = !!(comuneEsito && !comuneEsito.trovato);
+  const calcolabile = !provinciaIgnota && !soggettoIgnoto && !pdrIgnoto && !comuneIgnoto;
+
+  // Lo stimato che manca non e' zero: si somma quello che c'e', e se non ce n'e'
+  // nessuno il peso stimato e' vuoto (le schede dell'extra raccolta non lo hanno).
+  const conStimato = (r) => Number(r.peso_stimato) > 0;
+  const stimatoDi = (xs) => (xs.some(conStimato) ? t3(xs.reduce((s, r) => s + (Number(r.peso_stimato) || 0), 0)) : null);
+  const senzaStimato = righe.filter(r => !conStimato(r)).length;
+  const raggruppa = (chiaveDi) => {
+    const m = new Map();
+    for (const r of righe) {
+      const k = chiaveDi(r) || 'N/D';
+      if (!m.has(k)) m.set(k, { nome: k, righe: [] });
+      const x = m.get(k);
+      x.righe.push(r);
+    }
+    return [...m.values()].map(x => ({ nome: x.nome, ordini: x.righe.length, peso_stimato_t: stimatoDi(x.righe) })).sort((a, b) => b.ordini - a.ordini || (b.peso_stimato_t || 0) - (a.peso_stimato_t || 0));
+  };
+  // L'elenco nell'ordine della coda della pagina: prima i piu' vecchi.
+  const coda = [...righe].sort((a, b) => String(a.ordine_immesso_il || '').localeCompare(String(b.ordine_immesso_il || '')) || String(a.id_ordine || '').localeCompare(String(b.id_ordine || '')));
+  // LO STIMATO ACI SOTTO I 1.500 KG (decisione del 13/10/2026): regola del
+  // portale, il gestionale la segnala soltanto, come la pagina Assegnati ACI.
+  const sottoMinimo = canale === 'ACI' ? righe.filter(r => { const s = Number(r.peso_stimato) || 0; return s > 0 && s < MINIMO_ACI_KG; }) : [];
+  const eta = etaArretrato(righe, oggi);
+  const limbo = limboCanale.filter(passa);
+  const kgLimbo = limbo.reduce((s, r) => s + peso(r), 0);
+  const avvisi = [
+    avvisoCanale,
+    provinciaIgnota ? `"${prov.chiesta}" non e' una provincia che riconosco: scrivi la sigla (per esempio SR) o il nome per esteso (Siracusa). Senza la provincia il numero non si calcola, e non e' zero.` : '',
+    soggettoIgnoto ? (soggetto.come === 'ambiguo'
+      ? `"${soggetto.chiesto}" non basta a capire di chi si parla: fra i raccoglitori degli ordini aperti ci sono ${soggetto.alternative.join(', ')}. Rifai la domanda con il nome per esteso.`
+      : `"${soggetto.chiesto}" non risulta fra i raccoglitori degli ordini aperti del canale ${canale}${soggetto.alternative.length ? `. Forse intendevi: ${soggetto.alternative.join(', ')}` : ''}.`) : '',
+    pdrIgnoto ? `Il punto di raccolta "${pdr.chiesto}" non risulta fra gli ordini del canale ${canale}, ne' aperti ne' chiusi: controlla il codice o il nome (il codice e' il numero del PDR, per esempio 42872).` : '',
+    comuneIgnoto ? avvisoComune(comuneEsito, `gli ordini del canale ${canale}, ne' aperti ne' chiusi`) : '',
+  ].filter(Boolean);
+  const nessuno = calcolabile && !righe.length
+    ? `Nessun ordine aperto${prov && prov.sigla ? ` nella provincia di ${prov.nome} (${prov.sigla})` : ''}${comune ? ` nel comune di ${(comuneEsito && comuneEsito.nome) || comune}` : ''}${pdr ? ` del punto di raccolta "${pdr.chiesto}"` : ''}${soggetto ? ` del raccoglitore ${soggetto.nomi[0]}` : ''}${minimoGiorni ? ` da almeno ${minimoGiorni} giorni` : ''} nel canale ${canale} (${modulo}): lo zero e' vero.`
+    : '';
+  return {
+    fonte: `${modulo}: ordini in stato assegnato${extra ? '' : ', dall\'ultimo file delle primarie caricato'}`,
+    periodo: 'ordini aperti adesso, qualunque sia il giorno di immissione',
+    dati_al: oggi,
+    dati: {
+      canale,
+      modulo,
+      ordini: calcolabile ? righe.length : null,
+      peso_stimato_t: calcolabile ? stimatoDi(righe) : null,
+      ...(calcolabile && righe.length && senzaStimato ? {
+        senza_peso_stimato: senzaStimato === righe.length
+          ? `Nessuno dei ${righe.length} ordini ha il peso stimato: peso_stimato_t e' vuoto, non zero.`
+          : `${senzaStimato} ordini su ${righe.length} non hanno il peso stimato: peso_stimato_t somma solo gli altri.`,
+      } : {}),
+      ...(prov && prov.sigla ? { provincia_riconosciuta: `provincia di ${prov.nome} (${prov.sigla})${prov.come === 'nome' ? `, scritta "${prov.chiesta}"` : ''}` } : {}),
+      ...(soggetto && soggetto.trovato ? { raccoglitore_riconosciuto: `${soggetto.nomi[0]}${soggetto.come === 'esatto' ? '' : ` (scritto "${soggetto.chiesto}")`}` } : {}),
+      ...(pdr && !pdrIgnoto ? { pdr_riconosciuto: puntiDelPdr(perNomi.filter(r => delPdr(r, pdr))).slice(0, 10) } : {}),
+      ...(comuneEsito && comuneEsito.trovato ? { comune_riconosciuto: comuneEsito.nome } : {}),
+      ...(pdrNeiChiusi && pdrNeiChiusi.punti.length ? { pdr_senza_ordini_aperti: { punti: pdrNeiChiusi.punti.slice(0, 10), ultimo_ritiro_chiuso: pdrNeiChiusi.ultimo_ritiro, nota: 'Il punto di raccolta esiste ma non ha ordini aperti: ultimo_ritiro_chiuso e\' il giorno di fine trasporto del suo ultimo ordine terminato.' } } : {}),
+      ...(avvisi.length ? { avviso: avvisi.join(' ') } : {}),
+      ...(!calcolabile ? { numero_non_calcolabile: 'Non scrivere nessun numero: un filtro chiesto non si e\' riconosciuto, e il numero non e\' zero.' } : {}),
+      ...(nessuno ? { nessun_ordine: nessuno } : {}),
+      ...(minimoGiorni ? { filtro_attesa: `solo gli ordini aperti da almeno ${minimoGiorni} giorni: senza questo filtro sono ${delLuogo.length}` } : {}),
+      da_quanto_aspettano: {
+        entro_30_giorni: eta.entro_30, da_31_a_60_giorni: eta.da_31_a_60, oltre_60_giorni: eta.oltre_60, oltre_60_peso_stimato_t: righe.some(conStimato) ? t3(eta.kg_oltre_60) : null,
+        ...(eta.senza_data ? { senza_data_di_immissione: eta.senza_data } : {}),
+        ...(eta.piu_vecchio ? { il_piu_vecchio: { id_ordine: eta.piu_vecchio.id_ordine, giorni: eta.piu_vecchio.giorni, immesso_il: eta.piu_vecchio.immesso_il, ragione_sociale: eta.piu_vecchio.ragione_sociale, provincia: eta.piu_vecchio.provincia } } : {}),
+      },
+      ...(!prov ? { per_provincia: elenco(raggruppa(r => String(r.provincia || 'N/D').toUpperCase().trim() || 'N/D'), 40) } : {}),
+      ...(prov && prov.sigla ? { per_comune: elenco(raggruppa(r => String(r.comune || '').trim()), 40) } : {}),
+      per_raccoglitore: elenco(raggruppa(r => String(r.trasportatore || '').trim()), 30),
+      ...(sottoMinimo.length ? {
+        stimato_sotto_1500_kg: {
+          ordini: sottoMinimo.length,
+          id_ordine: sottoMinimo.slice(0, 20).map(r => r.id_ordine),
+          ...(sottoMinimo.length > 20 ? { avviso_id_ordine: `ELENCO TAGLIATO: qui ci sono 20 ordini dei ${sottoMinimo.length}. Il numero giusto e' "ordini".` } : {}),
+          nota: 'Regola del portale: nessuna richiesta ACI puo\' avere uno stimato sotto i 1.500 kg. Il gestionale lo segnala soltanto: la correzione si chiede al consorzio.',
+        },
+      } : {}),
+      // GLI «ESEGUITO» SI DICONO CON L'ID (richiesta dell'utente del 14/10/2026,
+      // decisione del 28/09/2026): hanno i dati ma a portale nessuno ha premuto
+      // Chiudi. Non sono aperti e non sono chiusi: si dicono a parte, mai sommati.
+      ...(eseguitiLetti === null ? { eseguiti_nel_limbo: { lettura_non_riuscita: 'Gli ordini in stato "eseguito" non si sono potuti leggere: non si sa se ce ne siano. Dillo.' } } : limbo.length ? {
+        eseguiti_nel_limbo: {
+          ordini: contaOrdini(limbo),
+          tonnellate: t3(kgLimbo),
+          id_ordine: limbo.slice(0, 20).map(r => ({ id_ordine: r.id_ordine, punto_di_raccolta: pdrDi(r), provincia: r.provincia || '', fine_trasporto: giornoMovimento(r) || null })),
+          ...(limbo.length > 20 ? { avviso_id_ordine: `ELENCO TAGLIATO: qui ci sono 20 ordini dei ${contaOrdini(limbo)}. Il numero giusto e' "ordini".` } : {}),
+          nota: 'ORDINI IN STATO "ESEGUITO": hanno tutti i dati inseriti ma a portale nessuno ha premuto Chiudi. Non sono aperti e non sono chiusi: non sommarli a "ordini" e non tacerli, di\' quanti sono e i loro ID ordine, perche\' a portale vanno chiusi (o cancellati). Si risolvono da soli al caricamento dopo.',
+        },
+      } : {}),
+      ordini_elenco: calcolabile ? elenco(coda.map(r => {
+        const g = giorniDi(r);
+        return {
+          id_ordine: r.id_ordine, pdr: r.id_pdr ?? null, punto_di_raccolta: String(r.punto_di_raccolta || r.produttore || '').trim(), ragione_sociale: String(r.ragione_sociale || '').trim(),
+          comune: r.comune || '', provincia: r.provincia || '', classe: r.classe || '', raccoglitore: r.trasportatore || '',
+          immesso_il: giornoRoma(r.ordine_immesso_il) || null, giorni_di_attesa: g, peso_stimato_kg: Number(r.peso_stimato) || null,
+          ...(canale === 'ACI' && (Number(r.peso_stimato) || 0) > 0 && Number(r.peso_stimato) < MINIMO_ACI_KG ? { stimato_sotto_1500_kg: true } : {}),
+        };
+      }), 60) : { quanti: 0, mostrate: 0, righe: [] },
+      nota: `Gli ordini aperti sono quelli in stato assegnato, come nella pagina ${modulo}: il numero da dire e' "ordini" (uno per ordine), e "peso_stimato_t" e' lo stimato del portale, non un peso pesato. Si contano tutti, qualunque sia il giorno di immissione, che per un ordine aperto e' il suo giorno: non ha ancora una fine trasporto. L'elenco parte dal piu' vecchio, come la coda della pagina. Non sono le Richieste ECT, che sono le richieste arrivate via email, e non sono i chiusi (ordini_chiusi). Rete, ACI ed extra raccolta non si sommano.`,
+    },
+  };
+}
+
+/**
+ * GLI ORDINI CHIUSI: I TERMINATI (richiesta dell'utente del 14/10/2026).
+ *
+ * «Quando e' stato chiuso l'ultimo ritiro del PDR 42872?», «quante richieste
+ * chiuse a Cosenza da luglio a settembre?»: sono domande dei Terminati Rete, dei
+ * Terminati ACI e dell'Extra Raccolta, non delle Richieste ECT. Si leggono con
+ * movimenti(), le stesse righe e gli stessi filtri del raccolto (nessuna lettura
+ * in piu': con la cache e' la stessa lettura), piu' il PDR e il comune. Si
+ * contano gli ORDINI (chiaveOrdine), come la matrice per provincia dei Terminati
+ * Rete, e accanto formulari e tonnellate del raccolto. Il giorno di un ordine
+ * chiuso e' la fine del trasporto, il giorno del ritiro: mai la chiusura a
+ * portale (regola 1).
+ */
+async function ordiniChiusi(base44, p, ctx) {
+  const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
+  const canale = canaleChiesto(p.canale) || 'RETE';
+  const avvisoCanale = canaleChiesto(p.canale) ? ''
+    : `${p.canale ? `"${p.canale}" non e' un canale` : 'Canale non indicato'}: questi sono gli ordini chiusi della RETE (Terminati Rete). Quelli dei demolitori (ACI) e dell'extra raccolta sono a parte e non si sommano: per loro rifai la domanda col canale.`;
+  const modulo = canale === 'ACI' ? 'Terminati ACI' : canale === 'EXTRA_RACCOLTA' ? 'Extra Raccolta' : 'Terminati Rete';
+  const { righe, date, soggetti, periodo, riserva, provincia: luogo, delLuogo, pdr, comune } = await movimenti(base44, { ...p, anno, canale }, ctx);
+  const { avvisoProvincia, avvisoPeriodo, avvisoSoggetto, calcolabile: filtriOk, inAnagrafica, risolti } = await esitoDeiFiltri(base44, { canale, anno, p, soggetti, periodo, luogo, righe });
+  // Un PDR che fra gli ordini del canale non c'e' proprio non fa zero: o il
+  // codice e' sbagliato, o e' di un altro canale, o ha solo ordini aperti.
+  const pdrIgnoto = !!(pdr && !pdr.punti.length);
+  // Lo stesso un comune (revisione del 14/10/2026).
+  const comuneIgnoto = !!(comune && !comune.trovato);
+  const calcolabile = filtriOk && !pdrIgnoto && !comuneIgnoto;
+  const giornoDi = (r) => giornoMovimento(r);
+  const piuRecenti = (xs) => [...xs].sort((a, b) => giornoDi(b).localeCompare(giornoDi(a)) || String(b.id_ordine || '').localeCompare(String(a.id_ordine || '')));
+  // L'ultimo giorno di ritiro, con tutti gli ordini chiusi quel giorno: il PDR
+  // 42872 l'11/10/2026 aveva due ordini finiti lo stesso 07/10.
+  const ultimoGiorno = (xs) => {
+    const ordinati = piuRecenti(xs.filter(r => giornoDi(r)));
+    if (!ordinati.length) return null;
+    const g = giornoDi(ordinati[0]);
+    const quel = ordinati.filter(r => giornoDi(r) === g);
+    return {
+      fine_trasporto: g, ordini: contaOrdini(quel),
+      id_ordine: quel.slice(0, 10).map(r => r.id_ordine), numero_fir: [...new Set(quel.map(r => r.numero_fir).filter(Boolean))].slice(0, 10),
+      punto_di_raccolta: [...new Set(quel.map(pdrDi))].slice(0, 5), raccoglitore: [...new Set(quel.map(r => r.trasportatore).filter(Boolean))].slice(0, 5),
+      tonnellate: t3(quel.reduce((s, r) => s + peso(r), 0)),
+    };
+  };
+  const campi = {
+    mese: MESE_DA_DATA, provincia: (r) => String(r.provincia || 'N/D').toUpperCase().trim() || 'N/D', comune: (r) => String(r.comune || '').trim(),
+    raccoglitore: (r) => String(r.trasportatore || '').trim(), destinazione: (r) => String(r.destinazione || '').trim(),
+    classe: (r) => String(r.classe || '').trim(), regione: REGIONE_DI, pdr: pdrDi,
+  };
+  const per = campi[p.raggruppa] ? p.raggruppa : (periodo.nomi.length > 1 || !periodo.nomi.length ? 'mese' : (luogo && luogo.sigla ? 'comune' : 'provincia'));
+  const totale = righe.reduce((s, r) => s + peso(r), 0);
+  const avvisoPdr = pdrIgnoto
+    ? `Il punto di raccolta "${pdr.chiesto}" non risulta fra gli ordini terminati del canale ${canale} (${modulo}), di nessun anno: controlla il codice o il nome, oppure e' di un altro canale o ha solo ordini aperti (ordini_aperti).`
+    : '';
+  const ultimoNelPeriodo = calcolabile ? ultimoGiorno(righe) : null;
+  // L'ultimo ritiro del PDR in tutto l'archivio, di qualunque anno: «quando e'
+  // stato chiuso l'ultimo ritiro» non ha un periodo, e il pianificatore ci mette
+  // l'anno in corso per abitudine.
+  const ultimoInArchivio = pdr && calcolabile ? ultimoGiorno(delLuogo) : null;
+  return {
+    fonte: `${modulo}: ordini terminati, canale ${canale}`,
+    periodo: periodo.nomi.length ? `${periodo.nomi.join(', ')} ${anno}, per giorno di fine trasporto` : `anno ${anno}, per giorno di fine trasporto`,
+    dati_al: oggiRoma(),
+    dati: {
+      canale,
+      modulo,
+      ordini: calcolabile ? contaOrdini(righe) : null,
+      formulari: calcolabile ? contaFormulari(righe) : null,
+      tonnellate: calcolabile ? t3(totale) : null,
+      ...(ultimoNelPeriodo ? { ultimo_ritiro_nel_periodo: ultimoNelPeriodo } : {}),
+      ...(ultimoInArchivio && (!ultimoNelPeriodo || ultimoInArchivio.fine_trasporto !== ultimoNelPeriodo.fine_trasporto) ? { ultimo_ritiro_in_archivio: { ...ultimoInArchivio, nota: 'L\'ultimo ritiro chiuso di questo punto di raccolta in tutto l\'archivio, di qualunque anno: e\' fuori dal periodo chiesto.' } } : {}),
+      ...(pdr && !pdrIgnoto ? { pdr_riconosciuto: pdr.punti.slice(0, 10), ...(pdr.punti.length > 1 ? { avviso_pdr_piu_punti: `"${pdr.chiesto}" corrisponde a ${pdr.punti.length} punti di raccolta: i numeri li comprendono tutti, e pdr_riconosciuto li dice uno per uno. Per uno solo, rifai la domanda col codice del PDR.` } : {}) } : {}),
+      ...(avvisoPdr ? { avviso_pdr: avvisoPdr } : {}),
+      ...(comune && comune.trovato ? { comune_riconosciuto: comune.nome } : {}),
+      ...(comuneIgnoto ? { avviso_comune: avvisoComune(comune, `gli ordini terminati del canale ${canale} (${modulo})`) } : {}),
+      ...(riserva ? { riserva_eseguiti: riserva } : {}),
+      ...(risolti.length ? { soggetto_riconosciuto: risolti.join('; ') } : {}),
+      ...(avvisoSoggetto ? { avviso_soggetto: avvisoSoggetto } : {}),
+      ...(!calcolabile ? { numero_non_calcolabile: 'Non scrivere nessun numero: un filtro chiesto non si e\' riconosciuto, e il numero non e\' zero.' } : {}),
+      ...(luogo && luogo.sigla ? { provincia_riconosciuta: `provincia di ${luogo.nome} (${luogo.sigla})${luogo.come === 'nome' ? `, scritta "${luogo.chiesta}"` : ''}` } : {}),
+      ...(avvisoProvincia ? { avviso_provincia: avvisoProvincia } : {}),
+      ...(inAnagrafica ? { in_anagrafica: inAnagrafica } : {}),
+      ...(avvisoCanale ? { avviso_canale: avvisoCanale } : {}),
+      ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
+      ...(avvisoPeriodo ? { avviso_periodo: avvisoPeriodo } : {}),
+      per,
+      dettaglio: calcolabile ? elenco(perChiaveOrdini(righe, campi[per]), 40) : { quanti: 0, mostrate: 0, righe: [] },
+      ordini_elenco: calcolabile ? elenco(piuRecenti(righe).map(r => ({
+        id_ordine: r.id_ordine, numero_fir: r.numero_fir || '', fine_trasporto: giornoDi(r) || null,
+        pdr: r.id_pdr ?? null, punto_di_raccolta: String(r.punto_di_raccolta || r.ragione_sociale || '').trim(), comune: r.comune || '', provincia: r.provincia || '',
+        raccoglitore: r.trasportatore || '', destinazione: r.destinazione || '', classe: r.classe || '', tonnellate: t3(peso(r)),
+      })), 40) : { quanti: 0, mostrate: 0, righe: [] },
+      nota: `Gli ordini chiusi sono i terminati, come nella pagina ${modulo}: "ordini" e' il numero degli ordini (uno per ordine), "formulari" e "tonnellate" sono quelli del raccolto sulle stesse righe. Il giorno di un ordine chiuso e' la fine del trasporto, cioe' il giorno del ritiro: e' quello il «quando», mai la chiusura a portale. L'elenco parte dal piu' recente. Non sono le Richieste ECT (le richieste arrivate via email). Rete, ACI ed extra raccolta non si sommano.`,
+    },
+  };
+}
+
+/**
+ * LE SECONDARIE E LE TERZIARIE, APERTE E CHIUSE (richiesta dell'utente del
+ * 14/10/2026: «e cio' vale anche per secondarie e terziarie aperte e/o chiuse»).
+ *
+ * Fino a oggi EcoTyna le vedeva solo dentro le pivot del Report Mensile, nella
+ * settimana della quadratura e nella predittivita': «secondarie aperte verso
+ * Irigom» o «terziarie di settembre» non avevano uno strumento. Si legge
+ * l'archivio intero del modulo (le secondarie sono 725 righe, le terziarie 427,
+ * sui dati veri dell'11/10), una lettura per domanda con la cache, e si conta
+ * come le pagine (computeSecondarieMatrix, Terziarie.jsx): le chiuse sono i
+ * terminati con la fine del trasporto nel periodo, un ordine per riga; le aperte
+ * sono le assegnate, tutte, qualunque sia l'immissione. Le secondarie restano
+ * divise per canale (rete e ACI nello stesso archivio, eAci); le terziarie sono
+ * le uscite dei prodotti dagli impianti e non hanno canale.
+ */
+async function trasportiSuccessivi(base44, quali, p, ctx) {
+  const sec = quali === 'secondarie';
+  const oggi = oggiRoma();
+  const anno = Number(p.anno) || Number(oggi.slice(0, 4));
+  const svc = base44.asServiceRole.entities;
+  const entita = sec ? 'Secondaria' : 'Terziaria';
+  const modulo = sec ? 'Secondarie' : 'Terziarie';
+  const campoOrigine = sec ? 'stoccaggio' : 'unita_locale_origine';
+  const canaleScritto = sec ? canaleChiesto(p.canale) : '';
+  if (sec && canaleScritto === 'EXTRA_RACCOLTA') {
+    return {
+      fonte: 'Secondarie', periodo: `anno ${anno}`, dati_al: oggi,
+      dati: { canale: 'EXTRA_RACCOLTA', ordini: null, avviso: 'Le secondarie dell\'extra raccolta (i trasferimenti) non stanno nel modulo Secondarie ma nel modulo Extra Raccolta: qui ci sono solo rete e ACI, e non si sommano.' },
+    };
+  }
+  const tutte = await leggiArchivio(ctx, svc, entita);
+  const s = String(p.stato ?? '').toLowerCase();
+  const statoChiesto = /apert|assegn|attesa|da fare|ritirar|evadere/.test(s) ? 'aperte' : /chius|termin|fatt|evas|effettu|conclus/.test(s) ? 'chiuse' : '';
+  const periodo = mesiChiesti(p.mese, p.mesi);
+  const soggetti = {};
+  const chiaviDi = (campo, chiesto, ruolo) => {
+    if (!chiesto) return null;
+    const esito = risolviNome(tutte.map(r => r[campo]), chiesto);
+    soggetti[ruolo] = { chiesto: String(chiesto), ...esito };
+    return new Set(esito.trovato ? esito.chiavi : []);
+  };
+  const ruoloOrigine = sec ? 'stoccaggio di partenza' : 'impianto di partenza';
+  const kOrig = chiaviDi(campoOrigine, p.origine, ruoloOrigine);
+  const kDest = chiaviDi('destinazione', p.destinazione, 'destinazione');
+  const kTrasp = chiaviDi('trasportatore', p.trasportatore, 'trasportatore');
+  const k = (v) => normalizzaRagioneSociale(v);
+  const passa = (r) => {
+    if (kOrig && !kOrig.has(k(r[campoOrigine]))) return false;
+    if (kDest && !kDest.has(k(r.destinazione))) return false;
+    if (kTrasp && !kTrasp.has(k(r.trasportatore))) return false;
+    return true;
+  };
+  const canaleRiga = (r) => (eAci(r) ? 'ACI' : 'RETE');
+  const nelPeriodo = (r) => {
+    const pm = periodoMovimento(r);
+    if (!pm || pm.anno !== anno) return false;
+    return !periodo.indici.size || periodo.indici.has(pm.mese_idx);
+  };
+  const nonRisolti = Object.entries(soggetti).filter(([, e]) => !e.trovato);
+  const calcolabile = !nonRisolti.length;
+  const avvisi = [
+    ...nonRisolti.map(([ruolo, e]) => (e.come === 'ambiguo'
+      ? `"${e.chiesto}" non basta a capire di chi si parla: fra i ${ruolo === 'destinazione' ? 'siti di destinazione' : ruolo === 'trasportatore' ? 'trasportatori' : 'siti di partenza'} delle ${modulo.toLowerCase()} ci sono ${e.alternative.join(', ')}. Rifai la domanda con il nome per esteso.`
+      : `"${e.chiesto}" non risulta fra i ${ruolo === 'destinazione' ? 'siti di destinazione' : ruolo === 'trasportatore' ? 'trasportatori' : 'siti di partenza'} delle ${modulo.toLowerCase()}${e.alternative.length ? `. Forse intendevi: ${e.alternative.join(', ')}` : ''}.`)),
+    periodo.ignorati.length ? `${periodo.ignorati.map(x => `"${x}"`).join(', ')} non ${periodo.ignorati.length === 1 ? 'e\' un mese' : 'sono mesi'}: ${periodo.nomi.length ? `ho preso ${periodo.nomi.join(', ')} ${anno}` : `ho preso tutto l'anno ${anno}`}.` : '',
+  ].filter(Boolean);
+  const risolti = Object.entries(soggetti).filter(([, e]) => e.trovato)
+    .map(([ruolo, e]) => `${ruolo}: ${e.nomi[0]}${e.come === 'esatto' ? '' : ` (scritto "${e.chiesto}")`}`);
+  const delFiltro = tutte.filter(r => passa(r) && (!canaleScritto || canaleRiga(r) === canaleScritto));
+  const gruppi = sec ? (canaleScritto ? [canaleScritto] : ['RETE', 'ACI']) : [''];
+  const perGruppo = gruppi.map(c => {
+    const delC = sec ? delFiltro.filter(r => canaleRiga(r) === c) : delFiltro;
+    const chiuse = delC.filter(r => eTerminato(r) && nelPeriodo(r));
+    const aperte = delC.filter(r => String(r.stato || '').toLowerCase().trim() === 'assegnato')
+      .sort((a, b) => String(a.ordine_immesso_il || '').localeCompare(String(b.ordine_immesso_il || '')));
+    const limbo = delC.filter(eEseguito);
+    const date = dateObbligatorie(delC, `${modulo.toLowerCase()}${c ? `, canale ${c}` : ''}`);
+    const kgChiuse = chiuse.reduce((x, r) => x + peso(r), 0);
+    const tratta = (r) => `${String(r[campoOrigine] || 'N/D').trim()} -> ${String(r.destinazione || 'N/D').trim()}`;
+    return {
+      ...(c ? { canale: c } : {}),
+      ...(statoChiesto !== 'aperte' ? {
+        chiuse: calcolabile ? {
+          ordini: chiuse.length, formulari: contaFormulari(chiuse), tonnellate: t3(kgChiuse),
+          // Fin dove arriva l'archivio: uno zero di settembre con l'ultima fine
+          // trasporto ad agosto e' un file da caricare, non un mese vuoto.
+          ultima_fine_trasporto_in_archivio: delC.filter(eTerminato).map(r => giornoMovimento(r)).filter(Boolean).sort().pop() || null,
+          per_tratta: elenco(perChiaveOrdini(chiuse, tratta), 30),
+          ...(periodo.nomi.length !== 1 ? { per_mese: elenco(perChiaveOrdini(chiuse, MESE_DA_DATA), 12) } : {}),
+        } : { ordini: null, tonnellate: null },
+      } : {}),
+      ...(statoChiesto !== 'chiuse' ? {
+        aperte: calcolabile ? {
+          ordini: aperte.length,
+          elenco: elenco(aperte.map(r => {
+            const g = giornoRoma(r.ordine_immesso_il);
+            return { id_ordine: r.id_ordine, da: r[campoOrigine] || '', a: r.destinazione || '', trasportatore: r.trasportatore || '', immesso_il: g || null, giorni_di_attesa: g ? giorniTra(g, oggi) : null, peso_stimato_kg: Number(r.peso_stimato) || null };
+          }), 40),
+        } : { ordini: null },
+      } : {}),
+      ...(limbo.length ? {
+        eseguiti_nel_limbo: {
+          ordini: limbo.length, id_ordine: limbo.slice(0, 20).map(r => r.id_ordine),
+          ...(limbo.length > 20 ? { avviso_id_ordine: `ELENCO TAGLIATO: qui ci sono 20 ordini dei ${limbo.length}. Il numero giusto e' "ordini".` } : {}),
+          nota: 'In stato "eseguito": dati inseriti, ma a portale nessuno ha premuto Chiudi. Non sono ne\' aperte ne\' chiuse e non si sommano: si dicono con l\'ID.',
+        },
+      } : {}),
+      ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
+    };
+  });
+  return {
+    fonte: `${modulo}${sec ? ', rete e ACI separate' : ''}`,
+    periodo: statoChiesto === 'aperte'
+      ? 'aperte adesso, qualunque sia il giorno di immissione'
+      : `${periodo.nomi.length ? `${periodo.nomi.join(', ')} ${anno}` : `anno ${anno}`}, per giorno di fine trasporto${statoChiesto ? '' : '; le aperte adesso'}`,
+    dati_al: oggi,
+    dati: {
+      ...(sec ? { canali: perGruppo } : perGruppo[0]),
+      ...(risolti.length ? { soggetto_riconosciuto: risolti.join('; ') } : {}),
+      ...(avvisi.length ? { avviso: avvisi.join(' ') } : {}),
+      ...(!calcolabile ? { numero_non_calcolabile: 'Non scrivere nessun numero: un filtro chiesto non si e\' riconosciuto, e il numero non e\' zero.' } : {}),
+      nota: `Come nella pagina ${modulo}: le chiuse sono i trasporti terminati, nel giorno della fine del trasporto, un ordine per riga ("ordini"); le aperte sono quelle in stato assegnato, contate tutte. ${sec ? 'Rete e ACI sono canali diversi e non si sommano; le secondarie sono lo stesso materiale delle primarie che si sposta, e non si sommano alle primarie.' : 'Le terziarie sono le uscite dei prodotti dagli impianti (origine = impianto) e non hanno canale.'}`,
+    },
+  };
 }
 
 /**
@@ -1262,6 +1871,7 @@ export const STRUMENTI = [
       canale: 'RETE, ACI o EXTRA_RACCOLTA, obbligatorio', anno: 'numero', mese: 'nome del mese, opzionale',
       mesi: 'elenco di nomi di mese, per una domanda su piu\' mesi ("luglio e agosto", "da marzo a maggio": scrivili tutti)',
       provincia: 'sigla (BA) o nome per esteso (Bari), opzionale', regione: 'opzionale', raccoglitore: 'opzionale', destinazione: 'opzionale',
+      comune: 'opzionale', pdr: 'codice del punto di raccolta (42872) o il suo nome, opzionale',
       raggruppa: 'raccoglitore, provincia, regione, classe, destinazione o mese',
     },
     moduli: ['Terminati Rete', 'Terminati ACI', 'Extra Raccolta', 'Report Mensile'],
@@ -1272,65 +1882,16 @@ export const STRUMENTI = [
       const canale = canaleChiesto(p.canale) || 'RETE';
       const avvisoCanale = canaleChiesto(p.canale) ? ''
         : `${p.canale ? `"${p.canale}" non e' un canale` : 'Canale non indicato'}: questi sono i numeri della RETE. ACI ed extra raccolta non si sommano: per loro rifai la domanda col canale.`;
-      const { righe, date, soggetti, periodo, riserva, provincia: luogo } = await movimenti(base44, { ...p, anno, canale }, ctx);
+      const { righe, date, soggetti, periodo, riserva, provincia: luogo, pdr, comune } = await movimenti(base44, { ...p, anno, canale }, ctx);
       const campo = { raccoglitore: 'trasportatore', provincia: 'provincia', regione: 'regioni', classe: 'classe', destinazione: 'destinazione', mese: 'mese' }[p.raggruppa] || 'trasportatore';
-      // LA PROVINCIA CHE NON TROVA NIENTE SI DICE (segnalazione alta A74 del
-      // 20/09, corretta il 12/10/2026). Una provincia che non si riconosce rende
-      // il numero non calcolabile, come un soggetto che non si riconosce; una
-      // riconosciuta che non trova formulari e' uno zero vero, ma va detto perche'
-      // e' zero: la provincia non ne ha nell'anno, o non ne ha con gli altri filtri.
-      const provinciaIgnota = !!(luogo && !luogo.sigla);
-      const altriFiltri = [
-        periodo.nomi.length ? `il periodo (${periodo.nomi.join(', ')})` : '',
-        p.raccoglitore ? `il raccoglitore "${p.raccoglitore}"` : '',
-        p.destinazione ? `la destinazione "${p.destinazione}"` : '',
-        p.regione ? `la regione "${p.regione}"` : '',
-      ].filter(Boolean);
-      const avvisoProvincia = !luogo ? ''
-        : provinciaIgnota ? `"${luogo.chiesta}" non e' una provincia che riconosco: scrivi la sigla (per esempio BA) o il nome per esteso (Bari). Senza la provincia il numero non si calcola, e non e' zero.`
-        : righe.length ? ''
-        : luogo.nell_anno ? `Con la provincia di ${luogo.nome} (${luogo.sigla}) il filtro non trova nessun formulario terminato del canale ${canale}: nel ${anno} la provincia ne ha ${luogo.nell_anno}, ma nessuno con ${altriFiltri.join(', ') || 'gli altri filtri chiesti'}.`
-        : `Nel canale ${canale} non c'e' nessun formulario terminato della provincia di ${luogo.nome} (${luogo.sigla}) in tutto il ${anno}: la provincia e' riconosciuta, ma il filtro non trova niente.`;
       const totale = righe.reduce((s, r) => s + peso(r), 0);
-      // Un mese che non esiste non deve passare in silenzio per "tutto l'anno".
-      const avvisoPeriodo = periodo.ignorati.length
-        ? `${periodo.ignorati.map(x => `"${x}"`).join(', ')} non ${periodo.ignorati.length === 1 ? 'e\' un mese' : 'sono mesi'}: ${periodo.nomi.length ? `ho preso ${periodo.nomi.join(', ')} ${anno}` : `ho preso tutto l'anno ${anno}`}.`
-        : '';
-      // UN NOME CHE NON SI RICONOSCE NON FA ZERO. Un soggetto chiesto e non
-      // trovato, o ambiguo, rende il numero non calcolabile: scrivere 0,00 t
-      // sarebbe una risposta falsa, e chi legge non ha modo di accorgersene.
-      const nonRisolti = Object.entries(soggetti).filter(([, e]) => !e.trovato);
-      const avvisoSoggetto = nonRisolti.map(([ruolo, e]) => (e.come === 'ambiguo'
-        ? `"${e.chiesto}" non basta a capire di chi si parla: in archivio ci sono ${e.alternative.join(', ')}. Rifai la domanda con il nome per esteso: sono soggetti diversi e non si sommano.`
-        : `"${e.chiesto}" non risulta fra i ${ruolo === 'raccoglitore' ? 'raccoglitori' : 'siti di destinazione'} del canale ${canale}${e.alternative.length ? `. Forse intendevi: ${e.alternative.join(', ')}` : ''}.`)).join(' ');
-      const calcolabile = nonRisolti.length === 0 && !provinciaIgnota;
-      // UN NOME CHE QUI NON C'E' PUO' ESSERCI ALTROVE. L'anagrafica dei fornitori
-      // e' una tabella piccola e dice che cosa fa un soggetto: meglio rispondere
-      // "Silvano Renato trasporta le secondarie, non raccoglie" che "non risulta
-      // fra i raccoglitori", che manda l'utente a sbattere (visto in produzione il
-      // 30/09/2026: ha rifatto la domanda due volte con lo stesso esito).
-      let inAnagrafica = '';
-      if (nonRisolti.length) {
-        try {
-          const fornitori = await fetchAll(base44.asServiceRole.entities.Fornitore, { stato: 'attivo' });
-          const nomi = fornitori.map(x => x.ragione_sociale);
-          inAnagrafica = nonRisolti.map(([, e]) => {
-            const f = risolviNome(nomi, e.chiesto);
-            if (!f.trovato) return '';
-            const rec = fornitori.find(x => normalizzaRagioneSociale(x.ragione_sociale) === f.chiavi[0]);
-            if (!rec) return '';
-            const ruoli = [
-              rec.ruolo_raccolta ? 'raccoglie le primarie' : '',
-              rec.ruolo_trasporto_secondaria ? 'trasporta le secondarie' : '',
-              rec.ruolo_stoccaggio ? 'ha uno stoccaggio' : '',
-              rec.ruolo_trattamento ? 'tratta il materiale' : '',
-            ].filter(Boolean);
-            return `"${e.chiesto}" in anagrafica e' ${rec.ragione_sociale}${ruoli.length ? `, e ${ruoli.join(', ')}` : ', senza nessun ruolo indicato'}. Fra i raccoglitori delle primarie del canale ${canale} non compare: o non raccoglie, o raccoglie in un altro canale.`;
-          }).filter(Boolean).join(' ');
-        } catch (_e) { /* l'anagrafica aiuta, non e' indispensabile */ }
-      }
-      const risolti = Object.entries(soggetti).filter(([, e]) => e.trovato)
-        .map(([ruolo, e]) => `${ruolo}: ${e.nomi[0]}${e.come === 'esatto' ? '' : ` (scritto "${e.chiesto}")`}`);
+      const { provinciaIgnota, avvisoProvincia, avvisoPeriodo, avvisoSoggetto, calcolabile: filtriOk, inAnagrafica, risolti } = await esitoDeiFiltri(base44, { canale, anno, p, soggetti, periodo, luogo, righe });
+      // Il PDR (14/10/2026), come negli ordini chiusi: uno che fra gli ordini del
+      // canale non c'e' proprio non fa zero tonnellate. E il comune (revisione del
+      // 14/10/2026): uno che non si riconosce non fa zero tonnellate.
+      const pdrIgnoto = !!(pdr && !pdr.punti.length);
+      const comuneIgnoto = !!(comune && !comune.trovato);
+      const calcolabile = filtriOk && !pdrIgnoto && !comuneIgnoto;
       return {
         fonte: `Formulari terminati, canale ${canale}`,
         periodo: periodo.nomi.length ? `${periodo.nomi.join(', ')} ${anno}` : `anno ${anno}`,
@@ -1345,6 +1906,16 @@ export const STRUMENTI = [
           ...(luogo && luogo.sigla ? { provincia_riconosciuta: `provincia di ${luogo.nome} (${luogo.sigla})${luogo.come === 'nome' ? `, scritta "${luogo.chiesta}"` : ''}` } : {}),
           ...(avvisoProvincia ? { avviso_provincia: avvisoProvincia } : {}),
           ...(provinciaIgnota && !avvisoSoggetto ? { numero_non_calcolabile: 'Non scrivere nessun numero: la provincia chiesta non si e\' riconosciuta, e il numero non e\' zero.' } : {}),
+          ...(pdr && !pdrIgnoto ? { pdr_riconosciuto: pdr.punti.slice(0, 10) } : {}),
+          ...(pdrIgnoto ? {
+            avviso_pdr: `Il punto di raccolta "${pdr.chiesto}" non risulta fra gli ordini terminati del canale ${canale}, di nessun anno: controlla il codice o il nome.`,
+            ...(!avvisoSoggetto && !provinciaIgnota ? { numero_non_calcolabile: 'Non scrivere nessun numero: il punto di raccolta chiesto non si e\' riconosciuto, e il numero non e\' zero.' } : {}),
+          } : {}),
+          ...(comune && comune.trovato ? { comune_riconosciuto: comune.nome } : {}),
+          ...(comuneIgnoto ? {
+            avviso_comune: avvisoComune(comune, `gli ordini terminati del canale ${canale}`),
+            ...(!avvisoSoggetto && !provinciaIgnota && !pdrIgnoto ? { numero_non_calcolabile: 'Non scrivere nessun numero: il comune chiesto non si e\' riconosciuto, e il numero non e\' zero.' } : {}),
+          } : {}),
           ...(inAnagrafica ? { in_anagrafica: inAnagrafica } : {}),
           ...(avvisoCanale ? { avviso_canale: avvisoCanale } : {}),
           ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
@@ -1353,6 +1924,71 @@ export const STRUMENTI = [
           dettaglio: calcolabile ? elenco(perChiave(righe, campo), 60) : { quanti: 0, mostrate: 0, righe: [] },
         },
       };
+    },
+  },
+  // GLI ORDINI, APERTI E CHIUSI, E LE SECONDARIE E TERZIARIE (richiesta
+  // dell'utente del 14/10/2026). A «quanti ordini aperti ci sono a Siracusa?»
+  // il pianificatore sceglieva richieste_ect, cioe' le richieste arrivate via
+  // email: nessuno strumento leggeva gli Assegnati, e quello era il nome piu'
+  // vicino. Le descrizioni dicono per quali domande e' ciascuno, con le parole
+  // di chi chiede; la mappa intera sta in istruzioniPiano (pianoAssistente.ts) e
+  // la guardia dopo il pianificatore corregge gli errori evidenti.
+  {
+    nome: 'ordini_aperti',
+    impliciti: { prestazione: ['RACCOLTA'], stato: '*' },
+    descrizione: 'Gli ORDINI APERTI, cioe\' gli Assegnati: le richieste di ritiro ancora da evadere, come nelle pagine Assegnati Rete e Assegnati ACI. Quanti sono e quali (ID ordine, punto di raccolta, comune, provincia, raccoglitore, giorno di immissione), in una provincia, in un comune, di un PDR o di un raccoglitore, e da quanto tempo aspettano (entro 30, da 31 a 60, oltre 60 giorni, il piu\' vecchio). Canale RETE per i gommisti (Assegnati Rete), ACI per demolitori e autodemolizioni (Assegnati ACI), EXTRA_RACCOLTA per le campagne di extra raccolta. E\' lo strumento per «quanti ordini (o richieste) aperti ci sono a ...», «da ritirare», «in attesa», «arretrato». Dice anche gli ordini in stato «eseguito» col loro ID. Non sono le Richieste ECT (quelle arrivate via email) e non sono i chiusi (ordini_chiusi).',
+    parametri: {
+      canale: 'RETE, ACI o EXTRA_RACCOLTA, obbligatorio', provincia: 'sigla (SR) o nome per esteso (Siracusa), opzionale', regione: 'opzionale', comune: 'opzionale',
+      pdr: 'codice del punto di raccolta (42872) o il suo nome, opzionale', raccoglitore: 'il trasportatore a cui l\'ordine e\' assegnato, opzionale', classe: 'opzionale',
+      da_almeno_giorni: 'numero, opzionale: solo gli ordini aperti da almeno tanti giorni',
+    },
+    moduli: ['Assegnati Rete', 'Assegnati ACI', 'Extra Raccolta'],
+    async esegui(base44, p, ctx) {
+      return ordiniAperti(base44, p, ctx);
+    },
+  },
+  {
+    nome: 'ordini_chiusi',
+    impliciti: { prestazione: ['RACCOLTA'], stato: '*' },
+    descrizione: 'Gli ORDINI CHIUSI, cioe\' i terminati: le richieste di ritiro gia\' evase, come nei Terminati Rete, nei Terminati ACI e nell\'Extra Raccolta. Quanti ordini (con formulari e tonnellate) in un periodo, in una provincia, in un comune, di un PDR o di un raccoglitore, e QUANDO: per ogni ordine il giorno di fine trasporto, che e\' il giorno del ritiro, e l\'ultimo ritiro di un PDR anche negli anni prima. E\' lo strumento per «se e quando e\' stato chiuso un ordine», «l\'ultimo ritiro del PDR ...», «quante richieste chiuse a ... da luglio a settembre», «quanti ritiri ha fatto ...». Il canale va sempre indicato. Non sono le Richieste ECT (quelle arrivate via email).',
+    parametri: {
+      canale: 'RETE, ACI o EXTRA_RACCOLTA, obbligatorio', anno: 'numero', mese: 'nome del mese, opzionale',
+      mesi: 'elenco di nomi di mese, per una domanda su piu\' mesi ("da luglio a settembre": scrivili tutti)',
+      provincia: 'sigla (CS) o nome per esteso (Cosenza), opzionale', regione: 'opzionale', comune: 'opzionale',
+      pdr: 'codice del punto di raccolta (42872) o il suo nome, opzionale', raccoglitore: 'opzionale', destinazione: 'opzionale',
+      raggruppa: 'mese, provincia, comune, raccoglitore, destinazione, classe, regione o pdr',
+    },
+    moduli: ['Terminati Rete', 'Terminati ACI', 'Extra Raccolta'],
+    async esegui(base44, p, ctx) {
+      return ordiniChiusi(base44, p, ctx);
+    },
+  },
+  {
+    nome: 'secondarie',
+    descrizione: 'Le SECONDARIE, aperte e chiuse, come nella pagina Secondarie: i viaggi dagli stoccaggi agli impianti. Chiuse: quante (ordini, formulari, tonnellate) in un periodo per giorno di fine trasporto, per tratta e per mese; aperte: quelle ancora assegnate, con ID e da quanto aspettano. Filtri: stato (aperte o chiuse), destinazione (l\'impianto: «verso Irigom»), origine (lo stoccaggio: «da Nappi Sud»), trasportatore, canale. Rete e ACI escono separate. Per la predittivita\' (target degli impianti, viaggi da programmare) c\'e\' proiezione_secondarie.',
+    parametri: {
+      stato: 'aperte o chiuse, opzionale (senza: le chiuse del periodo e le aperte di adesso)', canale: 'RETE o ACI, opzionale',
+      destinazione: 'impianto di arrivo, opzionale', origine: 'stoccaggio di partenza, opzionale', trasportatore: 'opzionale',
+      anno: 'numero', mese: 'nome del mese, opzionale', mesi: 'elenco di nomi di mese, opzionale',
+    },
+    moduli: ['Secondarie'],
+    async esegui(base44, p, ctx) {
+      return trasportiSuccessivi(base44, 'secondarie', p, ctx);
+    },
+  },
+  {
+    nome: 'terziarie',
+    // Le terziarie sono le uscite dei prodotti dagli impianti: non hanno canale.
+    impliciti: { canale: '*', tipologia: '*' },
+    descrizione: 'Le TERZIARIE, aperte e chiuse, come nella pagina Terziarie: le uscite dei prodotti (ciabattato, ferro) dagli impianti verso i destinatari finali. Chiuse: quante (ordini, formulari, tonnellate) in un periodo per giorno di fine trasporto, per tratta e per mese; aperte: quelle ancora assegnate. Filtri: stato (aperte o chiuse), origine (l\'impianto: «da Irigom»), destinazione, trasportatore.',
+    parametri: {
+      stato: 'aperte o chiuse, opzionale (senza: le chiuse del periodo e le aperte di adesso)',
+      origine: 'impianto di partenza, opzionale', destinazione: 'opzionale', trasportatore: 'opzionale',
+      anno: 'numero', mese: 'nome del mese, opzionale', mesi: 'elenco di nomi di mese, opzionale',
+    },
+    moduli: ['Terziarie'],
+    async esegui(base44, p, ctx) {
+      return trasportiSuccessivi(base44, 'terziarie', p, ctx);
     },
   },
   {
@@ -1656,14 +2292,17 @@ export const STRUMENTI = [
   },
   {
     nome: 'cerca_movimento',
-    descrizione: 'Cerca un formulario (FIR) o un ID ordine in tutti gli archivi e dice dove sta, con produttore, trasportatore, destinazione, peso e date.',
+    descrizione: 'Cerca un formulario (FIR) o un ID ordine in tutti gli archivi, compresi gli ordini ancora aperti (Assegnati Rete e ACI), e dice dove sta e in che stato, con produttore, trasportatore, destinazione, peso e date.',
     parametri: { testo: 'numero di formulario o ID ordine, anche parziale' },
-    moduli: ['Terminati Rete', 'Terminati ACI', 'Secondarie', 'Extra Raccolta', 'Terziarie'],
+    moduli: ['Terminati Rete', 'Terminati ACI', 'Assegnati Rete', 'Assegnati ACI', 'Secondarie', 'Extra Raccolta', 'Terziarie'],
     async esegui(base44, p) {
       const cerca = String(p.testo || '').trim().toUpperCase();
       if (!cerca) return { fonte: 'Archivi dei movimenti', periodo: '', dati_al: oggiRoma(), dati: { trovati: [], nota: 'Nessun testo da cercare.' } };
       const svc = base44.asServiceRole.entities;
-      const archivi = ['PrimariaRete', 'PrimariaAci', 'Secondaria', 'ExtraRaccolta', 'Terziaria'];
+      // Anche gli Assegnati (14/10/2026): «l'ordine ET26... e' ancora aperto?»
+      // cercava solo fra i movimenti, e un ordine aperto risultava «non trovato».
+      // Sono due archivi piccoli (qualche centinaio di righe).
+      const archivi = ['PrimariaRete', 'PrimariaAci', 'Assegnato', 'AssegnatoAci', 'Secondaria', 'ExtraRaccolta', 'Terziaria'];
       const trovati = [];
       await Promise.all(archivi.map(async (nome) => {
         const righe = await fetchAll(svc[nome]);
@@ -1672,7 +2311,7 @@ export const STRUMENTI = [
           const ordine = String(r.id_ordine || '').toUpperCase();
           if (!fir.includes(cerca) && !ordine.includes(cerca)) continue;
           trovati.push({
-            archivio: nome, canale: nome === 'PrimariaAci' ? 'ACI' : nome === 'Secondaria' ? (eAci(r) ? 'ACI' : 'RETE') : nome === 'ExtraRaccolta' ? 'EXTRA_RACCOLTA' : 'RETE',
+            archivio: nome, canale: nome === 'PrimariaAci' || nome === 'AssegnatoAci' ? 'ACI' : nome === 'Secondaria' ? (eAci(r) ? 'ACI' : 'RETE') : nome === 'ExtraRaccolta' ? 'EXTRA_RACCOLTA' : 'RETE',
             id_ordine: r.id_ordine, numero_fir: r.numero_fir, stato: r.stato,
             produttore: r.ragione_sociale || r.stoccaggio || r.unita_locale_origine || '',
             punto_di_raccolta: r.punto_di_raccolta || '', provincia: r.provincia || '',
@@ -1964,7 +2603,12 @@ export const STRUMENTI = [
   },
   {
     nome: 'richieste_ect',
-    descrizione: 'Le richieste di ritiro arrivate dal consorzio per email: quali sono aperte, quali scadute, quali ritirate da confermare e quali evase. Il ritiro si ricontrolla sui terminati di adesso, per fine trasporto.',
+    // SOLO LE RICHIESTE ARRIVATE VIA EMAIL (14/10/2026): era lo strumento che il
+    // pianificatore prendeva per «ordini aperti in provincia di Siracusa», perche'
+    // la descrizione parlava di «richieste di ritiro aperte». Ora dice per quali
+    // domande non e', e la guardia di pianoAssistente.ts lo toglie quando la
+    // domanda non parla di email.
+    descrizione: 'SOLO le Richieste ECT, cioe\' le richieste di ritiro arrivate dal consorzio VIA EMAIL e registrate nella To-Do List: quali sono aperte, quali scadute, quali ritirate da confermare e quali evase. Il ritiro si ricontrolla sui terminati di adesso, per fine trasporto. Da usare solo se la domanda parla di email, di richieste ricevute dal consorzio, di Richieste ECT o della To-Do List: per gli ordini aperti c\'e\' ordini_aperti (gli Assegnati), per gli ordini chiusi o i ritiri fatti ordini_chiusi (i Terminati).',
     parametri: { anno: 'numero', stato: 'aperta, da_confermare, evasa o annullata' },
     moduli: ['To-Do List'],
     async esegui(base44, p) {
@@ -2909,7 +3553,7 @@ export const STRUMENTI = [
   },
   {
     nome: 'fatturazione',
-    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese. La passiva fa lo stesso conto del modulo sui movimenti terminati: col mese indicato quel mese, senza mese tutti i mesi dell\'anno fino a quello in corso, uno per uno. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. Un surplus sulle tariffe (il Fuel Surcharge) e\' una riga a parte, gia\' compresa nei totali, con lo standard accanto. I canali restano separati.',
+    descrizione: 'Quanto dobbiamo pagare ai fornitori (passiva) e quanto ci spetta (attiva), per fornitore e per mese: e\' lo strumento per il FATTURATO o il costo di un fornitore in un periodo («quanto ha fatturato Emmesse da giugno a settembre», tipo PASSIVA col fornitore; la passiva la vede solo l\'amministratore) e per quanto abbiamo fatturato o ci spetta da Ecotyre (tipo ATTIVA). La passiva fa lo stesso conto del modulo sui movimenti terminati: col mese indicato quel mese, senza mese tutti i mesi dell\'anno fino a quello in corso, uno per uno. L\'attiva si calcola sempre sui dati di oggi, mese per mese, e dice di quanto il documento salvato e\' indietro. Un surplus sulle tariffe (il Fuel Surcharge) e\' una riga a parte, gia\' compresa nei totali, con lo standard accanto. I canali restano separati.',
     parametri: { anno: 'numero', mese: 'nome del mese, opzionale: senza, tutto l\'anno mese per mese', mesi: 'elenco di nomi di mese, per una domanda su piu\' mesi ("da marzo a maggio": scrivili tutti)', tipo: 'PASSIVA o ATTIVA', tipologia: 'RETE, ACI o EXTRA_RACCOLTA', fornitore: 'opzionale' },
     moduli: ['Fatturazione'],
     async esegui(base44, p, ctx) {
@@ -3271,6 +3915,15 @@ export function catalogoStrumenti() {
  * e' utile, una che si interrompe no.
  */
 export async function eseguiStrumento(base44, nome, parametri = {}, ctx = null) {
+  // LA SCELTA CORRETTA DALLA GUARDIA (14/10/2026). Quando la guardia dopo il
+  // pianificatore (correggiPiano, pianoAssistente.ts) mette uno strumento al
+  // posto di quello scelto, il perche' viaggia coi parametri sotto CHIAVE_SCELTA:
+  // allo strumento non arriva, e il risultato lo porta accanto al periodo, che e'
+  // quello che la chat mostra in «Dove ho guardato».
+  const { [CHIAVE_SCELTA]: scelta, ...veri } = parametri || {};
+  const conScelta = (esito) => (scelta
+    ? { ...esito, scelta_dello_strumento: String(scelta), periodo: `${esito.periodo ? `${esito.periodo} — ` : ''}${scelta}` }
+    : esito);
   const s = STRUMENTI.find(x => x.nome === nome);
   if (!s) return { strumento: nome, errore: `Strumento sconosciuto: ${nome}` };
   let ultimo = null;
@@ -3279,12 +3932,12 @@ export async function eseguiStrumento(base44, nome, parametri = {}, ctx = null) 
   // domanda. Al secondo colpo di solito passa.
   for (let giro = 0; giro < 2; giro++) {
     try {
-      const esito = await s.esegui(base44, parametri || {}, ctx);
-      return { strumento: nome, parametri, ...esito };
+      const esito = await s.esegui(base44, veri, ctx);
+      return conScelta({ strumento: nome, parametri: veri, ...esito });
     } catch (e) {
       ultimo = e && e.message ? e.message : String(e);
       if (giro === 0) await new Promise(r => setTimeout(r, 1200));
     }
   }
-  return { strumento: nome, parametri, errore: ultimo };
+  return conScelta({ strumento: nome, parametri: veri, errore: ultimo });
 }

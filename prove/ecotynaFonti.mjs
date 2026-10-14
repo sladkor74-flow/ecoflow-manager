@@ -160,7 +160,12 @@ console.log('4. A76: «VERIFICATA SULLE FONTI» SOLO CON UNA FONTE UFFICIALE O U
 
 console.log('5. A76: «DATI DEL GESTIONALE» SOLO SE UN DATO E\' ARRIVATO');
 {
-  const DOMANDA_DATI = 'Quanti ritiri ha fatto Emmesse questo mese?';
+  // Una domanda dell'anagrafica PDR, col piano sull'anagrafica (14/10/2026). Fino
+  // a quel giorno era «Quanti ritiri ha fatto Emmesse questo mese?» con lo stesso
+  // piano: da allora la guardia dopo il pianificatore (correggiPiano) mette gli
+  // ordini chiusi al posto dell'anagrafica, giustamente, e il guasto dell'archivio
+  // Pdr che qui serve non si vedeva piu'.
+  const DOMANDA_DATI = 'Quanti punti di raccolta segue Emmesse in provincia di Napoli?';
   const PIANO = { strumenti: [{ nome: 'punti_di_raccolta', parametri: { cerca: 'Emmesse' } }], serve_normativa: true };
   const RISPOSTA = { risposta: 'Non ho potuto leggere i dati.', certezza: 'bassa' };
   const t0 = Date.now();
