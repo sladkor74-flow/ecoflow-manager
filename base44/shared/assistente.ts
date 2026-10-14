@@ -99,6 +99,19 @@ export function testoVariazioni(vigenti, anno, targetT) {
   return `${testa}${vv.map(voceVariazione).join('; ')}.${senza} Sono gia' nei numeri del contratto (${dove}), che dashboard, Target & Status e avvisi leggono; nell'atteso alla data ognuna conta intera nel suo mese e nella sua regione, e le altre regioni non cambiano.`;
 }
 
+/**
+ * Le variazioni registrate che il contratto non comprende piu' (in_vigore
+ * falso: un salvataggio dopo ne ha riscritto i numeri), a parole e mai come in
+ * vigore. Stava dentro situazioneGestionale; ora la usa anche lo strumento del
+ * contratto di EcoTyna (contratto_ecotyre, 14/10/2026), con le stesse parole.
+ * Stringa vuota se non ce ne sono.
+ */
+export function testoVariazioniSuperate(superate) {
+  const ss = (superate || []).filter(Boolean);
+  if (!ss.length) return '';
+  return `${ss.length === 1 ? "Una variazione registrata non e' piu'" : `${ss.length} variazioni registrate non sono piu'`} nel contratto: un salvataggio dopo ne ha riscritto i numeri, vale il contratto scritto e non ${ss.length === 1 ? 'conta' : 'contano'} (${ss.map(voceVariazione).join('; ')}).`;
+}
+
 // IL TOTALE DI UNA COLONNA DELLE GIACENZE, CON LA REGOLA DEL MODULO (giro del
 // 14/10/2026, sulle decisioni dell'utente del 13/10/2026). Il perche' di ogni
 // riga senza numero, canale per canale, e' quello che calcolaGiacenze usa per i
@@ -276,9 +289,7 @@ export async function situazioneGestionale(base44, oggi) {
     const vigenti = variazioni.filter(v => v.in_vigore);
     if (vigenti.length) righe.push(`  ${testoVariazioni(vigenti, anno, contratto.t)}`);
     const superate = variazioni.filter(v => !v.in_vigore);
-    if (superate.length) {
-      righe.push(`  ${superate.length === 1 ? "Una variazione registrata non e' piu'" : `${superate.length} variazioni registrate non sono piu'`} nel contratto: un salvataggio dopo ne ha riscritto i numeri, vale il contratto scritto e non ${superate.length === 1 ? 'conta' : 'contano'} (${superate.map(voceVariazione).join('; ')}).`);
-    }
+    if (superate.length) righe.push(`  ${testoVariazioniSuperate(superate)}`);
     const regioni = regioniDellAnno(commessa, anno);
     if (regioni.fonte === 'ripiego') righe.push(`  Il contratto non ha il riparto per regione: quello qui sotto e' il riparto del ${anno} scritto nel gestionale come ripiego, come nella Dashboard.`);
     for (const r of regioni.righe) {

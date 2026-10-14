@@ -134,6 +134,14 @@ export function istruzioniPiano(catalogo, domanda, oggi, storia = []) {
     '- Se la domanda parla di PIU\' MESI ("luglio e agosto", "da marzo a maggio", "nel primo trimestre") scrivili tutti in mesi, uno per voce, con il nome per esteso: un intervallo va aperto mese per mese. Per un mese solo usa mese. Non scrivere mai un intervallo dentro mese: verrebbe letto come un mese che non esiste.',
     '- Il canale va sempre deciso: RETE, ACI ed EXTRA RACCOLTA sono commesse indipendenti e non si sommano mai. Se la domanda non lo dice e parla di raccolta, e\' RETE; se parla di autodemolizione o ACI, e\' ACI. Se la domanda chiede "in tutto", "complessivamente" o riguarda piu\' canali, metti in canali tutti quelli che servono: lo strumento verra\' eseguito una volta per canale e i numeri resteranno distinti.',
     '- I target sono solo della rete: per l\'ACI non esistono.',
+    // Variazione del contratto del 14/10/2026: a «qual e' oggi il target annuo
+    // del contratto Ecotyre, e com'e' messa la Puglia rispetto all'atteso?» il
+    // pianificatore sceglieva target_raccoglitori, che non legge il contratto:
+    // la risposta dava la somma dei raccoglitori come target del contratto (quel
+    // giorno uguale per caso, prima della variazione 11.650 contro 11.550) e diceva che
+    // la regione non si poteva estrarre. Le descrizioni del catalogo da sole non
+    // bastavano: la regola lo dice in chiaro.
+    '- Per il contratto Ecotyre della rete (il target annuo, l\'atteso alla data, lo scarto, il residuo, la proiezione, le variazioni del consorzio, una regione rispetto al contratto o all\'atteso, "come stiamo" con la commessa) usa contratto_ecotyre, con regione se la domanda ne nomina una. Usa target_raccoglitori solo per i singoli raccoglitori ("chi e\' sotto target", "quanto ha fatto X rispetto al suo target"): la somma dei loro target non e\' il contratto.',
     '- Per "quanto abbiamo raccolto" usa raccolto, non report_mensile: raccolto da il totale e il dettaglio di un canale e di un periodo. Usa report_mensile solo se la domanda chiede proprio le pivot del Report Mensile o il confronto fra i mesi.',
     '- Se la domanda cita un numero di formulario o un ID ordine, usa cerca_movimento.',
     // Chiusura dell'audit, 11/10/2026: lo strumento del riepilogo delle

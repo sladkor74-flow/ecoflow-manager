@@ -22,7 +22,7 @@
 import { fetchAll } from "./fetchAll.ts";
 import { contaFormulari } from "./formulari.ts";
 import { normalizzaRagioneSociale, risolviNome } from "./normalizzaRagioneSociale.ts";
-import { chiaveLettura } from "./cacheLetture.ts";
+import { chiaveLettura, nuovaCache } from "./cacheLetture.ts";
 import { regioneDi } from "./regioneMovimento.ts";
 import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
@@ -30,7 +30,7 @@ import { eTerminato, eEseguito, giornoMovimento, riepilogoEseguiti } from "./mov
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale, caricamentiAperti, contaDistinti } from "./quadraturaFirDati.ts";
 import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoVociDate, voceDate } from "./reportSettimanali.ts";
-import { situazioneGestionale, terminatiSenzaFine, totaleGiacenze, senzaFileDelPortale } from "./assistente.ts";
+import { situazioneGestionale, terminatiSenzaFine, totaleGiacenze, senzaFileDelPortale, testoVariazioni, testoVariazioniSuperate } from "./assistente.ts";
 import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } from "./dichiarazioniImpianti.ts";
@@ -49,6 +49,9 @@ import { storicoModifiche } from "./storicoModifiche.ts";
 import { provinciaChiesta } from "./province.ts";
 import { statoSurplus, euroTDi, periodoSurplus, surplusDellaTariffa, fornitoriDelSurplus, testoEuroT, NOMI_ORIGINE, DESTINATARI } from "./surplus.ts";
 import { formatoTonnellate } from "./formato.ts";
+import { contrattoDellaRete } from "./contrattoRete.ts";
+import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
+import { variazioniDelContratto, attesoDellaRegione, SOGLIA_VARIAZIONE_T } from "./attesoContratto.ts";
 
 export { oggiRoma };
 
@@ -1009,6 +1012,174 @@ async function passivaSuiDatiDiOggi(base44, { anno, meseIgnorato, tipologia, for
   };
 }
 
+// ─── il contratto Ecotyre della rete ───
+//
+// IL CONTRATTO, NON LA SOMMA DEI RACCOGLITORI (variazione del contratto del
+// 14/10/2026). Registrata la variazione di ottobre (Puglia +100 t), alla domanda
+// «Qual è oggi il target annuo 2026 del contratto Ecotyre sulla rete, e com'è
+// messa la Puglia rispetto all'atteso?» il pianificatore sceglieva
+// target_raccoglitori, che il contratto non lo leggeva: EcoTyna diceva 11.650 t
+// «come risulta dal modulo Target & Status» prendendo la somma dei target dei
+// raccoglitori, uguale al contratto quel giorno solo per caso (il giorno prima
+// sarebbe stata 11.650 contro un contratto di 11.550), e sulla Puglia «non è
+// possibile estrapolare il target». Ora il contratto lo legge contratto_ecotyre
+// con i numeri della dashboard (contrattoDellaRete, contrattoRete.ts), e
+// target_raccoglitori lo porta accanto alla somma dei raccoglitori, coi due
+// livelli chiamati per nome. Le letture sono quelle della dashboard: tutti i
+// contratti (pochi) e le primarie di rete terminate, che con la cache della
+// domanda sono la stessa lettura di movimenti(). Nessuna lettura per regione.
+
+const tonn = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 1000) / 1000);
+const cento = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 100) / 100);
+const listaJson = (json) => { try { const v = typeof json === 'string' ? JSON.parse(json || '[]') : json; return Array.isArray(v) ? v : []; } catch { return []; } };
+const stessaRegione = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+// La cache della domanda (chiediAssistente), o una sua quando lo strumento si
+// chiama da solo: cosi' le primarie di rete si leggono una volta sola anche fra
+// movimenti() e il contratto.
+const conCache = (ctx) => (ctx && typeof ctx.leggi === 'function' ? ctx : nuovaCache());
+
+/**
+ * Il contratto della rete di un anno, letto come la dashboard. Un contratto che
+ * non si legge non e' un contratto che manca: commesse null, e lo dice l'avviso
+ * di contrattoDellaRete (vale il ripiego, dove c'e', come nella dashboard).
+ */
+async function leggiContrattoDellaRete(base44, anno, ctx) {
+  const svc = base44.asServiceRole.entities;
+  const [commesse, rete] = await Promise.all([
+    leggiArchivio(ctx, svc, 'CommessaEcotyre').catch(() => null),
+    leggiArchivio(ctx, svc, 'PrimariaRete', { stato: 'terminato' }),
+  ]);
+  return { ...contrattoDellaRete({ commesse, anno, rete, oggi: oggiRoma() }), contratti_letti: commesse !== null };
+}
+
+const NOTA_CONTRATTO = "Il contratto Ecotyre della RETE con gli stessi numeri della dashboard e dell'Andamento di Target & Status. target_annuo_contratto_t e' il target del contratto (scheda Commessa Ecotyre), con dentro le variazioni del consorzio in vigore; raccolto_t sono i ritiri terminati della rete per giorno di fine trasporto; dati_fino_al e' il giorno su cui si misura l'anno: per l'anno in corso l'ultima fine trasporto della rete (mai oltre oggi), per un anno chiuso il 31/12 di quell'anno (anno_chiuso: i suoi dati sono completi); atteso_alla_data e' quanto il profilo mensile del contratto prevede fino al suo giorno, atteso_alla_data.al, e l'atteso, la percentuale attesa e lo scarto si dicono con quel giorno e con nessun altro; scarto_t positivo vuol dire avanti sull'atteso, negativo indietro. Di ogni regione: contratto_t, atteso_t (con le sole variazioni di quella regione, intere nel loro mese), raccolto_t, scarto_t, pct_del_contratto (il raccolto sul contratto della regione, come l'Andamento) e pct_dell_atteso (il raccolto sull'atteso, come la dashboard). La somma dei target dei singoli raccoglitori e' un'altra cosa e NON e' il contratto. ACI ed extra raccolta non hanno target e non si sommano alla rete.";
+
+/**
+ * I dati del contratto per EcoTyna, dai numeri di contrattoDellaRete (gli stessi
+ * della dashboard: qui si arrotondano e basta). regione: solo quella regione
+ * nell'elenco, i totali restano del contratto intero; periodo: i mesi chiesti
+ * (mesiChiesti), col target mensile del contratto; compatto: senza proiezione,
+ * ritmo, profilo e mesi (il blocco che target_raccoglitori porta accanto).
+ */
+function datiDelContratto(c, { regione = '', periodo = null, compatto = false } = {}) {
+  const q = c.rete;
+  const a = c.anno;
+  const targetT = q.target_t;
+  const senzaTarget = targetT === null || targetT === undefined;
+  const variazioni = variazioniDelContratto(c.commessa);
+  const vigenti = variazioni.filter(v => v.in_vigore);
+  const superate = variazioni.filter(v => !v.in_vigore);
+  // Senza chi l'ha registrata: come nella dashboard, il nome resta nella scheda Commessa.
+  const voce = (v) => ({
+    mese: v.mese, regione: v.regione, t: tonn(v.t), ...(v.destinazione ? { destinazione: v.destinazione } : {}),
+    motivo: v.motivo || '', comunicata_il: v.comunicata_il || '', nel_target_mensile_rivisto: !!v.nel_mese,
+  });
+  const grezzi = new Map((c.target_vs_raccolto || []).map(r => [r.regione, r]));
+  const tutte = (q.regioni || []).map(r => {
+    const g = grezzi.get(r.regione) || {};
+    const diCui = attesoDellaRegione(c.commessa, a, c.giorno_dati, r.regione).variazioni_t;
+    return {
+      regione: r.regione,
+      contratto_t: r.target_t,
+      ...(r.target_t !== null && Math.abs(Number(diCui) || 0) >= 0.0005 ? { di_cui_variazioni_del_consorzio_t: tonn(diCui) } : {}),
+      atteso_t: r.atteso_t,
+      raccolto_t: r.raccolto_t,
+      scarto_t: r.scarto_t,
+      pct_del_contratto: g.target ? cento((g.raccolto / g.target) * 100) : null,
+      pct_dell_atteso: cento(r.pct_atteso),
+    };
+  });
+  const chiesta = String(regione || '').trim();
+  const regioni = chiesta ? tutte.filter(r => stessaRegione(r.regione, chiesta)) : tutte;
+  const fuori = q.fuori_contratto || { raccolto_t: 0, regioni: [] };
+  const fuoriChiesta = chiesta && !regioni.length ? (fuori.regioni || []).find(r => stessaRegione(r.regione, chiesta)) : null;
+  const avvisoRegione = !chiesta || regioni.length ? ''
+    : fuoriChiesta
+      ? `${fuoriChiesta.regione} non e' fra le regioni del contratto ${a}: non ha un contratto ne' un atteso (non sono zero, non ci sono). Il suo raccolto RETE del ${a} e' ${formatoTonnellate(fuoriChiesta.raccolto_t)} t, che la dashboard mette nella riga «Fuori dalle regioni del contratto».`
+      : `"${chiesta}" non e' fra le regioni del contratto ${a}${tutte.length ? ` (${tutte.map(r => r.regione).join(', ')})` : ''} e non ha raccolto RETE nel ${a}: non ha un contratto ne' un atteso, che non sono zero.`;
+  const at = q.atteso;
+  const annoDati = c.giorno_dati ? Number(c.giorno_dati.slice(0, 4)) : null;
+  const attesoPerche = at ? ''
+    : senzaTarget ? "Senza il target del contratto l'atteso non c'e' (non e' zero)."
+    : annoDati === null ? "Nessun ritiro RETE terminato con la fine trasporto: l'atteso non si calcola (non e' zero)."
+    : `Nessun ritiro RETE del ${a} ancora terminato: l'atteso non si calcola (non e' zero).`;
+  const mesi = !compatto && periodo && periodo.indici && periodo.indici.size
+    ? [...periodo.indici].sort((x, y) => x - y).map(i => {
+      const m = (q.mesi || [])[i] || {};
+      const rivisto = Number(listaJson(c.commessa && c.commessa.target_mensile_json)[i]);
+      const iniziale = Number(listaJson(c.commessa && c.commessa.target_mensile_iniziale_json)[i]);
+      const delMese = vigenti.filter(v => Number(v.mese_idx) === i);
+      return {
+        mese: m.mese || MESI[i],
+        target_mensile_rivisto_t: rivisto > 0 ? tonn(rivisto) : null,
+        ...(iniziale > 0 ? { target_mensile_iniziale_t: tonn(iniziale) } : {}),
+        target_del_profilo_t: m.target_t === undefined ? null : m.target_t,
+        atteso_al_giorno_dei_dati_t: m.atteso_t === undefined ? null : m.atteso_t,
+        raccolto_t: m.raccolto_t === undefined ? null : m.raccolto_t,
+        parte_del_mese_coperta_dai_dati: m.coperto === undefined ? null : m.coperto,
+        ...(m.budget_t ? { budget_smoco_t: m.budget_t } : {}),
+        ...(delMese.length ? { variazioni_del_consorzio: delMese.map(voce) } : {}),
+      };
+    })
+    : null;
+  return {
+    canale: 'RETE',
+    anno: a,
+    contratto: c.commessa
+      ? `contratto Ecotyre ${a} della scheda Commessa Ecotyre di Target & Status (fra piu' contratti dello stesso anno vale il modificato per ultimo, come nella dashboard)`
+      : `nessun contratto Ecotyre del ${a} in Target & Status`,
+    target_annuo_contratto_t: senzaTarget ? null : tonn(targetT),
+    fonte_target: c.target.fonte,
+    ...(senzaTarget ? { target_perche: `${c.avvisi_target.join(' ') || `Il contratto Ecotyre del ${a} non ha un target.`} Non e' zero: non c'e'.` } : {}),
+    ...(c.target.fonte === 'ripiego' ? { target_di_ripiego: "Questo target non e' del contratto: e' il ripiego scritto nel gestionale, come nella dashboard. Dillo." } : {}),
+    // Il riparto per regione di ripiego si dice come il target di ripiego
+    // (revisione del 14/10/2026): la dashboard lo mostra senza dirlo.
+    ...(c.fonte_regioni === 'ripiego' ? { regioni_di_ripiego: "Il riparto per regione non e' del contratto: e' il ripiego scritto nel gestionale, come nella dashboard. Dillo." } : {}),
+    ...(c.target.da_confermare ? { da_confermare: "Il contratto e' copiato dall'anno prima e va confermato in Target & Status: dillo." } : {}),
+    raccolto_t: tonn(q.raccolto_t),
+    ritiri: q.ritiri,
+    pct_del_target: cento(q.pct_target),
+    // Il giorno della misura, come le etichette della dashboard (revisione del
+    // 14/10/2026): per un anno chiuso il 31/12, non l'ultima fine trasporto
+    // dell'anno dopo; per un anno senza ancora un ritiro, nessuno.
+    dati_fino_al: c.giorno_misura || null,
+    ...(c.anno_chiuso ? { anno_chiuso: `Il ${a} e' chiuso: i suoi dati sono completi e i numeri sono al 31/12/${a}.` } : {}),
+    atteso_alla_data: at ? {
+      al: at.giorno, atteso_t: tonn(at.atteso_t), pct_del_target: cento(at.pct_atteso), scarto_t: tonn(at.scarto_t),
+      ...(at.fine_anno ? { anno_chiuso: "L'anno e' chiuso: l'atteso al 31/12 e' il target intero." } : {}),
+    } : null,
+    ...(attesoPerche ? { atteso_perche: attesoPerche } : {}),
+    residuo_t: q.residuo_t,
+    ...(compatto ? {} : {
+      proiezione_fine_anno: q.proiezione ? { t: q.proiezione.t, pct_del_target: cento(q.proiezione.pct_target), finale: !!q.proiezione.finale } : null,
+      ...(q.proiezione ? {} : { proiezione_perche: q.proiezione_perche || '' }),
+      ritmo_che_serve: q.ritmo ? { servono_t_al_mese: q.ritmo.servono_t_mese, contratto_t_al_mese: q.ritmo.contratto_t_mese, pct_del_ritmo_del_contratto: cento(q.ritmo.pct_ritmo), mesi_restanti: q.ritmo.mesi_restanti } : null,
+      profilo_mensile: q.profilo && q.profilo.rivisto
+        ? { somma_del_profilo_scritto_t: q.profilo.somma_t, nota: "L'atteso segue il profilo mensile del contratto riportato al target annuo: il profilo scritto puo' sommare un po' piu' o un po' meno del target." }
+        : { nota: "Il contratto non ha il profilo mensile: l'atteso e' in dodicesimi." },
+    }),
+    regioni,
+    ...(!chiesta && fuori.raccolto_t > 0 ? { fuori_dalle_regioni_del_contratto: fuori } : {}),
+    ...(avvisoRegione ? { avviso_regione: avvisoRegione } : {}),
+    ...(vigenti.length || superate.length ? {
+      variazioni_del_consorzio: {
+        in_vigore: vigenti.map(voce),
+        ...(superate.length ? { superate: superate.map(voce) } : {}),
+        ...(vigenti.length ? { a_parole: testoVariazioni(vigenti, a, targetT) } : {}),
+        ...(superate.length ? { superate_a_parole: testoVariazioniSuperate(superate) } : {}),
+      },
+    } : {}),
+    ...(mesi ? {
+      mesi_chiesti: mesi,
+      nota_mesi: "target_mensile_rivisto_t e' il numero scritto nel contratto per quel mese (scheda Commessa Ecotyre), con le variazioni del consorzio scritte nel mese; target_del_profilo_t e' quello del grafico mese per mese della dashboard, il target annuo ripartito col profilo del contratto: possono differire di poco. raccolto_t null vuol dire un mese che i dati non coprono ancora, non zero.",
+    } : {}),
+    ...(c.avvisi_target.length ? { avvisi: c.avvisi_target } : {}),
+    ...(q.senza_fine_trasporto ? { terminati_senza_fine_trasporto_esclusi: q.senza_fine_trasporto } : {}),
+    nota: NOTA_CONTRATTO,
+  };
+}
+
 // ─── il registro ───
 
 // I COSTI SONO DELL'AMMINISTRATORE (chiusura dell'audit, 11/10/2026). Dal 16/09
@@ -1025,13 +1196,59 @@ export const vedeICosti = (ctx) => !!(ctx && ctx.amministratore === true);
 export const STRUMENTI = [
   {
     nome: 'panoramica_commessa',
-    descrizione: 'Il quadro generale della commessa: contratto, raccolto per canale, target, alert, giacenze e qualifica. Da usare per le domande larghe, non per un numero preciso.',
+    descrizione: 'Il quadro generale della commessa: contratto, raccolto per canale, target, alert, giacenze e qualifica. Da usare per le domande larghe, non per un numero preciso: per il contratto, il target annuo, l\'atteso e le regioni c\'e\' contratto_ecotyre.',
     parametri: { anno: 'numero, opzionale', mese: 'nome del mese, opzionale' },
     moduli: ['Target & Status', 'Dashboard'],
     async esegui(base44, p) {
       const oggi = p.data || oggiRoma();
       const testo = await situazioneGestionale(base44, oggi);
       return { fonte: 'Riepilogo della commessa', periodo: `anno ${oggi.slice(0, 4)}`, dati_al: oggi, dati: { riepilogo: testo } };
+    },
+  },
+  {
+    // IL CONTRATTO ECOTYRE DELLA RETE, CON I NUMERI DELLA DASHBOARD (variazione
+    // del contratto del 14/10/2026). Prima nessuno strumento lo leggeva: per
+    // «target annuo», «atteso» e «come sta la Puglia» il pianificatore prendeva
+    // target_raccoglitori, cioe' la somma dei raccoglitori, e le regioni non
+    // c'erano. Sta subito dopo il riepilogo, prima di target_raccoglitori, e la
+    // descrizione dice per quali domande e' lui. I numeri sono quelli di
+    // getDashboardRaccolta (contrattoDellaRete, contrattoRete.ts):
+    // prove/ecotynaContratto.mjs li confronta campo per campo sui dati veri.
+    nome: 'contratto_ecotyre',
+    // Il contratto e' solo della rete: il canale scritto come parametro non e' un filtro ignorato.
+    impliciti: { canale: ['RETE'], tipologia: ['RETE'] },
+    descrizione: 'Il CONTRATTO Ecotyre della rete di un anno, con gli stessi numeri della dashboard e dell\'Andamento di Target & Status: target annuo del contratto (con le variazioni del consorzio registrate), raccolto, percentuale del target, atteso alla data dei dati e scarto (avanti o indietro), residuo, proiezione a fine anno e ritmo che serve, e per ogni regione contratto, atteso, raccolto, scarto e percentuale. E\' lo strumento per ogni domanda sul contratto, sul target annuo, sull\'atteso, su una regione rispetto al contratto o su «come stiamo» con la commessa della rete. Con mese, anche il target mensile del contratto di quel mese. Non dice i singoli raccoglitori: per quelli c\'e\' target_raccoglitori. ACI ed extra raccolta non hanno target.',
+    parametri: {
+      anno: 'numero', regione: 'opzionale: una regione (Campania, Puglia, ...); i totali restano quelli del contratto intero',
+      mese: 'nome del mese, opzionale: il target mensile del contratto di quel mese', mesi: 'elenco di nomi di mese, opzionale',
+    },
+    moduli: ['Dashboard', 'Target & Status'],
+    async esegui(base44, p, ctx) {
+      const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
+      const cx = conCache(ctx);
+      // Le date da sistemare e la riserva degli «eseguito» della rete, come negli
+      // altri strumenti del raccolto: con la cache, movimenti() legge le stesse
+      // primarie terminate del contratto, piu' la pagina breve degli «eseguito».
+      const [c, { date, riserva }] = await Promise.all([
+        leggiContrattoDellaRete(base44, anno, cx),
+        movimenti(base44, { canale: 'RETE', anno }, cx),
+      ]);
+      const periodo = mesiChiesti(p.mese, p.mesi);
+      const avvisoPeriodo = periodo.ignorati.length
+        ? `${periodo.ignorati.map(x => `"${x}"`).join(', ')} non ${periodo.ignorati.length === 1 ? 'e\' un mese' : 'sono mesi'}: il contratto e' quello dell'anno ${anno}, senza il dettaglio del mese.`
+        : '';
+      return {
+        fonte: 'Contratto Ecotyre (scheda Commessa Ecotyre di Target & Status) e formulari terminati della RETE, come la Dashboard',
+        periodo: `anno ${anno}`,
+        dati_al: oggiRoma(),
+        dati: {
+          ...datiDelContratto(c, { regione: p.regione, periodo }),
+          ...(avvisoPeriodo ? { avviso_periodo: avvisoPeriodo } : {}),
+          // Il raccolto sono i terminati: un ordine nel limbo «eseguito» fa sembrare la rete piu' indietro di quanto sia.
+          ...(riserva ? { riserva_eseguiti: riserva } : {}),
+          ...(date ? { date_obbligatorie_da_sistemare: date } : {}),
+        },
+      };
     },
   },
   {
@@ -1145,15 +1362,29 @@ export const STRUMENTI = [
     // risposta diceva «non filtrato per ...» su un numero che lo era.
     // I target sono solo della rete.
     impliciti: { canale: ['RETE'], tipologia: ['RETE'] },
-    descrizione: 'Il target annuo di ciascun raccoglitore della rete e quanto ha fatto finora, con lo scostamento. I target sono solo di rete: l\'ACI non ne ha.',
-    parametri: { anno: 'numero' },
+    // IL CONTRATTO NON E' LA SOMMA DEI RACCOGLITORI (14/10/2026). Il totale si
+    // chiamava target_totale_t e il modello lo diceva «target annuo del contratto»:
+    // 11.650 t il 14/10 per caso, e il giorno prima sarebbe stato 11.650 contro un
+    // contratto di 11.550. Ora si chiama somma_target_raccoglitori_t, accanto c'e'
+    // il contratto letto davvero (contratto_ecotyre, come la dashboard) con la
+    // differenza, e ogni raccoglitore dice la sua regione.
+    descrizione: 'Il target annuo di ciascun raccoglitore della rete, con la sua regione, e quanto ha fatto finora, con lo scostamento: per le domande sui singoli raccoglitori (chi e\' sotto target, quanto ha fatto X sul suo target). La somma dei loro target NON e\' il contratto Ecotyre: per il target annuo del contratto, l\'atteso, le regioni e «come stiamo» con la commessa usa contratto_ecotyre (qui il contratto c\'e\' solo accanto, per confronto). I target sono solo di rete: l\'ACI non ne ha.',
+    parametri: { anno: 'numero', regione: 'opzionale: solo i raccoglitori con un target in quella regione, ognuno col target e il fatto di quella regione (nella_regione_chiesta)' },
     moduli: ['Target & Status'],
     async esegui(base44, p, ctx) {
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const svc = base44.asServiceRole.entities;
-      const [target, { righe, date, riserva }] = await Promise.all([
+      const cx = conCache(ctx);
+      // La regione chiesta (14/10/2026): prima non era un parametro, finiva fra
+      // gli ignorati e la risposta diceva che i raccoglitori «non sono filtrati
+      // per area geografica».
+      const regioneChiesta = String(p.regione || '').trim();
+      const [target, { righe, date, riserva }, contratto] = await Promise.all([
         svc.TargetRaccoglitore.filter({ anno }, 'raccoglitore', 500),
-        movimenti(base44, { canale: 'RETE', anno }, ctx),
+        movimenti(base44, { canale: 'RETE', anno }, cx),
+        // Il contratto accanto, letto davvero e con le letture gia' fatte: se non
+        // si legge, lo si dice, e la somma dei raccoglitori non lo sostituisce.
+        leggiContrattoDellaRete(base44, anno, cx).catch(e => ({ errore: e && e.message ? e.message : String(e) })),
       ]);
       // Il nome del target puo' essere l'abbreviazione di quello che scrive il
       // portale ("PNEUSERVICE SRL" per "PNEUSERVICE CONVERSANO SRL"): abbinando
@@ -1163,12 +1394,21 @@ export const STRUMENTI = [
       // nel nome del portale.
       const nomiTarget = [...new Set(target.map(t => t.raccoglitore).filter(Boolean))];
       const fatto = new Map();
+      // Il fatto di ogni raccoglitore anche per regione, con la regione
+      // dell'Andamento di Target & Status: quella della provincia, o «Altro»
+      // (raccoltoPerRaccoglitore, computeRaccoltoData). Le righe raccoglitore |
+      // regione dell'Andamento sono queste, e prove/ecotynaContratto.mjs le
+      // confronta una per una sui dati veri (revisione del 14/10/2026).
+      const fattoInRegione = new Map();
       const senzaTarget = new Map();
       for (const r of righe) {
         const nome = targetDelPortale(nomiTarget, r.trasportatore);
         if (nome) {
           const k = normalizzaRagioneSociale(nome);
           fatto.set(k, (fatto.get(k) || 0) + peso(r));
+          if (!fattoInRegione.has(k)) fattoInRegione.set(k, new Map());
+          const reg = PROV_TO_REGION[String(r.provincia || '').toUpperCase().trim()] || 'Altro';
+          fattoInRegione.get(k).set(reg, (fattoInRegione.get(k).get(reg) || 0) + peso(r));
         } else {
           const k = String(r.trasportatore || 'N/D').trim();
           senzaTarget.set(k, (senzaTarget.get(k) || 0) + peso(r));
@@ -1177,23 +1417,124 @@ export const STRUMENTI = [
       const per = new Map();
       for (const t of target) {
         const k = normalizzaRagioneSociale(t.raccoglitore);
-        if (!per.has(k)) per.set(k, { raccoglitore: t.raccoglitore, target_t: 0, fatto_t: t3(fatto.get(k) || 0) });
-        per.get(k).target_t += Number(t.target_tonnellate) || 0;
+        if (!per.has(k)) per.set(k, { raccoglitore: t.raccoglitore, target_t: 0, fatto_t: t3(fatto.get(k) || 0), regioni: new Map() });
+        const x = per.get(k);
+        x.target_t += Number(t.target_tonnellate) || 0;
+        // LA REGIONE DI OGNI RACCOGLITORE (14/10/2026): il target la porta, e
+        // senza EcoTyna diceva che i raccoglitori «non sono filtrati per area
+        // geografica». Chi ha target in piu' regioni (SMOCO: Puglia, Calabria,
+        // Basilicata) li ha uno per regione, col fatto di ognuna.
+        const reg = String(t.regione || '').trim() || 'regione non indicata';
+        x.regioni.set(reg, (x.regioni.get(reg) || 0) + (Number(t.target_tonnellate) || 0));
       }
-      const dettaglio = [...per.values()].map(x => ({
-        ...x,
-        target_t: Math.round(x.target_t * 100) / 100,
-        residuo_t: Math.round((x.target_t - x.fatto_t) * 100) / 100,
-        percentuale: x.target_t > 0 ? Math.round((x.fatto_t / x.target_t) * 1000) / 10 : null,
-      })).sort((a, b) => (a.percentuale ?? 999) - (b.percentuale ?? 999));
+      const tutti = [...per.entries()].map(([k, x]) => {
+        const suoi = [...(fattoInRegione.get(k) || new Map())];
+        const regioni = [...x.regioni].map(([regione, tt]) => ({
+          regione, target_t: Math.round(tt * 100) / 100,
+          fatto_t: t3(suoi.filter(([r]) => stessaRegione(r, regione)).reduce((s, [, kg]) => s + kg, 0)),
+        }));
+        const fuoriKg = suoi.filter(([r]) => !regioni.some(g => stessaRegione(g.regione, r))).reduce((s, [, kg]) => s + kg, 0);
+        // LA REGIONE CHIESTA PER TUTTI (revisione del 14/10/2026). Prima il
+        // target e il fatto della regione li aveva solo chi ha target in piu'
+        // regioni: per gli altri fatto_t e percentuale restavano di tutte le
+        // regioni, e «Chi e' sotto target in Campania?» dava Nappi Sud a 1.550,60 t
+        // (77,2%) mentre l'Andamento, riga Nappi Sud | Campania, ha 1.528,52 t: i
+        // 22,08 t raccolti fuori regione. Ora ognuno porta nella_regione_chiesta
+        // col target, il fatto, il residuo e la percentuale di quella regione.
+        const inRegione = regioneChiesta ? regioni.find(g => stessaRegione(g.regione, regioneChiesta)) : null;
+        const nellaRegione = inRegione ? {
+          ...inRegione,
+          residuo_t: Math.round((inRegione.target_t - inRegione.fatto_t) * 100) / 100,
+          percentuale: inRegione.target_t > 0 ? Math.round((inRegione.fatto_t / inRegione.target_t) * 1000) / 10 : null,
+        } : null;
+        return {
+          raccoglitore: x.raccoglitore,
+          regione: regioni.map(g => g.regione).join(', '),
+          target_t: Math.round(x.target_t * 100) / 100,
+          fatto_t: x.fatto_t,
+          residuo_t: Math.round((x.target_t - x.fatto_t) * 100) / 100,
+          percentuale: x.target_t > 0 ? Math.round((x.fatto_t / x.target_t) * 1000) / 10 : null,
+          ...(regioni.length > 1 ? { per_regione: regioni } : {}),
+          ...(nellaRegione ? { nella_regione_chiesta: nellaRegione } : {}),
+          ...(fuoriKg > 0 ? { fatto_fuori_dalle_regioni_del_suo_target_t: t3(fuoriKg) } : {}),
+        };
+      }).sort((a, b) => (a.percentuale ?? 999) - (b.percentuale ?? 999));
+      const somma = Math.round(tutti.reduce((s, x) => s + x.target_t, 0) * 100) / 100;
+      // Con la regione, i soli raccoglitori che vi hanno un target, in ordine di
+      // percentuale in quella regione; la somma di tutti resta accanto, quella
+      // della regione ha il suo nome.
+      const pctRegione = (x) => (x.nella_regione_chiesta ? x.nella_regione_chiesta.percentuale ?? 999 : 999);
+      const dettaglio = regioneChiesta ? tutti.filter(x => x.nella_regione_chiesta).sort((a, b) => pctRegione(a) - pctRegione(b)) : tutti;
+      const sommaRegione = regioneChiesta
+        ? Math.round(target.filter(t => stessaRegione(t.regione, regioneChiesta)).reduce((s, t) => s + (Number(t.target_tonnellate) || 0), 0) * 100) / 100
+        : null;
+      // Il contratto accanto, compatto: target annuo, atteso, regioni e
+      // variazioni, gli stessi numeri di contratto_ecotyre e della dashboard.
+      const delContratto = contratto && !contratto.errore ? datiDelContratto(contratto, { compatto: true, regione: regioneChiesta }) : null;
+      // SOLO CONTRO IL CONTRATTO VERO (revisione del 14/10/2026). La scheda e il
+      // cruscotto (vociContrattoRaccoglitori) confrontano i raccoglitori solo con
+      // un contratto letto che ha il suo target e il suo riparto per regione, e
+      // solo se i target dei raccoglitori ci sono. Qui si confrontavano anche col
+      // ripiego: con la variazione registrata e i contratti che non si leggevano,
+      // la Puglia dei raccoglitori (2.600) risultava +100 sui 2.500 del ripiego,
+      // e la nota diceva «di solito una variazione non ancora registrata»: EcoTyna
+      // poteva far registrare due volte la stessa variazione. Ora il totale si
+      // confronta solo col target del contratto, le regioni solo col suo riparto,
+      // e quando no lo dice confronto_col_contratto_perche.
+      const fonteTarget = delContratto ? contratto.target.fonte : null;
+      const fonteRegioni = delContratto ? contratto.fonte_regioni : null;
+      const conTotale = !!delContratto && target.length > 0 && fonteTarget === 'contratto';
+      const conRegioni = !!delContratto && target.length > 0 && fonteRegioni === 'contratto';
+      const tContratto = conTotale ? delContratto.target_annuo_contratto_t : null;
+      const nonLetto = !!delContratto && contratto.contratti_letti === false ? ", perche' i contratti non si sono potuti leggere" : '';
+      const perche = !delContratto ? "Il contratto Ecotyre non si e' potuto leggere: la somma dei raccoglitori non si confronta con niente."
+        : !target.length ? `Nel ${anno} non c'e' nessun target dei raccoglitori: niente confronto col contratto (i target mancano, non e' una differenza da registrare).`
+        : !fonteTarget ? `Per il ${anno} non c'e' il target del contratto Ecotyre (lo spiega contratto_ecotyre.target_perche): la somma dei raccoglitori non si confronta con niente.`
+        : [
+          conTotale ? ''
+            : `Il target annuo accanto (${formatoTonnellate(delContratto.target_annuo_contratto_t)} t) non e' del contratto: e' il ripiego scritto nel gestionale${nonLetto}. La somma dei raccoglitori non si confronta col ripiego.`,
+          conRegioni ? ''
+            : fonteRegioni === 'ripiego' ? "Il riparto per regione accanto non e' del contratto: e' il ripiego scritto nel gestionale. Regione per regione i raccoglitori non si confrontano col ripiego."
+            : `Il contratto Ecotyre del ${anno} non ha il riparto per regione: regione per regione i raccoglitori non si confrontano.`,
+          fonteTarget === 'ripiego' || fonteRegioni === 'ripiego'
+            ? "Come nella scheda Target raccoglitori e nel cruscotto: una differenza col ripiego non vuol dire una variazione da registrare, e non va detta." : '',
+        ].filter(Boolean).join(' ');
+      // Regione per regione, i target dei raccoglitori contro il contratto: e'
+      // l'avviso della scheda Target raccoglitori («I raccoglitori della Puglia
+      // hanno 100,00 t più del contratto»), che una variazione registrata chiude.
+      const perRegioneRacc = new Map();
+      for (const t of target) {
+        const reg = String(t.regione || '').trim();
+        if (reg) perRegioneRacc.set(reg, (perRegioneRacc.get(reg) || 0) + (Number(t.target_tonnellate) || 0));
+      }
+      const regioniContro = conRegioni && delContratto.regioni.some(r => r.contratto_t !== null)
+        ? delContratto.regioni.map(r => {
+          const tr = [...perRegioneRacc].filter(([g]) => stessaRegione(g, r.regione)).reduce((s, [, v]) => s + v, 0);
+          const diff = r.contratto_t === null ? null : tonn(tr - r.contratto_t);
+          // sotto mezza tonnellata e' un arrotondamento, come nella scheda (SOGLIA_VARIAZIONE_T)
+          return { regione: r.regione, somma_target_raccoglitori_t: tonn(tr), contratto_t: r.contratto_t, differenza_t: diff, ...(diff !== null && diff !== 0 && Math.abs(diff) < SOGLIA_VARIAZIONE_T ? { solo_arrotondamento: true } : {}) };
+        })
+        : null;
       return {
         fonte: 'Target & Status, canale RETE',
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
           raccoglitori: dettaglio,
-          target_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.target_t, 0) * 100) / 100,
-          fatto_totale_t: Math.round(dettaglio.reduce((s, x) => s + x.fatto_t, 0) * 100) / 100,
+          ...(regioneChiesta ? {
+            regione_chiesta: regioneChiesta,
+            somma_target_raccoglitori_della_regione_t: sommaRegione,
+            nota_regione: dettaglio.length
+              ? `L'elenco ha i soli raccoglitori con un target in ${regioneChiesta}, in ordine di percentuale in quella regione. I numeri della regione sono in nella_regione_chiesta: target, fatto, residuo e percentuale in ${regioneChiesta}, il fatto come la riga raccoglitore | regione dell'Andamento di Target & Status. Sono questi da dire per ${regioneChiesta}: target_t, fatto_t, residuo_t e percentuale del raccoglitore sono di tutte le sue regioni, e fatto_t comprende anche il raccolto fuori dalle regioni del suo target. somma_target_raccoglitori_t e fatto_totale_t restano della rete intera.`
+              : `Nessun raccoglitore ha un target in "${regioneChiesta}" nel ${anno}: l'elenco e' vuoto, e non vuol dire zero raccolto (quello lo dice contratto_ecotyre, regione per regione).`,
+          } : {}),
+          somma_target_raccoglitori_t: somma,
+          contratto_ecotyre: delContratto || { lettura_non_riuscita: `Il contratto Ecotyre non si e' potuto leggere (${contratto && contratto.errore ? contratto.errore : 'errore'}): il suo target annuo, l'atteso e le regioni qui non ci sono. Non usare somma_target_raccoglitori_t al posto del contratto: dillo.` },
+          ...(tContratto !== null ? { differenza_somma_raccoglitori_meno_contratto_t: tonn(somma - tContratto) } : {}),
+          ...(regioniContro ? { regioni_raccoglitori_contro_contratto: regioniContro } : {}),
+          ...(perche ? { confronto_col_contratto_perche: perche } : {}),
+          nota_livelli: "Due livelli da non scambiare. somma_target_raccoglitori_t e' la somma dei target annui dei singoli raccoglitori (scheda Target raccoglitori di Target & Status): NON e' il target del contratto, e non va mai detta come tale. Il target annuo del contratto Ecotyre e' contratto_ecotyre.target_annuo_contratto_t (scheda Commessa Ecotyre), lo stesso della dashboard: con lui vanno l'atteso, lo scarto e le regioni. Le differenze ci sono solo contro il contratto vero, col suo target e il suo riparto per regione, come nella scheda Target raccoglitori: se differenza_somma_raccoglitori_meno_contratto_t o una differenza_t di regione non e' zero, dilla: di solito una variazione del consorzio scritta sui raccoglitori e non ancora registrata nel contratto («Registra una variazione» nella scheda Commessa Ecotyre); una differenza di regione sotto mezza tonnellata (solo_arrotondamento) e' un arrotondamento dei target, non una variazione. Se le differenze non ci sono, confronto_col_contratto_perche dice perche' (per esempio un target o un riparto di ripiego): allora non dire ne' che i raccoglitori fanno il contratto ne' che c'e' una variazione da registrare. fatto_totale_t e' il raccolto dei soli raccoglitori con un target, non il raccolto della rete (quello e' contratto_ecotyre.raccolto_t).",
+          fatto_totale_t: Math.round(tutti.reduce((s, x) => s + x.fatto_t, 0) * 100) / 100,
           // La copertura del target si legge sui terminati: un ordine nel limbo
           // "eseguito" fa sembrare un raccoglitore piu' indietro di quanto sia.
           ...(riserva ? { riserva_eseguiti: riserva } : {}),

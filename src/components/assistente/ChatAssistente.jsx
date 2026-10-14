@@ -62,6 +62,7 @@ const leggiStrumenti = (json) => { try { const v = JSON.parse(json || '[]'); ret
 // Come si chiamano, in italiano, i posti dove EcoTyna va a prendere i numeri.
 const ETICHETTE_STRUMENTO = {
   panoramica_commessa: 'Riepilogo della commessa',
+  contratto_ecotyre: 'Contratto Ecotyre',
   raccolto: 'Raccolto per canale',
   target_raccoglitori: 'Target & Status',
   report_mensile: 'Report Mensile',
