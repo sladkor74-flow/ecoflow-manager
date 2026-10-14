@@ -30,7 +30,7 @@ import { eTerminato, eEseguito, giornoMovimento, riepilogoEseguiti } from "./mov
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale, caricamentiAperti, contaDistinti } from "./quadraturaFirDati.ts";
 import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoVociDate, voceDate } from "./reportSettimanali.ts";
-import { situazioneGestionale, terminatiSenzaFine } from "./assistente.ts";
+import { situazioneGestionale, terminatiSenzaFine, totaleGiacenze, senzaFileDelPortale } from "./assistente.ts";
 import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } from "./dichiarazioniImpianti.ts";
@@ -1876,10 +1876,43 @@ export const STRUMENTI = [
       // Senza il file, pero', l'impianto ha una fotografia col giorno vuoto e una
       // giacenza a zero: quello zero non e' un dato, e passato cosi' EcoTyna
       // diceva "nessuna giacenza".
+      // IL PERCHE' DI UNA RIGA SENZA GIACENZA E' QUELLO DEL MODULO (giro del
+      // 14/10/2026, punto 7 del gruppo D-K). calcolaGiacenze lo scrive in
+      // perche_senza_giacenza: il file del portale mai caricato, un piazzale senza
+      // lettura, un anno chiuso senza la lettura del 31/12, un anno prima del
+      // gestionale. Qui ogni impianto senza fotografia diventava «nessun file
+      // caricato, va caricato il file», anche nel 2025, dove il file non c'entra.
+      // UN ANNO PRIMA DEL GESTIONALE (decisioni dell'utente del 13/10/2026): la
+      // giacenza dei suoi impianti non si ricostruisce, e il perche' lo dice il
+      // modulo una volta per tutto l'anno. EcoTyna non deve dare numeri di giacenza
+      // su quell'anno: il perche' va una volta in testa (avviso_anno), e le righe e
+      // i totali, che sono «—», ci rimandano.
+      const primaDelGestionale = !!(d.totali && d.totali.prima_del_gestionale);
+      const percheAnno = primaDelGestionale ? String(d.totali.perche_prima_del_gestionale || '') : '';
+      const rimandoAnno = `Il ${anno} e' prima del gestionale: la giacenza non si ricostruisce e non e' zero (il perche' e' in avviso_anno).`;
+      // IL PERCHE' DI ACI ED EXTRA RACCOLTA, DETTO UNA VOLTA (revisione del giro
+      // del 14/10/2026). calcolaGiacenze lo scrive per canale anche quando e' lo
+      // stesso della riga: su un anno prima del gestionale il testo intero
+      // dell'anno, su ogni impianto, per l'ACI e per l'extra raccolta; in un
+      // piazzale senza la lettura che apra l'anno, per l'ACI, lo stesso perche'
+      // della rete. Passato cosi', sui dati veri dell'11/10 il perche' del 2025
+      // compariva 19 volte (del 2024, 23), la risposta passava il limite del
+      // prompt e l'elenco dei siti arrivava a EcoTyna tagliato a 8 righe su 15
+      // (su 18): spariva meta' dei siti, coi loro conferiti. Si rimanda: all'avviso
+      // dell'anno, o al perche' della riga che sta in calcolo.avviso.
+      const comeLaRiga = "Lo stesso perche' della giacenza di rete di questa riga: e' in calcolo.avviso. Non vuol dire zero.";
+      const percheCanali = (r) => {
+        if (!r.perche_canali) return null;
+        const rete = r.perche_senza_giacenza || '';
+        return Object.fromEntries(Object.entries(r.perche_canali).map(([canale, testo]) => [canale,
+          primaDelGestionale && percheAnno && testo === percheAnno ? rimandoAnno : (testo && testo === rete ? comeLaRiga : testo)]));
+      };
       const utili = righe.map(r => {
         const stoc = String(r.tipo_destinazione || '').toLowerCase() === 'stoc';
         const f = r.fotografia;
         const calcolata = stoc || !!(f && f.del);
+        const perche = primaDelGestionale && percheAnno && r.perche_senza_giacenza === percheAnno ? rimandoAnno : (r.perche_senza_giacenza || '');
+        const canali = percheCanali(r);
         return {
           sito: r.sito, tipo: stoc ? 'stoccaggio' : 'impianto',
           giacenza_rete_t: calcolata ? (r.giacenza_rete_t ?? null) : null,
@@ -1890,8 +1923,13 @@ export const STRUMENTI = [
           // In uno stoccaggio e' l'extra raccolta in piazzale; in un impianto quella
           // arrivata e non ancora dichiarata. Un campo solo, letto secondo il tipo.
           giacenza_extra_raccolta_t: r.giacenza_extra_t ?? null,
-          // Da dove viene il numero, cosi' uno scarto col portale si spiega coi dati.
-          calcolo: stoc
+          // Il perche' di ACI ed extra raccolta quando non c'e' il numero (un anno
+          // prima del gestionale, un piazzale senza la lettura che apra l'anno):
+          // un rimando, quando e' lo stesso dell'anno o della riga (percheCanali).
+          ...(canali ? { perche_canali: canali } : {}),
+          // Da dove viene il numero, cosi' uno scarto col portale si spiega coi dati;
+          // senza il numero, il perche' del modulo.
+          calcolo: perche ? { avviso: perche } : stoc
             ? (r.data_rilevazione
               // Il numero parte dall'ancora dell'anno; l'ultima lettura e' il
               // riscontro, non la fonte (regola della direzione, 24/09/2026).
@@ -1907,10 +1945,22 @@ export const STRUMENTI = [
             : r.rete_non_dovuta
               ? { rete_non_dovuta: "Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico e il portale non tiene per noi una giacenza di rete. Quello che e' arrivato si legge nel conferito; l'ACI si dichiara e ha la sua giacenza." }
             : (calcolata
-              ? { file_del_portale_del: f.del, fotografia_t: f.foto_t, carichi_aggiunti: f.aggiunti, carichi_aggiunti_t: f.aggiunti_t, dichiarato_dopo_la_fotografia_t: f.dichiarato_dopo_t }
+              // Un anno chiuso parte dalla lettura del 31/12 salvata dalla chiusura, non
+              // dal file di oggi (decisioni dell'utente del 13/10/2026): si dice quella.
+              ? (f.lettura_del_trentuno
+                ? { lettura_del_portale_del: f.del, letta_t: f.foto_t, dichiarato_dopo_la_lettura_t: f.dichiarato_dopo_t }
+                : { file_del_portale_del: f.del, fotografia_t: f.foto_t, carichi_aggiunti: f.aggiunti, carichi_aggiunti_t: f.aggiunti_t, dichiarato_dopo_la_fotografia_t: f.dichiarato_dopo_t })
               : { avviso: 'Nessun file degli ordini non dichiarati caricato: senza la fotografia del portale la giacenza di rete dell\'impianto non si puo\' calcolare (non e\' zero). Va caricato il file.' }),
           movimenti_caricati_fino_al: r.aggiornata_al || null,
-          in_attesa_dichiarazione_t: r.in_attesa_dichiarazione_t, ordini_da_dichiarare: r.ordini_da_dichiarare,
+          in_attesa_dichiarazione_t: r.in_attesa_dichiarazione_t,
+          // L'ATTESA PER NOI CHIUSA (decisioni dell'utente del 13/10/2026, giro del
+          // 14/10/2026). Di quello che il portale attribuisce ancora a uno
+          // stoccaggio, la parte partita verso chi sulla rete non dichiara a SMOCO
+          // (T-Cycle: 181,299 t verso Tecnogum) e' un giro chiuso: nessuna
+          // dichiarazione la chiudera' e non c'e' niente da fare. Senza questi due
+          // campi EcoTyna la chiamava un'attesa da risolvere.
+          ...(Number(r.in_attesa_chiusa_t) > 0 ? { in_attesa_chiusa_t: r.in_attesa_chiusa_t, in_attesa_chiusa_perche: r.in_attesa_chiusa_perche || '' } : {}),
+          ordini_da_dichiarare: r.ordini_da_dichiarare,
           dichiarato_rete_t: r.dichiarato_t, conferito_primarie_rete_t: r.conferito_primarie_t, conferito_aci_t: r.conferito_aci_t,
           // conferito_extra_t sono le sole primarie di extra raccolta: le secondarie
           // di extra raccolta hanno i loro due campi, come rete e ACI (chiusura
@@ -1949,22 +1999,52 @@ export const STRUMENTI = [
       const filtrato = !!(p.sito || p.tipo);
       const somma = (xs, campo) => Math.round(xs.reduce((s, r) => s + (Number(r[campo]) || 0), 0) * 1000) / 1000;
       const impianti = utili.filter(r => r.tipo === 'impianto');
-      const stoccaggi = utili.filter(r => r.tipo === 'stoccaggio');
-      // Chi non ha il dato resta fuori dai totali, e lo si dice in ogni canale in
-      // cui manca: senza, il totale sembra completo. Uno stoccaggio senza
-      // rilevazione manca sia alla rete sia all'ACI (le classi 1-4 e la 9 stanno
-      // nella stessa rilevazione).
-      const senzaRilevazione = stoccaggi.filter(r => r.giacenza_rete_t === null).map(r => r.sito);
-      const senzaFile = impianti.filter(r => r.giacenza_rete_t === null && !r.rete_non_dovuta).map(r => r.sito);
+      // I TOTALI CON LA REGOLA DEL MODULO (giro del 14/10/2026, sulle decisioni
+      // dell'utente del 13/10/2026). Una riga senza il numero per mancanza del dato
+      // (ha il suo perche') fa del totale un «—» (null) col perche', come il totale
+      // delle Giacenze e delle Dichiarazioni (totaleGiacenze di assistente.ts, la
+      // stessa del riepilogo della commessa). Qui si sommava con lo zero: il 2025,
+      // anno prima del gestionale, usciva con la giacenza di rete a 0 e nove
+      // impianti «senza il file del portale». Le righe di calcolo sono quelle di
+      // calcolaGiacenze coi numeri che lo strumento passa (righe e utili vanno di
+      // pari passo).
+      const perTotali = righe.map((r, i) => ({
+        ...r, tipo_destinazione: utili[i].tipo === 'stoccaggio' ? 'stoc' : 'imp',
+        giacenza_portale_t: utili[i].giacenza_rete_t, giacenza_aci_t: utili[i].giacenza_aci_t, giacenza_extra_t: utili[i].giacenza_extra_raccolta_t,
+      }));
+      const impTot = perTotali.filter(r => r.tipo_destinazione === 'imp');
+      const stocTot = perTotali.filter(r => r.tipo_destinazione === 'stoc');
+      const delCanale = (canale, ...parti) => {
+        if (!parti.some(x => x.t === null)) return {};
+        return { perche_totale: primaDelGestionale ? rimandoAnno : totaleGiacenze(perTotali, canale).perche || '' };
+      };
+      const reteImp = totaleGiacenze(impTot, 'RETE'), reteStoc = totaleGiacenze(stocTot, 'RETE');
+      const aciImp = totaleGiacenze(impTot, 'ACI'), aciStoc = totaleGiacenze(stocTot, 'ACI');
+      const extraImp = totaleGiacenze(impTot, 'EXTRA_RACCOLTA'), extraStoc = totaleGiacenze(stocTot, 'EXTRA_RACCOLTA');
+      // Chi non ha il dato si dice per nome, col motivo giusto: l'impianto senza il
+      // file del portale dal suo perche' (senzaFileDelPortale), lo stoccaggio
+      // senza nessuna rilevazione, la rete che per accordo non ci si dichiara. Gli
+      // altri (un anno chiuso, un anno prima del gestionale) li dice perche_totale,
+      // e ogni riga il suo nel calcolo. Uno stoccaggio senza rilevazione manca sia
+      // alla rete sia all'ACI (le classi 1-4 e la 9 stanno nella stessa rilevazione).
+      const senzaRilevazione = stocTot.filter(r => r.giacenza_portale_t === null && !r.data_rilevazione).map(r => r.sito);
+      const senzaFile = perTotali.filter(senzaFileDelPortale).map(r => r.sito);
       const reteNonDovuta = impianti.filter(r => r.rete_non_dovuta).map(r => r.sito);
+      const attesa = somma(utili, 'in_attesa_dichiarazione_t');
+      const attesaChiusa = somma(utili, 'in_attesa_chiusa_t');
       const totali = {
         perimetro: filtrato ? `solo ${utili.length === 1 ? 'il sito richiesto' : 'i siti richiesti'}` : 'tutti i siti',
         siti: utili.length,
+        ...(primaDelGestionale ? { prima_del_gestionale: true } : {}),
         rete: {
-          giacenza_t: somma(utili, 'giacenza_rete_t'),
-          di_cui_impianti_t: somma(impianti, 'giacenza_rete_t'),
-          di_cui_stoccaggi_t: somma(stoccaggi, 'giacenza_rete_t'),
-          in_attesa_dichiarazione_t: somma(utili, 'in_attesa_dichiarazione_t'),
+          giacenza_t: reteImp.t === null || reteStoc.t === null ? null : Math.round((reteImp.t + reteStoc.t) * 1000) / 1000,
+          di_cui_impianti_t: reteImp.t,
+          di_cui_stoccaggi_t: reteStoc.t,
+          ...delCanale('RETE', reteImp, reteStoc),
+          in_attesa_dichiarazione_t: attesa,
+          // Di quell'attesa, la parte per noi chiusa e quella che resta da
+          // risolvere: il totale resta il numero del portale (decisioni del 13/10/2026).
+          ...(attesaChiusa > 0 ? { in_attesa_chiusa_t: attesaChiusa, in_attesa_da_risolvere_t: Math.round((attesa - attesaChiusa) * 1000) / 1000 } : {}),
           ordini_da_dichiarare: utili.reduce((s, r) => s + (Number(r.ordini_da_dichiarare) || 0), 0),
           ...(senzaFile.length ? { impianti_senza_file_del_portale_esclusi: senzaFile } : {}),
           ...(reteNonDovuta.length ? { impianti_che_per_accordo_non_dichiarano_la_rete: reteNonDovuta } : {}),
@@ -1977,21 +2057,25 @@ export const STRUMENTI = [
         // alla stessa domanda due numeri, e il primo con l'etichetta sbagliata.
         // Ora tutti e due dicono impianti e stoccaggi, rifatti sulle righe.
         aci: {
-          giacenza_impianti_t: somma(impianti, 'giacenza_aci_t'),
-          giacenza_stoccaggi_t: somma(stoccaggi, 'giacenza_aci_t'),
+          giacenza_impianti_t: aciImp.t,
+          giacenza_stoccaggi_t: aciStoc.t,
+          ...delCanale('ACI', aciImp, aciStoc),
           ...(senzaRilevazione.length ? { stoccaggi_senza_rilevazione_esclusi: senzaRilevazione } : {}),
         },
         extra_raccolta: {
-          impianti_t: somma(impianti, 'giacenza_extra_raccolta_t'),
-          in_piazzale_t: somma(stoccaggi, 'giacenza_extra_raccolta_t'),
+          impianti_t: extraImp.t,
+          in_piazzale_t: extraStoc.t,
+          ...delCanale('EXTRA_RACCOLTA', extraImp, extraStoc),
         },
-        nota_totali: 'Tre canali, tre totali: rete, ACI ed extra raccolta non si sommano. Dentro ACI ed extra raccolta impianti e stoccaggi sono due numeri: in un impianto e\' quello arrivato e non ancora dichiarato, in uno stoccaggio quello in piazzale.',
+        nota_totali: 'Tre canali, tre totali: rete, ACI ed extra raccolta non si sommano. Dentro ACI ed extra raccolta impianti e stoccaggi sono due numeri: in un impianto e\' quello arrivato e non ancora dichiarato, in uno stoccaggio quello in piazzale. Un totale null non e\' zero: una riga non ha il numero, e perche_totale dice quale e perche\'; scrivi «—» e il perche\', mai 0. in_attesa_chiusa_t e\' la parte dell\'attesa che il portale attribuisce ancora a uno stoccaggio ma che per noi e\' un giro chiuso (in_attesa_chiusa_perche: partita verso chi sulla rete non dichiara a SMOCO): nessuna dichiarazione la chiudera\' e non c\'e\' niente da fare, non chiamarla un\'attesa da risolvere; in_attesa_da_risolvere_t e\' il resto.',
       };
       return {
         fonte: 'Giacenze, giacenza a portale per canale',
         periodo: `anno ${anno}`,
         dati_al: oggiRoma(),
         dati: {
+          // Un anno prima del gestionale: niente numeri di giacenza, e si dice perche'.
+          ...(primaDelGestionale ? { avviso_anno: `${percheAnno} Per il ${anno} le giacenze non hanno un numero: si dicono «—», mai zero.` } : {}),
           siti: elenco(utili, 80), totali, anomalie: elenco(anomalie, 20),
           // Niente giustificazioni con la chiusura a portale: la giacenza segue i
           // caricamenti, e uno scarto e' un'anomalia da dire, non da spiegare via.
@@ -2216,6 +2300,10 @@ export const STRUMENTI = [
         dati: {
           ...(p.sito && !siti.length ? { avviso_sito: `"${p.sito}" non risulta fra gli impianti e gli stoccaggi del riepilogo ${anno}: niente da dire su di lui, che non vuol dire zero.` } : {}),
           ...(canaleIgnorato ? { avviso_canale: `"${canaleIgnorato}" non e' un canale: qui ci sono tutti e tre, ciascuno sul suo flusso e mai sommati.` } : {}),
+          // Un anno prima del gestionale (decisioni dell'utente del 13/10/2026, giro
+          // del 14/10/2026): giacenza e resto da dichiarare non si ricostruiscono, e
+          // il perche' della pagina va con la risposta, come nello strumento giacenze.
+          ...(d.prima_del_gestionale || tot.prima_del_gestionale ? { avviso_anno: `${d.perche_prima_del_gestionale || tot.perche_prima_del_gestionale || ''} Per il ${anno} il resto da dichiarare e la giacenza non hanno un numero: si dicono «—», mai zero.`.trim() } : {}),
           siti: elenco(righe, 40),
           resta_per_canale_t: restaPerCanale,
           ...(p.sito ? {} : {

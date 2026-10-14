@@ -21,7 +21,7 @@
 // Solo server, nessuno specchio: la pagina riceve i numeri fatti.
 import { periodoMovimento, chiaveOrdine, eTerminato, MESI_MOVIMENTI } from "./movimenti.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
-import { profiloMensile, quotaAttesa, frazioneDelMese, giorniDelMese } from "./attesoContratto.ts";
+import { profiloMensile, quotaAttesa, frazioneDelMese, giorniDelMese, variazioniDelContratto } from "./attesoContratto.ts";
 import { righeAndamento } from "./andamentoTarget.ts";
 import { daConfermare } from "./annoTarget.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
@@ -324,6 +324,16 @@ export function quadroRete({ anno, oggi, giornoDati, commessa, kpi, fonteTarget 
     // quanto somma il profilo scritto, che puo' non essere il target (11.571,64 t
     // contro 11.550 nel 2026): lo dice il perche' della sezione
     profilo: { rivisto: profilo.rivisto, somma_t: profilo.rivisto ? t3(profilo.totale) : null },
+    // LE VARIAZIONI DEL CONSORZIO CHE IL CONTRATTO COMPRENDE (giro del 14/10/2026).
+    // Target, mesi, regioni e atteso le hanno gia' dentro (attesoContratto.ts), ma
+    // la sezione diceva solo il numero: 11.650 t senza dire che 100 sono
+    // l'assegnazione di ottobre in Puglia. Qui quelle in vigore, la pagina le dice
+    // a parole (fraseVariazioni di righeQuadro.js); una superata da un salvataggio
+    // dopo non e' piu' nei numeri e non si dice. Il nome di chi l'ha registrata
+    // resta nella scheda Commessa: il quadro lo vede chiunque.
+    variazioni: variazioniDelContratto(commessa).filter(v => v.in_vigore).map(v => ({
+      mese_idx: v.mese_idx, mese: v.mese, regione: v.regione, t: t3(v.t), destinazione: v.destinazione || '', motivo: v.motivo || '', comunicata_il: v.comunicata_il || '',
+    })),
     mesi,
     regioni,
     fuori_contratto: { raccolto_t: t3(fuori.reduce((s, [, t]) => s + t, 0)), regioni: fuori.map(([regione, t]) => ({ regione, raccolto_t: t3(t) })) },

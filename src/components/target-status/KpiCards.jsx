@@ -22,14 +22,43 @@ import { tonnellate } from '@/lib/target';
 const giornoMese = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}` : '');
 const conSegno = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${tonnellate(v)}`);
 
+// LE VARIAZIONI DEL CONSORZIO NELLA CARD DEL TARGET (giro del 14/10/2026). Il
+// target annuo e' gia' quello con le variazioni registrate (11.650 t con le 100 t
+// di ottobre in Puglia), ma la card diceva solo «Dal contratto Ecotyre»: chi la
+// guardava non sapeva da dove venissero le 100 t in piu' sulle 11.550 di inizio
+// anno. Le dice la tabella per regione, sotto; qui una riga e il target senza.
+
+/**
+ * Le variazioni in vigore per la card: { quante, t, senza_t, voci } o null.
+ * variazioni sono quelle di variazioniDelContratto (src/lib/attesoContratto.js):
+ * una superata (in_vigore falso) non e' piu' nel target e non si conta.
+ */
+export function variazioniPerLaCard(variazioni, targetT) {
+  const vv = (variazioni || []).filter(v => v && v.in_vigore !== false && Number.isFinite(Number(v.t)));
+  if (!vv.length || targetT === null || targetT === undefined || !Number.isFinite(Number(targetT))) return null;
+  const t = Math.round(vv.reduce((s, v) => s + Number(v.t), 0) * 1000) / 1000;
+  return { quante: vv.length, t, senza_t: Math.round((Number(targetT) - t) * 1000) / 1000, voci: vv.map(v => ({ mese: v.mese, regione: v.regione, t: Number(v.t) })) };
+}
+
+/** La riga della card: «Compresa la variazione del consorzio (+100,00 t di ottobre in Puglia): senza, 11.550,00 t.» */
+export function notaVariazioni(variazioni) {
+  if (!variazioni || !variazioni.quante) return '';
+  const una = variazioni.quante === 1 && variazioni.voci && variazioni.voci[0];
+  const quali = una
+    ? `Compresa la variazione del consorzio (${conSegno(una.t)} t di ${String(una.mese || '').toLowerCase()} in ${una.regione})`
+    : `Comprese le ${variazioni.quante} variazioni del consorzio (in tutto ${conSegno(variazioni.t)} t)`;
+  return `${quali}: senza, sarebbe ${tonnellate(variazioni.senza_t)} t. Il dettaglio è sotto la tabella per regione.`;
+}
+
 export default function KpiCards({ kpis, anno }) {
-  const notaTarget = kpis.targetAnnuoTotale === null
+  const notaBase = kpis.targetAnnuoTotale === null
     ? `Il contratto del ${anno} non è inserito: scrivilo nella scheda Commessa Ecotyre.`
     : kpis.targetDaConfermare
       ? "Copiato dall'anno prima, da confermare nella scheda Commessa Ecotyre."
       : kpis.fonteTarget === 'ripiego'
         ? `Il contratto del ${anno} non ha il target annuo: è quello scritto nel gestionale come ripiego.`
         : 'Dal contratto Ecotyre, canale RETE.';
+  const notaTarget = [notaBase, kpis.targetAnnuoTotale === null ? '' : notaVariazioni(kpis.variazioni)].filter(Boolean).join(' ');
   const mesi = (kpis.mesiScarto || []).join(', ').toLowerCase();
   const tuttoLAnno = kpis.conFiltri ? " Tutto l'anno: i filtri non valgono qui." : '';
   const filtriScarto = (kpis.filtriScarto || []).length ? ` Con i filtri: ${kpis.filtriScarto.join('; ')}.` : '';

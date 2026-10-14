@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { MESI } from '@/lib/pfuConstants';
 import { exportExcel, exportPDF, exportPPT } from '@/lib/statusExports';
-import KpiCards from '@/components/target-status/KpiCards';
+import KpiCards, { variazioniPerLaCard } from '@/components/target-status/KpiCards';
 import TargetTable from '@/components/target-status/TargetTable';
 import RegionTable from '@/components/target-status/RegionTable';
 import ImpiantiTable from '@/components/target-status/ImpiantiTable';
@@ -302,6 +302,9 @@ export default function TargetStatus() {
       targetAnnuoTotale: contratto.t,
       fonteTarget: contratto.fonte,
       targetDaConfermare: contratto.da_confermare,
+      // Le variazioni del consorzio che il target comprende, per la nota della
+      // card (giro del 14/10/2026): solo quelle in vigore, dal contratto della pagina.
+      variazioni: contratto.fonte === 'contratto' ? variazioniPerLaCard(variazioniDelContratto(commessa).filter(v => v.in_vigore), contratto.t) : null,
       raccoltoTotale,
       residuoAnno: contratto.t === null ? null : contratto.t - raccoltoTotale,
       scartoMese: giornoDati ? raccoltoMese - attesoMese : null,

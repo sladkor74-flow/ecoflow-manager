@@ -3,9 +3,46 @@
 // PDF. Stanno qui, in un file senza componenti, perche' pagina e PDF dicano le
 // stesse parole e gli stessi numeri, e perche' la prova li legga senza
 // impacchettare i grafici (prove/dashboardPagina.mjs).
-import { t, pct, intero, giornoMese, avantiIndietro, segnoScarto, coloreScarto, qualificatoriTarget, MESI_BREVI } from '@/components/dashboard/formato';
+import { t, tSegno, pct, intero, giorno, giornoMese, avantiIndietro, segnoScarto, coloreScarto, qualificatoriTarget, MESI_BREVI } from '@/components/dashboard/formato';
 
 export const senzaTarget = (rete) => !rete || rete.target_t === null || rete.target_t === undefined;
+
+// LE VARIAZIONI DEL CONSORZIO A PAROLE (giro del 14/10/2026). Il quadro porta
+// quelle che il contratto comprende (quadro.rete.variazioni, quadroCommessa.ts):
+// target, mesi, regioni e atteso le hanno gia' dentro, e la sezione diceva solo
+// 11.650 t. All'utente, il 14/10: «come variano gli altri moduli e sezioni di
+// conseguenza considerando che il target è passato a 11.650 t nell'anno 2026?».
+const variazioniDi = (rete) => (senzaTarget(rete) ? [] : (rete.variazioni || []).filter(v => v && Number.isFinite(Number(v.t))));
+const sommaVariazioni = (vv) => Math.round(vv.reduce((s, v) => s + Number(v.t), 0) * 1000) / 1000;
+const voceVariazione = (v) => {
+  const perche = [String(v.motivo || '').trim(), v.comunicata_il ? `comunicata il ${giorno(v.comunicata_il)}` : ''].filter(Boolean).join(', ');
+  return `${String(v.mese || '').toLowerCase()}, ${v.regione} ${tSegno(v.t)}${perche ? ` (${perche})` : ''}`;
+};
+
+/**
+ * La frase del perche' del target: «Il contratto 2026 comprende una variazione
+ * del consorzio: ottobre, Puglia +100,00 t (assegnazione del consorzio di
+ * ottobre, comunicata il 14/10/2026). Senza, il target sarebbe 11.550,00 t. [...]».
+ * Stringa vuota se il contratto non ne comprende: allora niente cambia.
+ */
+export function fraseVariazioni(rete, anno = null) {
+  const vv = variazioniDi(rete);
+  if (!vv.length) return '';
+  const somma = sommaVariazioni(vv);
+  const contratto = anno ? `Il contratto ${anno}` : 'Il contratto';
+  const testa = vv.length === 1
+    ? `${contratto} comprende una variazione del consorzio: `
+    : `${contratto} comprende ${vv.length} variazioni del consorzio, in tutto ${tSegno(somma)}: `;
+  return `${testa}${vv.map(voceVariazione).join('; ')}. Senza, il target sarebbe ${t(Number(rete.target_t) - somma)}. Nell'atteso ${vv.length === 1 ? 'conta intera' : 'ognuna conta intera'} nel suo mese e nella sua regione: le altre regioni non cambiano. Si registrano nella scheda Commessa Ecotyre di Target & Status.`;
+}
+
+/** La riga breve sotto il target: «compresa la variazione del consorzio di ottobre in Puglia (+100,00 t)». */
+export function sottoVariazioni(rete) {
+  const vv = variazioniDi(rete);
+  if (!vv.length) return '';
+  if (vv.length === 1) return `compresa la variazione del consorzio di ${String(vv[0].mese || '').toLowerCase()} in ${vv[0].regione} (${tSegno(vv[0].t)})`;
+  return `comprese ${vv.length} variazioni del consorzio (${tSegno(sommaVariazioni(vv))})`;
+}
 
 /** Le cifre della rete, con il perche' dove serve. Esportate per la prova e per il PDF. */
 export function cifreRete(rete, { annoInCorso } = {}) {
@@ -14,8 +51,15 @@ export function cifreRete(rete, { annoInCorso } = {}) {
   const q = qualificatoriTarget(rete);
   const residuo = rete.residuo_t;
   const manca = (v) => v === null || v === undefined;
+  // Le variazioni del consorzio: sotto il numero in breve (va anche nel PDF), nel
+  // perche' a parole intere (giro del 14/10/2026). Senza variazioni, come prima.
+  const sv = sottoVariazioni(rete);
   const cifre = [
-    { etichetta: 'Target annuo del contratto', valore: t(rete.target_t), sotto: q || 'il contratto Ecotyre in Target & Status' },
+    {
+      etichetta: 'Target annuo del contratto', valore: t(rete.target_t),
+      sotto: [q || 'il contratto Ecotyre in Target & Status', sv].filter(Boolean).join(', '),
+      ...(sv ? { perche: fraseVariazioni(rete) } : {}),
+    },
     { etichetta: 'Raccolto', valore: t(rete.raccolto_t), sotto: `${intero(rete.ritiri)} ${rete.ritiri === 1 ? 'ritiro' : 'ritiri'} (ordini distinti)` },
     { etichetta: 'Fatto dell\'anno', valore: senzaTarget(rete) ? '—' : pct(rete.pct_target), sotto: senzaTarget(rete) ? 'senza target non si misura' : 'del target annuo' },
     {

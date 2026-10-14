@@ -6,7 +6,7 @@ import ReteMesi from '@/components/dashboard/ReteMesi';
 import ReteRegioni from '@/components/dashboard/ReteRegioni';
 import ReteRaccoglitori from '@/components/dashboard/ReteRaccoglitori';
 import { t, pct, intero, giorno, giorniMedi } from '@/components/dashboard/formato';
-import { cifreRete, senzaTarget } from '@/components/dashboard/righeQuadro';
+import { cifreRete, senzaTarget, fraseVariazioni } from '@/components/dashboard/righeQuadro';
 
 // LA RETE: IL CONTRATTO ECOTYRE DELL'ANNO (migliorie dell'11/10/2026).
 //
@@ -61,6 +61,11 @@ export default function SezioneRete({ quadro, arretrato, annoInCorso, daGestire,
   const fuoriConto = Number(rete.senza_fine_trasporto) || 0;
   const tempi = rete.tempi;
   const ferme = rete.province_ferme;
+  // Le variazioni del consorzio che il contratto comprende, anche nel perche'
+  // della sezione (chiusura del giro del 14/10/2026): la cifra del target le
+  // diceva gia', la sezione diceva «il contratto ... il modificato per ultimo» e
+  // basta. Senza variazioni la frase e' vuota e il perche' e' quello di prima.
+  const variazioni = fraseVariazioni(rete, anno);
   return (
     <Sezione
       id="rete" icona={Truck}
@@ -69,7 +74,7 @@ export default function SezioneRete({ quadro, arretrato, annoInCorso, daGestire,
       perche={(
         <>
           <p>Raccolto: primarie di rete terminate del {anno}, per giorno italiano di fine trasporto (mai la chiusura a portale).</p>
-          <p>Target: il contratto Ecotyre del {anno} in Target &amp; Status, il modificato per ultimo.{rete.ripiego ? ' Quest\'anno è un target di ripiego: quello scritto nel gestionale finché il contratto non è inserito.' : ''}</p>
+          <p>Target: il contratto Ecotyre del {anno} in Target &amp; Status, il modificato per ultimo.{rete.ripiego ? ' Quest\'anno è un target di ripiego: quello scritto nel gestionale finché il contratto non è inserito.' : ''}{variazioni ? ` ${variazioni}` : ''}</p>
           <p>Atteso: il target ripartito col profilo mensile del contratto, riportato all&apos;annuo{rete.profilo && rete.profilo.somma_t ? ` (il profilo scritto somma ${t(rete.profilo.somma_t)}, il target ${t(rete.target_t)})` : ''}, {rete.atteso && rete.atteso.fine_anno ? 'per l\'anno intero: l\'anno è chiuso, e l\'atteso al 31/12 è il target.' : 'fino al giorno dei dati.'}</p>
           {fuoriConto > 0 && <p>Fuori dal conto {intero(fuoriConto)} {fuoriConto === 1 ? 'ordine terminato' : 'ordini terminati'} senza fine trasporto, di qualunque anno: vedi Da gestire.</p>}
         </>

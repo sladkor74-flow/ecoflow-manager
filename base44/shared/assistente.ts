@@ -17,8 +17,9 @@ import { giornoRoma, annoRoma } from "./giornoItaliano.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { contaFormulari } from "./formulari.ts";
 import { commessaDellAnno } from "./annoTarget.ts";
-import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, attesoDellaRegione, giornoDeiDati } from "./attesoContratto.ts";
+import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, attesoDellaRegione, giornoDeiDati, variazioniDelContratto } from "./attesoContratto.ts";
 import { datiFinoAl } from "./statoArchivi.ts";
+import { PERCHE_SENZA_FOTOGRAFIA, totaleDellaColonna } from "./giacenzaPortale.ts";
 
 const PAROLE_DATI = [
   'target', 'raccolt', 'raccoglitor', 'giacenz', 'plafond', 'tonnellat', 'campania', 'puglia', 'basilicata',
@@ -54,6 +55,98 @@ export function analizzaDomanda(testo) {
 const t1 = (v) => formatoTonnellate(v);
 const p1 = (v) => (Math.round((Number(v) || 0) * 10) / 10).toLocaleString('it-IT');
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+// Le tonnellate col segno davanti («+100,00 t», «-50,00 t») e il giorno gg/mm/aaaa.
+const t1Segno = (v) => `${Number(v) > 0 ? '+' : ''}${t1(v)} t`;
+const giornoIt = (g) => (g ? `${String(g).slice(8, 10)}/${String(g).slice(5, 7)}/${String(g).slice(0, 4)}` : '');
+
+// Una variazione del contratto a parole: «ottobre, Puglia +100,00 t
+// (assegnazione del consorzio di ottobre, comunicata il 14/10/2026)».
+const voceVariazione = (v) => {
+  const perche = [String(v.motivo || '').trim(), v.comunicata_il ? `comunicata il ${giornoIt(v.comunicata_il)}` : ''].filter(Boolean).join(', ');
+  return `${String(v.mese || '').toLowerCase()}, ${v.regione} ${t1Segno(v.t)}${perche ? ` (${perche})` : ''}`;
+};
+
+/**
+ * LE VARIAZIONI DEL CONSORZIO A PAROLE (decisioni dell'utente del 13/10/2026,
+ * giro del 14/10/2026). Una variazione registrata nel contratto muove da se'
+ * target annuo, regione, mese e atteso, ma il riepilogo diceva solo il numero:
+ * alla domanda dell'utente del 14/10 («come variano gli altri moduli [...]
+ * considerando che il target è passato a 11.650 t nell'anno 2026?») EcoTyna
+ * leggeva 11.650 t e non sapeva dire da dove venisse. vigenti sono le variazioni
+ * che il contratto comprende ancora (in_vigore di variazioniDelContratto),
+ * targetT il target annuo del contratto. Stringa vuota senza variazioni.
+ */
+export function testoVariazioni(vigenti, anno, targetT) {
+  const vv = (vigenti || []).filter(v => v && v.in_vigore !== false);
+  if (!vv.length) return '';
+  const somma = Math.round(vv.reduce((s, v) => s + (Number(v.t) || 0), 0) * 1000) / 1000;
+  const testa = vv.length === 1
+    ? `Il contratto ${anno} comprende una variazione del consorzio, registrata nella scheda Commessa Ecotyre: `
+    : `Il contratto ${anno} comprende ${vv.length} variazioni del consorzio, registrate nella scheda Commessa Ecotyre, in tutto ${t1Segno(somma)}: `;
+  const conTarget = targetT !== null && targetT !== undefined && Number.isFinite(Number(targetT));
+  const senza = conTarget ? ` Per questo il target annuo e' ${t1(targetT)} t: senza, sarebbe ${t1(Number(targetT) - somma)} t.` : '';
+  // Il target mensile rivisto si nomina solo per le variazioni che ci sono
+  // scritte (nel_mese, revisione del giro del 14/10/2026): registrata su un
+  // contratto che il profilo mensile non lo aveva, la variazione va solo nel
+  // target annuo e nella regione, e qui si diceva a EcoTyna anche un mese
+  // rivisto che non c'e'.
+  const nelMese = vv.filter(v => v.nel_mese);
+  const dove = nelMese.length === vv.length
+    ? 'target annuo, regione e target mensile rivisto'
+    : nelMese.length
+      ? `target annuo e regione, e per ${nelMese.map(v => `${String(v.mese || '').toLowerCase()}, ${v.regione}`).join('; ')} anche il target mensile rivisto`
+      : 'target annuo e regione';
+  return `${testa}${vv.map(voceVariazione).join('; ')}.${senza} Sono gia' nei numeri del contratto (${dove}), che dashboard, Target & Status e avvisi leggono; nell'atteso alla data ognuna conta intera nel suo mese e nella sua regione, e le altre regioni non cambiano.`;
+}
+
+// IL TOTALE DI UNA COLONNA DELLE GIACENZE, CON LA REGOLA DEL MODULO (giro del
+// 14/10/2026, sulle decisioni dell'utente del 13/10/2026). Il perche' di ogni
+// riga senza numero, canale per canale, e' quello che calcolaGiacenze usa per i
+// suoi totali: il perche' della rete; per l'ACI il suo, o quello della rete in un
+// piazzale (rete e classe 9 stanno nella stessa rilevazione); per l'extra
+// raccolta solo il suo (un piazzale che non ne ha non manca di niente).
+const CAMPO_GIACENZA = { RETE: 'giacenza_portale_t', ACI: 'giacenza_aci_t', EXTRA_RACCOLTA: 'giacenza_extra_t' };
+const PERCHE_GIACENZA = {
+  RETE: (g) => g.perche_senza_giacenza,
+  ACI: (g) => (g.perche_canali && g.perche_canali.ACI) || (g.tipo_destinazione === 'stoc' ? g.perche_senza_giacenza : null),
+  EXTRA_RACCOLTA: (g) => g.perche_canali && g.perche_canali.EXTRA_RACCOLTA,
+};
+
+/**
+ * Il totale di un canale sulle righe di calcolaGiacenze (tutte o solo alcune:
+ * gli impianti, gli stoccaggi, il sito chiesto): { t, perche }. Una riga senza il
+ * numero per mancanza del dato fa del totale un «—» (t null), e perche dice
+ * quali righe e perche', con le parole del modulo (totaleDellaColonna di
+ * giacenzaPortale.ts). Prima qui e nello strumento giacenze si sommava con lo
+ * zero al posto del numero che manca: il totale della rete di un anno prima del
+ * gestionale usciva 0,00 t. La rete di chi non la dichiara non manca: non ha
+ * niente da sommare.
+ */
+export function totaleGiacenze(righe, canale) {
+  const campo = CAMPO_GIACENZA[canale];
+  const col = totaleDellaColonna((righe || []).map(g => ({
+    sito: g.tipo_destinazione === 'stoc' ? `${g.sito} (piazzale)` : g.sito,
+    t: g[campo],
+    perche: PERCHE_GIACENZA[canale](g) || null,
+  })));
+  return { t: col.t === null ? null : Math.round(col.t * 1000) / 1000, perche: col.perche };
+}
+
+/**
+ * L'IMPIANTO SENZA IL FILE DEGLI ORDINI NON DICHIARATI si riconosce dal suo
+ * perche' (giro del 14/10/2026). Bastava una fotografia senza giorno: fra gli
+ * «impianti senza il file» finivano anche quelli di un anno chiuso senza la
+ * lettura del 31/12 e di un anno prima del gestionale, a cui il file non manca:
+ * il numero mancava davvero, il motivo detto era sbagliato. calcolaGiacenze
+ * scrive PERCHE_SENZA_FOTOGRAFIA solo per il file mai caricato; una riga senza
+ * nessun perche' (una risposta di prima) si riconosce ancora dalla fotografia.
+ * La rete di chi per accordo non la dichiara non e' un file che manca.
+ */
+export function senzaFileDelPortale(g) {
+  if (!g || g.tipo_destinazione === 'stoc' || g.rete_non_dovuta) return false;
+  if (g.perche_senza_giacenza) return g.perche_senza_giacenza === PERCHE_SENZA_FOTOGRAFIA;
+  return !(g.fotografia && g.fotografia.del);
+}
 
 async function provaA(fn, ripiego, cosa = '', guasti = null) {
   try { return await fn(); } catch (e) {
@@ -176,6 +269,16 @@ export async function situazioneGestionale(base44, oggi) {
       ? 'target annuo non inserito nel contratto'
       : `target annuo ${t1(contratto.t)} t${contratto.fonte === 'ripiego' ? " (il contratto non ha il target annuo: e' quello scritto nel gestionale come ripiego, come nella Dashboard)" : ''}`;
     righe.push(`Contratto Ecotyre ${anno}, canale RETE: ${targetTesto}; ${quotaTesto}.${contratto.da_confermare ? " Il contratto e' copiato dall'anno prima e va confermato in Target & Status." : ''}`);
+    // Le variazioni del consorzio, a parole (testoVariazioni, giro del
+    // 14/10/2026): quelle che il contratto comprende, e a parte quelle che un
+    // salvataggio dopo ha riscritto, perche' non si dicano come in vigore.
+    const variazioni = variazioniDelContratto(commessa);
+    const vigenti = variazioni.filter(v => v.in_vigore);
+    if (vigenti.length) righe.push(`  ${testoVariazioni(vigenti, anno, contratto.t)}`);
+    const superate = variazioni.filter(v => !v.in_vigore);
+    if (superate.length) {
+      righe.push(`  ${superate.length === 1 ? "Una variazione registrata non e' piu'" : `${superate.length} variazioni registrate non sono piu'`} nel contratto: un salvataggio dopo ne ha riscritto i numeri, vale il contratto scritto e non ${superate.length === 1 ? 'conta' : 'contano'} (${superate.map(voceVariazione).join('; ')}).`);
+    }
     const regioni = regioniDellAnno(commessa, anno);
     if (regioni.fonte === 'ripiego') righe.push(`  Il contratto non ha il riparto per regione: quello qui sotto e' il riparto del ${anno} scritto nel gestionale come ripiego, come nella Dashboard.`);
     for (const r of regioni.righe) {
@@ -185,8 +288,12 @@ export async function situazioneGestionale(base44, oggi) {
       const senzaRaccolto = !raccolto;
       // L'atteso della regione con le sue variazioni soltanto, come la Dashboard e
       // l'Andamento (attesoDellaRegione, variazioni del contratto del 14/10/2026).
-      const attesoRegione = attesoDellaRegione(commessa, anno, giornoDati, r.regione).atteso_t;
-      righe.push(`- ${r.regione}: contratto ${t1(contrattoRegione)} t, raccolto ${senzaRaccolto ? 'n/d (lettura non riuscita)' : `${t1(fatto)} t (${contrattoRegione ? p1(fatto / contrattoRegione * 100) : '-'}%)`}, atteso a oggi ${attesoRegione === null ? 'n/d' : `${t1(attesoRegione)} t`}, mese in corso ${senzaRaccolto ? 'n/d' : `${t1(racc?.mesi?.[mese])} t`}.`);
+      // E quanto del suo contratto sono variazioni del consorzio, se ce ne sono.
+      const delContratto = attesoDellaRegione(commessa, anno, giornoDati, r.regione);
+      const attesoRegione = delContratto.atteso_t;
+      const variazioniRegione = Number(delContratto.variazioni_t) || 0;
+      const diCui = Math.abs(variazioniRegione) >= 0.0005 ? ` (di cui ${t1Segno(variazioniRegione)} di variazioni del consorzio)` : '';
+      righe.push(`- ${r.regione}: contratto ${t1(contrattoRegione)} t${diCui}, raccolto ${senzaRaccolto ? 'n/d (lettura non riuscita)' : `${t1(fatto)} t (${contrattoRegione ? p1(fatto / contrattoRegione * 100) : '-'}%)`}, atteso a oggi ${attesoRegione === null ? 'n/d' : `${t1(attesoRegione)} t`}, mese in corso ${senzaRaccolto ? 'n/d' : `${t1(racc?.mesi?.[mese])} t`}.`);
     }
   } else {
     // Senza contratto la Dashboard mostra il ripiego scritto nel gestionale, dove
@@ -319,7 +426,9 @@ export async function situazioneGestionale(base44, oggi) {
   if (giacenze && Array.isArray(giacenze.righe) && giacenze.righe.length) {
     const tc = (v) => (v === null || v === undefined ? '-' : t1(v));
     const stoc = (g) => g.tipo_destinazione === 'stoc';
-    const senzaFile = (g) => !stoc(g) && !(g.fotografia && g.fotografia.del);
+    // Dal suo perche', non da una fotografia senza giorno (senzaFileDelPortale,
+    // giro del 14/10/2026).
+    const senzaFile = senzaFileDelPortale;
     righe.push('Impianti e stoccaggi, un canale per colonna e mai sommati (giacenza RETE | giacenza ACI | giacenza EXTRA RACCOLTA, che in uno stoccaggio e\' quella in piazzale e in un impianto quella arrivata e non ancora dichiarata | target RETE | primarie RETE nell\'anno | % del target RETE, cioe\' primarie sul target, quanto del target di raccolta e\' stato raccolto | residuo RETE, cioe\' target meno TUTTO quello che e\' arrivato, primarie piu\' secondarie in ingresso, perche\' il target di un impianto comprende gia\' le secondarie dai piazzali: percentuale e residuo rispondono a due domande diverse e non sono l\'uno il complemento dell\'altra | conferito ACI nell\'anno | conferito extra raccolta nell\'anno). In un impianto la giacenza ACI e quella di extra raccolta sono apertura + arrivato - dichiarato e caricato, come nel modulo Dichiarazioni. Il trattino vuol dire non calcolata o non pertinente, MAI zero: la giacenza RETE e ACI di uno stoccaggio senza rilevazione del portale, la giacenza RETE di un impianto senza il file degli ordini non dichiarati o di un impianto che per accordo non ci dichiara la rete (non calcolata); l\'extra raccolta di uno stoccaggio che nell\'anno non ne ha movimentata (non pertinente).');
     for (const g of giacenze.righe.slice(0, 25)) {
       righe.push(`- ${g.sito} (${stoc(g) ? 'stoccaggio' : 'impianto'}): ${senzaFile(g) ? '-' : tc(g.giacenza_rete_t)} | ${tc(g.giacenza_aci_t)} | ${tc(g.giacenza_extra_t)} | ${g.target_totale_t ? t1(g.target_totale_t) : '-'} | ${t1(g.conferito_primarie_t)} | ${g.percentuale_target !== null && g.percentuale_target !== undefined ? p1(g.percentuale_target) + '%' : '-'} | ${g.residuo_t !== null && g.residuo_t !== undefined ? t1(g.residuo_t) : '-'} | ${t1(g.conferito_aci_t)} | ${t1(g.conferito_extra_t)}`);
@@ -341,10 +450,29 @@ export async function situazioneGestionale(base44, oggi) {
     // dichiarate e un piazzale con 3 t di classe 9 davano «ACI negli stoccaggi
     // 10 t», mentre lo strumento giacenze diceva 3. Si rifanno sulle righe, come
     // fa lo strumento, cosi' i due testi dicono gli stessi numeri.
-    const sommaT = (xs, campo) => Math.round(xs.reduce((s, g) => s + (Number(g[campo]) || 0), 0) * 1000) / 1000;
+    //
+    // UN TOTALE CHE NON SI FA E' «—», NON 0,00 (giro del 14/10/2026, punto 7 del
+    // gruppo D-K). Dalle decisioni dell'utente del 13/10/2026 il totale della rete
+    // del modulo e' null quando una riga non ha il numero per mancanza del dato (un
+    // impianto senza il file del portale, un piazzale senza lettura, un anno chiuso
+    // senza la lettura del 31/12, un anno prima del gestionale), col perche'.
+    // formatoTonnellate(null) scrive 0,00: il riepilogo diceva «RETE 0,00 t» e il
+    // modello lo leggeva come piazzali e impianti vuoti. Ora «RETE: —» col perche'
+    // del modulo; e ACI ed extra raccolta, divisi fra impianti e stoccaggi, si
+    // sommano con la stessa regola (totaleGiacenze): prima un piazzale senza
+    // lettura valeva zero nella somma degli stoccaggi.
     const impR = giacenze.righe.filter(g => !stoc(g));
     const stocR = giacenze.righe.filter(stoc);
-    righe.push(`Giacenze per canale, tre totali distinti: RETE ${t1(tot.giacenza_portale_t)} t${fuoriRete.length ? ` (esclusi ${fuoriRete.join('; ')})` : ''}; ACI: impianti ${t1(sommaT(impR, 'giacenza_aci_t'))} t, stoccaggi ${t1(sommaT(stocR, 'giacenza_aci_t'))} t${fuoriAci}; EXTRA RACCOLTA: impianti ${t1(sommaT(impR, 'giacenza_extra_t'))} t (arrivata e non ancora dichiarata), stoccaggi ${t1(sommaT(stocR, 'giacenza_extra_t'))} t (in piazzale). Impianti e stoccaggi dello stesso canale sono due numeri: dilli tutti e due.`);
+    const tT = (x) => (x.t === null ? '—' : `${t1(x.t)} t`);
+    const percheDi = (canale) => tot.perche_prima_del_gestionale || totaleGiacenze(giacenze.righe, canale).perche || '';
+    const percheSe = (canale, ...parti) => (parti.some(x => x.t === null) ? ` (non e' zero: ${percheDi(canale)})` : '');
+    const senzaReteTotale = tot.giacenza_portale_t === null || tot.giacenza_portale_t === undefined;
+    const reteTesto = senzaReteTotale
+      ? `RETE: — (non e' zero: ${(tot.perche_totali && tot.perche_totali.RETE) || percheDi('RETE') || 'il modulo Giacenze non ha dato il totale.'})`
+      : `RETE ${t1(tot.giacenza_portale_t)} t${fuoriRete.length ? ` (esclusi ${fuoriRete.join('; ')})` : ''}`;
+    const aciImp = totaleGiacenze(impR, 'ACI'), aciStoc = totaleGiacenze(stocR, 'ACI');
+    const extraImp = totaleGiacenze(impR, 'EXTRA_RACCOLTA'), extraStoc = totaleGiacenze(stocR, 'EXTRA_RACCOLTA');
+    righe.push(`Giacenze per canale, tre totali distinti: ${reteTesto}; ACI: impianti ${tT(aciImp)}, stoccaggi ${tT(aciStoc)}${aciStoc.t === null ? '' : fuoriAci}${percheSe('ACI', aciImp, aciStoc)}; EXTRA RACCOLTA: impianti ${tT(extraImp)} (arrivata e non ancora dichiarata), stoccaggi ${tT(extraStoc)} (in piazzale)${percheSe('EXTRA_RACCOLTA', extraImp, extraStoc)}. Impianti e stoccaggi dello stesso canale sono due numeri: dilli tutti e due.`);
     // Il confronto col target lo fa calcolaGiacenze sulla sola giacenza di rete.
     const sopra = (giacenze.anomalie || []).filter(a => a.tipo === 'giacenza_sopra_target');
     if (sopra.length) righe.push(`Siti con giacenza RETE sopra il target: ${sopra.map(a => a.sito).join(', ')}.`);
