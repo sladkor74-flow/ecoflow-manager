@@ -63,6 +63,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Il foglio della passiva dell'amministrazione (11/10/2026)
   - Un nome, un record: anagrafica e consuntivi (11/10/2026)
   - Prima di eliminare, chi lo usa (12/10/2026)
+  - La scheda dei fornitori (13/10/2026)
   - La pratica mensile di Irigom
   - La Quadratura FIR: il flusso non si indovina dal titolo (30/09/2026)
     - La parola "gestionale" sulla stampa non siamo noi
@@ -70,6 +71,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - La dashboard: il quadro della commessa e l'elenco unico delle cose da gestire (11/10/2026)
   - La chiusura del mese passo passo (11/10/2026)
   - Il target del contratto e l'atteso alla data (11/10/2026)
+  - Le variazioni del contratto in corso d'anno (14/10/2026)
   - L'Andamento di Target & Status: le stesse parole in pagina, Excel, PDF e presentazione (11/10/2026)
   - I tipi di regola alert (11/10/2026)
   - Il motore degli alert al cambio d'anno (12/10/2026)
@@ -236,6 +238,14 @@ diventano 30.** E' quando vale un surplus, a chi, quanto fa una riga, i
 controlli e i conflitti del salvataggio. Lo usano passiva, attiva, margine,
 `gestisciAnagrafiche`, EcoTyna e, nelle pagine, la colonna «Surplus» delle
 tariffe, la scheda dei surplus e l'extra raccolta.
+
+**Con le decisioni del 13/10/2026 entra `configurazioneRegolaAlert`, e le
+coppie diventano 31** (aggiunta all'elenco dalla chiusura del giro, il
+14/10/2026). E' il giorno della configurazione di una regola alert, uguale per
+la pagina Alert Engine e per `runAlertEngine`. `surplusVisibile.ts` (la parte
+attiva del surplus per chi non e' amministratore) non ha uno specchio: la usa
+solo la funzione `leggiSurplus`, e nel browser `src/lib/leggiSurplus.js` chiama
+la funzione.
 
 **Gli import in `src/lib` vanno bene in tutte due le forme.** La convenzione e'
 l'alias `@/` (39 dei 92 file; 12 usano un relativo, fra cui i cinque che prendono
@@ -429,6 +439,26 @@ nota e ai rifiuti a dati intatti. Prove: `prove/ascoltoCaricamenti.mjs`,
 `prove/terminatiReteUnaLettura.mjs`, `prove/evasioneAnnoInMemoria.mjs`,
 `prove/pagineUnaRilettura.mjs`.
 
+**Un contatore degli alert che non si e' letto dice «—», mai 0** (13/10/2026):
+in Terminati Rete `caricaAlert` mette null quando getAlerts non risponde o
+risponde senza `total`, e accanto a «Carica dati» compare «Alert aperti: —
+(non letti)», che porta alla pagina degli alert. Prima metteva 0 e il segno
+spariva, come se non ci fossero alert aperti. Finche' la prima lettura non
+risponde non si mostra niente. Dal 14/10/2026 (chiusura del giro) lo stesso in
+Secondarie, dove una risposta senza conteggio diventava 0 e una lettura caduta
+lasciava a video il numero di prima. Prove: `prove/terminatiReteUnaLettura.mjs`,
+`prove/pagineUnaRilettura.mjs` («SECONDARIE: GLI ALERT NON LETTI DICONO «—»»).
+
+**Una lettura fallita non riparte da sola** (revisione del 13/10/2026). Un
+effetto che legge «quando i dati non ci sono e nessuna lettura e' in corso»
+riparte da solo dopo ogni errore, perche' e' proprio lo stato che un errore
+lascia: negli Assegnati erano 51 letture su 51 errori. L'errore si tiene in uno
+stato (`erroreRecords` in `src/pages/Assegnati.jsx`) e l'effetto non riparte.
+La pagina lo dice («Gli ordini non si sono letti (...)», oppure «non si sono
+riletti: quelli a video sono della lettura di prima») e offre «Riprova»; un
+caricamento chiuso vale come un nuovo tentativo. Prova:
+`prove/pagineUnaRilettura.mjs`.
+
 ### Base44: comandi, file e riferimenti
 
 Questo e' un repository di un'app Base44: codice dell'utente, modifiche aderenti
@@ -589,6 +619,15 @@ che qualcuno ha messo una condizione su un campo **nostro**, e allora va guardat
 una per una. **E non si toglie un `data.` legittimo**: su un campo nostro quel
 prefisso serve, e senza, una condizione sbagliata rende invisibili i propri record
 al loro proprietario senza che si veda dall'account dell'amministratore.
+
+Il primo `data.` legittimo e' quello di `ModificaDato` (`"data.riservato": false`,
+14/10/2026). Sta nell'elenco `GUARDATE` di `prove/scrittureDegliUtenti.mjs`, che
+fallisce se compare un `data.` nuovo non guardato e se uno guardato sparisce.
+Dopo la pubblicazione va controllato da un utente non amministratore: la riga
+Storico di un target cambiato deve mostrare le modifiche. Se non mostra niente,
+la condizione non regge, e la strada e' una lettura solo all'amministratore piu'
+una funzione di sola lettura dello storico, come `leggiSurplus`, chiamata da
+`StoricoModifiche.jsx`.
 
 ### Il nome: TreadRider
 
@@ -861,8 +900,14 @@ che la rifa' darebbe una terza risposta**. Otto prudenze:
    la sezione Impianti e «Da gestire» no. Ora le righe sono quelle della pagina.
    Il canale di una riga di stoccaggio sta in fondo alla chiave
    («nappi sud|RETE»): `canaleDellaVoce`, la stessa regola di `canaleDelSito`.
-   L'ACI degli stoccaggi resta fuori dal verdetto, come nella dashboard dove sta
-   a parte. Chi non ha fotografia (Tecnogum) non si scosta da niente. Lo
+   L'ACI degli stoccaggi non entra nel conto della rete. **Dal 13/10/2026
+   (decisioni dell'utente, gruppo B) uno stoccaggio ACI con un confronto a
+   portale (oggi Nappi Sud, classe 9) che non quadra fa «da guardare»** e
+   aggiunge alla nota una frase sua, dopo quella della rete: «Uno stoccaggio ACI
+   (classe 9) si scosta dal portale: NAPPI SUD SRL +3,00 t» (`scostamentiAci`,
+   `notaAci` in `indicatoriGiorno.ts`: stessa regola e tolleranza, canale
+   'ACI'). `scostamenti_json` resta della sola rete. Sui dati veri dell'11/10/2026
+   Nappi Sud ACI fa 0,00 t a portale e 0,00 t calcolate: nessuna voce. Chi non ha fotografia (Tecnogum) non si scosta da niente. Lo
    scostamento di uno stoccaggio porta `stoccaggio: true`. La nota e la voce
    «giacenze:scostamenti» dicono chi si scosta (`chiSiScosta`): «Uno stoccaggio
    non quadra col portale», «Un impianto e uno stoccaggio non quadrano». Anche
@@ -1399,6 +1444,80 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
     Sull'anno in corso le etichette restano quelle di prima. Le etichette le
     prova la sezione 4 di `prove/attesaDellAnno.mjs`.
 
+19. **Tecnogum sulla rete e' un giro chiuso** (decisioni dell'utente del
+    13/10/2026: «tutte le 249,06 t sono andate in tecnogum per il quale
+    impianto, come già sai, noi nel 2026 non facciamo dichiarazioni perchè loro
+    non ci fatturano i conferimenti rete (trattamento); per ciò che ci riguarda
+    il cerchio è chiuso»). Il file degli ordini non dichiarati attribuisce
+    ancora 181,299 t allo stoccaggio di T-Cycle. Sono partite tutte verso
+    Tecnogum, che sulla rete non dichiara a SMOCO.
+    - Il numero resta quello del portale, e serve alla quadratura.
+    - Le pagine lo dicono «attribuite dal portale allo stoccaggio, ma per noi
+      chiuse: TECNOGUM SRL sulla rete non dichiara a SMOCO»: niente «Da
+      gestire», niente avvisi.
+    - La regola e' `attesaChiusaPerNoi` (`shared/giacenzaPortale.ts`), con
+      `partenzeDegliStoccaggi` e `primoInAttesa` di `collocaFotografia`. Si
+      chiude solo quello che non puo' essere andato altrove: tutte le partenze
+      terminate dal primo carico in attesa vanno verso chi ha `dichiara_rete`
+      falso, meno quello ancora in piazzale.
+    - Uno stoccaggio che manda anche a chi dichiara, come Nappi Sud, resta
+      un'attesa.
+    - Le Giacenze e la Quadratura portano `in_attesa_chiusa_t` e
+      `in_attesa_chiusa_perche` sulla riga, e nei totali `in_attesa_chiusa_t`;
+      la storia della riga del Riepilogo lo racconta allo stesso modo
+      (`stoccaggioDelSito`, `attesaChiusa`).
+    - Prova: `prove/giroChiusoTecnogum.mjs` (anche sui dati veri: T-Cycle
+      181,299 t chiuse in tutti e due i moduli, Nappi Sud no).
+
+20. **Gli anni passati: lo stesso numero, o «—» in tutti e due col perche'**
+    (13/10/2026). Le regole sono in `shared/giacenzaPortale.ts`:
+    - Un anno chiuso si legge con la lettura del 31/12 salvata dalla chiusura
+      (`letturaDelTrentuno`), non col portale di oggi. Senza la lettura e' «—»
+      con `PERCHE_SENZA_LETTURA_DEL_TRENTUNO`. Le Giacenze di un anno chiuso
+      leggono anche i siti dell'anno dopo: una lettura in piu', solo per un anno
+      chiuso, come il riepilogo.
+    - Un anno chiuso senza nessuna GiacenzaSito (`annoPrimaDelGestionale`) non si
+      ricostruisce: «—» su rete, ACI ed extra in tutti e due i moduli, con
+      `PERCHE_ANNO_PRIMA_DEL_GESTIONALE`. Nella risposta ci sono
+      `prima_del_gestionale` e `perche_prima_del_gestionale` solo quando e' vero.
+      Sul 2025 dei dati veri prima dicevano tre numeri, nessuno vero: Irigom
+      652,84 t nelle Giacenze (il portale di oggi) e 4.439,08 nelle Dichiarazioni
+      (tutto l'arrivato), Tecnogum 1.833,43 contro 2.007,08, Innorec 0 contro
+      1.254,41; sul 2024 Green Tyre 337,96 contro 0.
+    - Un piazzale di un anno chiuso senza una lettura che lo apra ha «—» anche
+      nelle Giacenze (`PERCHE_PIAZZALE_SENZA_INIZIO`), come nelle Dichiarazioni:
+      sul 2025 Nappi Sud diceva 25,88 t in una e «—» nell'altra.
+    - Le Giacenze confrontano portale con portale (voce (a) del catalogo). La
+      giacenza del canale delle Dichiarazioni e' la calcolata. Su un anno chiuso
+      guardato prima della chiusura le Giacenze dicono «—» e la calcolata c'e':
+      e' la quadratura che manca, non un'identita' rotta.
+    - Prove: `prove/identitaFraModuli.mjs`, sezione 5 (5a-5e, e sui dati veri
+      il 2024 e il 2025), `prove/storiaDichiarazioni.mjs`.
+
+21. **Una riga senza numero non vale zero nel totale** (revisione del
+    14/10/2026). Il 2026 guardato il 05/01/2027, prima che la chiusura salvi la
+    lettura del 31/12: le righe dei cinque impianti che dichiarano la rete
+    dicevano «—» col loro perche', ma il totale della colonna delle Giacenze
+    (anche la KPI «Giacenza rete a portale») diceva 25,88 t, il solo piazzale di
+    Nappi Sud, e il totale a portale delle Dichiarazioni 0. Ora una riga che il
+    numero non ce l'ha per mancanza del dato fa del totale del canale un «—», e
+    il totale dice quali righe e perche', con la stessa regola e le stesse
+    parole nei due moduli (`totaleDellaColonna`, `PERCHE_TOTALE_SENZA_RIGHE`).
+    La rete di chi non la dichiara non manca. L'anno in corso non cambia di un
+    chilo. Prova: `prove/totaleSenzaRighe.mjs` (la regola, le due funzioni vere,
+    la tabella delle Giacenze e la Quadratura, i dati veri).
+
+22. **Il mese di un target mensile si legge com'e' scritto, in tutti i moduli**
+    (rilievo della revisione, corretto con le decisioni del 13/10/2026).
+    `targetMensiliValidi` riconosce il doppione col mese com'e' scritto, e
+    Target & Status, l'Andamento, gli avvisi ed EcoTyna leggono «Ottobre» e
+    basta (i mesi di `targetRaccoglitori.ts`). La ripartizione fra gli impianti
+    (`ripartisciTargetPrimarie` in `targetImpianti.ts`, per Giacenze e
+    predittivita') leggeva il mese in minuscolo e sommava «Ottobre» e
+    «ottobre»: 80 + 50 = 130 t dove la pagina dice 80. Ora una riga con un mese
+    scritto in un altro modo non vale in nessun modulo. Prova:
+    `prove/targetMeseComeScritto.mjs`.
+
 **La prova confronta tutto.** Oltre alle trappole, `confrontaTutto` (in
 `prove/dueModuliStessiNumeri.mjs`) mette a fianco ogni impianto e ogni piazzale,
 canale per canale, nei due moduli: gli stessi numeri, o nessun numero in tutti e
@@ -1597,6 +1716,78 @@ tariffe di rete**, ne' nel calcolo ne' nel modulo. In fatturazione entrano solo 
 interventi terminati, nel mese della fine trasporto. Una scheda si chiude
 (terminato) solo con FIR, peso effettivo e le tre date obbligatorie.
 
+**Le secondarie dell'extra raccolta sono trasporti di secondaria** (decisione
+dell'utente del 13/10/2026: «le eventuali secondarie di extra raccolta saranno
+trattate come normali trasporti di secondaria con il loro €/t oppure €/viaggio a
+seconda del tragitto e dei contratti»). E' l'eccezione alla regola dei costi
+scritti sull'intervento.
+- In passiva (`tariffaTrasportoExtra` e `trasportoInterventoExtra` in
+  `passivaCalcolo.ts`) il prezzo e' la tariffa TRASPORTO_SECONDARIA del vettore
+  (chi fattura, dopo la catena dei subfornitori) per la tratta stoccaggio →
+  destinazione, nel giorno italiano della fine del trasporto: prima una tariffa
+  EXTRA_RACCOLTA, poi la TUTTE del contratto del vettore; una disattivata mai.
+- A tonnellata sui chili, a viaggio una volta per viaggio (qui sotto). Il
+  centesimo e' per intervento.
+- Il prezzo a viaggio scritto sull'intervento vale solo per una tratta senza
+  contratto; accanto a un contratto non si paga, e la nota della riga lo dice.
+  Senza l'uno e l'altro, l'anomalia.
+- Una secondaria non e' piu' fra le raccolte (prima ci stava a 0 €, con
+  l'avviso sbagliato «il contratto di extra raccolta prevede 80 €/t»). Un costo
+  di raccolta scritto su una secondaria non si paga e si dice, e la scheda lo
+  chiude e salva 0.
+- Il sovracosto pagato al trasportatore di una secondaria si paga sulla riga
+  del suo trasporto; un vettore interno ha la riga a 0.
+- Pagina, scheda e blocco del foglio usano la stessa regola, `trasportoIntervento`
+  di `extraRaccoltaCalc.js`, col quinto argomento di `contestoPrezzi` (le tariffe
+  passive). La pagina legge una volta, solo per l'amministratore, le tariffe
+  TRASPORTO_SECONDARIA; il foglio della passiva (`PassivaModulo`) passa quelle che
+  legge gia' (dal 14/10/2026, chiusura del giro: prima non le passava, e il
+  foglio diceva 0 + 40 dove la passiva 600 + 40; prova:
+  `prove/extraRaccoltaSecondarie.mjs`, sezione 9).
+- Senza le tariffe nel contesto, `trasporto.non_letto` e il prezzo scritto, e
+  la nota del foglio lo dice.
+- Nel foglio la colonna TRASPORTO di una secondaria porta quanto si paga per il
+  viaggio, cosi' la formula della riga rifa' l'importo.
+
+**Lo stesso viaggio si paga una volta, anche nell'extra raccolta** (revisione
+del 14/10/2026). Un viaggio e' un camion in un giorno. A viaggio, le secondarie
+di extra raccolta con lo stesso automezzo, lo stesso giorno italiano di
+`trasporto_finito_il`, la stessa tratta e lo stesso vettore pagano il prezzo del
+contratto una volta sola:
+- l'automezzo con la targa normalizzata;
+- la tratta dallo stoccaggio alla destinazione;
+- il vettore e' chi fattura, dopo la catena dei subfornitori.
+
+Il prezzo si divide fra gli interventi in proporzione ai chili, come il viaggio
+misto fra rete e ACI. Senza chili si divide in parti uguali. L'ultimo
+nell'ordine di `chiaveInterventoExtra` prende la differenza, cosi' la somma e'
+sempre il prezzo. A tonnellata non cambia niente. Il prezzo scritto a mano
+sull'intervento, per una tratta senza contratto, resta di quell'intervento.
+
+Il codice:
+- in `passivaCalcolo.ts`: `chiaveViaggioExtra`, `quoteDelViaggio` e
+  `trasportoInterventoExtra(r, tariffe, trasKey, membri)`. La riga condivisa
+  porta `viaggi_quota`, `viaggio_condiviso` e la nota «stesso viaggio di FS B
+  (camion GC599NL, 10/09/2026): i 400,00 € a viaggio si pagano una volta, divisi
+  per peso, qui 6,00 t delle 12,00: 200,00 €»;
+- in `src/lib/extraRaccoltaCalc.js` la stessa regola, con `conViaggi(contesto,
+  interventi)`. La pagina lo chiama con l'elenco gia' letto, e
+  `bloccoExtraRaccolta` con gli interventi del mese. Senza `conViaggi` ogni
+  intervento e' un viaggio a se'.
+
+Senza targa, piu' interventi dello stesso giorno sulla stessa tratta sono un
+viaggio solo, e c'e' l'anomalia. Un camion che porta anche formulari di rete o
+ACI puo' essere pagato a viaggio anche in quella passiva, cioe' due volte: la
+passiva dell'extra raccolta lo dice con l'anomalia «lo stesso camion ...». La
+strada per toglierlo e' contare, nel blocco delle secondarie di rete e ACI, i
+chili dell'extra raccolta come un terzo canale nella proporzione dei viaggi
+misti (la regola del 22/09/2026, «fai la proporzione in base al peso»); ma
+allora anche la pagina dell'extra raccolta deve leggere le Secondarie di quei
+giorni, altrimenti non direbbe lo stesso costo. Sui dati veri dell'11/10/2026
+non ci sono secondarie di extra raccolta, e la passiva e' identica oggetto per
+oggetto in tutti i mesi del 2026. Prova: `prove/extraRaccoltaSecondarie.mjs`
+(sezioni 6-8 per il viaggio).
+
 **Il prezzo attivo dell'extra raccolta e' una funzione sola** (chiusura
 dell'audit, 11/10/2026): `prezzoAttivoExtra` in
 `base44/shared/ecotyreTariffe.ts` (specchio `src/lib/ecotyreTariffe.js`). Prima
@@ -1604,8 +1795,8 @@ il prezzo scritto, poi la Tariffa ATTIVA EXTRA_RACCOLTA valida, poi la base
 dell'anno; una secondaria vale zero. La usano la fattura (`attivaCalcolo.ts`),
 la pagina, la scheda e il foglio. La pagina legge una volta le tariffe attive
 dell'extra raccolta, tutti i fornitori (non piu' solo quelli con la spunta della
-dicitura, dal surplus del 13/10/2026) e i surplus, e passa
-`contestoPrezzi(tariffe, fornitori, surplus, subfornitori)`
+dicitura, dal surplus del 13/10/2026) e i surplus (da `leggiSurplus`), e passa
+`contestoPrezzi(tariffe, fornitori, surplus, subfornitori, tariffePassive)`
 (`src/lib/extraRaccoltaCalc.js`) a `calcExtraRaccolta(r, contesto)`; il surplus
 nell'extra raccolta e' in «Il surplus sulle tariffe». Prima aveva una copia
 della sola base dei 202 euro: dal 2027, o con la tabella a un valore diverso,
@@ -1948,28 +2139,27 @@ attiva, +4.332,80 € a nove raccoglitori, margine +1.268,40 € (253,68 t di
 SMOCO x 5); ACI +94,45 €, +69,95 €, margine +24,50 €; extra raccolta nessun
 intervento.
 
-#### Le domande ancora aperte
+#### Le domande del progetto: decise il 13/10/2026 sera
 
-Il giro e' fatto con le proposte del progetto, che l'utente non ha ancora
-confermato. Il 13/10/2026 sera ha accettato le proposte sulle domande nuove
-del giro, «poi risponderò anche alle altre»: queste restano aperte, e le sue
-risposte sono le regole del paragrafo che segue.
-- **D1, la prefattura.** Come portera' il Fuel Surcharge non si sa: il
-  confronto riconosce le quattro forme (vedi «Il surplus nella prefattura»), e
-  la prima prova vera sara' la prefattura di ottobre. Se Ecotyre lo comunica
-  fuori dalla prefattura, il confronto lo scrive e non lo conta (regola 3 del
-  13/10/2026 sera).
+Il giro e' stato fatto con le proposte del progetto. Il 13/10/2026 sera
+l'utente ha accettato quelle sulle domande nuove (le cinque regole del
+paragrafo che segue) e poi ha deciso le altre: dove serve con parole sue, per
+il resto si affida *«alla tua professionalità e alla capacità di rendere
+questo gestionale sempre più performante»*. Le proposte sono quindi regole, e
+nessuna domanda del surplus resta aperta tranne la forma della prefattura.
+- **D1, la prefattura: si sapra' il 04/11/2026.** Come il portale portera' il
+  Fuel Surcharge nella prefattura lo dira' quella di ottobre, attesa per il
+  04/11/2026. Il confronto riconosce gia' le quattro forme (vedi «Il surplus
+  nella prefattura»); se Ecotyre lo comunica fuori dalla prefattura, il
+  confronto lo scrive e non lo conta (regola 3).
 - **D2, le tonnellate di SMOCO.** Ecotyre paga il surplus su tutto il canale e
   SMOCO, che sulle sue tonnellate e' il raccoglitore, non lo paga a nessuno:
   resta a SMOCO, e il margine sale.
-- **D3, i tre report dell'amministrazione dell'attiva: NON FATTA.**
-  `fatturazioneExport.js`, `formatAmministrazione.js` e
-  `formatAmministrazioneExport.js` non hanno la riga del surplus e non si
-  toccano finche' l'utente non dice come la vuole (proposta: una riga «Fuel
-  Surcharge» in fondo, con la quantita' vuota). Intanto la pagina delle
-  esportazioni passa loro le sole righe dei formulari (vedi «La fatturazione
-  attiva verso Ecotyre»). La parte 7b di `prove/attivaReportSurplus.mjs` tiene
-  l'impronta dei tre file: chi li cambia dopo la risposta la aggiorna.
+- **D3, i tre report dell'amministrazione dell'attiva: FATTA il 13/10/2026 sera.**
+  L'utente: il Fuel Surcharge *«deve essere una voce disgiunta con un proprio
+  rigo (per canale)»*. Una riga per surplus sotto i formulari, con la Quantita'
+  vuota, il totale dei soli formulari e il TOTALE che la comprende (vedi «La
+  fatturazione attiva verso Ecotyre»).
 - **D4, i fornitori.** Il surplus arriva come riga a parte nello stesso
   consuntivo del mese.
 - **D5, la base di Ecotyre**: comprende le tonnellate «Trasp.» (Tecnogum).
@@ -1978,17 +2168,31 @@ risposte sono le regole del paragrafo che segue.
 - **D7, un mese chiuso**: il gestionale lo segnala e non riapre niente; si fa
   la fattura integrativa del solo surplus. Dal 13/10/2026 sera il mese e'
   «gia' fatturato» anche con l'attiva approvata o esportata (regola 2).
-- **D8, chi legge**: come `Tariffa`, lettura aperta e scrittura del solo
-  amministratore; pagine ed EcoTyna mostrano `euro_t_passiva` solo a lui.
+- **D8, chi legge**: deciso il 13/10/2026 sera. `SurplusTariffa` lo legge solo
+  l'amministratore, e a chi non lo e' la parte attiva arriva dalla funzione
+  `leggiSurplus` (vedi «Chi legge il surplus»). Prima la lettura era aperta
+  come quella di `Tariffa`.
 
-Restano aperte anche due domande nuove: gli estremi della comunicazione del
-consorzio per il campo «Riferimento»; e se il TOTALE QUANTITA' del riepilogo
-dei file dell'elenco dell'extra raccolta debba contare solo i chili fatturati
-(oggi conta anche le secondarie, mentre il surplus vale sui soli chili
-fatturati: vedi «Il surplus nell'extra raccolta»). Finche' l'utente non
-risponde resta com'era. Quella sui costi mostrati a chi non e' amministratore
-e' chiusa il 13/10/2026 (vedi «I costi dei fornitori sono
-dell'amministratore»).
+Le due domande nuove sono chiuse lo stesso giorno. Il campo «Riferimento» resta
+generico: la comunicazione del consorzio l'ha ricevuta il responsabile
+dell'utente. Il TOTALE QUANTITA' dei file dell'elenco dell'extra raccolta conta
+solo i chili fatturati, e le secondarie hanno una riga loro (vedi «Il surplus
+nell'extra raccolta»). Quella sui costi mostrati a chi non e' amministratore e'
+chiusa il 13/10/2026 (vedi «I costi dei fornitori sono dell'amministratore»).
+
+**Il Fuel Surcharge e' dei raccoglitori, sulle sole primarie** (decisioni
+dell'utente del 13/10/2026 sera, testuali): *«il surplus per il fuel surcharge
+riguarda solo le primarie, quindi va a favore dei soli raccoglitori; per
+l'extra raccolta noi fatturiamo al consorzio solo le primarie con eventuali
+surplus [...]; le eventuali secondarie di extra raccolta saranno trattate come
+normali trasporti di secondaria con il loro €/t oppure €/viaggio a seconda del
+tragitto e dei contratti»*, e *«il fuel surcharge non riguarda i produttori ma
+i trasportatori ovvero i raccoglitori, su questo non ci devono essere
+confusioni»*. Il Fuel Surcharge scritto dall'utente (rete, ACI ed extra
+raccolta; la raccolta, a tutti i raccoglitori; +5/+5 €/t; dal 01/10 al
+31/12/2026) e' gia' cosi', e non si tocca. Il motore sa ancora un surplus su
+trattamento, stoccaggio o trasporto delle secondarie: serve a un accordo
+commerciale che lo chieda, mai al Fuel Surcharge.
 
 #### Le risposte del 13/10/2026 sera: cinque regole
 
@@ -2109,7 +2313,10 @@ campo che il calcolo legge: `surplusAll` per la passiva, `surplus` o
 Un `{ surplus: x }` dato alla passiva si perderebbe in silenzio. Il surplus
 passato deve venire da una lettura di `SurplusTariffa` nel file, oppure da chi
 chiama la funzione che lo riceve come parametro (il margine lo riceve da
-`calcolaMargine`). Fanno fallire la prova anche un surplus vuoto scritto a mano,
+`calcolaMargine`). Dal 13/10/2026 vale come lettura anche la chiamata di
+`leggiSurplus` di `src/lib/leggiSurplus.js`, importata col suo nome o con un
+altro: e' la strada delle pagine che servono anche a chi non e'
+amministratore. Fanno fallire la prova anche un surplus vuoto scritto a mano,
 un alias o una riesportazione che la guardia non segue, un riferimento senza
 chiamata e una lettura di `SurplusTariffa` con un filtro sullo stato.
 - Le chiamate senza surplus stanno in `SENZA_SURPLUS` col loro motivo, di due
@@ -2208,7 +2415,12 @@ e la `nota` pronta. Un elenco sbagliato e' un'informazione, non un'anomalia.
 - trattamento e stoccaggio su tutto quello che arriva al sito;
 - il trasporto delle secondarie sulle tonnellate del canale della tratta, anche
   sui viaggi misti, solo sulle tratte che hanno una riga; nell'extra raccolta
-  solo sugli interventi secondari.
+  solo sugli interventi secondari, e solo se il loro trasporto si paga (col
+  contratto della tratta o col prezzo scritto: vedi «Le secondarie
+  dell'extra raccolta sono trasporti di secondaria» in «Canali indipendenti»).
+
+Il Fuel Surcharge e' una raccolta: vale solo per i raccoglitori (vedi «Le
+domande del progetto»). Le altre prestazioni servono agli accordi commerciali.
 
 Un fornitore interno non ha la riga. Il centesimo e' `importoSurplus` sui chili
 del fornitore nel mese: uno per fornitore, per surplus, per canale.
@@ -2250,6 +2462,10 @@ l'anomalia e' identica campo per campo.
 Prova: `prove/surplusTariffaMancante.mjs`, anche sui dati veri (settembre col
 Fuel Surcharge simulato e ottobre col vero non hanno raccoglitori pagati senza
 tariffa, e i numeri non cambiano).
+
+**Le secondarie dell'extra raccolta** si pagano come trasporti di secondaria
+(decisione del 13/10/2026), e lo stesso camion nello stesso giorno si paga una
+volta: le regole stanno in «Canali indipendenti».
 
 **I consuntivi.** `costoAttesoDallaPassiva` da' `importo` = standard + surplus
 (il fornitore fattura il surplus come riga a parte nello stesso consuntivo, D4),
@@ -2319,8 +2535,9 @@ mostrano con `NomeSurplus.jsx`: barretta ed etichetta «Surplus» nel token
   solo). Se sono cambiati anche dei movimenti c'e' una frase sola: riaprire e
   rielaborare OPPURE fare un'integrazione in due righe (formulari e surplus).
   Mai le due indicazioni insieme, altrimenti il surplus si fattura due volte.
-- **I tre report dell'amministrazione ricevono le sole righe dei formulari**
-  finche' l'utente non risponde a D3: la parte 7 di
+- **I tre report dell'amministrazione ricevono tutte le righe del documento**
+  (D3, decisa il 13/10/2026 sera) e mettono il surplus nella sua riga: vedi
+  «La fatturazione attiva verso Ecotyre». La parte 7 di
   `prove/attivaReportSurplus.mjs` lo verifica eseguendo davvero
   `AttivaEsportazioni.jsx` e premendo i suoi pulsanti (`ESPORTAZIONI=<file>`
   prova una versione proposta della pagina prima di metterla al suo posto).
@@ -2341,7 +2558,17 @@ passati chiede prima l'anteprima al server, che dice i mesi chiusi, e si
 conferma. I conti della pagina stanno in
 `src/components/fatturazione/surplusTariffe.js`. Col Fuel Surcharge salvato,
 sulla copia dell'11/10: la pastiglia su 29 tariffe, la fascia «29 tariffe
-interessate (22 di raccolta, 7 attive)».
+interessate (22 di raccolta, 7 attive)». Le 29 sono 17 tariffe di raccolta
+della rete, 5 dell'ACI e 7 attive (la rete, le cinque regioni dell'ACI e
+l'extra raccolta). Un rilievo del 13/10/2026 dava «28 tariffe interessate (22
+di raccolta, 7 attive)»: non si riproduce. `tariffeDelleSchede` conta ogni
+tariffa una volta per surplus e in un gruppo solo (le attive, o le passive per
+prestazione), quindi il totale e' sempre la somma delle parti, e conta proprio
+le tariffe a cui la colonna mette la pastiglia. Quel testo uscirebbe solo
+togliendo dal totale un'attiva (per esempio quella dell'extra raccolta)
+lasciata fra le attive. La sezione 11 di `prove/surplusPagina.mjs` lo controlla
+su 5.000 combinazioni a caso e sui dati veri, dove fascia, colonna e filtro
+«Con surplus» dicono lo stesso 29.
 
 **Un surplus, piu' canali, date diverse: la pagina dice il periodo di ogni
 canale** (revisione del 13/10/2026). I record dello stesso surplus sui diversi
@@ -2439,12 +2666,18 @@ funzioni sono in `src/lib/extraRaccoltaCalc.js`.
   del surplus dice lo scarto delle quote quando c'e'.
 - `calcExtraRaccolta` ha `ricavo` e `costo_totale` col surplus,
   `ricavo_standard` e `costo_standard` senza.
-- `contestoPrezzi(tariffe, fornitori, surplus, subfornitori)`: la pagina legge
-  SurplusTariffa tutto (una lettura, mai con `{ stato: 'attivo' }`) e
-  l'anagrafica intera, e passa il modulo `src/lib/subfornitori.js`, che in node
-  non si carica perche' importa con l'alias. Interno, id e catena della passiva
-  vengono dai soli fornitori attivi, come in `calcolaPassiva`; l'id per un
-  elenco dell'attiva viene da tutti, come in `elaboraFatturazioneAttiva`.
+- `contestoPrezzi(tariffe, fornitori, surplus, subfornitori, tariffePassive)`:
+  la pagina chiede i surplus a `leggiSurplus()` (`src/lib/leggiSurplus.js`):
+  una chiamata, tutti i record che chi e' collegato puo' leggere, mai con un
+  filtro sullo stato (vedi «Chi legge il surplus»). Legge l'anagrafica intera, e
+  passa il modulo `src/lib/subfornitori.js`, che in node non si carica perche'
+  importa con l'alias. Il quinto argomento sono le tariffe passive, per il
+  contratto della tratta delle secondarie: la pagina le legge solo per
+  l'amministratore, e il foglio della passiva (`PassivaModulo`) passa quelle che
+  legge gia' (chiusura del giro, 14/10/2026: prima non le passava). Interno,
+  id e catena della passiva vengono dai soli fornitori attivi, come in
+  `calcolaPassiva`; l'id per un elenco dell'attiva viene da tutti, come in
+  `elaboraFatturazioneAttiva`.
 - `bloccoExtraRaccolta(interventi, anno, mese, contesto)`
   (`src/lib/extraRaccoltaAmministrazione.js`) restituisce `surplus` (una riga
   per fornitore e per surplus), `surplus_interni`, `totale_standard` e
@@ -2452,6 +2685,24 @@ funzioni sono in `src/lib/extraRaccoltaCalc.js`.
   restano lo standard e le tonnellate non cambiano.
 - La parte ai fornitori (€/t passivo, importi, chi e' interno) la vede solo
   l'amministratore.
+
+**Il Fuel Surcharge e' dei raccoglitori, mai dei produttori** (utente,
+13/10/2026 sera: «il fuel surcharge non riguarda i produttori ma i trasportatori
+ovvero i raccoglitori, su questo non ci devono essere confusioni»).
+- Ogni quota attiva di `surplusIntervento` porta `fornitore` e
+  `fornitore_chiave`, cioe' a chi e' dovuta: il raccoglitore che fattura (catena
+  dei subfornitori) per la raccolta e per un surplus senza prestazione, la
+  destinazione per trattamento e stoccaggio.
+- `surplusDelMese` ha `per_fornitore`: una riga per mese, surplus e fornitore
+  che lo riceve, con `kg_attivo`, `kg_passivo`, `ricavo` (parte da Ecotyre sui
+  suoi chili), `costo` (quello della passiva; 0 con `interno`; null se il
+  surplus non ha quella parte) e `sul_movimento` (i subraccoglitori).
+- `aggregaPerProduttore` e' lo standard qualunque contesto riceva. Il 13/10
+  mattina sommava le quote del surplus, e un produttore aveva un Fuel Surcharge
+  suo.
+- Chi riceve un surplus, a parole, sta in `aiChiSurplus` e `titoloSurplus` di
+  `extraRaccoltaCalc.js`: «Fuel Surcharge ai raccoglitori», «... agli impianti»,
+  «... ai trasportatori delle secondarie».
 
 **I file Excel e PDF dell'elenco hanno la riga del Fuel Surcharge** (regola 4,
 risposta dell'utente del 13/10/2026 sera). Fino ad allora ricevevano il
@@ -2473,29 +2724,42 @@ standard. Ora la pagina passa a `exportExtraRaccoltaExcel` e
   riga e' vestita come nei fogli della passiva (indaco, corsivo, barra).
 - **L'analisi per produttore, coi costi e il margine, esce solo
   all'amministratore** (`opzioni.isAdmin === true`; senza, si nega). Prima del
-  13/10 usciva a chiunque premesse il pulsante. Le righe dei produttori restano
-  lo standard (il contesto senza surplus) e il surplus ha righe sue sotto di
-  loro, col costo nella colonna della sua prestazione e il ricavo da Ecotyre;
-  il TOTALE le somma tutte: ricavi = Totale imponibile, costi = la passiva del
-  mese. Le righe del surplus vanno per mese, poi per nome e per data d'inizio,
-  come quelle della fattura (`righeDelSurplus`; revisione del 13/10/2026: prima
-  un accordo solo passivo di ottobre finiva dopo il Fuel Surcharge di
-  novembre). Un surplus senza la parte ai fornitori ha il costo null, non zero.
-- Il TOTALE QUANTITA' del riepilogo conta anche le secondarie, il surplus no:
-  vale sui chili fatturati, e la riga e la tabella del PDF lo dicono (nella
-  prova 6.465 kg nel totale, 4,465 t di surplus, 4.465 kg in fattura). Se il
-  totale debba contare solo i chili fatturati lo decide l'utente (domanda
-  aperta); finche' non risponde resta com'era.
+  13/10 usciva a chiunque premesse il pulsante. Dal 13/10/2026 sera l'analisi
+  e' lo standard, e il suo TOTALE pure: il surplus e' dei raccoglitori, non dei
+  produttori, e ha il suo blocco (qui sotto).
+- **Il TOTALE QUANTITA' conta solo i chili fatturati a Ecotyre**, cioe' le
+  primarie col peso effettivo (decisione del 13/10/2026 sera). Le secondarie
+  hanno la riga «Trasporti di secondaria (non si fatturano a Ecotyre)», in kg;
+  nel PDF il riquadro «Secondarie, non fatturate (kg)» e il sottotitolo «N
+  interventi, di cui ... trasporti di secondaria». Prima il totale le sommava
+  (6.465 kg sopra un surplus su 4,465 t).
+- **Il blocco «FUEL SURCHARGE AI RACCOGLITORI»**, uno per surplus, fra il
+  riepilogo e l'analisi: un gruppo per mese (e per importo se cambia a meta'
+  mese), con l'intestazione «Ottobre 2026 · consorzio Ecotyre · dal ... al ... ·
+  5,00 €/t da Ecotyre, 5,00 €/t ai raccoglitori», e una riga per raccoglitore
+  con tonnellate e ricavo da Ecotyre; all'amministratore anche costo, margine e
+  note (sub, interno). Il totale del mese e' la riga in fattura; se le righe
+  fanno un centesimo diverso, una nota lo dice. Chi non e' amministratore non
+  vede i surplus pagati solo ai fornitori. Nel PDF i blocchi prendono il posto
+  della tabella «SURPLUS SULLE TARIFFE»; all'amministratore l'intestazione del
+  gruppo e' divisa fra la prima colonna e quella delle note, perche' una cella
+  si taglia a tre righe.
+- All'amministratore il file chiude col «CONTO DEL MESE»: costi, ricavi e
+  margine, ciascuno standard, surplus e totale (costi = passiva del mese, ricavi
+  = Totale imponibile), poi il margine % complessivo col surplus.
 - Senza surplus il file dell'amministratore e' quello di prima, cella per
   cella; a chi non e' amministratore manca l'analisi.
-- Accanto ai pulsanti la pagina dice «Nei file il surplus ha la sua riga prima
-  del totale imponibile, col centesimo del mese come in fattura», e
-  all'amministratore anche la riga nell'analisi.
+- **La pagina** dice accanto ai pulsanti «... e il blocco «Fuel Surcharge ai
+  raccoglitori»: per raccoglitore le tonnellate[, il costo] e il ricavo da
+  Ecotyre, mai per produttore», e il tooltip della quota da Ecotyre «da
+  Ecotyre, per <raccoglitore>». **La scheda** dice «..., per il raccoglitore
+  <nome>».
 
 Prove: `prove/extraRaccoltaSurplus.mjs`, che sui dati veri controlla che ogni
 mese del 2026 pagina, fattura e passiva diano gli stessi numeri e che i
-pulsanti passino ai file il contesto coi surplus e i permessi;
-`prove/extraRaccoltaExport.mjs`, sezioni 6-13, sui file veri riaperti.
+pulsanti passino ai file il contesto coi surplus e i permessi (sezioni 6-7 per
+i raccoglitori); `prove/extraRaccoltaExport.mjs`, sezioni 2 e 6-15, sui file
+veri riaperti; `prove/documentiCheEscono.mjs`, sezione 11.
 
 #### In EcoTyna
 
@@ -2525,6 +2789,48 @@ pulsanti passino ai file il contesto coi surplus e i permessi;
 
 Prova: `prove/strumentiSurplus.mjs`, anche sui dati veri con settembre come mese
 di Fuel Surcharge: rete +5.601,20 / +4.332,80 €, ACI +94,45 / +69,95 €.
+
+#### Chi legge il surplus (13/10/2026)
+
+Decisione del gruppo B del 13/10/2026 sera: `SurplusTariffa` lo legge solo
+l'amministratore (`rls.read` come la scrittura). `euro_t_passiva` e' un costo, e
+un accordo pagato solo da SMOCO e' tutto un costo, nome e fornitori compresi.
+- **Le funzioni dei conti** leggono con `asServiceRole` e non cambiano. Anche
+  `cruscottoOperativo`, che dal 14/10/2026 legge i surplus per il promemoria di
+  quello finito l'anno prima e ne passa al calcolo solo nome, canale, date,
+  stato e la parte da Ecotyre.
+- **Le pagine dell'amministratore** (Tariffe & Anagrafiche, la Passiva)
+  leggono l'archivio dal browser come prima.
+- **Una pagina che serve anche agli altri** chiede i surplus alla funzione di
+  sola lettura `leggiSurplus`, nel browser `leggiSurplus()` di
+  `src/lib/leggiSurplus.js`: all'amministratore tutti i record, agli altri la
+  sola parte attiva. Chi e' amministratore lo decide il server. Oggi e' l'Extra
+  Raccolta (portata il 14/10/2026, nello stesso giro della chiusura
+  dell'archivio). Una pagina che leggesse l'archivio direttamente, aperta da
+  chi non e' amministratore, riceverebbe un elenco vuoto e direbbe «nessun
+  surplus» senza un errore.
+- **La parte attiva** sta in `base44/shared/surplusVisibile.ts`
+  (`surplusPerChiLegge`) ed e' un elenco di campi scritto, `CAMPI_PARTE_ATTIVA`:
+  id, nome, origine, canale, prestazione, a chi, `euro_t_attiva`, date e stato;
+  `fornitori_json` solo con «solo questi», perche' l'attiva vale sulle tonnellate
+  di quei fornitori. Restano fuori `euro_t_passiva`, riferimento, note, gruppo e
+  i campi della piattaforma (`created_by` e' un indirizzo email). Un surplus
+  senza parte attiva (solo passivo, o sul trasporto delle secondarie) non si
+  nomina. Un campo nuovo dell'archivio non arriva agli altri finche' non lo si
+  aggiunge li'.
+- **Lo storico delle modifiche** ne tiene una copia. Le righe di
+  `euro_t_passiva`, e tutte quelle di un surplus senza importo da Ecotyre,
+  nascono riservate, e le riceve solo l'amministratore (revisione del
+  14/10/2026, vedi «Lo storico delle modifiche»). Un surplus che perde la parte
+  attiva lascia leggibili le righe scritte quando l'aveva: il registro non si
+  corregge.
+- Sui dati veri dell'11/10/2026, con un Fuel Surcharge simulato su tutto il
+  2026, un accordo solo passivo e un «solo questi» su ogni canale, la fattura a
+  Ecotyre e la pagina dell'extra raccolta dicono gli stessi numeri con la sola
+  parte attiva, ogni mese e su tutti e tre i canali.
+
+Prova: `prove/chiLeggeCosa.mjs`, che monta anche la pagina Extra Raccolta con
+l'archivio chiuso, amministratore o no.
 
 #### Un colore solo
 
@@ -2591,6 +2897,25 @@ effettivo, ed e' quello che rende il conto leggibile invece che sospetto.
 - Un riquadro elenca gli ordini stimati sotto i 1.500 kg, i formulari oltre il
   110% dello stimato del ticket e quelli ripetuti sullo stesso ordine
   (`src/lib/controlliPortaleAci.js`). Le righe interessate hanno il segno.
+
+**Negli Assegnati ACI lo stimato sotto i 1.500 kg si segnala** (decisione
+dell'utente del 13/10/2026: «nessun aci può avere uno stimato inferiore a
+1.500 kg, se negli assegnati del portale è indicato così limitati a segnalarlo
+e provvederemo a farlo modificare al consorzio»). La pagina Assegnati, nella
+vista ACI (`entity` 'AssegnatoAci'), legge gli ordini appena si apre (una
+lettura, che il dettaglio riusa) e sopra la matrice ha un riquadro col conto
+sugli ordini dei filtri attivi: «Un ordine con lo stimato sotto i 1.500 kg
+ammessi: da far correggere al consorzio», con l'ID (che porta all'ordine), il
+ticket, il punto di raccolta e lo stimato. La regola e' una sola,
+`stimatoSottoMinimo` di `src/lib/controlliPortaleAci.js`, la stessa dei
+Terminati ACI; `problemiDellaRiga` scrive i chili all'italiana («stimato
+1.400 kg»). La pagina passa alla tabella il segno di ogni riga (`segni`, Map id
+-> frasi), e `AssegnatiTable` colora la riga e mette il triangolo accanto
+all'ID, col perche' nel title, come nei Terminati ACI (dal 14/10/2026, chiusura
+del giro: prima la tabella ignorava i segni). Il gestionale non corregge
+niente: lo fa il consorzio. Il 12/10/2026 gli assegnati ACI di SMOCO erano 2,
+nessuno sotto il minimo; ET26084363 (1.400 kg) e' gia' terminato. Prova:
+`prove/assegnatiAciStimato.mjs`.
 
 Le soglie `MINIMO_ACI_KG` e `SOGLIA_ACI` stanno in `formulari` (e nello
 specchio) dal 13/10/2026: le importano da li' sia `passivaCalcolo.ts` sia
@@ -2862,25 +3187,27 @@ Gli ultimi due guardano solo i movimenti rimasti liberi. I simili, inoltre, si
 cercano solo fra i movimenti dell'impianto verificato, perche' lo stesso
 blocchetto serve impianti diversi.
 
-Un simile vale solo con una conferma dalla riga: stesso peso, data entro un
-giorno, stessa classe, stesso produttore o codice PDR (ingresso), stesso
-destinatario (uscita). A due caratteri non basta una conferma qualsiasi
-(revisione del 13/10/2026): serve lo stesso peso o la data entro un giorno, e
-classe, produttore e destinatario contano solo insieme a uno di questi
-(`confermeBastano`). In un report di stoccaggio quasi tutte le righe hanno la
-stessa classe: con la sola classe un formulario non registrato, vicino di due
-cifre a un carico che il report non riporta, diventava «formulario errato»,
-perdeva il termine di registrazione e toglieva il carico dagli assenti. A un
-carattere basta ancora una conferma qualsiasi, come nei consuntivi. Il nome
-dell'impianto stesso e il trasportatore non confermano niente, perche' stanno su
-ogni riga del suo report. L'esito porta `riconosciuto_da` e il messaggio lo
-dice.
+Un simile vale solo con una conferma dalla riga, e la conferma e' **lo stesso
+peso o la data entro un giorno, a un carattere come a due** (per i due
+caratteri dalla revisione del 13/10/2026, per uno dalla decisione dello stesso
+giorno). Classe, produttore o codice PDR (ingresso) e destinatario (uscita)
+contano solo insieme a uno di questi (`confermeBastano`). In un report di
+stoccaggio quasi tutte le righe hanno la stessa classe, e i blocchetti sono
+numerati in sequenza: con la sola classe o il solo produttore, un formulario non
+registrato vicino di una o due cifre a un carico che il report non riporta
+diventava «formulario errato», perdeva il termine di registrazione e toglieva
+il carico dagli assenti. Il nome dell'impianto stesso e il trasportatore non
+confermano niente, perche' stanno su ogni riga del suo report. L'esito porta
+`riconosciuto_da` e il messaggio lo dice. I consuntivi (`confrontaConsuntivo`
+in `consuntivoFornitore.ts`) hanno ancora la regola di prima, una conferma
+qualsiasi: in un consuntivo di raccoglitore la classe e' quasi sempre la
+stessa, e allinearli e' il passo dopo.
 
 Senza conferma la riga e' «non presente», col suo termine di registrazione,
 l'osservazione «Simile a ...» e `simile_a` sull'esito; a due caratteri
-l'osservazione dice anche perche' non basta («ma a due caratteri di distanza
-servono lo stesso peso o la data entro un giorno (in comune c'e' solo la
-classe)»). Questa osservazione non conta fra le osservazioni del riepilogo. Il
+l'osservazione dice anche perche' non basta, con la distanza («ma a un
+carattere di distanza servono lo stesso peso o la data entro un giorno (in
+comune c'e' solo la classe)»). Questa osservazione non conta fra le osservazioni del riepilogo. Il
 PDF dell'esito scrive il «Simile a ...» sotto il formulario, nella tabella dei
 non registrati (`notaSimile`, `prove/esitoVerificaPdfSimile.mjs`).
 
@@ -3263,16 +3590,47 @@ Chi aggiunge una regola la aggiunge li', e aggiunge un caso a
   effettivo (`in_fattura`, accanto a `quanti`): «conta una volta (470,40 €): la
   copia senza peso effettivo non si fattura», oppure «non entra» se nessuna ha
   il peso. Un peso che manca si scrive «—» (13/10/2026). Nell'anteprima
-  (`RiepilogoEcotyre.jsx`) `formulario_ripetuto` e `regione_mancante` stanno in
-  `DA_GUARDARE`: escono in ambra.
+  (`RiepilogoEcotyre.jsx`) `formulario_ripetuto` sta in `DA_GUARDARE`: esce in
+  ambra.
 - **La regione del prezzo ACI e' quella di `regioneDi`** (12/10/2026): prima la
   provincia, poi la regione, scritta col nome della regione («PUGLIA» diventa
   «Puglia»), per tutte le righe dell'attiva. `findTariffa` confronta la regione
-  senza maiuscole e senza spazi in piu' (`normRegione`, nei due specchi). Un ACI
-  senza regione ne' provincia da' l'anomalia `regione_mancante`: dice se ha
-  preso la tariffa senza regione o se e' rimasto senza prezzo. Prima un ritiro
-  senza provincia con «PUGLIA» nel file prendeva 230 €/t invece di 240 in
-  silenzio. Prova: `prove/attivaDoppioniRegione.mjs`.
+  senza maiuscole e senza spazi in piu' (`normRegione`, nei due specchi). Prima
+  un ritiro senza provincia con «PUGLIA» nel file prendeva 230 €/t invece di
+  240 in silenzio.
+
+  **Un ACI senza regione ne' provincia e' un errore** (decisione del
+  13/10/2026): la riga non prende nessuna tariffa, nemmeno quella ACI senza
+  regione, resta a zero euro con `stato_validazione` 'errore' e la nota
+  `NOTA_ACI_SENZA_REGIONE`, e il documento ACI resta «elaborata» finche' la
+  provincia non si corregge nel caricamento (`cambiaStatoFatturazione` conta le
+  righe in errore). L'anomalia `regione_mancante` ha `gravita: 'errore'`; la
+  voce `senza_tariffa`, che mandava alle tariffe, per questo caso non nasce
+  piu'. I chili restano nel mese e il surplus li conta come prima.
+  Nell'anteprima (`RiepilogoEcotyre.jsx`) gli errori stanno in un riquadro
+  rosso a parte («Da correggere: il documento del canale non si verifica
+  finché restano»), e il badge del canale dice «senza prezzo».
+  **Chi decide sulle anomalie conta anche `gravita === 'errore'`, non solo
+  `senza_tariffa`**: le conferme di «Elabora Mese» e «Rielabora» in
+  `AttivaDashboard.jsx` (`erroriDaCorreggere`, `fraseErrore`: «ACI: un ritiro
+  senza provincia né regione (2,00 t). Il prezzo ACI cambia con la regione:
+  sarà salvato a zero euro e in errore, e il documento ACI non potrà essere
+  verificato finché non correggi la provincia nel caricamento.»), il toast di
+  una «Verifica» respinta («Una riga senza prezzo (una tariffa che manca o un
+  ritiro senza provincia)») e il riquadro delle prestazioni con errori, che dice
+  le due cause. Con le tariffe ACI del 2026, tutte regionali, contando solo le
+  tariffe mancanti il mese si elaborava senza chiedere niente (revisione del
+  14/10/2026, portata dalla chiusura del giro). Sui dati veri dell'11/10/2026
+  nessun ritiro ACI e' senza provincia. Prove:
+  `prove/attivaDoppioniRegione.mjs` (con la funzione vera
+  `cambiaStatoFatturazione` e la pagina eseguita),
+  `prove/attivaConfermaSenzaProvincia.mjs` (le conferme della pagina).
+- **Le date del riepilogo sono giorni italiani** (13/10/2026).
+  `RiepilogoEcotyre.jsx` scrive la data di elaborazione e la fine trasporto
+  dei movimenti della riconciliazione con `giornoRoma`: tagliando i primi
+  dieci caratteri, un documento elaborato alle 00:30 del 1° ottobre era «del
+  30/09» e un ritiro del 1° settembre «31/08». Prova:
+  `prove/riepilogoEcotyreGiorno.mjs`.
 - **Il surplus sulle tariffe e' UNA riga in piu' per canale** (13/10/2026; le
   regole del surplus in «Il surplus sulle tariffe»). `calcolaRigheAttiva({ ...,
   surplus })` riceve i record di `SurplusTariffa`, letti tutti con `fetchAll`;
@@ -3296,22 +3654,55 @@ Chi aggiunge una regola la aggiunge li', e aggiunge un caso a
   da solo. `calcolaRigheAttiva` restituisce anche `surplus_del_mese` per
   canale, con gli `ordini_ids` per la prefattura. Prova: `prove/attivaSurplus.mjs`.
 
-**I file dell'esportazione hanno le sole righe dei formulari, finche'
-l'amministrazione non dice come vuole il surplus** (D3, 13/10/2026). Il
-documento del mese ha la riga del surplus, ma il report dell'attiva e il format
-dell'amministrazione, in Excel e in PDF, hanno le colonne dei modelli SMOCO, e
-come metterci una riga in piu' lo decide l'amministrazione. Senza filtro la riga
-usciva come «Trasp.+Tratt.» con 0 kg e il TOTALE del file cambiava (sulla rete
-di settembre col Fuel Surcharge: 381 righe e 231.889,68 € invece di 380 e
-226.288,48). `AttivaEsportazioni.jsx` passa ai quattro file `soloFormulari`
-(`src/lib/surplusVista.js`) e dice, sopra i pulsanti e nell'esito, che il
-surplus si fattura con la sua riga a parte, e quanto («Il file ha le sole righe
-dei formulari: Fuel Surcharge € 5.601,20 si fattura con la sua riga a parte.»);
-due record dello stesso surplus si dicono una volta, col totale. Senza surplus
-la pagina e i file sono quelli di prima. Prove:
-`prove/attivaEsportazioniSurplus.mjs` (la pagina eseguita, coi suoi pulsanti e
-le sue parole) e la parte 7 di `prove/attivaReportSurplus.mjs` (le righe sui
-dati veri).
+**Nei file dell'esportazione il surplus e' una voce a se', con la sua riga**
+(D3, decisa dall'utente il 13/10/2026 sera: il Fuel Surcharge *«deve essere
+una voce disgiunta con un proprio rigo (per canale)»*). `AttivaEsportazioni.jsx`
+passa ai quattro file tutte le righe del documento del canale. `tabellaAttiva`
+(`fatturazioneExport.js`) e `tabellaAmministrazione` (`formatAmministrazione.js`)
+le separano con `soloFormulari` e `soloSurplus`: `righe` sono i soli formulari,
+cella per cella quelli di prima; `surplus` le righe dei surplus
+(`{ celle, nome, origine, validita, base, euro_t, kg, ordini, totale }`); il
+totale dei formulari e' `totale_formulari` (nel format `totale_euro_formulari`),
+quello col surplus `totale` (`totale_euro`), sommati in centesimi. La riga del
+surplus riempie le colonne del modello coi pezzi di `pezziSurplusReport`
+(`surplusVista.js`): il nome sotto il Tipo (nell'extra raccolta sotto l'Ordine),
+l'origine sotto l'Ordine (nell'extra raccolta nelle Note), la validita' sotto
+la Data, «+5,00 €/t sulle 1.120,24 t del mese» sotto il FIR. **La Quantita'
+resta vuota**: le tonnellate sono quelle dei formulari. Il prezzo e' quello del
+foglio: 0,005 €/kg nel format della rete (sei decimali, perche' l'importo e' una
+formula su quella cella), a tonnellata altrove; nel format ACI le Note restano
+vuote. Pezzi corti perche' il PDF tiene tre righe per cella.
+- **Excel**: sotto i formulari (nel report dell'attiva dopo la riga vuota) il
+  «Totale formulari» in grassetto, cioe' il TOTALE di prima; le righe dei
+  surplus vestite come nella passiva (`vestiRigaSurplusFoglio`: fondo indaco
+  chiaro, corsivo indaco scuro, barra a sinistra, testi a capo nella cella, le
+  colonne non si allargano); il TOTALE. Nel format le somme non prendono due
+  volte le tonnellate: i chili del Totale formulari e del TOTALE sono `SUM` dei
+  soli formulari, gli euro del TOTALE `SUM` dal Totale formulari all'ultimo
+  surplus, l'importo del surplus `ROUND(kg*prezzo,2)` sulla rete e
+  `ROUND(kg/1000*prezzo,2)` sull'ACI, coi chili scritti nella formula. Il foglio
+  «Note» del report dice la riga a parole.
+- **PDF**: le righe dei surplus col colore 'surplus' di `esportaTabella`, il
+  TOTALE col surplus, il totale dei formulari nel sottotitolo («380 righe e la
+  riga del Fuel Surcharge · formulari € 226.288,48 · cliente Ecotyre»): una riga
+  «Totale formulari» il piede di `esportaTabellaPdf` la conterebbe fra le righe.
+  Per metterla anche nel PDF serve un'opzione di `esportaTabellaPdf` per le
+  righe di totale che il piede non conta (oggi un solo `totali`): non c'e'
+  ancora, e il sottotitolo basta.
+- La pagina dice, prima e dopo, che il surplus e' nel file e quanto fa («Nel
+  file il Fuel Surcharge (€ 5.601,20) ha la sua riga, sotto i formulari, e il
+  TOTALE lo comprende.»), in verde; un canale col solo surplus non da' un file.
+  Il sottotitolo del format scrive i chili col punto anche sotto i diecimila
+  (7.600, prima 7600). Senza surplus file e frasi sono quelli di prima.
+
+Coi dati dell'11/10/2026: ottobre rete 113 formulari, 321.830 kg, 65.009,66 € +
+Fuel Surcharge 1.609,15 € = 66.618,81 €; settembre identico (380 righe,
+1.120.240 kg, 226.288,48 €). Prove: `prove/reportAmministrazioneSurplus.mjs` (i
+file veri riaperti, le formule calcolate, i PDF di jspdf, un ottobre costruito a
+471,65 t e +2.358,25 €, ottobre vero e settembre),
+`prove/attivaEsportazioniSurplus.mjs` (la pagina eseguita) e la parte 7 di
+`prove/attivaReportSurplus.mjs` (le righe sui dati veri). L'impronta dei tre
+file (la vecchia parte 7b) non c'e' piu'.
 
 **La riconciliazione.** Il portale chiude gli ordini giorni dopo il trasporto: un
 ritiro del 30 giugno chiuso il 4 luglio entra negli archivi dopo che giugno e'
@@ -3468,8 +3859,9 @@ Fuel Surcharge) non e' una voce del modello: e' una riga `tipo: 'surplus'` che
 `foglioPassiva` aggiunge sotto le voci del soggetto, col numero del calcolo (t x
 €/t arrotondato una volta per fornitore). Il foglio non lo rifa'.
 - Le tonnellate della riga sono le stesse del mese e NON si sommano: il totale
-  del soggetto e del blocco in tonnellate resta quello delle voci, in euro
-  comprende il surplus (`totale_standard` e `totale_surplus` lo scompongono).
+  del soggetto e del blocco in tonnellate resta quello delle voci (piu' i chili
+  che nessuna voce prende, dal 13/10/2026: vedi sotto), in euro comprende il
+  surplus (`totale_standard` e `totale_surplus` lo scompongono).
 - Nel periodo di validita' la riga c'e' anche a zero per i soggetti del modello
   senza movimenti, mai per un interno.
 - Nell'Excel le tonnellate sono un numero col formato `(#,##0.00)` e il totale
@@ -3481,8 +3873,9 @@ Fuel Surcharge) non e' una voce del modello: e' una riga `tipo: 'surplus'` che
   «(12,50)», cosi' una somma sulla colonna non le prende.
 - L'extra raccolta prende il suo surplus dal modulo: `PassivaModulo` legge
   `SurplusTariffa` e `Fornitore` una volta per foglio e passa
-  `contestoPrezzi([], fornitori, surplusAll, subfornitori)` a
-  `bloccoExtraRaccolta`; `extraConSurplus` veste quelle righe e non le prende
+  `contestoPrezzi([], fornitori, surplusAll, subfornitori, tariffe)` a
+  `bloccoExtraRaccolta` (le tariffe passive, gia' lette per le voci, dal
+  14/10/2026: danno il contratto della tratta delle secondarie); `extraConSurplus` veste quelle righe e non le prende
   mai anche dal calcolo, cosi' il surplus si dice una volta sola.
 - Un fornitore senza dettaglio porta in `righePiatte` lo standard, non il
   totale.
@@ -3510,6 +3903,31 @@ Senza surplus settembre 2026 del modello e' identico al centesimo. Prova:
 senza surplus come prima e col Fuel Surcharge simulato coi numeri del progetto:
 rete raccoglitori 69.684,18 €, di cui 4.332,80).
 
+**Quello che si legge e' quello che Excel rifa'** (decisioni dell'utente del
+13/10/2026). Nel foglio Excel ogni totale e' una formula che porta dentro il
+numero gia' calcolato: l'amministrazione lo apre, Excel ricalcola, e se la
+formula dice un'altra cosa il numero cambia sotto gli occhi di chi lo legge.
+- **I chili che nessuna voce prende stanno nelle tonnellate del fornitore e del
+  blocco, non negli euro.** Sono chili che il fornitore ha davvero portato nel
+  mese, e il segnale che il modello va aggiornato; un prezzo non ce l'hanno.
+  Nella rete a due livelli la riga del fornitore diceva 12 t (voci + senza voce)
+  e la formula sommava le sole voci, 10 t: appena Excel ricalcolava diventava 10.
+  Ora la formula li somma come il numero che porta dentro, anche nel Totale
+  complessivo dell'ACI piatta, e anche quando la riga del surplus sta fra la
+  voce e i chili senza voce.
+- **L'extra raccolta dice il nome del surplus.** Il calcolo della passiva non
+  ce l'ha (PassivaModulo le passa un oggetto vuoto: il suo surplus lo conta il
+  modulo Extra Raccolta), e la fascia dell'Excel e il riquadro del PDF dicevano
+  «di cui surplus» dove rete e ACI dicono «di cui Fuel Surcharge». Ora i surplus
+  si prendono dalle righe del blocco degli interventi, uno per surplus
+  (`passivaAmministrazione.js`), e il nome e' lo stesso dappertutto.
+
+Prova: `prove/passivaAmministrazioneRicalcolo.mjs`, che rifa' ogni formula del
+foglio come Excel (SUM, ROUND, somme di celle) e pretende il numero della
+cella, anche su ogni mese del 2026 dei dati veri col modello, con le voci
+dell'archivio e col Fuel Surcharge vero; settembre 2026 del modello resta al
+centesimo.
+
 ### Un nome, un record: anagrafica e consuntivi (11/10/2026)
 
 **Fornitori e servizi.** `gestisciAnagrafiche` rifiuta un Fornitore o un
@@ -3517,7 +3935,11 @@ Servizio nuovo, o rinominato, il cui nome normalizzato esiste gia' (409 col
 doppione). Una modifica che lascia il nome com'e' passa sempre. I doppioni nati
 prima («GATIM» e «GATIM S.R.L.») li toglie l'amministratore dalla pagina,
 tenendo il record a cui puntano le tariffe. Prova:
-`prove/anagraficheDoppioni.mjs`.
+`prove/anagraficheDoppioni.mjs`. Una modifica che svuota il nome (vuoto o null)
+risponde 400, come una creazione senza nome: dal 13/10/2026 il nome si cambia
+dalla scheda Fornitori, e un nome vuoto, che non ha chiave, passava il
+controllo dei doppioni. Quando un nome usato puo' cambiare lo dice «Prima di
+eliminare, chi lo usa».
 
 **I consuntivi dei fornitori.** Ce n'e' uno per nome normalizzato, ruolo, anno,
 mese e canale (`chiaveConsuntivo`). Ricaricare il file lo **sostituisce** dopo
@@ -3539,8 +3961,9 @@ Per un fornitore:
 - i fornitori che fatturano tramite lui;
 - le voci del foglio della passiva;
 - i contratti;
-- le primarie di rete e ACI, le secondarie e gli interventi di extra raccolta
-  terminati che lo nominano.
+- le primarie di rete e ACI, le secondarie, gli interventi di extra raccolta e
+  le terziarie terminati che lo nominano (le terziarie dal 14/10/2026, anche
+  come impianto da cui partono: la loro ragione sociale).
 
 Con un doppione dello stesso nome normalizzato contano solo i collegamenti per
 id, perche' i nomi li prende l'altro record.
@@ -3554,14 +3977,51 @@ condizioni:
 - per una passiva, il fornitore ha il ruolo della prestazione.
 
 Una tariffa `non_attivo` non da' il prezzo a niente. La classe non si guarda: si
-dice il perimetro, non il conto esatto della passiva.
+dice il perimetro, non il conto esatto della passiva. Le terziarie per una
+tariffa non contano (`ARCHIVI_CON_TARIFFA`): le paga il portale in prefattura, e
+per eliminare una tariffa non si leggono.
 
 Con riferimenti la funzione risponde 409 con l'elenco e propone l'alternativa:
 «disattiva» per il fornitore, «chiudi periodo» per la tariffa. Elimina solo con
 `conferma_eliminazione: true`, e il motivo nello storico dice che cosa c'era. Un
 archivio che non si legge da' errore: un controllo a meta' direbbe «nessuno lo
-usa». Le pagine `FornitoriManager` e `TariffeUnificate` mostrano l'elenco con i
-due pulsanti.
+usa». Le pagine `FornitoriManager` e `TariffeUnificate` mostrano l'elenco: le
+tariffe con «Chiudi periodo» ed «Elimina comunque», i fornitori con «Disattiva»
+e, solo senza movimenti, «Elimina comunque».
+
+**Un fornitore con movimenti terminati non si elimina** (decisioni dell'utente
+del 13/10/2026), nemmeno con la conferma: i suoi movimenti sono gia' nei conti,
+fatturati o da fatturare. `riferimentiFornitore` dice `eliminabile: false` e la
+proposta `disattiva` (`gia_disattivato` per uno gia' spento); `gestisciAnagrafiche`
+risponde 409 senza `richiede_conferma` e non scrive niente. La finestra di
+`FornitoriManager` mostra l'elenco e solo «Disattiva», o solo «Chiudi» se e'
+gia' disattivato: niente «Elimina comunque». Senza movimenti (tariffe, voci,
+contratti) si elimina come prima, con la conferma; a uno gia' disattivato la
+finestra dice che lo e' e non propone di disattivarlo. Il record letto per i
+riferimenti e' il «prima» dello storico dell'eliminazione: una lettura sola.
+
+**Le terziarie contano** (revisione del 14/10/2026). Sono movimenti terminati
+dell'archivio, di SMOCO, e chi aveva solo terziarie si eliminava senza domande:
+sui dati dell'11/10 IMPRIMET SRL (6), KATANE' TRASPORTI S.R.L. (3), PIRRERA
+ANTONIO (3) e RIA PIETRINA (4).
+
+**La ragione sociale di un fornitore gia' usato non cambia** (revisione del
+14/10/2026). Dalla scheda Fornitori il nome si modifica. Rinominare scollegava il
+fornitore da quello che lo cerca per nome: i movimenti (portano il nome del
+portale), la catena dei subfornitori, il fornitore interno, le voci e i
+contratti. Poi si eliminava senza domande. Ora:
+- una rinomina che lascia la stessa chiave (`normalizzaRagioneSociale`:
+  maiuscole, punti, S.R.L.) passa sempre, senza letture in piu';
+- una che cambia la chiave passa solo a un fornitore che niente usa ancora
+  (`siRinomina`: riferimenti a zero, come un nome sbagliato appena scritto);
+- altrimenti si risponde 409 con `rinominabile: false` e il testo di
+  `testoRinomina`: chi cambia davvero ragione sociale si aggiunge come fornitore
+  nuovo, e il vecchio si disattiva e resta per i movimenti col nome di prima.
+
+Le letture sono quelle dell'eliminazione, e si fanno solo quando la chiave
+cambia. Il record da modificare che non si legge non si modifica (errore, come
+per l'eliminazione). La ragione sociale non passa dallo storico: le rinomine che
+passano non cambiano nessun conto. La scheda lo dice sotto il nome.
 
 **Il record che non si legge non si elimina** (revisione del 13/10/2026). La
 lettura del fornitore o della tariffa da eliminare finiva in un catch che dava
@@ -3584,11 +4044,34 @@ tariffa ha gia': chiudere accorcia, mai allunga (contratti annuali senza tacito
 rinnovo).
 
 Dati dell'11/10:
-- 30 fornitori su 37 hanno riferimenti;
+- 34 fornitori su 37 hanno riferimenti: 33 non si eliminano (hanno movimenti
+  terminati; erano 29 prima di contare le terziarie), 1 si elimina con la
+  conferma, e 34 non cambiano chiave del nome; 3 sono liberi (GTP, il doppione
+  GATIM S.R.L., Ecotyre Scrl);
 - 63 tariffe su 65 hanno movimenti nel periodo.
 
 Prove: `prove/eliminaAnagrafiche.mjs`, che fissa «oggi» con una Date finta
 perche' l'esito non cambi col calendario, e `prove/anagraficheDoppioni.mjs`.
+
+### La scheda dei fornitori (13/10/2026)
+
+In Fatturazione, scheda Fornitori, la matita apre la scheda del fornitore:
+ragione sociale, tipo, partita IVA, regione e «Recapiti per i contratti»
+(referente, cellulare, telefono, email, PEC). La stessa scheda aggiunge un
+fornitore nuovo. Si scrive solo con `gestisciAnagrafiche`, e solo i campi
+cambiati (`datiDaScrivere`): un recapito tolto diventa null, una scheda non
+cambiata non scrive niente. `cellulare`, `pec` e `referente` sono campi del
+`Fornitore` e passano dallo storico delle modifiche (`CAMPI_TRACCIATI.Fornitore`,
+non riservati, etichetta la ragione sociale); stato, nome e ruoli no, e non
+costano letture. I contratti li leggono con `RECAPITI_DALL_ANAGRAFICA`
+(FORNITORE_TEL_2, FORNITORE_EMAIL_2, FORNITORE_REFERENTE), e l'anagrafica vince
+sul contratto dell'anno prima. Una modifica che svuota il nome risponde 400. Su
+un telefono la scheda e la finestra di eliminazione scorrono (`max-h-[90vh]
+overflow-y-auto`, come le altre finestre di Fatturazione). Telefono ed email
+non sono nello storico: bastano due righe in `CAMPI_TRACCIATI.Fornitore`, uguali
+nei due specchi, e la prova che oggi fissa i tre campi. Prove:
+`prove/recapitiFornitore.mjs`, `prove/eliminaAnagrafiche.mjs` e la sezione 9 di
+`prove/storicoModifiche.mjs`.
 
 ### La pratica mensile di Irigom
 
@@ -3866,6 +4349,16 @@ pagine).
   trovati, con codice e numero di ordini; con piu' punti si sceglie quello
   giusto con un clic.
 
+**La colonna PDR nel Dettaglio Ordini** (13/10/2026). Accanto alla ragione
+sociale c'e' la colonna «PDR»: il codice `id_pdr` e, dopo un punto mediano, il
+nome del punto di raccolta come lo scrive il portale (`punto_di_raccolta`). La
+ragione sociale da sola non distingue due punti della stessa ditta (MASTRIA
+GOMME SRL, viale Pio X e viale Europa; 71 ditte con piu' punti nell'archivio
+dell'11/10/2026). Il codice viene prima, senza il punto delle migliaia perche'
+e' un codice, e non si taglia nemmeno a 375 px; il nome si tronca come la
+ragione sociale (`truncate max-w-[200px]`), e il title dice codice e nome
+interi. Senza codice la cella dice «—». Si ordina per codice, come numero.
+
 Prova: `prove/terminatiReteUnaLettura.mjs`.
 
 ### La dashboard: il quadro della commessa e l'elenco unico delle cose da gestire (11/10/2026)
@@ -3882,6 +4375,9 @@ La pagina (`src/pages/Dashboard.jsx`, componenti in `src/components/dashboard/`)
 - **L'attiva di un anno passato** (`mesiAttivaAnnoPassato`) si guarda dal primo mese che ha un documento. Un anno senza documenti, come il 2025 fatturato prima del gestionale, non ha mesi: c'e' la nota `mesi_attiva_nota`, a video e nel PDF. Mai dodici «da elaborare».
 - **Province ferme** (`provinceFerme`, `quadroCommessa.ts`): le province che lavorano, cioe' con un ritiro nell'anno o in quello prima, tutto l'anno, e che non hanno ritiri dal primo dei due mesi finiti in poi (fine trasporto, giorno italiano). Non sono `province_with_zeros` di Terminati Rete, che risponde a un'altra domanda (due mesi a zero in qualunque momento dell'anno); e Terminati Rete (`fermeDallAnnoPrima` in `primarieReteAnalytics.ts`) guarda l'anno prima solo a gennaio e febbraio: da allineare. `provinceFerme` riceve anche le province del contratto dell'anno (`provinceDelContratto`, le passa `quadroRete`): una provincia del contratto senza ritiri ne' nell'anno ne' in quello prima entra fra le ferme con `mai_servita` e `ultimo` vuoto, da marzo come nella matrice, e il riquadro dice «del contratto, mai servita nel <anno>» (13/10/2026).
 - **«Controlli automatici»** riassume le voci con origine `presidi` e la voce del guardiano fermo (area Manutenzione), dovunque stiano (`riassuntoControlli`). Il suo segno porta al filtro `FILTRO_CONTROLLI`, non alla sezione «dati». «Tutti regolari» si scrive solo a cruscotto letto e con la notte che ha scritto. **Chi aggiunge un controllo automatico che diventa una voce** le da' origine `presidi` o area Manutenzione, altrimenti la riga dice «tutti regolari» accanto alla voce.
+- **Lo stoccaggio ACI che non quadra** (13/10/2026) e' una voce sua di «Da gestire»: «giacenze:scostamenti-aci» (Giacenze, attenzione, sezione impianti, /giacenze), col dettaglio sulla classe 9 e il giorno del controllo, mai insieme alla rete. Si legge dalla fotografia (`fg.siti`, `scostamentiAci`), quindi vale anche per una fotografia scritta prima. La voce della rete dice solo la rete: il suo dettaglio e' `notaDelGiorno` sulle righe della rete, non la nota intera.
+- **Il surplus finito l'anno prima** (13/10/2026): dal 1° gennaio `vociSurplusFiniti` ricorda un surplus con l'importo da Ecotyre finito l'anno prima e non riscritto nell'anno in corso con lo stesso nome (senza accenti ne' maiuscole, come `conflittiSurplus`; un disattivato non conta come riscritto). Titolo «Fuel Surcharge del 2026: finito il 31/12/2026», area «Surplus sulle tariffe», canali e date senza importi, collegamento `/fatturazione?tab=tariffe&sezione=surplus`, chiave `surplus-finito:<nome>|<anno>`. Il dettaglio dice che, se il consorzio lo rinnova, va riscritto con le date nuove, perche' non si copia da solo nell'anno nuovo. Un accordo pagato solo da SMOCO non si dice: e' un costo riservato (`campoRiservato`). `cruscottoOperativo` legge `SurplusTariffa` (una lettura, l'archivio e' piccolo) e passa `dati.surplus` coi soli nome, origine, canale, date, stato e `euro_t_attiva`, mai `euro_t_passiva` (chiusura del giro, 14/10/2026: prima non lo leggeva, e la voce non sarebbe uscita mai). Riscritto il surplus, la voce sparisce da sola.
+- **I raccoglitori che non fanno il contratto** (chiusura del giro, 14/10/2026, sulla richiesta dell'utente dello stesso giorno: le 100 t di ottobre in Puglia scritte solo nel target di SMOCO, e la dashboard ferma a 11.550 t). `vociContrattoRaccoglitori` in `cruscotto.ts` fa la stessa regola dell'avviso della scheda Target raccoglitori (`scartiDalContratto`) sugli stessi numeri: la somma dei target annui dei raccoglitori dell'anno, regione per regione com'e' scritta, contro il riparto del contratto. Sotto mezza tonnellata e' un arrotondamento (sui dati veri dell'11/10 Campania 4.400,38 e Calabria 1.649,62 non fanno voci). Una voce sola, area «Target raccoglitori», sezione rete: «I raccoglitori della Puglia hanno 100,00 t più del contratto 2026», o «In 2 regioni ...», col dettaglio regione per regione e che cosa fare (registrare la variazione nel contratto, o correggere i target), collegamento `/target-status?tab=raccoglitori&anno=`, chiave `contratto-raccoglitori:<anno>`. Senza riparto per regione, o senza nessun target dei raccoglitori nell'anno (lo dice la voce dell'anno nuovo), niente. Un target senza regione non si conta, e la voce lo dice. Nessuna lettura in piu': `cruscottoOperativo` legge gia' contratti e target annui per l'anno nuovo. Prova: `prove/cruscotto.mjs` (anche la funzione vera sul banco, da utente non amministratore).
 
 Prove: `prove/dashboardPagina.mjs` (richieste, numeri disegnati, voci, PDF, sorgente), `prove/quadroCommessa.mjs`, `prove/dashboardRaccoltaQuadro.mjs`, `prove/cruscottoQuadro.mjs`, `prove/dashboardDatiVeri.mjs` (sulla copia dei dati veri: Irigom compreso e la pagina disegnata).
 
@@ -3938,7 +4434,7 @@ In Alert & Controllo ogni riga dice «Si corregge in …» col collegamento (`sr
 `base44/shared/chiusuraMese.ts` (le regole, pure), la funzione `statoChiusuraMese` e il pannello `src/components/dashboard/ChiusuraMese.jsx` (props `{ isAdmin, anno }`, montato dalla dashboard per l'anno scelto). Una riga - «Settembre 2026: 4 di 8 fatti, mancano ...» - che si apre in dieci passi: dati del mese, terminati, dichiarazioni, attiva rete/ACI/extra, passiva rete/ACI/extra, quadrature FIR. Ogni passo ha lo stato (`fatto`, `da_fare`, `non_serve`), il perche', le voci e il collegamento al modulo col periodo (`?tab=&anno=&mese=&canale=`). Sotto, i mesi prima ancora aperti, che si aprono uno per volta chiedendo `{ anno, mese }`.
 
 - **Il mese** e' l'ultimo finito sul giorno italiano (`meseDaChiudere`): a gennaio e' il dicembre dell'anno prima, e un dicembre mai chiuso resta fra i mesi aperti anche a marzo (`mesiAncoraAperti`, dal primo mese con un documento dell'attiva, nell'anno e in quello prima). Aperto vuol dire attiva di un canale non chiusa, o passiva non congelata dal primo mese da chiedere in poi (vedi il punto dopo).
-- **Il primo mese chiuso nel gestionale e' settembre 2026** (`PRIMO_MESE_DEL_GESTIONALE` in `chiusuraMese.ts`, revisione del 12/10/2026). Gennaio-agosto 2026 sono stati fatturati fuori e si chiudono come gia' fatti (decisione dell'utente dell'11/10/2026: un'azione sui documenti, non una regola qui, vedi il punto dopo). I passi che prima non si facevano qui - attiva elaborata, passiva congelata, consuntivi, quadrature FIR - si chiedono dal primo fatto scritto o da settembre 2026, quale viene prima (`primoDaChiedere`); mai da «il mese che si chiude adesso», che scivolava col calendario (dal 01/11/2026 settembre, mai congelato, diventava «non serve»). Un mese di prima lo dice col perche' vero: «Il gestionale chiude i mesi da settembre 2026: agosto 2026 si è chiuso fuori». La costante e' scritta una volta.
+- **Il primo mese chiuso nel gestionale e' settembre 2026** (`PRIMO_MESE_DEL_GESTIONALE` in `chiusuraMese.ts`, revisione del 12/10/2026). Gennaio-agosto 2026 sono stati fatturati fuori e si chiudono come gia' fatti (decisione dell'utente dell'11/10/2026: un'azione sui documenti, non una regola qui, vedi il punto dopo). I passi che prima non si facevano qui - attiva elaborata, passiva congelata, consuntivi - si chiedono dal primo fatto scritto o da settembre 2026, quale viene prima (`primoDaChiedere`); le quadrature FIR hanno il loro confine fisso, la settimana 37 del 2026 (vedi il punto «Quadrature FIR»); mai da «il mese che si chiude adesso», che scivolava col calendario (dal 01/11/2026 settembre, mai congelato, diventava «non serve»). Un mese di prima lo dice col perche' vero: «Il gestionale chiude i mesi da settembre 2026: agosto 2026 si è chiuso fuori». La costante e' scritta una volta.
 - **I mesi fatturati prima del gestionale si segnano chiusi** (giro K8, 12/10/2026; decisione dell'utente dell'11/10/2026: «si chiudili nel gestionale come se fossero gia' stati fatti»). Non c'e' una regola speciale: la funzione `segnaMesiChiusiFuori` (solo l'amministratore) porta i documenti ATTIVA non superati dei mesi scelti, canale per canale, allo stato «chiusa» che tutti leggono gia' (Fatturazione attiva, dashboard `statoMesiAttiva`, «Da gestire», chiusura del mese, EcoTyna). Scrive `data_chiusura`, `fattura_confermata_da` e la riga in coda alle note `NOTA_CHIUSO_FUORI` («Chiuso fuori dal gestionale: fatturato prima dell'avvio, decisione dell'utente dell'11/10/2026. Segnato chiuso il gg/mm/aaaa da ...: era «elaborata».»), piu' una riga per documento in `ModificaDato` (campo `stato`, origine `ORIGINE_CHIUSO_FUORI`). **Mai `fattura_confermata_il` ne' `fattura_numero`**: non si sanno e non si inventano. Senza `conferma: true` risponde il piano di `pianoMesiChiusiFuori` (mese per mese e canale per canale: `chiude`, `gia_chiusa`, `senza_documento`, `da_rielaborare`; prima e dopo con la regola dei mesi aperti, `mancanzeDelMese`). Con la conferma, un mese da settembre 2026 in poi, non finito o non riconosciuto fa rifiutare tutta la richiesta. **Un canale senza documento non si chiude** (un documento creato apposta direbbe zero euro fatturati), e nemmeno **l'extra raccolta a zero righe con movimenti finiti nel mese**: chiusa, non si rielaborerebbe piu'. Si torna indietro col Riapri di sempre. `passiAttiva` riconosce un documento chiuso fuori (`chiusoFuoriDalGestionale`: chiuso, con la nota, senza `fattura_confermata_il`) e dice «Fatturata fuori dal gestionale, prima dell'avvio», non «Approvata» ne' «fattura confermata». Nel pannello, sotto «Mesi prima ancora aperti», l'amministratore ha «Segna come gia' chiusi» per i mesi con `prima_del_gestionale`; `statoChiusuraMese` manda `primo_mese_del_gestionale` come etichetta. Sulla copia dell'11/10/2026: 24 documenti in 8 mesi, tutti allineati ai dati di oggi al centesimo e alla riga. Lo strumento `storico_modifiche` di EcoTyna li trova (vedi «Lo storico delle modifiche»).
 - **Un anno passato** (revisione del 12/10/2026): la fotografia del guardiano e' dell'anno in corso, e il suo resto non dice niente di un mese di un anno prima (dicembre 2025 riceveva i 337,96 t di Green Tyre del 2026). Li' le dichiarazioni «non servono», col perche'. A gennaio, quando si chiude dicembre, la fotografia e' gia' dell'anno nuovo: si guarda solo che cosa e' caricato, mai i mesi della fotografia.
 - **Si legge lo stato che i moduli scrivono, mai un conto rifatto**: i documenti dell'attiva di tutti gli anni (il primo dice da quando il gestionale fattura) e il registro delle esportazioni, la prefattura del mese (senza righe), i congelamenti (senza totale), i consuntivi (senza importo), le quadrature, le dichiarazioni dell'anno, la pratica di Irigom, l'ultima fotografia del guardiano, gli alert aperti, il registro dei caricamenti, l'extra raccolta intera (sette righe l'11/10/2026: solo stato, fine trasporto, tipo e peso, mai prezzi e sovracosti); delle primarie solo le righe «eseguito» e le poche del «dati fino al». Diciassette letture, nessuna scrittura. Una lettura che cade lascia il passo «non verificato» (`lettura_non_riuscita`): mai un verde falso, e mai un rosso falso. Congelamenti non letti arrivano a `mesiAncoraAperti` come `null`, non come elenco vuoto: allora la passiva non si giudica, invece di dire «manca il congelamento» di mesi magari congelati (12/10/2026).
@@ -3948,7 +4444,7 @@ In Alert & Controllo ogni riga dice «Si corregge in …» col collegamento (`sr
 - **Dichiarazioni: non si chiede «settembre e' dichiarato?».** Il resto viene dalla fotografia del guardiano. Se la fotografia porta i mesi aperti per canale (`mesi_aperti`, con la provenienza sull'ACI) si dicono quelli. Altrimenti si dice solo cio' che si sa: l'ultima dichiarazione caricata, i mesi fino a quello che si chiude con la dichiarazione scritta e non caricata (anche prima dell'ultima caricata: giugno scritto e settembre caricato lasciano giugno da caricare), quanto resta. **Non si elencano come mancanti i mesi senza una riga**: GATIM rete ha luglio e agosto a zero perche' non e' arrivato niente. **Lo stato di un mese e' per provenienza**, mai il migliore fra primaria e secondaria: la primaria caricata non copre la secondaria che manca. **Solo la rete si aggancia**: su ACI ed extra raccolta il portale non aggancia niente, un resto e' sempre qualcosa senza dichiarazione e il passo resta da fare; senza `mesi_aperti` nella fotografia resta da fare anche quando il resto e' fatto solo di arrivi del mese dopo (la scelta prudente). Dal 12/10/2026 il guardiano scrive i mesi per canale e per provenienza (prudenza 8 del guardiano notturno): la regola prudente resta per le fotografie di prima e per un canale senza i dodici mesi, dove il campo manca. La casella «dall'anno prima» e' giacenza sulla rete, da dichiarare sull'ACI. Irigom rete: la pratica del mese, registrata e caricata, oppure registrata di soli metalli («a portale non si carica nulla»: mai «caricata»). Stoccaggi e rete non dovuta non si chiedono.
 - **Attiva per canale**: elaborata, prefattura (rete e ACI; l'esito del confronto non resta scritto e si guarda in Fatturazione), approvata, esportata dopo l'approvazione, chiusa con la fattura confermata. **Esportata dopo l'approvazione vale anche per un'esportazione legata al documento**: l'interfaccia manda sempre `documento_ids: [doc.id]`, e `registraEsportazione` registra anche quelle di un documento «elaborata» (il 05/10/2026 alle 09:25 rete e ACI di settembre); conta solo con la data dopo `data_approvazione`. `numero_voci` 0 = non serve, ma per l'extra raccolta solo se nel mese non c'e' un intervento finito (`movimentiExtraNelMese`, contati come `calcolaRigheAttiva`): con un intervento pesato il documento e' di prima e manca la rielaborazione; con interventi solo senza peso manca il peso. Un numero che manca non e' zero.
 - **Passiva per canale**: congelata, coi consuntivi caricati e quadrati; chi li aveva mandati il mese prima e ora manca si dice (nome normalizzato e ruolo). Prima del primo congelamento e del primo consuntivo i due passi non servono, ma il confine non va mai oltre settembre 2026: col primo congelamento di ottobre, settembre si chiede lo stesso. L'extra raccolta con un documento a zero righe e interventi finiti nel mese serve.
-- **Quadrature FIR**: le settimane ISO del mese, ferme all'anno come `intervalloSettimana`, completate e piene su ogni canale. Da settembre 2026 si chiedono tutte le settimane del mese, anche la 36 (31/08-06/09) se la prima quadratura caricata e' la 37. Nei mesi di prima solo quelle dalla prima quadratura caricata.
+- **Quadrature FIR**: le settimane ISO del mese, ferme all'anno come `intervalloSettimana`, completate e piene su ogni canale. **Si chiedono dalla settimana 37 del 2026** (`PRIMA_SETTIMANA_DA_QUADRARE`, `settimanaDaQuadrare` in `chiusuraMese.ts`, fissa come `PRIMO_MESE_DEL_GESTIONALE`). Decisione dell'utente del 13/10/2026: «ciò che è vecchio non conta più», come i report settimanali cancellati dopo quaranta giorni. La 36 (31/08-06/09) e le settimane prima sono «non_serve» anche se hanno una quadratura caricata da chiarire, col perche' «le quadrature si chiedono dalla settimana 37 del 2026, quello che c'è prima non conta più». Settembre 2026 chiede quattro settimane (37-40). Il confine non dipende piu' dalla prima quadratura caricata. Prove: `prove/chiusuraMese.mjs` (QUADRATURE FIR), `prove/statoChiusuraMese.mjs`.
 
 Prove: `prove/chiusuraMese.mjs` (le regole, con la fotografia vera del guardiano e il foglio DICHIARAZIONI del 09/10), `prove/statoChiusuraMese.mjs` (la funzione intera con un SDK finto che conta le letture e sa `$in`, ordinamento e numero di righe, e il giorno di oggi fissato), `prove/chiusuraMesePannello.mjs` (i passi disegnati con React lato server), `prove/chiusuraMeseDatiVeri.mjs` (la funzione intera sulla copia dei dati veri dell'11/10/2026, coi sei scenari dei revisori del 12/10; si salta senza la copia o con un'altra copia), `prove/mesiChiusiFuori.mjs` (segnaMesiChiusiFuori e statoChiusuraMese intere sulla copia dei dati veri, con un archivio finto scrivibile: piano, conferma, storico, dopo; si salta senza la copia). **Nelle prove le esportazioni si scrivono come le registra l'interfaccia**, con `documento_ids` pieni: una prova con `documento_ids: []` passava senza provare niente.
 
@@ -3989,6 +4485,63 @@ restituita. Il resto sta in `base44/shared/attesoContratto.ts` (specchio
   `da_confermare`, e lo scostamento grave di `runAlertEngine` lo salta.
 
 Prove: `prove/targetAttesoAllaData.mjs`, `prove/annoTarget.mjs`.
+
+### Le variazioni del contratto in corso d'anno (14/10/2026)
+
+Richiesta dell'utente del 14/10/2026, testuale: *«abbiamo avuto per il mese di
+ottobre dal consorzio 100 t in più che per il momento ho aggiunto al target di
+Smoco in Puglia (ho fatto la variazione lì)...ti chiedo come variano gli altri
+moduli e sezioni di conseguenza considerando che il target è passato a 11.650 t
+nell'anno 2026?...non sto notando che da altre parti la modifica viene
+interessata, compresa la dashboard»*. Il «Totale raccoglitori» era 11.650 t, ma
+il contratto (`CommessaEcotyre`) era rimasto a 11.550: dashboard, atteso alla
+data, proiezione, Andamento ed EcoTyna leggono il contratto, e non si
+muovevano. **Una variazione del consorzio si registra nel contratto**, non
+nella scheda dei raccoglitori.
+- **La variazione**: «Registra una variazione» nella scheda Commessa Ecotyre
+  (`src/components/target-status/VariazioneContratto.jsx`, solo
+  l'amministratore, mai su un anno chiuso): mese, regione, tonnellate in piu' o
+  in meno, la destinazione se si sa, il motivo e il giorno della comunicazione.
+  Le regole sono in `attesoContratto.ts` (specchio in `src/lib`):
+  `variazioneDelContratto(commessa, variazione)` da' errori, avvisi e la `patch`
+  (target annuo, target della regione, target mensile rivisto del mese e, se si
+  dice, la quantita' della destinazione, arrotondati al chilo, mai sotto zero),
+  scritta con una scrittura sola (`scriviConTraccia`), piu' la voce nello
+  storico della commessa (`storicoConVariazione`) col motivo. Senza target
+  mensile rivisto la variazione va nell'annuo e nella regione, e lo dice.
+- **L'elenco**: `variazioniDelContratto(commessa)` le legge dallo storico, con
+  `in_vigore`. Una variazione i cui numeri un salvataggio della tabella (a mano
+  o da un foglio importato) riscrive esce dai numeri e resta in elenco barrata,
+  con chi l'ha superata; la scheda lo dice prima di salvare
+  (`variazioniCheSiChiudono`), non dopo (revisione del 14/10/2026: prima
+  l'elenco continuava a dire «compresa nel contratto» e la stessa variazione si
+  poteva registrare due volte).
+- **L'avviso dei raccoglitori**: quando l'annuo dei raccoglitori di una regione
+  non fa il contratto (`scartiDalContratto`, sotto mezza tonnellata no), la
+  scheda Target raccoglitori lo dice («I raccoglitori della Puglia hanno 100,00 t
+  più del contratto ...») col pulsante che apre la variazione gia' compilata; il
+  mese si propone solo se si capisce dallo storico dei target mensili
+  (`propostaDelMese`). Lo stesso avviso e' una voce di «Da gestire» della
+  dashboard (`vociContrattoRaccoglitori`, vedi «La dashboard»).
+- **L'atteso di una regione e' suo** (`attesoDellaRegione`, revisione del
+  14/10/2026): la parte senza variazioni segue il profilo del contratto, le
+  variazioni in vigore della regione stanno intere nel loro mese, e quelle delle
+  altre regioni non la toccano; le regioni sommano l'atteso del totale. Si usa
+  al posto di `attesoAllaData` col target della regione, che dava a ogni regione
+  la quota nazionale e spalmava le 100 t di ottobre anche su Campania e Sicilia.
+  La usano l'Andamento di Target & Status, la tabella delle regioni della
+  dashboard (`getDashboardRaccolta`) ed EcoTyna (`assistente.ts`): queste due
+  dalla chiusura del giro del 14/10/2026.
+
+Sulla copia dei dati veri dell'11/10/2026, con la variazione di ottobre (+100 t
+in Puglia, IRIGOM): target annuo 11.550 → 11.650; Puglia 2.500 → 2.600; ottobre
+nel contratto 1.100 → 1.200; atteso del totale all'08/10 8.689,23 → 8.715,04 (la
+sola parte di ottobre passata, 100 t per 8 giorni su 31), scarto +129,32 →
++103,51; Puglia attesa 1.880,79 → 1.906,59 e le altre quattro regioni
+invariate, nella dashboard, nell'Andamento e in EcoTyna; residuo 2.731,45 →
+2.831,45; proiezione 11.721,90 t (101,49%) → 11.788,37 t (101,19%). Prove: `prove/variazioneContratto.mjs` (le regole, l'avviso,
+la dashboard intera, l'Andamento ed EcoTyna sui dati veri, la finestra
+disegnata), `prove/targetAttesoAllaData.mjs`.
 
 ### L'Andamento di Target & Status: le stesse parole in pagina, Excel, PDF e presentazione (11/10/2026)
 
@@ -4101,9 +4654,13 @@ rotte, scostamenti e SLA. Ora:
   (`REGOLE_DI_TRATTA`: tratta_autorizzata, tratta_combinazione,
   tratte_autorizzate_classe; `scrittaPrimaDellAnno`, `tratteDiQuestAnno`;
   revisione del 13/10/2026). Le regole di tratta non hanno un anno: valgono dal
-  giorno in cui sono scritte. Sull'anno prima si applica solo una regola creata
-  e cambiata l'ultima volta (`created_date`, `updated_date`, giorno italiano)
-  prima del 01/01 di quest'anno. Quella apre alert nuovi a gennaio e febbraio,
+  giorno in cui sono scritte. Sull'anno prima si applica solo una regola
+  configurata prima del 01/01 di quest'anno: conta `configurata_il`
+  (decisioni dell'utente del 13/10/2026), il giorno italiano dell'ultima
+  modifica della configurazione, con `impronta_configurazione` (modulo, tipo e
+  config, chiavi in ordine). Le regole stanno in
+  `base44/shared/configurazioneRegolaAlert.ts` (specchio
+  `src/lib/configurazioneRegolaAlert.js`). Quella apre alert nuovi a gennaio e febbraio,
   come peso e rotte, e il viaggio del 30/12 registrato il 04/01 ha il suo
   alert: col primo rimedio, nessun alert di tratta sull'anno prima, non l'aveva
   mai. Una regola creata o cambiata quest'anno, sull'anno prima, non apre, non
@@ -4112,9 +4669,28 @@ rotte, scostamenti e SLA. Ora:
   viaggio dell'anno prima resta com'e' e si conta in
   `alerts_anni_non_controllati`, anche se la regola nuova ammette quella
   destinazione: allora era un errore. La pagina le regole le crea, le attiva e
-  le disattiva, ma non ne cambia la configurazione: anche disattivare e
-  riattivare una regola a gennaio la rende una regola dell'anno nuovo. Una
-  regola senza date vale come scritta quest'anno.
+  le disattiva.
+
+  «Scritta» vuol dire configurata (decisioni dell'utente del 13/10/2026):
+  attivare e disattivare una regola non la cambia. La regola porta
+  `configurata_il`, il giorno italiano dell'ultima modifica della configurazione
+  (modulo, tipo, destinazioni, combinazioni, classi, soglie), e
+  `impronta_configurazione`, cioe' modulo, tipo e config scritti con le chiavi
+  in ordine. «Salva regola» li scrive con `configurataOggi`; «Attiva/Disattiva»
+  scrive solo `attiva` (`cambioAttivazione`). Una regola salvata prima del
+  13/10/2026, senza i due campi, al primo tocco del pulsante prende il giorno
+  della sua ultima scrittura (`updated_date`, che arriva in UTC senza fuso:
+  `giornoDellIstante`), mai il giorno del clic. Il motore (`scrittaPrimaDellAnno`)
+  usa `configurata_il` solo se l'impronta torna con la configurazione di oggi
+  (`giornoDellaConfigurazione`); senza il giorno, o con una configurazione
+  cambiata fuori dalla pagina (a mano nell'archivio), ripiega su `created_date`
+  e `updated_date` come prima: tolta a gennaio una destinazione fuori dalla
+  pagina, nessun alert falso sul 2026. Una regola senza nessuna data vale come
+  scritta quest'anno. La pagina scrive «configurata il gg/mm/aaaa» accanto a
+  ogni regola che ha un giorno di cui il motore si fida. Chi aggiunge alla
+  pagina la modifica della configurazione scrive `configurataOggi` con la
+  configurazione nuova, altrimenti l'impronta non torna e la regola ripiega
+  sulle date di sistema.
 - **Un alert si chiude da solo solo se il suo record sta negli anni
   controllati** (`perimetroDellAlert`). Regole sul formulario e rotte: l'anno e'
   quello del record, ricavato dall'archivio (ID ordine o formulario, fine
@@ -4147,8 +4723,25 @@ rotte, scostamenti e SLA. Ora:
   con ottobre e novembre ancora a zero. Ora resta sulla sua coppia e si conta
   anche se la provincia ha un'altra coppia a zero. Finche' e' aperto, la coppia
   nuova non apre un alert suo; chiuso a mano come risolto, nasce al giro dopo.
-  Ignorato, invece, blocca quella provincia per quella regola, per qualunque
-  coppia.
+  Ignorato, vale solo per la sua coppia di mesi (decisioni dell'utente del
+  13/10/2026, `provinceIgnorate`, `provinciaIgnorata`): la stessa coppia non
+  riapre niente, una coppia nuova a zero apre un alert nuovo, e l'ignorato resta
+  ignorato col suo testo. Prima bloccava la provincia per quella regola per
+  sempre. Si confronta l'ultimo mese della coppia (`coppiaProvincia`), non il
+  testo: i testi di prima non hanno l'anno, e quello di una provincia del
+  contratto mai servita («(Gennaio 2026 - Settembre 2026)») e' la coppia
+  agosto-settembre, anche se poi arriva tardi un ritiro di marzo. In un ignorato
+  il mese senza anno e' dell'anno di `created_date`: `updated_date` e' il giorno
+  in cui lo si e' ignorato. Un ignorato senza la coppia nel testo blocca la
+  provincia come prima. Se la coppia a zero di oggi torna quella ignorata,
+  l'alert aperto della provincia non si riscrive con quella coppia: si chiude,
+  perche' la sua condizione non c'e' piu' (revisione del 14/10/2026: AV ignorata
+  per agosto-settembre, il 02/11 nasce settembre-ottobre, il 09/11 arriva il
+  ritiro del 28/10; prima l'aperto diventava «Agosto 2026 - Settembre 2026» e
+  restava aperto per sempre). Un aperto che sta gia' sulla stessa coppia
+  ignorata (un doppione di prima) si chiude con «la stessa coppia di mesi è già
+  stata ignorata» (`ignorateOggi`). Il pulsante «Ignora» di Alert & Controllo
+  non dice ancora che vale per quei due mesi: il motore funziona anche senza.
 - **Le province del contratto mai servite** (A58, 13/10/2026). Il motore legge i
   contratti (`CommessaEcotyre`) una volta per giro, solo se c'e' una regola delle
   province, e li passa alla matrice con `{ commesse }`. Una provincia senza
@@ -4205,6 +4798,14 @@ della matrice, che non si riscrive (CE con il ritiro di dicembre registrato a
 gennaio, AV ad aprile, BA a marzo). La 12 copre la data della regola di tratta
 (il viaggio del 30/12 registrato il 04/01, la regola disattivata e riattivata o
 rifatta a gennaio, l'alert del 2026 con Gatim ammessa nel 2027);
+la 13 la regola configurata nel 2026, disattivata e riattivata il 02/01/2027,
+che apre ancora l'alert del viaggio del 30/12 registrato a gennaio, il giro
+vero della pagina con `cambioAttivazione` e la configurazione cambiata a mano;
+la 14 «Ignora» sulle province (stessa coppia, coppia nuova, testi senza anno,
+BA mai servita, la coppia ignorata che torna il 09/11).
+`prove/alertRegolaConfigurata.mjs` copre la regola e lo specchio, l'impronta,
+il giorno di cui fidarsi, che cosa scrivono i due pulsanti (anche alle 23:30
+UTC del 31/12) e i due campi nell'archivio;
 `prove/alertEsecuzioneMessaggio.mjs` copre il messaggio della pagina, e nella
 sezione 6 lo compone dalla risposta del motore vero sul banco con la data finta.
 
@@ -4286,6 +4887,18 @@ ECT evasa stava nella tabella delle aperte con la targhetta verde.
 - Un cambio di stato che non si salva si dice sulla pagina, non solo nella
   console. Prova: `prove/todoCompletati.mjs` (divisione, giorni, pagine disegnate
   con React lato server, sorgente).
+- **Il numero nel menu** (decisioni dell'utente del 13/10/2026): accanto a
+  «To-Do List» c'e' il «Da fare» della pagina. `contaDaFare`
+  (`src/lib/todoSezioni.js`) fa una lettura filtrata sugli stati aperto e in
+  corso, al massimo 500 righe, mai l'elenco intero, poi `conteggiAttivita(...)`.
+  Si legge come gli altri contatori di `Layout.jsx`: all'avvio, ogni cinque
+  minuti e una volta uscendo da /todo, mai a ogni pagina. «99+» oltre 99,
+  nascosto a zero, e una lettura che cade lascia il numero com'era. La pagina
+  manda il numero con `EVENTO_TODO` ({ detail: { da_fare } }) ogni volta che
+  rilegge l'elenco (aperta, un'attivita' aggiunta, chiusa, riaperta, eliminata),
+  senza letture, e solo con l'elenco intero: con 500 righe lette il suo conto
+  potrebbe essere piu' basso di quello vero (chiusura del giro, 14/10/2026).
+  Prova: `prove/menuTodo.mjs` (sezione 3 per la pagina).
 
 ### EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
 
@@ -4526,6 +5139,22 @@ istruita, e sono state misurate sul codice:
     di `FONTI_UFFICIALI`) con la ricerca online accesa (`ufficiale`), oppure una
     voce della base di conoscenza. La ricerca accesa da sola non basta, e un
     indirizzo ufficiale scritto senza ricerca non e' una verifica.
+  - *Consultata, non verificata* (decisione del 13/10/2026). Una pagina trovata
+    con la ricerca online, che nessuna voce cita, porta «(consultata il
+    gg/mm/aaaa)» col giorno della domanda, mai «verificata il».
+    `fontiDellaRisposta` scrive `consultata_il` (il giorno italiano di oggi, o
+    `giorno` se lo si passa) solo con la ricerca accesa, un indirizzo e nessuna
+    voce; quello che scrive il modello non passa. `chiediAssistente` passa il
+    giorno calcolato all'inizio della domanda (chiusura del giro, 14/10/2026):
+    una risposta finita dopo mezzanotte non porta il giorno dopo. La regola sta
+    in `consultataIl` (`base44/shared/fontiConoscenza.ts`, specchio
+    `src/lib/fontiConoscenza.js`): le risposte di prima, senza il campo, prendono
+    il giorno italiano della domanda (`created_date`). Un indirizzo senza la
+    ricerca online e' scritto a memoria: nessun giorno. Prima accanto a una
+    pagina trovata online non c'era nessun giorno. `Messaggio` e' esportato da
+    `ChatAssistente.jsx` perche' la prova lo disegna con React lato server.
+    Prova: `prove/ecotynaFonti.mjs`, sezione 9 (in fondo la domanda alle 23:59
+    con la risposta dopo mezzanotte).
   - *«Dati del gestionale»* vuol dire che uno strumento ha risposto, o che il
     riepilogo generale e' stato letto al posto di strumenti andati in errore o
     di un pianificatore non riuscito. Non vale piu' `analisi.dati`, cioe' le
@@ -4565,15 +5194,29 @@ istruita, e sono state misurate sul codice:
   uno per canale). Un blocco troncato a meta', che non si legge, segna ancora
   tutti i file con il «se»; un file che modifica un allegato non si segna mai.
   La chat mostra `parziale` accanto a «Scarica», e il file scaricato porta
-  l'avviso in testa: A1 di ogni foglio Excel, prima riga del CSV, primo
-  paragrafo di Word, PDF e testo (`testaParziale`, `testoDelDocumento` in
-  `src/lib/fileEcoTyna.js`). REGOLE_FILE chiede al modello di copiare nomi,
+  l'avviso in testa: A1 di ogni foglio Excel, primo paragrafo di Word, PDF e
+  testo (`testaParziale`, `testoDelDocumento` in `src/lib/fileEcoTyna.js`). Il
+  CSV no (decisione del 13/10/2026): si carica in altri programmi, e la riga
+  d'avviso diventava la riga delle intestazioni. Per il CSV l'avviso resta
+  accanto a «Scarica» e nella risposta, e REGOLE_FILE lo dice al modello. REGOLE_FILE chiede al modello di copiare nomi,
   codici e numeri come li vede, perche' il file si riconosce dalle righe.
   Limite: un file in cui il modello ha riscritto tutti i valori non si
   riconosce. Il rifacimento dal server senza taglio (`da_strumento`) non c'e',
   perche' servirebbe un «senza taglio» nei ventidue elenchi degli strumenti.
-  Prova: `prove/ecotynaFileTagliati.mjs` (le sezioni 5, 6 e 7 per le
-  revisioni; la 7 anche sulla copia dei dati veri, se c'e').
+  Gli esempi tagliati portano il segno (decisione del 13/10/2026).
+  `settimana_formulari` dava 5 esempi dei senza fine trasporto e 10 delle date
+  da sistemare, e la riserva degli eseguiti 10 esempi, senza nessun avviso. Ora
+  portano «ELENCO TAGLIATO: qui ci sono N formulari (ordini) dei M». Gli esempi
+  della riserva lo portano come `avviso_esempi`, perche' nello stesso oggetto
+  c'e' `per_raccoglitore` col suo `elenco_tagliato`. `elenchiTagliati` legge
+  `avviso_<elenco>` come il taglio di quell'elenco soltanto; prima un avviso
+  dell'oggetto valeva per tutti i suoi elenchi, e con 25 raccoglitori nel limbo
+  il file degli esempi diceva «20 righe su 25». Chi taglia un elenco che sta
+  accanto a un altro usa `avviso_<nome>`. Sui dati veri dell'11/10 non ci sono
+  senza fine trasporto ne' eseguiti: la prova li aggiunge a una copia.
+  Prova: `prove/ecotynaFileTagliati.mjs` (le sezioni 5, 6, 7 e 8 per le
+  revisioni e le decisioni del 13/10/2026; la 7 e la 8 anche sulla copia dei
+  dati veri, se c'e').
 - **La provincia per sigla o per nome** (A74, 12/10/2026). Gli archivi scrivono
   la sigla. `provinciaChiesta` (`base44/shared/province.ts`) riconosce anche il
   nome e le forme d'ufficio («provincia di Bari», «Reggio Calabria»,
@@ -4902,17 +5545,17 @@ Prove: `prove/caricamentoAperto.mjs`, `prove/cruscotto.mjs` (UNA REGOLA SOLA),
 
 La piattaforma conserva solo `updated_date`: di un target, di un'apertura o di una tariffa non si sapeva chi l'avesse cambiata, quando, da quale valore e perche'. Il 10/10/2026 una voce della passiva e' passata da 300 a 90 €/t e lo ricordava solo la memoria di una sessione. Dall'11/10/2026 ogni scrittura a mano di quei numeri lascia una riga per campo in **`ModificaDato`**: entita, record_id, etichetta («IRIGOM S.R.L. · 2026»), campo, prima, dopo (testo; un valore che mancava resta assente, non zero), unita, operazione (create/update/delete), utente, il, origine, motivo, anno, riservato.
 
-- **Quali campi**: `CAMPI_TRACCIATI` in `base44/shared/campiTracciati.ts`, specchio `src/lib/campiTracciati.js`. Ci sono i target degli impianti e dei raccoglitori (annui e mensili), le aperture di `GiacenzaSito`, prezzo, unita', date e stato delle tariffe, tutta la commessa, `quantita_kg`/`caricata_inviata`/`motivo_assenza` delle dichiarazioni, costi e prezzi dell'extra raccolta e le voci della passiva. Un campo nuovo che fa i conti si aggiunge li', in tutti e due i file. Dal 13/10/2026 ci sono anche i surplus sulle tariffe (`SurplusTariffa`): nome, canale, prestazione, i due importi (`euro_t_passiva` riservato, `euro_t_attiva` no, e un surplus senza importo da Ecotyre riservato in ogni campo), le date, stato, a chi e i fornitori dell'elenco. Un campo json che e' un elenco di fornitori si dichiara con `elenco: 'nome'`: l'ordine non conta, e la differenza si dice coi nomi («GATIM S.R.L. → GATIM S.R.L., EMMESSE SRLS»), mai con l'id dell'anagrafica. Prova: `prove/storicoModifiche.mjs`, sezione 8.
+- **Quali campi**: `CAMPI_TRACCIATI` in `base44/shared/campiTracciati.ts`, specchio `src/lib/campiTracciati.js`. Ci sono i target degli impianti e dei raccoglitori (annui e mensili), le aperture di `GiacenzaSito`, prezzo, unita', date e stato delle tariffe, tutta la commessa, `quantita_kg`/`caricata_inviata`/`motivo_assenza` delle dichiarazioni, costi e prezzi dell'extra raccolta e le voci della passiva. Un campo nuovo che fa i conti si aggiunge li', in tutti e due i file. Dal 13/10/2026 ci sono anche i surplus sulle tariffe (`SurplusTariffa`): nome, canale, prestazione, i due importi (`euro_t_passiva` riservato, `euro_t_attiva` no, e un surplus senza importo da Ecotyre riservato in ogni campo), le date, stato, a chi e i fornitori dell'elenco. Un campo json che e' un elenco di fornitori si dichiara con `elenco: 'nome'`: l'ordine non conta, e la differenza si dice coi nomi («GATIM S.R.L. → GATIM S.R.L., EMMESSE SRLS»), mai con l'id dell'anagrafica. Prova: `prove/storicoModifiche.mjs`, sezione 8. Dal 13/10/2026 anche i recapiti del fornitore che leggono i contratti (`Fornitore`: cellulare, pec, referente; testo, non riservati; l'etichetta e' la ragione sociale, senza anno). Lo stato, il nome e i ruoli del fornitore non si tracciano e non costano letture. Prova: `prove/storicoModifiche.mjs`, sezione 9.
 - **Come si scrive**: nelle pagine `scriviConTraccia(entita, id, patch, { motivo, origine })`, `eliminaConTraccia`, `creaMoltiConTraccia` ed `eliminaMoltiConTraccia` (`src/lib/scriviConTraccia.js`); nelle funzioni `traccia(svc, entita, id, patch, { utente: utenteDellaRichiesta(user), origine, motivo })` (`base44/shared/traccia.ts`). Si rilegge il record, si scrive e si registrano solo i campi tracciati che cambiano. Una scrittura senza campi tracciati non costa nessuna lettura in piu', quindi conviene far passare di li' tutte le scritture di quegli archivi.
 - **Quando un valore e' cambiato**: i JSON si confrontano sul contenuto (la commessa riscrive tutte le tabelle a ogni salvataggio), i numeri come numeri, e un vuoto vale il suo default (stato 'attivo', costi dell'extra raccolta a 0). Pero' un'apertura vuota che diventa 0 si registra: un valore mancante non e' zero. Creazione e cancellazione registrano i campi diversi dal default, e almeno una riga c'e' sempre.
 - **Produrre e registrare sono due passi**: ogni scrittura risponde `{ record, traccia: { scritta, righe, motivo? } }`. Se la traccia non si scrive il dato resta, e la pagina lo dice con `avvisoTraccia(esito)` o `notaTraccia`, senza finestre di sistema. Le funzioni rimandano `traccia` nella risposta (`gestisciAnagrafiche`, `preparaAnno`).
-- **RLS**: create solo l'amministratore; update e delete `user_condition role «nessuno»`, cioe' nessuno: un registro che si corregge non e' un registro. E' la prima entita' chiusa a tutti in scrittura, e la regola non si scrive mai come `null`. Read e' aperto come gli archivi che racconta; i costi (`riservato`) li vede solo l'amministratore, nella riga Storico e in EcoTyna (`vedeICosti`).
+- **RLS**: create solo l'amministratore; update e delete `user_condition role «nessuno»`, cioe' nessuno: un registro che si corregge non e' un registro. E' la prima entita' chiusa a tutti in scrittura, e la regola non si scrive mai come `null`. Read dal 14/10/2026 (revisione): l'amministratore legge tutto, gli altri le sole righe con `riservato` falso, `{ "$or": [ { "user_condition": { "role": "admin" } }, { "data.riservato": false } ] }`. Lo storico tiene una copia campo per campo dei surplus, che dal 13/10 legge solo l'amministratore: con la lettura aperta, `euro_t_passiva` e tutto un accordo solo passivo (nome, riferimento, fornitori) si leggevano qui da chiunque fosse collegato. A video non cambia niente: sono le righe che la riga Storico gia' mostrava a chi non e' amministratore. EcoTyna legge con `asServiceRole` e toglie i costi con `vedeICosti`. `riservato` si scrive sempre vero o falso (`righeDiModifica`, i mesi chiusi fuori, la conferma di `preparaAnno`): una riga senza il campo resterebbe all'amministratore. Prove: `prove/chiLeggeCosa.mjs` sezione 10 e `prove/scrittureTracciate.mjs`. **Chi chiude un archivio in lettura guarda anche le sue copie**: lo storico, `ContenutoEsteso` e la passiva congelata (`ChiusuraPassivaMese`, ancora aperta).
 - **A video**: `src/components/shared/StoricoModifiche.jsx`, che chiuso non legge niente (una griglia di cento target non fa cento richieste). Si trova in commessa, impianti, celle dei target, siti di Giacenze, tariffe, dichiarazioni del mese, extra raccolta e voci della passiva; il testo all'italiana viene da `src/lib/storicoModifiche.js`. Lo `storico_json` di commessa e target resta: il pallino arancione delle celle lo legge.
-- **EcoTyna**: lo strumento `storico_modifiche` (`base44/shared/storicoModifiche.ts`) dice sempre che lo storico comincia a ottobre 2026: «nessuna modifica» non vuol dire «mai cambiato». Le righe dei mesi dell'attiva chiusi fuori dal gestionale (`segnaMesiChiusiFuori`, archivio DocumentoFatturazione) si dicono «documento della fatturazione attiva» e si trovano chiedendo di fatturazione o di chiusura (gruppo `['fattur','chius']` in `COSE`; revisione del 13/10/2026). Prova: `prove/storicoModifiche.mjs`, sezione 6. Le righe dei surplus si dicono «surplus sulle tariffe» (`NOMI_ARCHIVI`; prima EcoTyna diceva «SurplusTariffa», il nome interno) e si trovano chiedendo delle tariffe, perche' il surplus e' parte del prezzo, o del surplus, del Fuel Surcharge o del carburante, con tutti i loro campi, date, stato ed elenco compresi (13/10/2026). Un archivio tracciato nuovo ha il suo nome in `NOMI_ARCHIVI` e le sue parole in `COSE`. Prova: `prove/storicoModificheSurplus.mjs`.
-- **Fuori, con il loro motivo**: i caricamenti dei file (il loro storico e' UploadLog), le copie d'anno in blocco, le sistemazioni una tantum e i semi. Il debito scritto e' nella lista `DA_PORTARE` di `prove/scrittureTracciate.mjs`: chi ne porta una sull'involucro la toglie dall'elenco. Lo stesso giorno ci sono passate le aperture di `chiusuraAnno`, le righe tolte da `ripulisciDichiarazioni` (col record intero come «prima», non il riassunto dell'elenco: `prove/storicoScrittureDiServizio.mjs`) e il modello delle voci della passiva in `PassivaModulo`; `TariffeUnificate` e `NuovoAnno` dicono quando la traccia di `gestisciAnagrafiche` o `preparaAnno` non si e' scritta. Resta `ImportaReportGenerale`: centinaia di target una volta l'anno, e con l'involucro ogni scrittura diventerebbe tre richieste senza ritentativi; ogni cella ha gia' il suo `storico_json`. Va portato con una scrittura del registro a blocchi.
+- **EcoTyna**: lo strumento `storico_modifiche` (`base44/shared/storicoModifiche.ts`) dice sempre che lo storico comincia a ottobre 2026: «nessuna modifica» non vuol dire «mai cambiato». Le righe dei mesi dell'attiva chiusi fuori dal gestionale (`segnaMesiChiusiFuori`, archivio DocumentoFatturazione) si dicono «documento della fatturazione attiva» e si trovano chiedendo di fatturazione o di chiusura (gruppo `['fattur','chius']` in `COSE`; revisione del 13/10/2026). Prova: `prove/storicoModifiche.mjs`, sezione 6. Le righe dei surplus si dicono «surplus sulle tariffe» (`NOMI_ARCHIVI`; prima EcoTyna diceva «SurplusTariffa», il nome interno) e si trovano chiedendo delle tariffe, perche' il surplus e' parte del prezzo, o del surplus, del Fuel Surcharge o del carburante, con tutti i loro campi, date, stato ed elenco compresi (13/10/2026). Un archivio tracciato nuovo ha il suo nome in `NOMI_ARCHIVI` e le sue parole in `COSE`. Prova: `prove/storicoModificheSurplus.mjs`. Le righe dei fornitori (dal 13/10/2026) si dicono «anagrafica dei fornitori (recapiti per i contratti)» e si trovano chiedendo dei recapiti, del cellulare, del referente, dell'anagrafica o dei contratti; niente «pec» fra le parole, perche' sta dentro «specifico» e «specchio» (chiusura del giro, 14/10/2026; prova: `prove/storicoModifiche.mjs`, sezione 9).
+- **Fuori, con il loro motivo**: i caricamenti dei file (il loro storico e' UploadLog), le copie d'anno in blocco, le sistemazioni una tantum e i semi. Il debito scritto e' nella lista `DA_PORTARE` di `prove/scrittureTracciate.mjs`: chi ne porta una sull'involucro la toglie dall'elenco. Lo stesso giorno ci sono passate le aperture di `chiusuraAnno`, le righe tolte da `ripulisciDichiarazioni` (col record intero come «prima», non il riassunto dell'elenco: `prove/storicoScrittureDiServizio.mjs`) e il modello delle voci della passiva in `PassivaModulo`; `TariffeUnificate` e `NuovoAnno` dicono quando la traccia di `gestisciAnagrafiche` o `preparaAnno` non si e' scritta. Resta `ImportaReportGenerale`: centinaia di target una volta l'anno, e con l'involucro ogni scrittura diventerebbe tre richieste senza ritentativi; ogni cella ha gia' il suo `storico_json`. Va portato con una scrittura del registro a blocchi. `elaboraFatturazionePassiva`, superata, crea fornitori con `Fornitore.create`, che dal 13/10/2026 e' un archivio tracciato: risponde 410 subito dopo l'autenticazione, quel codice non gira, e sta in `FUORI_PER_NATURA` col suo motivo (chiusura del giro, 14/10/2026).
 - **Revisione dell'11-12/10/2026.** I JSON si confrontano con le chiavi in ordine: il criterio di una voce della passiva riscritto dalla pagina con le chiavi in un altro ordine e' lo stesso criterio (8 voci vere di Irigom registravano un cambio mai avvenuto). Una tabella senza nessun valore (dodici null, [] o {}) vale vuoto; lo zero resta un valore. I campi json di `CAMPI_TRACCIATI` dicono l'unita' dei loro numeri (`celle` per i dodici mesi, `colonne` { colonna: { nome, unita } }): `differenzeJson(prima, dopo, campoTracciato(entita, campo))` restituisce { voce, prima, dopo, unita }, la percentuale salvata come frazione esce per cento, e a video si legge «P, percentuale 30% → 35%», «Campania, prezzo 120,00 €/t → 125,00 €/t», «giugno 900,50 t → 950,00 t». Un campo json nuovo con numeri dentro deve dire la sua unita' li'. In `storicoModifiche.ts` l'unita' di una riga si decide una volta, non lato per lato (`unitaMostrata`): su un impianto cancellato il «dopo» e' vuoto, e il target in tonnellate arrivava con 'kg'. Una riga di tabella aggiunta o tolta senza valori si dice per nome («righe Campania, Puglia, Basilicata, Calabria e Sicilia aggiunte, ancora senza valori»), mai col suo JSON.
 - **La copia dell'anno passa dallo storico** (`copiaAnnoTarget`, 11/10/2026): una riga 'create' per campo, con origine «Target & Status, copia dell'anno» e motivo «copia dal <anno prima>, da confermare»; il registro si scrive a blocchi per archivio (sui dati veri 329 righe, le scritture da 11 a 19). `creaTracciati`/`creaConTraccia` accetta `unoPerUno: true` per chi ha bisogno dell'id di ogni record; se una creazione a blocchi si ferma a meta', registra quelle fatte e poi lancia. La finestra della copia in `ConfigurazioneImpianti.jsx` (`DialogoAzione`) dice in ambra quando il registro non si scrive (`notaTraccia`). Le funzioni che rimandano `traccia` sono gestisciAnagrafiche, preparaAnno, copiaAnnoTarget, chiusuraAnno e ripulisciDichiarazioni.
-- **La conferma di un valore copiato non lascia righe**: toglie solo il segno «da confermare» dalla nota del record. Le righe della copia tengono il motivo di quel momento, e la nota di `storico_modifiche` lo dice a EcoTyna: se un valore e' confermato lo dice la pagina, non lo storico. Se un giorno la conferma deve lasciare una riga, va fatto in tutti i punti che confermano (impianti, raccoglitori, commessa, siti, tariffe), non in uno solo.
+- **La conferma di un valore copiato**: le tariffe confermate con «Prepara l'anno» (`preparaAnno`, azione `conferma_tariffe`; decisioni dell'utente del 13/10/2026) lasciano una riga per tariffa, scritte tutte con un solo `registraModifiche`. La riga e' fatta cosi': entita Tariffa, campo valore, prima e dopo uguali (il prezzo e' stato controllato, non cambiato), operazione update, chi, quando, origine «Nuovo anno, tariffe», motivo «confermato il valore copiato dall'anno prima (<anno prima>), sul contratto <anno>» (`righeConferma`, `MOTIVO_CONFERMA`), riservata se la tariffa e' passiva. Sui dati veri dell'11/10/2026 la copia del 2027 fa 65 tariffe (7 attive, 58 passive): confermarle lascera' 65 righe. Se il registro non si scrive le tariffe restano confermate, e la risposta lo dice (`traccia`). I target, i siti e la commessa confermati in Target & Status tolgono ancora solo il segno «da confermare» e non lasciano righe: la nota di `storico_modifiche` dice tutte e due le cose, perche' EcoTyna non riceva la riga della conferma insieme a una frase che la smentisce (revisione del 14/10/2026, nota portata dalla chiusura del giro). Chi porta la riga anche sulla conferma di Target & Status (`DaConfermare` in `ConfigurazioneImpianti.jsx`, `confermaRighe` in `TargetRaccoglitoriGrid.jsx`, la commessa) la fa come `righeConferma`, meglio con una regola sola in `campiTracciati` per tutti, e accorcia la nota. Prove: `prove/inizializzazioneAnno.mjs` e `prove/storicoModifiche.mjs`, sezione 6.
 - **Prove**: `prove/scrittureTracciate.mjs` fallisce se una create/update/delete di un archivio tracciato compare fuori dall'involucro, anche via alias o `entities[...]`, se un'eccezione non serve piu' o se qualcuno tocca una riga di `ModificaDato`. `prove/storicoModifiche.mjs` prova regola, motore, pagine, le funzioni vere e lo strumento.
 
 ### I conti che si salvano non si salvano su un archivio a meta' (11/10/2026)
@@ -5055,6 +5698,22 @@ dell'extra raccolta hanno l'analisi per produttore, coi costi e il margine, solo
 con `opzioni.isAdmin === true`: senza, si nega. Prove:
 `prove/costiSoloAmministratore.mjs`, `prove/extraRaccoltaExport.mjs`.
 
+**Contratti, modelli e surplus li legge solo l'amministratore** (13/10/2026,
+decisione del gruppo B). `ContrattoFornitore` (valori e importi sono i prezzi
+dei fornitori, `file_uri` anche delle versioni sostituite), `ModelloContratto`
+(il `file_uri` del .docx) e `SurplusTariffa` hanno `rls.read` dell'amministratore.
+Chi non e' amministratore non perde niente a video: la scheda Contratti legge
+`contrattiAnno`, che manda i valori al solo amministratore; i file si aprono da
+`apriFile`; il surplus arriva da `leggiSurplus` (vedi «Chi legge il surplus»).
+Nessuna pagina legge contratti e modelli dal browser, e nessuna funzione li legge
+coi permessi di chi chiede. Prova: `prove/chiLeggeCosa.mjs`, sezioni 1-4.
+Restano lette da tutti le tariffe passive: le legge dal browser solo
+`ExtraRaccoltaForm.jsx`, che la pagina Extra Raccolta monta per chiunque anche se
+la apre solo l'amministratore. Si chiudono montando la scheda solo per lui, e poi
+con una lettura di `Tariffa` riservata all'amministratore tranne le ATTIVA (la
+condizione sul campo va provata da un utente non amministratore dopo la
+pubblicazione).
+
 ### I documenti aziendali non salgono mai in area pubblica (30/09/2026)
 
 Regola dell'utente, testuale: *"fai in modo che documenti aziendali non girino per
@@ -5135,17 +5794,19 @@ collegato.
    browser si passa da `src/lib/apriFile.js`. Prove: `prove/fileRiservato.mjs`.
 
 **Quello che resta da decidere.** `UploadLog`, `VerificaReport`, `QuadraturaFir`,
-`ContrattoFornitore`, `ModelloContratto` e `ModelloDocumento` (per quest'ultimo
-l'apertura a tutti e' voluta, `chi: 'tutti'`) tengono ancora il `file_uri` su record
-con `read: true`, quindi i loro file restano apribili da qualunque utente
-collegato. Per `UploadLog` la lettura aperta **serve** (otto pagine la usano per
+`EsportazioneFatturazione` e `ModelloDocumento` (per quest'ultimo l'apertura a
+tutti e' voluta, `chi: 'tutti'`) tengono ancora il `file_uri` su record con
+`read: true`, quindi i loro file restano apribili da qualunque utente
+collegato. `ContrattoFornitore` e `ModelloContratto` dal 13/10/2026 li legge
+solo l'amministratore (vedi «I costi dei fornitori sono dell'amministratore»). Per `UploadLog` la lettura aperta **serve** (otto pagine la usano per
 accorgersi di un caricamento nuovo), quindi la sola strada e' la terza
 dell'assistenza: spostare il riferimento in un archivio che solo
 l'amministratore legge, con la migrazione dei record che ce l'hanno adesso. E' una
 decisione sull'accesso, non una correzione: va chiesta prima di farla.
 
 Dal 12/10/2026 `ContrattoFornitore.versioni_json` tiene anche i `file_uri` delle
-versioni sostituite, sullo stesso record con `read: true`. Il controfirmato
+versioni sostituite, sullo stesso record, che dal 13/10/2026 legge solo
+l'amministratore. Il controfirmato
 caricato e il suo `DocumentoQualifica` condividono lo stesso file. La funzione
 `contrattiAnno`, invece, non manda piu' nessun `file_uri`: prima lo mandava, di
 contratti e modelli, a chiunque aprisse la scheda. L'inventario dei file
@@ -5637,11 +6298,86 @@ primarie ACI, trattamento ACI = impianto che riceve ACI, stoccaggio ACI =
 piazzale che stocca ACI, le secondarie col loro canale. Il trasporto delle
 secondarie resta UN contratto per vettore, registrato RETE e mostrato «rete e
 ACI»: le tariffe del trasporto sono «TUTTE» e il format non parla di canale.
-L'extra raccolta non ha contratti annuali. Due trattamenti non sono contratti di
-SMOCO e non si contano (`non_dovuto`, col motivo): quello di rete di un impianto
-che Ecotyre paga da se' (`trattamento_fatturato_da_ecotyre`, Tecnogum) e quello
-compreso nel prezzo unico della raccolta (`comprensiva_trattamento`, Green Tyre
-sull'ACI).
+L'extra raccolta non ha contratti annuali. Tre prestazioni non sono contratti a
+parte e non si contano (`non_dovuto`, col motivo): il trattamento di rete di un
+impianto che Ecotyre paga da se' (`trattamento_fatturato_da_ecotyre`, Tecnogum),
+quello compreso nel prezzo unico della raccolta (`comprensiva_trattamento`,
+Green Tyre sull'ACI) e lo stoccaggio ACI di chi sull'ACI raccoglie e stocca
+(vedi sotto).
+
+**Raccolta e stoccaggio ACI: un contratto solo, coi due prezzi (decisione
+dell'utente del 13/10/2026, rivista il 14/10/2026).** Chi sull'ACI raccoglie e
+stocca (Nappi Sud; Ecorecuperi negli anni in cui lo fa) ha UN contratto ACI
+«raccolta e stoccaggio», con CORRISPETTIVO_RACCOLTA e CORRISPETTIVO_STOCCAGGIO,
+non due; a dicembre l'utente dara' i format aggiornati. Si registra come
+raccolta ACI (`tipo_contratto` 'raccolta', archivi invariati). Il suo modello e'
+una raccolta ACI che ha fra i punti il prezzo dello stoccaggio
+(`eModelloRaccoltaEStoccaggio` in `segnapostiContratto.ts`): lo dice il format,
+non un campo. In «Modelli dei contratti» c'e' la riga «Raccolta e stoccaggio
+ACI» accanto a «Raccolta ACI», e un format non si salva nella riga sbagliata. Ha
+i due prezzi il contratto vero di Nappi Sud 2026 (raccolta 92,00 e 82,00,
+stoccaggio 16,00; nel 2024 61,00 e 10,00). Quello di Ecorecuperi del 2024
+(«Raccolta&stoccaggio») NO: ha un prezzo solo, «Trasporto+Stoccaggio» 105,00, e
+in quella riga si rifiuta con un messaggio che lo spiega. La riga della raccolta
+ACI ha `raccolta_e_stoccaggio` e propone i due prezzi: parametro `stoccaggio` di
+`valoriDelContratto`, avvisi «Per la raccolta, …» e «Per lo stoccaggio, …»,
+tariffe con `servizio`. Il file si chiama «Contratto Raccolta e stoccaggio ACI
+<anno> - …». La riga dello stoccaggio ACI e' `non_dovuto` («sta nel contratto di
+raccolta e stoccaggio») e non si conta, nemmeno fra i da decidere. Sulla rete i
+contratti restano due.
+
+Chi decide se il contratto e' unico:
+- senza un contratto di raccolta ACI dell'anno, i movimenti: le due righe ACI
+  nello stesso stato (tutte e due attese o tutte e due da decidere) e nessun
+  contratto di stoccaggio ACI a parte. Chi ha smesso di stoccare o di
+  raccogliere ha le righe di sempre;
+- con il contratto di raccolta ACI dell'anno, il contratto stesso
+  (`eContrattoRaccoltaEStoccaggio`). Decide il suo modello, anche se poi e'
+  stato sostituito: per questo `contrattiAnno` legge tutti i modelli, non solo
+  gli attivi. Solo senza il modello decidono i valori salvati.
+
+Fino al 14/10/2026 decidevano sempre i movimenti, e succedevano due cose:
+- il contratto 2027 di Nappi Sud coi due prezzi, guardato il 15/04/2027 senza
+  ancora un viaggio ACI dell'anno, tornava «sola raccolta»: 34 da decidere
+  invece di 33, e la scheda riproponeva il modello senza lo stoccaggio;
+- un contratto di sola raccolta firmato prima che il fornitore cominciasse a
+  stoccare rendeva lo stoccaggio ACI «non dovuto», scoperto e fuori dai conti.
+
+Se il contratto di raccolta ACI fatto e' di sola raccolta e quest'anno il
+fornitore stocca anche sull'ACI, lo stoccaggio ACI resta da fare (mancante,
+atteso) e la raccolta ha `si_puo_unire_lo_stoccaggio`. La scheda offre tutti e
+due i modelli, la proposta ha anche il prezzo dello stoccaggio e gli avvisi lo
+dicono sulle due righe. Rigenerata col modello coi due prezzi diventa il
+contratto unico. Un contratto di stoccaggio ACI gia' fatto a parte resta suo e
+si conta. Prova: `prove/contrattiCanali.mjs`, sezioni «RACCOLTA E STOCCAGGIO
+ACI», «IL CONTRATTO GIA' FATTO DICE SE E' DI RACCOLTA E STOCCAGGIO» e «IL
+CONTRATTO DI ECORECUPERI DEL 2024 HA UN PREZZO SOLO».
+
+Il contratto unico lo sanno anche (chiusura del giro, 14/10/2026):
+- **il controfirmato** (`salvaContrattoFornitore`, azione 'controfirmato'): la
+  voce «contratto» del catalogo della qualifica si cerca per tutti e due i
+  ruoli, raccolta e stoccaggio, e il firmato diventa il documento di ciascuna
+  voce trovata (una sola voce per i due ruoli: un documento solo). Il modello si
+  legge una volta, e solo per una raccolta ACI. Il contratto tiene il primo
+  documento in `documento_qualifica_id`, la risposta li porta tutti
+  (`documenti_qualifica`) e la scheda Contratti li legge uno dopo l'altro
+  (`documentiDelFirmato`). Un ruolo senza voce, o con piu' voci, lo dice la
+  frase «Per lo stoccaggio: ...». I documenti degli altri contratti dello stesso
+  anno si riconoscono anche dal file firmato, non solo da
+  `documento_qualifica_id`. Prova: `prove/contrattoFirmato.mjs`, «IL CONTRATTO
+  ACI UNICO DI RACCOLTA E STOCCAGGIO DIVENTA IL DOCUMENTO DELLE DUE VOCI»;
+- **EcoTyna**: lo strumento `qualifica_fornitori` mette `raccolta_e_stoccaggio`
+  sulla riga del contratto, con la stessa regola e i modelli letti una volta
+  per domanda, e la nota dice che cosa vuol dire. Prima diceva il contratto di
+  Nappi Sud di sola raccolta, e a «Nappi Sud ha il contratto di stoccaggio
+  ACI?» i dati dicevano di no. Prova: `prove/ecotynaQualificaClasse.mjs`,
+  sezione 5.
+
+La voce 6 di `inizializzazioneAnno.ts` («Contratti ai subfornitori») confronta
+ancora quanti contratti ha l'anno rispetto all'anno prima: un anno che passa da
+due contratti ACI separati a quello unico risulta «parziale» per uno. Va
+portata su `totali.attesi` di `situazioneContratti`; sui dati veri non ci sono
+contratti, e oggi non cambia niente.
 
 **L'elenco di un anno e' un'unione, non un ripiego.** Fino all'11/10/2026 l'anno
 prima si guardava solo se l'anno chiesto non aveva nessun soggetto:
@@ -5706,8 +6442,9 @@ scheda lo spiega nell'intestazione.
   pagamento e polizza dal contratto dell'anno prima. Il secondo telefono
   (FORNITORE_TEL_2, il cellulare), la seconda email (FORNITORE_EMAIL_2, la pec),
   il referente e i numeri d'iscrizione vengono dal contratto dell'anno prima.
-  Dall'anagrafica vengono solo se ha i campi `cellulare`, `pec` e `referente`,
-  che oggi non ci sono. Mai dedotti: il telefono non diventa il cellulare. Un
+  Dal 13/10/2026 vengono prima dall'anagrafica (i campi `cellulare`, `pec` e
+  `referente`, scritti dalla scheda Fornitori), e dal contratto dell'anno prima
+  solo se li' mancano. Mai dedotti: il telefono non diventa il cellulare. Un
   recapito dell'anagrafica che il contratto dell'anno prima aveva gia' in un
   altro punto della stessa famiglia non si ripete (`RECAPITI_DALL_ANAGRAFICA`).
 
@@ -5775,7 +6512,9 @@ I `{{...}}` gia' scritti si tengono. L'amministratore accende, spegne, aggiunge
 pezzi: un valore spezzato fra due pezzi prende il segnaposto nel primo e il resto
 si toglie dal secondo, con la formattazione intatta. Il modello si salva
 nell'area privata con `punti_json`. Il valore di partenza dei prezzi NON si salva
-nel modello, perche' `ModelloContratto` lo legge chiunque sia collegato. Un
+nel modello: e' un costo dei fornitori e resta solo nel contratto. Dal
+13/10/2026 `ModelloContratto` lo legge solo l'amministratore, ma i punti dei
+modelli arrivano ancora a chiunque apra la scheda Contratti, da `contrattiAnno`. Un
 prezzo in una casella di testo disegnata sopra il documento (T-Cycle stoccaggio
 2026, «55,00» barrato) si propone spento. `compilaContratto` scrive ogni valore
 nello stile del modello. Provato sugli otto format veri di CONTRATTI
@@ -5805,6 +6544,32 @@ SMOCO e il suo telefono. Le regole di `src/lib/modelliContratto.js`:
   indirizzo @smoco; la sua parte della riga della privacy; le sue persone,
   dovunque compaiano; il suo riquadro delle firme (anche a colonne o in
   tabella). Un'occorrenza che cade li' si mostra spenta: «e' un dato di SMOCO».
+- **Tranne la data dell'Albo di SMOCO (13/10/2026).** L'iscrizione di SMOCO
+  all'Albo gestori (categoria 8, n. BA-11513) e' del 16/05/2025 e vale fino al
+  rinnovo del 2030. Decisione dell'utente: «ogni 5 anni c'è il rinnovo delle
+  autorizzazioni sull'albo, quindi devi sempre considerare come data il
+  «16/05/2025» (fino al 2030 quando verrà rinnovata)». E' un dato fisso e sta in
+  un posto solo: `ALBO_SMOCO` in `segnapostiContratto.ts` e nello specchio, con
+  la scadenza 15/05/2030 e `alboSmocoScaduto`. Al rinnovo si cambia li'. Il
+  lettore dei format (`alboSmocoNelleRighe` in `src/lib/modelliContratto.js`)
+  trova il numero (BA-11513, BA11513, BA 11513) seguito da «del <data>» e la
+  categoria, scritta dopo la data o subito prima («cat.8 BA-11513»). Se la
+  categoria e' 8 e la data e' diversa, la riscrive nello stile del format
+  (`correggiAlboSmoco`: «16/05/2025», «16.05.2025», «16 maggio 2025»), e il
+  resto della riga resta identico. Lo fanno `costruisciModello` e
+  `compilaContratto`, anche sui modelli salvati prima, e la proposta lo dice
+  (`albo_smoco`). Il «Contratto Raccolta 2026_RETE MODIFICATO» ha «del
+  15/05/2020» e il contratto esce con «del 16/05/2025»; nessun altro dato di
+  SMOCO cambia. Nelle due cartelle dei contratti ci sono 102 documenti con
+  l'Albo di SMOCO: si correggono 15/05/2020 (63 volte), 16/05/2026 (7) e
+  15/05/2025 (4). Le date dell'Albo di SMOCO non diventano mai un punto, nemmeno
+  l'anno del contratto («16/05/2026» nei contratti rete 2026 di Green Tyre e
+  Nappi Sud). L'iscrizione di categoria 4, con un'altra data (Eco Faso: «n.
+  BA11513 del 01.04.2022 ... categoria 4»), non si tocca. Una data senza la
+  categoria scritta non si corregge, e la proposta lo dice. Dopo il 15/05/2030
+  compare l'avviso del rinnovo. Prove: `prove/modelliContratto.mjs` (sezione
+  «L'ISCRIZIONE DI SMOCO ALL'ALBO», sui 102 documenti veri) e
+  `prove/modelliContrattoResidui.mjs`.
 - **Il nome del fornitore.** Se e' di una parola sola, si cerca senza
   distinguere maiuscole solo con la forma societaria («LOGISTICA SRL»); da solo
   vale solo scritto com'e'. Se e' di piu' parole, vale in qualunque maiuscola.
