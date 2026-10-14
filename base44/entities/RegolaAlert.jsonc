@@ -57,6 +57,15 @@
     "messaggio_alert": {
       "type": "string",
       "description": "Messaggio mostrato nell'alert quando la regola \u00e8 violata"
+    },
+    "configurata_il": {
+      "type": "string",
+      "format": "date",
+      "description": "Il giorno italiano dell'ultima modifica della configurazione (modulo, tipo, destinazioni, combinazioni, classi, soglie). Lo scrive la pagina Alert Engine quando crea la regola; attivare e disattivare non lo cambiano (decisioni dell'utente del 13/10/2026). Il motore lo usa per sapere se una regola di tratta era gia' quella dell'anno prima: sull'anno prima vale solo una regola configurata prima del 01/01 (base44/shared/configurazioneRegolaAlert.ts)"
+    },
+    "impronta_configurazione": {
+      "type": "string",
+      "description": "L'impronta della configurazione del giorno configurata_il (modulo, tipo e config, con le chiavi in ordine). Se la configurazione cambia senza passare dalla pagina l'impronta non torna, e il motore ripiega sulle date di sistema (created_date, updated_date), come per le regole senza configurata_il"
     }
   },
   "required": [

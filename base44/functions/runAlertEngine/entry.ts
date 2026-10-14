@@ -20,6 +20,7 @@ import { formatoTonnellate, formatoKg } from "../../shared/formato.ts";
 import { daConfermare } from "../../shared/annoTarget.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento, riepilogoVociDate, descriviVoceDate, dataItaliana } from "../../shared/reportSettimanali.ts";
+import { giornoDellaConfigurazione } from "../../shared/configurazioneRegolaAlert.ts";
 
 // Le date obbligatorie dei formulari: immissione, inizio e fine trasporto
 // (regola dell'utente del 22/09/2026, "vanno segnalate e questo vale sempre dove
@@ -147,9 +148,10 @@ const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
 //   italiano (creata e cambiata l'ultima volta prima: scrittaPrimaDellAnno), che
 //   era la regola di quell'anno: apre alert nuovi a gennaio e febbraio, come
 //   peso e rotte, e il viaggio del 30/12 registrato il 04/01 ha il suo alert.
-//   Una regola creata o cambiata quest'anno (la pagina le crea, le attiva e le
-//   disattiva: anche questo la cambia) sull'anno prima non si applica: non apre,
-//   non riscrive e non chiude. Tolta a gennaio una destinazione ammessa l'anno
+//   Una regola creata o cambiata quest'anno sull'anno prima non si applica: non
+//   apre, non riscrive e non chiude. «Cambiata» vuol dire la configurazione
+//   (decisioni dell'utente del 13/10/2026): attivarla e disattivarla no, vedi
+//   scrittaPrimaDellAnno. Tolta a gennaio una destinazione ammessa l'anno
 //   prima, nasceva un alert falso per ogni viaggio di allora, e aggiunta a
 //   gennaio chiudeva come risolto l'alert di un viaggio che allora era un
 //   errore; ora quell'alert resta com'e', e si conta fra quelli fuori perimetro.
@@ -165,15 +167,27 @@ const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
 //   («Novembre 2026 - Dicembre 2026») si chiudeva «risolto» appena quella si
 //   risolveva, con settembre e ottobre ancora a zero. Finche' e' aperto la
 //   coppia nuova non apre un alert suo; chiuso a mano, nasce al giro dopo.
+//   Ignorato, vale solo per la sua coppia di mesi (decisioni dell'utente del
+//   13/10/2026, vedi provinceIgnorate): una coppia nuova a zero apre un alert
+//   nuovo, e l'ignorato resta ignorato.
 const MESI_NUOVI_ANNO_PRIMA = 2;
 const REGOLE_DELL_ANNO = new Set(['mix_classi_deviazione', 'ritardo_sla', 'scostamento_target']);
 const REGOLE_DI_TRATTA = new Set(['tratta_autorizzata', 'tratta_combinazione', 'tratte_autorizzate_classe']);
 
 // Se una regola e' stata scritta tutta prima del 01/01 dell'anno dato (giorno
-// italiano): creata e cambiata l'ultima volta prima, quindi era la regola
-// dell'anno prima (revisione del 13/10/2026, vedi PERIMETRO). Senza le date non
+// italiano), quindi era la regola dell'anno prima (revisione del 13/10/2026, vedi
+// PERIMETRO). Conta il giorno della configurazione (configurata_il, decisioni
+// dell'utente del 13/10/2026): la pagina lo scrive quando crea la regola, e
+// attivarla o disattivarla non lo cambia. Prima contavano created_date e
+// updated_date, e una regola del 2026 disattivata e riattivata il 02/01/2027
+// diventava del 2027: il viaggio del 30/12/2026 registrato il 04/01 restava
+// senza il suo alert. Una regola senza quel giorno, o con una configurazione che
+// non e' piu' quella dell'impronta (cambiata fuori dalla pagina), ripiega sulle
+// date di sistema: creata e cambiata l'ultima volta prima. Senza nessuna data non
 // lo si sa, e vale come scritta quest'anno.
 function scrittaPrimaDellAnno(regola, anno) {
+  const configurata = giornoDellaConfigurazione(regola);
+  if (configurata) return Number(configurata.slice(0, 4)) < anno;
   const creata = annoRoma(regola.created_date);
   const cambiata = annoRoma(regola.updated_date || regola.created_date);
   return !!creata && !!cambiata && creata < anno && cambiata < anno;
@@ -295,11 +309,26 @@ async function motoreAlert(req) {
     // trasportatore resta critico anche fino alla fine del trasporto l'alert si
     // ripropone con i numeri veri.
     const regoleSlaId = new Set(regole.filter(r => r.tipo_regola === 'ritardo_sla').map(r => r.id));
+    const regoleProvinceId = new Set(regole.filter(r => r.tipo_regola === 'province_inattive').map(r => r.id));
     const ignorati = await fetchAll(base44.asServiceRole.entities.Alert, { modulo, stato: 'ignorato' }, 'created_date');
     // Le date obbligatorie si segnalano sempre (22/09/2026): un alert ignorato
     // vale solo per l'elenco che diceva. Se gli ordini da sistemare cambiano, il
     // testo cambia e l'alert si riapre come nuovo.
     const dateIgnorate = new Map();
+    // Le province inattive (decisioni dell'utente del 13/10/2026): un alert
+    // ignorato vale solo per la sua coppia di mesi. La chiave e'
+    // provincia|||regola, senza i mesi, e l'ignorato la bloccava per sempre: una
+    // provincia ignorata per settembre-ottobre poteva restare a zero anche a
+    // novembre, dicembre e oltre senza che nessun alert lo dicesse. Ora si tiene,
+    // per chiave, l'ultimo mese delle coppie ignorate (coppiaProvincia): la
+    // stessa coppia non riapre niente, una coppia nuova a zero apre un alert
+    // nuovo, e l'ignorato resta ignorato. Si confronta l'ultimo mese e non il
+    // testo: i testi di prima non avevano l'anno, e quello di una provincia mai
+    // servita («nessun ritiro nell'anno (Gennaio 2026 - Settembre 2026)») dice la
+    // stessa coppia agosto-settembre. Un mese scritto senza l'anno e' dell'anno in
+    // cui l'alert e' nato: updated_date di un ignorato e' il giorno in cui lo si e'
+    // ignorato. Un testo senza la coppia blocca la chiave, come prima.
+    const provinceIgnorate = new Map();
     for (const a of ignorati) {
       if (regoleSlaId.has(a.regola_id) && !String(a.descrizione || '').includes(MISURA_SLA)) continue;
       if (String(a.regola_id || '').startsWith(REGOLA_DATE)) {
@@ -307,8 +336,22 @@ async function motoreAlert(req) {
         dateIgnorate.get(chiaveAlert(a)).add(String(a.descrizione || ''));
         continue;
       }
+      const coppia = regoleProvinceId.has(a.regola_id) ? coppiaProvincia(a.descrizione, annoRoma(a.created_date || a.updated_date) || anno) : null;
+      if (coppia) {
+        if (!provinceIgnorate.has(chiaveAlert(a))) provinceIgnorate.set(chiaveAlert(a), new Set());
+        provinceIgnorate.get(chiaveAlert(a)).add(coppia.fine);
+        continue;
+      }
       existingKeys.add(chiaveAlert(a));
     }
+    // L'alert nuovo di una provincia sulla coppia di mesi (lo stesso ultimo mese)
+    // di un suo alert ignorato: la decisione vale ancora, e non nasce. Il testo
+    // nuovo porta sempre l'anno dei mesi.
+    const provinciaIgnorata = (alert) => {
+      const ignorate = provinceIgnorate.get(chiaveAlert(alert));
+      const coppia = ignorate ? coppiaProvincia(alert.descrizione, anno) : null;
+      return !!coppia && ignorate.has(coppia.fine);
+    };
     // Condizioni presenti oggi nei dati, col testo di oggi: gli alert aperti fuori
     // da questo insieme si chiudono, quelli dentro prendono il testo nuovo.
     const attuali = new Map();
@@ -442,11 +485,13 @@ async function motoreAlert(req) {
       }, { status: 409 });
     }
 
-    // Bulk create alerts (chunk di 100)
+    // Bulk create alerts (chunk di 100), tranne le province ignorate sulla
+    // stessa coppia di mesi (provinciaIgnorata, decisioni del 13/10/2026)
+    const daCreare = newAlerts.filter(a => !provinciaIgnorata(a));
     let creati = 0;
     const CHUNK = 100;
-    for (let i = 0; i < newAlerts.length; i += CHUNK) {
-      const chunk = newAlerts.slice(i, i + CHUNK);
+    for (let i = 0; i < daCreare.length; i += CHUNK) {
+      const chunk = daCreare.slice(i, i + CHUNK);
       try {
         await base44.asServiceRole.entities.Alert.bulkCreate(chunk);
         creati += chunk.length;
@@ -463,6 +508,22 @@ async function motoreAlert(req) {
     // 2026 diventava a gennaio quello di novembre-dicembre, e si chiudeva
     // «risolto» all'arrivo del ritiro di dicembre, con ottobre ancora a zero.
     // Resta com'e', e si conta fra quelli fuori perimetro (sotto).
+    // La condizione di oggi di una provincia sulla coppia di mesi ignorata non
+    // tiene aperto l'alert della stessa chiave, e non lo riscrive (revisione del
+    // 14/10/2026 sulle decisioni del 13/10): l'ignorato vale per quella coppia, e
+    // la decisione e' gia' presa. AV ignorata per agosto-settembre: il 02/11
+    // ottobre era ancora a zero e nasceva, giusto, l'alert di settembre-ottobre;
+    // il 09/11, registrato il ritiro del 28/10, la coppia a zero tornava
+    // agosto-settembre, e l'alert aperto si riscriveva proprio con la coppia
+    // ignorata e restava aperto per sempre, su mesi passati. Ora si chiude: la
+    // sua condizione non c'e' piu'. Un aperto sulla stessa coppia ignorata (un
+    // doppione di prima) si chiude dicendolo (ignorateOggi, sotto).
+    const ignorateOggi = new Map();
+    for (const [key, alert] of [...attuali]) {
+      if (!provinciaIgnorata(alert)) continue;
+      ignorateOggi.set(key, coppiaProvincia(alert.descrizione, anno).fine);
+      attuali.delete(key);
+    }
     const tipoDi = new Map(regole.map(r => [r.id, r.tipo_regola]));
     const mesiProvince = mesiDellaMatrice(oggi);
     const provinceFerme = new Set();
@@ -518,9 +579,13 @@ async function motoreAlert(req) {
           else { visti.add(key); restanoAperti++; }
           continue;
         }
+        // la provincia ferma oggi sulla coppia ignorata, e l'aperto e' su quella
+        // stessa coppia: la condizione c'e', ma e' gia' stata decisa
+        const coppiaAperta = genere === 'province_inattive' && ignorateOggi.has(key) ? coppiaProvincia(a.descrizione, annoRoma(a.updated_date || a.created_date) || anno) : null;
+        const giaIgnorata = !!coppiaAperta && coppiaAperta.fine === ignorateOggi.get(key);
         daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: genere === 'date'
           ? `Chiuso automaticamente il ${oggiIt}: gli ordini terminati di questo modulo e canale hanno tutte le date obbligatorie, e nell'ordine giusto`
-          : `Chiuso automaticamente il ${oggiIt}: ${perimetro.nota}` });
+          : `Chiuso automaticamente il ${oggiIt}: ${giaIgnorata ? 'la stessa coppia di mesi è già stata ignorata' : perimetro.nota}` });
       } else if (visti.has(key)) {
         daChiudere.push({ id: a.id, stato: 'risolto', risolto_note: `Chiuso automaticamente il ${oggiIt}: doppione di un alert ancora aperto` });
       } else {
@@ -664,6 +729,20 @@ const MESE_E_ANNO = `(${MESI_ANNO.join('|')})(?: (\\d{4}))?`;
 const COPPIA_DI_MESI = new RegExp(`\\(${MESE_E_ANNO} - ${MESE_E_ANNO}\\)`);
 
 /**
+ * I due mesi scritti nel testo di un alert delle province, come numeri
+ * (numeroMese), o null se il testo non li ha. Un mese senza l'anno (i testi di
+ * prima) e' dell'anno dato. Per una provincia mai servita il primo e' gennaio
+ * («nessun ritiro nell'anno (Gennaio 2026 - Settembre 2026)») e l'ultimo e'
+ * quello della coppia vuota: per questo un ignorato si confronta sull'ultimo
+ * (provinceIgnorate, decisioni dell'utente del 13/10/2026).
+ */
+function coppiaProvincia(descrizione, anno) {
+  const m = String(descrizione || '').match(COPPIA_DI_MESI);
+  if (!m) return null;
+  return { inizio: numeroMese(Number(m[2]) || anno, MESI_ANNO.indexOf(m[1])), fine: numeroMese(Number(m[4]) || anno, MESI_ANNO.indexOf(m[3])) };
+}
+
+/**
  * Il perimetro di un alert delle province inattive (revisione del 13/10/2026).
  * Prima era sempre «controllato»: il 02/01/2027 l'alert di settembre-ottobre
  * 2026 si chiudeva come risolto «nei dati 2027», perche' a gennaio la matrice
@@ -680,10 +759,9 @@ const COPPIA_DI_MESI = new RegExp(`\\(${MESE_E_ANNO} - ${MESE_E_ANNO}\\)`);
  */
 function perimetroProvince(a, anno, mesiProvince) {
   const scritto = annoRoma(a.updated_date || a.created_date) || anno;
-  const m = String(a.descrizione || '').match(COPPIA_DI_MESI);
-  if (!m) return { controllato: scritto === anno, nota: `condizione non presente nei dati ${anno}` };
-  const inizio = numeroMese(Number(m[2]) || scritto, MESI_ANNO.indexOf(m[1]));
-  const fine = numeroMese(Number(m[4]) || scritto, MESI_ANNO.indexOf(m[3]));
+  const coppia = coppiaProvincia(a.descrizione, scritto);
+  if (!coppia) return { controllato: scritto === anno, nota: `condizione non presente nei dati ${anno}` };
+  const { inizio, fine } = coppia;
   if (!mesiProvince.has(inizio) || !mesiProvince.has(fine)) return { controllato: false, nota: '' };
   const anni = [...new Set([Math.floor(inizio / 12), Math.floor(fine / 12)])].join(' e ');
   return { controllato: true, nota: `condizione non presente nei dati ${anni}` };
@@ -850,7 +928,9 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
   const alerts = [];
   // Ogni condizione trovata si segna col testo calcolato adesso, anche quando
   // l'alert c'e' gia' (per riscriverne il testo); si crea solo se la chiave non
-  // e' ne' aperta ne' ignorata, e se l'anno ammette alert nuovi.
+  // e' ne' aperta ne' ignorata, e se l'anno ammette alert nuovi. La provincia
+  // ignorata sulla stessa coppia di mesi si toglie prima di scrivere
+  // (provinciaIgnorata, decisioni dell'utente del 13/10/2026).
   const proponi = (key, alert) => {
     segna(attuali, key, alert);
     if (existingKeys.has(key) || !creaNuovi) return;

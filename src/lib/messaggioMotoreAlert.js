@@ -15,7 +15,9 @@
 // del 01/01 (scrittaPrimaDellAnno in runAlertEngine): il viaggio del 30/12
 // registrato il 04/01 ha il suo alert di tratta, e il messaggio diceva il
 // contrario. Quelle create o cambiate quest'anno invece l'anno prima non lo
-// misurano affatto: non aprono, non riscrivono e non chiudono. Per questo la
+// misurano affatto: non aprono, non riscrivono e non chiudono. «Cambiate» e' la
+// configurazione (configurata_il, decisioni dell'utente del 13/10/2026):
+// attivare e disattivare una regola non la cambia. Per questo la
 // riserva sta in fondo a tutto quello che l'anno prima fa, anche quando non
 // apre alert nuovi: «(non con le regole di tratta create o cambiate nel
 // <anno>)». E i loro alert rimasti aperti non sono «di un periodo non piu'

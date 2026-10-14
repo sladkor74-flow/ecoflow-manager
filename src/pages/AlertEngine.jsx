@@ -8,6 +8,10 @@ import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 // Il messaggio dopo «Esegui», coi record dell'anno prima e i numeri all'italiana
 // (revisione del 13/10/2026): sta in src/lib perche' le prove lo leggono in node.
 import { messaggioEsecuzione } from '@/lib/messaggioMotoreAlert';
+// Il giorno della configurazione di una regola (decisioni dell'utente del
+// 13/10/2026): si scrive quando la regola si crea, e Attiva/Disattiva non lo
+// cambia. Il motore lo legge con la stessa regola (base44/shared, stesso nome).
+import { configurataOggi, cambioAttivazione, giornoDellaConfigurazione } from '@/lib/configurazioneRegolaAlert';
 
 const MODULI = [
   { value: 'secondarie', label: 'Secondarie' },
@@ -57,6 +61,13 @@ const TIPI_REGOLA = [
 ];
 const TIPI_VALUTATI = new Set(TIPI_REGOLA.map(t => t.value));
 
+// Il giorno della configurazione all'italiana (gg/mm/aaaa), o '' se la regola
+// non ne ha uno di cui il motore si fidi.
+const dataConfigurazione = (r) => {
+  const g = giornoDellaConfigurazione(r);
+  return g ? g.split('-').reverse().join('/') : '';
+};
+
 export default function AlertEngine() {
   const { isAdmin } = usePermessi();
   const [regole, setRegole] = useState([]);
@@ -88,7 +99,7 @@ export default function AlertEngine() {
       try { config = JSON.parse(configJson); } catch (e) {
         alert('Config JSON non valido'); setSaving(false); return;
       }
-      await base44.entities.RegolaAlert.create({ ...form, config });
+      await base44.entities.RegolaAlert.create({ ...form, config, ...configurataOggi({ ...form, config }) });
       setShowForm(false);
       setForm({ nome: '', descrizione: '', modulo: 'secondarie', tipo_regola: 'tratta_autorizzata', severita: 'warning', messaggio_alert: '', attiva: true });
       setConfigJson('{}');
@@ -97,9 +108,14 @@ export default function AlertEngine() {
     setSaving(false);
   };
 
+  // Attivare e disattivare non cambia che cosa la regola controlla: si scrive
+  // solo attiva, e il giorno della configurazione resta quello (13/10/2026). Una
+  // regola di prima, senza quel giorno, prende quello della sua ultima scrittura
+  // prima di adesso: cosi' una regola di tratta del 2026 riattivata a gennaio
+  // misura ancora il 2026.
   const handleToggle = async (regola) => {
     try {
-      await base44.entities.RegolaAlert.update(regola.id, { attiva: !regola.attiva });
+      await base44.entities.RegolaAlert.update(regola.id, cambioAttivazione(regola));
       load();
     } catch (e) { console.error(e); }
   };
@@ -267,6 +283,7 @@ export default function AlertEngine() {
                         <span className="text-xs px-2 py-0.5 rounded bg-muted">{r.modulo}</span>
                         <span className="text-xs px-2 py-0.5 rounded bg-muted">{r.tipo_regola}</span>
                         {!r.attiva && <span className="text-xs px-2 py-0.5 rounded bg-muted">disattivata</span>}
+                        {dataConfigurazione(r) && <span className="text-xs text-muted-foreground" title="Il giorno dell'ultima modifica della configurazione: attivare e disattivare non lo cambiano. Una regola di tratta misura i viaggi dell'anno prima solo se configurata prima del 01/01.">configurata il {dataConfigurazione(r)}</span>}
                         {!TIPI_VALUTATI.has(r.tipo_regola) && <span className="text-xs px-2 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800">non valutata dal motore</span>}
                       </div>
                       {/* Una regola salvata quando il menu offriva tipi che il

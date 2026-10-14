@@ -54,8 +54,24 @@
 //    apriva mai. Una regola scritta nel 2027 sul 2026 non apre, non riscrive e
 //    non chiude: l'alert aperto resta e si conta.
 //
+// Decisioni dell'utente del 13/10/2026:
+// 13. attivare e disattivare una regola di tratta non la cambia: conta il
+//    giorno della configurazione (configurata_il, con la sua impronta), che la
+//    pagina scrive quando crea la regola e Attiva/Disattiva non tocca. Una regola
+//    del 2026 disattivata e riattivata il 02/01/2027 apre ancora l'alert del
+//    viaggio del 30/12/2026 registrato a gennaio; prima, con updated_date del
+//    2027, no. Una configurazione cambiata fuori dalla pagina non torna con
+//    l'impronta, e si ripiega sulle date di sistema;
+// 14. «Ignora» su un alert delle province vale solo per la sua coppia di mesi:
+//    la stessa coppia non riapre niente, una coppia nuova a zero apre un alert
+//    nuovo, e l'ignorato resta ignorato. Prima l'ignorato bloccava la provincia
+//    per sempre. Revisione del 14/10/2026: quando la coppia nuova si risolve e
+//    la coppia a zero torna quella ignorata, l'alert aperto si chiude invece di
+//    riscriversi con la coppia ignorata e restare aperto per sempre.
+//
 // node prove/alertCambioAnno.mjs
 import { caricaFunzione, chiama } from './dati/bancoFunzioni.mjs';
+import { caricaLibPagine } from './dati/libPagine.mjs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -509,9 +525,11 @@ console.log("12. LE REGOLE DI TRATTA SULL'ANNO PRIMA: CONTA LA DATA DELLA REGOLA
   const mar = await giro('2027-03-05T10:00:00Z', { ...dic.db, Secondaria: [...viaggi, tardi] }, 'secondarie');
   verifica('arrivato a marzo, l\'anno prima non apre piu\' (come peso e rotte)', sulTardi(mar).length === 0, J(sulTardi(mar)));
 
-  // Una regola creata o cambiata nel 2027 (anche solo disattivata e riattivata) non misura il 2026.
+  // Una regola creata o cambiata nel 2027 non misura il 2026. Una regola senza il giorno della
+  // configurazione (salvata prima del 13/10/2026) ripiega sulle date di sistema: disattivata e
+  // riattivata nel 2027 vale come cambiata; con configurata_il no (sezione 13).
   for (const [nome, regola] of [
-    ['disattivata e riattivata il 02/01/2027', tratta(['IRIGOM SRL'], '2026-03-01T09:00:00.000000', '2027-01-02T09:00:00.000000')],
+    ['senza configurata_il, disattivata e riattivata il 02/01/2027', tratta(['IRIGOM SRL'], '2026-03-01T09:00:00.000000', '2027-01-02T09:00:00.000000')],
     ['rifatta il 03/01/2027', tratta(['IRIGOM SRL'], '2027-01-03T09:00:00.000000')],
     ['scritta alle 23:30 UTC del 31/12/2026, cioe\' il 01/01/2027 in Italia', tratta(['IRIGOM SRL'], '2026-12-31T23:30:00Z')],
   ]) {
@@ -562,6 +580,180 @@ console.log("12. LE REGOLE DI TRATTA SULL'ANNO PRIMA: CONTA LA DATA DELLA REGOLA
         J(nuovoDi(r, id).map(a => a.record_id).sort()) === J(attesi), J([r.j.error, nuovoDi(r, id).map(a => a.record_id)]));
     }
   }
+}
+
+// --- Decisioni dell'utente del 13/10/2026 ---
+
+// Le firme della configurazione come le scrive la pagina (src/lib, specchio di
+// base44/shared/configurazioneRegolaAlert.ts che il motore impacchetta): se la
+// pagina e il motore non calcolano la stessa impronta, le prove qui sotto cadono.
+const { improntaConfigurazione, configurataOggi, cambioAttivazione } = await caricaLibPagine('lib/configurazioneRegolaAlert');
+
+console.log("13. ATTIVARE E DISATTIVARE UNA REGOLA DI TRATTA NON LA CAMBIA");
+{
+  const viaggio = (i, giorno, destinazione) => ({ id: 's-' + i, id_ordine: 'ET26S' + String(i).padStart(4, '0'), numero_fir: 'FIRS' + i, stato: 'terminato', peso_effettivo: 20000,
+    ordine_immesso_il: giorno + 'T08:00:00Z', trasporto_iniziato_il: giorno + 'T08:00:00Z', trasporto_finito_il: giorno + 'T10:00:00Z',
+    stoccaggio: 'NAPPI SUD SRL', destinazione, trasportatore: 'NAPPI SUD SRL' });
+  const viaggi = [];
+  for (let i = 0; i < 20; i++) viaggi.push(viaggio(i, `2026-${String(1 + (i % 12)).padStart(2, '0')}-1${i % 9}`, 'IRIGOM SRL'));
+  const tardi = viaggio(99, '2026-12-30', 'GATIM SRL');
+  const sulTardi = (r) => (r.db.Alert || []).filter(a => a.record_id === 'ET26S0099' && a.regola_id === 'rt');
+  const config = (ammesse) => ({ campo_origine: 'stoccaggio', valore_origine: 'NAPPI SUD SRL', campo_destinazione: 'destinazione', destinazioni_ammesse: ammesse });
+  // La regola com'e' nell'archivio: le date della piattaforma, senza fuso.
+  const regola = (extra) => ({ id: 'rt', modulo: 'secondarie', attiva: true, tipo_regola: 'tratta_autorizzata', severita: 'warning', nome: 'Tratta Nappi Sud',
+    created_date: '2026-03-01T09:00:00.000000', updated_date: '2026-03-01T09:00:00.000000', config: config(['IRIGOM SRL']), ...extra });
+  const firmata = (r, il) => ({ ...r, configurata_il: il, impronta_configurazione: improntaConfigurazione(r) });
+  const gennaio = (r, db = {}) => giro('2027-01-05T10:00:00Z', { RegolaAlert: [r], Secondaria: [...viaggi, tardi], Alert: [], UploadLog: [], ...db }, 'secondarie');
+
+  // Configurata il 01/03/2026, disattivata e riattivata il 02/01/2027.
+  const riattivata = firmata(regola({ updated_date: '2027-01-02T09:00:00.000000' }), '2026-03-01');
+  const a = await gennaio(riattivata);
+  verifica('configurata nel 2026, disattivata e riattivata il 02/01/2027: apre l\'alert del viaggio del 30/12/2026', a.stato === 200 && sulTardi(a).length === 1
+    && /destinazione non ammessa "GATIM SRL"/.test(sulTardi(a)[0].descrizione || ''), J([a.j.error, sulTardi(a)]));
+
+  // Il giro vero della pagina: una regola salvata prima del 13/10/2026, senza il
+  // giorno, toccata l'ultima volta il 05/10/2026; il 02/01/2027 si disattiva e si
+  // riattiva col pulsante. Le scritture sono quelle di cambioAttivazione.
+  let vecchia = regola({ updated_date: '2026-10-05T09:00:00.000000' });
+  const spenta = cambioAttivazione(vecchia);
+  verifica('disattivare una regola di prima le scrive il giorno della sua ultima scrittura, non oggi', spenta.attiva === false && spenta.configurata_il === '2026-10-05'
+    && spenta.impronta_configurazione === improntaConfigurazione(vecchia), J(spenta));
+  vecchia = { ...vecchia, ...spenta, updated_date: '2027-01-02T09:00:00.000000' };
+  const accesa = cambioAttivazione(vecchia);
+  verifica('riattivarla scrive solo attiva', J(accesa) === J({ attiva: true }), J(accesa));
+  vecchia = { ...vecchia, ...accesa, updated_date: '2027-01-02T09:05:00.000000' };
+  const b = await gennaio(vecchia);
+  verifica('e il 05/01/2027 la regola misura ancora il 2026: l\'alert del viaggio del 30/12/2026 nasce', b.stato === 200 && sulTardi(b).length === 1, J([b.j.error, sulTardi(b)]));
+
+  // Una regola creata dalla pagina il 03/01/2027 e' del 2027.
+  const nuova = { ...regola({ created_date: '2027-01-03T09:00:00.000000', updated_date: '2027-01-03T09:00:00.000000' }) };
+  const firmaNuova = await conOggi('2027-01-03T09:00:00Z', async () => configurataOggi(nuova));
+  verifica('una regola creata il 03/01/2027 porta quel giorno', firmaNuova.configurata_il === '2027-01-03' && firmaNuova.impronta_configurazione === improntaConfigurazione(nuova), J(firmaNuova));
+  const c = await gennaio({ ...nuova, ...firmaNuova });
+  verifica('e il 2026 non lo misura', c.stato === 200 && sulTardi(c).length === 0, J(sulTardi(c)));
+
+  // Configurata nel 2026, poi cambiata a mano il 03/01/2027 fuori dalla pagina
+  // (tolta IRIGOM, ammessa GATIM): l'impronta non torna, e conta updated_date.
+  const aMano = { ...riattivata, config: config(['GATIM SRL']), updated_date: '2027-01-03T09:00:00.000000' };
+  const d = await gennaio(aMano, { Secondaria: viaggi });
+  verifica('configurazione cambiata fuori dalla pagina nel 2027: nessun alert falso sui viaggi del 2026 a Irigom', d.stato === 200 && nuovoDi(d, 'rt').length === 0, J(nuovoDi(d, 'rt').map(x => x.record_id)));
+  // con la stessa configurazione scritta con le chiavi in un altro ordine l'impronta torna
+  const riordinata = { ...riattivata, config: { destinazioni_ammesse: ['IRIGOM SRL'], campo_destinazione: 'destinazione', valore_origine: 'NAPPI SUD SRL', campo_origine: 'stoccaggio' } };
+  const e = await gennaio(riordinata);
+  verifica('le chiavi della configurazione in un altro ordine non la cambiano', sulTardi(e).length === 1, J(sulTardi(e)));
+  // senza il giorno, come prima: disattivata e riattivata nel 2027 non misura il 2026
+  const f = await gennaio(regola({ updated_date: '2027-01-02T09:00:00.000000' }));
+  verifica('una regola senza il giorno della configurazione ripiega sulle date di sistema', sulTardi(f).length === 0, J(sulTardi(f)));
+
+  // L'alert gia' aperto sul viaggio del 03/12/2026 a Gatim, con la regola del
+  // 2026 riattivata a gennaio: corretto il viaggio, si chiude coi dati 2026.
+  const gatim = viaggio(50, '2026-12-03', 'GATIM SRL');
+  const apertoT = { id: 'at3', modulo: 'secondarie', stato: 'aperto', record_id: 'ET26S0050', regola_id: 'rt', regola_nome: 'Tratta Nappi Sud', entity_type: 'Secondaria',
+    titolo: 'Destinazione non autorizzata per NAPPI SUD SRL', descrizione: 'Record ET26S0050: origine "NAPPI SUD SRL" con destinazione non ammessa "GATIM SRL". Destinazioni ammesse: IRIGOM SRL.',
+    severita: 'warning', created_date: '2026-12-04T10:00:00.000000', updated_date: '2026-12-04T10:00:00.000000' };
+  const g = await gennaio(riattivata, { Secondaria: [...viaggi, { ...gatim, destinazione: 'IRIGOM SRL' }], Alert: [apertoT] });
+  verifica('riattivata a gennaio, corretto il viaggio del 2026 l\'alert si chiude da solo', alertDi(g, 'at3').stato === 'risolto'
+    && /: condizione non presente nei dati 2026$/.test(alertDi(g, 'at3').risolto_note || '') && g.j.alerts_anni_non_controllati === 0, J([alertDi(g, 'at3'), g.j.alerts_anni_non_controllati]));
+}
+
+console.log("14. «IGNORA» SULLE PROVINCE VALE SOLO PER QUELLA COPPIA DI MESI");
+{
+  const ignorato = (a, il) => ({ ...a, stato: 'ignorato', risolto_note: 'Ignorato', updated_date: il });
+  const SET_OTT = testoProv('AV', 'Campania', 'Settembre 2026 - Ottobre 2026');
+  const OTT_NOV = testoProv('AV', 'Campania', 'Ottobre 2026 - Novembre 2026');
+  const ign = ignorato(alertProv('pi1', 'AV', SET_OTT, '2026-11-20T10:00:00.000000'), '2026-11-21T10:00:00.000000');
+  const AV = (vuoti) => ritiriIn('AV', 'Campania', mesiFra('2026-01', '2026-12', vuoti), 'ET26AV');
+  const dicembre = (vuoti, alert) => giro('2026-12-20T10:00:00Z', { RegolaAlert: [REGOLA_PROV], PrimariaRete: AV(vuoti), Alert: alert, UploadLog: [] });
+  const avAperti = (r) => apertiDi(r, 'rp', 'AV');
+
+  // Ignorato settembre-ottobre; a dicembre, col ritiro di novembre, la coppia e' la stessa.
+  const stessa = await dicembre(['2026-09', '2026-10'], [ign]);
+  verifica('la stessa coppia (settembre-ottobre 2026) non riapre niente', stessa.stato === 200 && stessa.j.alerts_creati === 0 && avAperti(stessa).length === 0
+    && alertDi(stessa, 'pi1').stato === 'ignorato', J([stessa.j.error, stessa.j.alerts_creati, avAperti(stessa)]));
+  // Anche novembre a zero: la coppia nuova e' ottobre-novembre.
+  const nuova = await dicembre(['2026-09', '2026-10', '2026-11'], [ign]);
+  verifica('anche novembre a zero: nasce l\'alert di ottobre-novembre 2026', J(avAperti(nuova).map(a => a.descrizione)) === J([OTT_NOV]), J([nuova.j.error, avAperti(nuova).map(a => a.descrizione)]));
+  verifica('e l\'ignorato resta ignorato, col suo testo', alertDi(nuova, 'pi1').stato === 'ignorato' && alertDi(nuova, 'pi1').descrizione === SET_OTT, J(alertDi(nuova, 'pi1')));
+  const dopo = await giro('2026-12-22T10:00:00Z', nuova.db);
+  verifica('al giro dopo nessun doppione', avAperti(dopo).length === 1 && dopo.j.alerts_creati === 0, J([avAperti(dopo).length, dopo.j.alerts_creati]));
+  // ignorato anche quello nuovo: niente finche' la coppia resta ottobre-novembre
+  const ignorati2 = { ...dopo.db, Alert: dopo.db.Alert.map(a => (a.stato === 'aperto' ? ignorato(a, '2026-12-23T10:00:00.000000') : a)) };
+  const fermo = await giro('2026-12-28T10:00:00Z', ignorati2);
+  verifica('ignorato anche ottobre-novembre, non rinasce nessuno dei due', avAperti(fermo).length === 0 && fermo.j.alerts_creati === 0, J(avAperti(fermo)));
+
+  // Il testo di prima, senza l'anno: i mesi sono dell'anno in cui l'alert e'
+  // nato (created_date), non di quello in cui lo si e' ignorato.
+  const vecchio = ignorato(alertProv('pi2', 'AV', testoProv('AV', 'Campania', 'Settembre - Ottobre'), '2026-11-20T10:00:00.000000'), '2027-01-10T10:00:00.000000');
+  const v26 = await dicembre(['2026-09', '2026-10'], [{ ...vecchio, updated_date: '2026-11-21T10:00:00.000000' }]);
+  verifica('col testo di prima («Settembre - Ottobre»), la stessa coppia non riapre niente', v26.j.alerts_creati === 0 && avAperti(v26).length === 0, J(avAperti(v26)));
+  const AV27 = [...AV([]), ...ritiriIn('AV', 'Campania', mesiFra('2027-01', '2027-11', ['2027-09', '2027-10']), 'ET27AV')];
+  const v27 = await giro('2027-11-20T10:00:00Z', { RegolaAlert: [REGOLA_PROV], PrimariaRete: AV27, Alert: [vecchio], UploadLog: [] });
+  verifica('ignorato il 10/01/2027 il «Settembre - Ottobre» del 2026, settembre-ottobre 2027 a zero apre il suo alert', J(avAperti(v27).map(a => a.descrizione)) === J([testoProv('AV', 'Campania', 'Settembre 2027 - Ottobre 2027')]),
+    J([v27.j.error, avAperti(v27).map(a => a.descrizione)]));
+
+  // Un testo senza la coppia di mesi blocca la provincia, come prima.
+  const senzaCoppia = ignorato(alertProv('pi3', 'AV', 'Provincia AV (Campania): nessuna raccolta da settimane.', '2026-11-20T10:00:00.000000'), '2026-11-21T10:00:00.000000');
+  const muto = await dicembre(['2026-09', '2026-10', '2026-11'], [senzaCoppia]);
+  verifica('un ignorato senza la coppia nel testo vale per tutte, come prima', muto.j.alerts_creati === 0 && avAperti(muto).length === 0, J(avAperti(muto)));
+
+  // Un ignorato su una coppia vecchia e un aperto su quella di oggi: si riscrive l'aperto, nessun doppione.
+  const conAperto = await dicembre(['2026-09', '2026-10', '2026-11'], [ign, alertProv('pa1', 'AV', OTT_NOV, '2026-12-01T10:00:00.000000')]);
+  verifica('con l\'aperto sulla coppia di oggi, nessun alert nuovo', conAperto.j.alerts_creati === 0 && J(avAperti(conAperto).map(a => a.id)) === J(['pa1']), J(avAperti(conAperto).map(a => a.id)));
+}
+{
+  // Revisione del 14/10/2026: la coppia ignorata non torna a video in un alert
+  // aperto. AV ignorata per agosto-settembre (ignorata il 03/10). Il 02/11
+  // ottobre e' ancora a zero (i ritiri di fine mese si registrano entro 10
+  // giorni) e nasce, giusto, l'alert di settembre-ottobre. Il 09/11 arriva il
+  // ritiro del 28/10, e l'ultima coppia a zero torna agosto-settembre: prima
+  // l'alert aperto si riscriveva con quella coppia, l'ignorata, e restava aperto.
+  const AGO_SET = testoProv('AV', 'Campania', 'Agosto 2026 - Settembre 2026');
+  const SET_OTT = testoProv('AV', 'Campania', 'Settembre 2026 - Ottobre 2026');
+  const ign = { ...alertProv('pi1', 'AV', AGO_SET, '2026-10-02T10:00:00.000000'), stato: 'ignorato', risolto_note: 'Ignorato', updated_date: '2026-10-03T10:00:00.000000' };
+  const base = ritiriIn('AV', 'Campania', mesiFra('2026-01', '2026-07'), 'ET26AV');
+  const conOttobre = [...base, ritiro('ET26AVOTT', '2026-10-28', 5000, { provincia: 'AV', regione: 'Campania' })];
+  const avAperti = (r) => apertiDi(r, 'rp', 'AV');
+
+  const nov2 = await giro('2026-11-02T10:00:00Z', { RegolaAlert: [REGOLA_PROV], PrimariaRete: base, Alert: [ign], UploadLog: [] });
+  const nato = avAperti(nov2)[0] || {};
+  verifica('il 02/11/2026, ottobre ancora a zero, nasce l\'alert di settembre-ottobre', J(avAperti(nov2).map(a => a.descrizione)) === J([SET_OTT]), J([nov2.j.error, avAperti(nov2).map(a => a.descrizione)]));
+  const nov9 = await giro('2026-11-09T10:00:00Z', { ...nov2.db, PrimariaRete: conOttobre });
+  verifica('il 09/11, registrato il ritiro del 28/10, nessun aperto mostra la coppia ignorata', nov9.stato === 200 && avAperti(nov9).length === 0 && nov9.j.alerts_aggiornati === 0,
+    J([nov9.j.error, avAperti(nov9).map(a => [a.id, a.descrizione])]));
+  verifica('l\'alert di settembre-ottobre si chiude: la sua condizione non c\'e\' piu\'', alertDi(nov9, nato.id).stato === 'risolto'
+    && alertDi(nov9, nato.id).descrizione === SET_OTT
+    && alertDi(nov9, nato.id).risolto_note === 'Chiuso automaticamente il 09/11/2026: condizione non presente nei dati 2026', J(alertDi(nov9, nato.id)));
+  verifica('l\'ignorato resta ignorato, col suo testo, e non nasce niente', nov9.j.alerts_creati === 0 && alertDi(nov9, 'pi1').stato === 'ignorato' && alertDi(nov9, 'pi1').descrizione === AGO_SET,
+    J([nov9.j.alerts_creati, alertDi(nov9, 'pi1')]));
+  const nov16 = await giro('2026-11-16T10:00:00Z', nov9.db);
+  verifica('al giro dopo non rinasce niente', avAperti(nov16).length === 0 && nov16.j.alerts_creati === 0 && nov16.j.alerts_chiusi === 0, J([avAperti(nov16), nov16.j.alerts_creati, nov16.j.alerts_chiusi]));
+
+  // Un aperto sulla stessa coppia ignorata (un doppione di prima, quando
+  // l'ignorato bloccava la provincia): si chiude, e la nota dice perche'.
+  // Anche col testo di prima, senza l'anno, scritto nel 2026.
+  for (const [nome, testo] of [['col testo di oggi', AGO_SET], ['col testo di prima («Agosto - Settembre»)', testoProv('AV', 'Campania', 'Agosto - Settembre')]]) {
+    const doppio = await giro('2026-11-09T10:00:00Z', { RegolaAlert: [REGOLA_PROV], PrimariaRete: conOttobre, UploadLog: [],
+      Alert: [ign, alertProv('pd1', 'AV', testo, '2026-10-01T10:00:00.000000')] });
+    verifica(`un aperto sulla stessa coppia ignorata, ${nome}, si chiude dicendo che e' gia' stata ignorata`, doppio.stato === 200 && avAperti(doppio).length === 0
+      && alertDi(doppio, 'pd1').stato === 'risolto' && alertDi(doppio, 'pd1').risolto_note === 'Chiuso automaticamente il 09/11/2026: la stessa coppia di mesi è già stata ignorata'
+      && doppio.j.alerts_creati === 0 && alertDi(doppio, 'pi1').stato === 'ignorato', J([doppio.j.error, alertDi(doppio, 'pd1'), doppio.j.alerts_creati]));
+  }
+}
+{
+  // Una provincia del contratto mai servita (A58): il testo dice da gennaio
+  // all'ultimo mese finito, e la coppia e' quella che finisce con quel mese.
+  const contratto = { id: 'c2026', anno: 2026, target_annuo_t: 2500, regioni_json: '[{"regione":"Puglia","province":"BA","target_t":2500}]', updated_date: '2026-01-10T00:00:00Z' };
+  const MAI = "Provincia BA (Puglia), del contratto: nessun ritiro nell'anno (Gennaio 2026 - Settembre 2026). Pianificare le raccolte per rispettare i requisiti consorziali.";
+  const ign = { ...alertProv('pib', 'BA', MAI, '2026-10-05T10:00:00.000000'), stato: 'ignorato', risolto_note: 'Ignorato', updated_date: '2026-10-06T10:00:00.000000' };
+  const BAN = (oggi, ritiri = []) => giro(oggi, { RegolaAlert: [REGOLA_PROV], PrimariaRete: [...ritiriIn('NA', 'Campania', mesiFra('2026-01', '2026-11'), 'ET26NA'), ...ritiri],
+    CommessaEcotyre: [contratto], Alert: [ign], UploadLog: [] });
+  const baAperti = (r) => apertiDi(r, 'rp', 'BA');
+  const ott = await BAN('2026-10-20T10:00:00Z');
+  verifica('BA mai servita, ignorata a ottobre: a ottobre non rinasce', ott.stato === 200 && baAperti(ott).length === 0, J([ott.j.error, baAperti(ott).map(a => a.descrizione)]));
+  const conMarzo = await BAN('2026-10-20T10:00:00Z', ritiriIn('BA', 'Puglia', ['2026-03'], 'ET26BA'));
+  verifica('arrivato tardi un ritiro di marzo, la coppia e\' sempre agosto-settembre: non rinasce', conMarzo.stato === 200 && baAperti(conMarzo).length === 0, J(baAperti(conMarzo).map(a => a.descrizione)));
+  const nov = await BAN('2026-11-15T10:00:00Z');
+  verifica('a novembre, anche ottobre a zero, nasce l\'alert nuovo di BA', J(baAperti(nov).map(a => a.descrizione)) === J([MAI.replace('Settembre 2026', 'Ottobre 2026')]), J(baAperti(nov).map(a => a.descrizione)));
 }
 
 console.log(`\n${ok} superate, ${ko} fallite`);

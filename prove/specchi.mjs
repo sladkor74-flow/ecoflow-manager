@@ -50,6 +50,9 @@ const SPECCHI = [
   // Dal 13/10/2026 (il surplus sulle tariffe): quando vale un surplus, a chi e
   // quanto fa una riga, uguale per il calcolo, il salvataggio e le pagine.
   ['base44/shared/surplus.ts', 'src/lib/surplus.js'],
+  // Dal 13/10/2026 (decisioni dell'utente): il giorno della configurazione di una
+  // regola alert, uguale per la pagina Alert Engine e per il motore.
+  ['base44/shared/configurazioneRegolaAlert.ts', 'src/lib/configurazioneRegolaAlert.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa
