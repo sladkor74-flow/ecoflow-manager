@@ -55,13 +55,19 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno, opzioni = {
   // quell'anno (calcolaGiacenze, revisione finale del 13/10/2026): lo dice
   // l'intestazione, come la pagina, il PDF e la Quadratura delle Dichiarazioni.
   const attesaDel = (data.totali && data.totali.in_attesa_dei_carichi_del) || null;
+  // Su un anno passato gli ordini da dichiarare sono i carichi di quell'anno
+  // ancora aperti oggi (giro del 14/10/2026): lo dicono l'intestazione e una
+  // nota sotto l'elenco del foglio «Da dichiarare», che la pagina chiede gia'
+  // coi soli carichi di quell'anno. L'anno e' ordini_dei_carichi_del, mai quello
+  // dell'attesa: sull'anno dopo gli ordini sono tutto il file di oggi.
+  const ordiniDel = (data.totali && data.totali.ordini_dei_carichi_del) || null;
   // LA PARTE DELL'ATTESA CHE PER NOI E' CHIUSA (decisioni dell'utente del
   // 13/10/2026, giro del 14/10/2026): le 181,299 t che il portale attribuisce
   // ancora allo stoccaggio di T-Cycle sono partite tutte verso Tecnogum, che sulla
   // rete non dichiara a SMOCO. La pagina lo dice, il foglio no: ora ha la sua
   // colonna, e il perche' in una nota sotto la tabella. Sta dopo gli ordini da
   // dichiarare, che seguono l'attesa (prove/attesaDellAnno.mjs).
-  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza rete a portale (t)', 'Giacenza ACI (t)', 'Extra raccolta in piazzale, fuori portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', attesaDel ? `In attesa di dichiarazione, dei carichi del ${attesaDel} (t)` : 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Attesa per noi chiusa (t)', 'Dichiarato (t)', 'Tipologia trattamento', 'Formulari con le date da sistemare'];
+  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza rete a portale (t)', 'Giacenza ACI (t)', 'Extra raccolta in piazzale, fuori portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', attesaDel ? `In attesa di dichiarazione, dei carichi del ${attesaDel} (t)` : 'In attesa di dichiarazione (t)', ordiniDel ? `Ordini da dichiarare, dei carichi del ${ordiniDel} ancora da dichiarare oggi` : 'Ordini da dichiarare', 'Attesa per noi chiusa (t)', 'Dichiarato (t)', 'Tipologia trattamento', 'Formulari con le date da sistemare'];
   const senzaFile = (r) => r.tipo_destinazione === 'imp' && !(r.fotografia && r.fotografia.del);
   const classi = (r) => CLASSI.map(c => (r.giacenza_classi_kg && !senzaFile(r) ? r.giacenza_classi_kg[c] || 0 : null));
   const vuotaSeManca = (v) => (v === null || v === undefined ? '' : v);
@@ -126,8 +132,12 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno, opzioni = {
     testoFormulario(r), testoCollocato(r),
   ]);
   ddRows.push(['TOTALE', '', '', '', '', '', '', '', ordiniData.totale_kg, '', '', '', '', '']);
+  const notaDd = ordiniDel
+    ? [`Carichi del ${ordiniDel} ancora da dichiarare oggi: il file degli ordini non dichiarati del portale è di oggi, e qui ci sono solo i carichi arrivati nel ${ordiniDel}, per fine trasporto, che oggi sono ancora da dichiarare.`]
+    : [];
   foglioDaRighe(wb, 'Da dichiarare', {
-    doc, righe: [ddHeaders, ...ddRows],
+    doc, righe: [ddHeaders, ...ddRows, ...(notaDd.length ? [[], ...notaDd.map(n => [n])] : [])],
+    ...(notaDd.length ? { stili: { [ddRows.length + 2]: 'nota' } } : {}),
     larghezze: [16, 16, 14, 28, 18, 6, 18, 10, 18, 24, 24, 24, 48, 36],
   });
 

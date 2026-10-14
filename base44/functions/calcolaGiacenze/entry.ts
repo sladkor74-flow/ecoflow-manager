@@ -7,7 +7,7 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza, kgReteDiRilevazione, kgAciDiRilevazione, PERCHE_PIAZZALE_SENZA_LETTURA, PERCHE_PIAZZALE_SENZA_INIZIO } from "../../shared/giacenzaStoccaggi.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, nostraRiga, formulariDaSistemare, avvisoSenzaFine, ORDINE_GRUPPI, PERCHE_SENZA_FOTOGRAFIA, giornoAlPiazzale, nellAttesaDellAnno, letturaDelTrentuno, PERCHE_SENZA_LETTURA_DEL_TRENTUNO, annoPrimaDelGestionale, PERCHE_ANNO_PRIMA_DEL_GESTIONALE, partenzeDegliStoccaggi, attesaChiusaPerNoi, totaleDellaColonna } from "../../shared/giacenzaPortale.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, nostraRiga, formulariDaSistemare, avvisoSenzaFine, ORDINE_GRUPPI, PERCHE_SENZA_FOTOGRAFIA, giornoAlPiazzale, nellAttesaDellAnno, finiDelleSecondarie, giornoAllImpianto, letturaDelTrentuno, PERCHE_SENZA_LETTURA_DEL_TRENTUNO, annoPrimaDelGestionale, PERCHE_ANNO_PRIMA_DEL_GESTIONALE, partenzeDegliStoccaggi, attesaChiusaPerNoi, totaleDellaColonna } from "../../shared/giacenzaPortale.ts";
 import { ingressoMovimento } from "../../shared/ingressoMovimento.ts";
 import { carichiNonNelFile } from "../../shared/riconciliazioneDaDichiarare.ts";
 import { leggiDichiarazioni } from "../../shared/dichiarazioniImpianti.ts";
@@ -85,7 +85,13 @@ export default async function(req) {
     // sono la lettura del 31/12 che la chiusura ha salvato, il numero a portale
     // di quell'anno (letturaDelTrentuno, decisioni dell'utente del 13/10/2026).
     // Una lettura sola in piu', e solo per un anno chiuso, come nel riepilogo.
-    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSito, giacenzeStoccaggio, dichiarazioniSito, impiantiTarget, targetRaccoglitori, targetMensili, giacenzeAnnoDopo] = await Promise.all([
+    // E DAL 14/10/2026 NEMMENO QUELLA (giro della velocita', sull'approvazione
+    // dell'utente): i siti dell'anno e quelli dell'anno dopo vengono da una
+    // lettura sola di GiacenzaSito, divisa qui per anno, come nel riepilogo. Lo
+    // stesso ordine del filtro per anno: fetchAll ordina tutte e due le letture
+    // allo stesso modo, e filtrare non sposta niente. Ogni archivio si legge una
+    // volta per chiamata (prove/velocitaGiacenze.mjs).
+    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSitoTutte, giacenzeStoccaggio, dichiarazioniSito, impiantiTarget, targetRaccoglitori, targetMensili] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.OrdineNonDichiarato),
       fetchAll(base44.asServiceRole.entities.DichiarazioneTrattamento),
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
@@ -93,7 +99,7 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
       fetchAll(base44.asServiceRole.entities.Secondaria),
       fetchAll(base44.asServiceRole.entities.Terziaria),
-      fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno: annoNum }),
+      fetchAll(base44.asServiceRole.entities.GiacenzaSito),
       fetchAll(base44.asServiceRole.entities.GiacenzaStoccaggio),
       fetchAll(base44.asServiceRole.entities.DichiarazioneSito),
       fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria),
@@ -101,8 +107,10 @@ export default async function(req) {
       // i target mensili dicono di che mese e' quale pezzo di target, e su quale
       // impianto l'utente lo ha scritto: li legge la ripartizione
       fetchAll(base44.asServiceRole.entities.TargetMensile),
-      annoTargetChiuso ? fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno: annoNum + 1 }) : Promise.resolve([]),
     ]);
+    // L'anno e' un numero obbligatorio di GiacenzaSito: lo stesso confronto del filtro.
+    const giacenzeSito = giacenzeSitoTutte.filter(g => g.anno === annoNum);
+    const giacenzeAnnoDopo = annoTargetChiuso ? giacenzeSitoTutte.filter(g => g.anno === annoNum + 1) : [];
     // Gli impianti di Target & Status di quell'anno con un target: compaiono anche
     // senza movimenti, come prima quelli con il target scritto in Giacenze.
     const impiantiConTarget = recordDellAnno(impiantiTarget, annoNum)
@@ -123,10 +131,25 @@ export default async function(req) {
 
     // --- Filtri temporali per movimentazione ---
     function isTerminato(r) { return String(r.stato || '').trim().toLowerCase() === 'terminato'; }
+    // IL GIORNO ITALIANO DI UNA DATA SI CALCOLA UNA VOLTA PER CHIAMATA (giro della
+    // velocita' del 14/10/2026). La stessa fine trasporto si chiedeva fino a
+    // quattro volte (conferito di rete, ACI, secondarie, ultima data caricata), e
+    // ogni volta passava dal fuso di Roma: sui dati veri piu' di sessantamila
+    // conversioni. Qui si ricorda il giorno di ogni testo gia' visto; il giorno e'
+    // quello di giornoRoma, sempre.
+    const giorniLetti = new Map();
+    const giornoDi = (v) => {
+      if (typeof v !== 'string') return giornoRoma(v);
+      let g = giorniLetti.get(v);
+      if (g === undefined) { g = giornoRoma(v); giorniLetti.set(v, g); }
+      return g;
+    };
     // L'anno e' quello del giorno italiano: un trasporto finito alle 23 del 31
     // dicembre appartiene all'anno che si chiude, non a quello che comincia.
+    // (Come annoRoma: senza un giorno l'anno non c'e', e non e' quello guardato.)
     function inYear(dateField) {
-      return annoRoma(dateField) === annoNum;
+      const g = giornoDi(dateField);
+      return !!g && Number(g.slice(0, 4)) === annoNum;
     }
 
     // === 0a. NOMI DEI SITI DA MOSTRARE ===
@@ -208,18 +231,33 @@ export default async function(req) {
     const fineRete = new Map(); // id della primaria terminata -> giorno di fine trasporto
     for (const r of reteAll) {
       const id = String(r.id_ordine || '').trim();
-      const g = isTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
+      const g = isTerminato(r) ? giornoDi(r.trasporto_finito_il) : '';
       if (id && g) fineRete.set(id, g);
     }
     // L'anno di oggi, per l'attesa del portale di un anno che non e' quello in
     // corso (nellAttesaDellAnno): letto una volta.
     const annoDiOggi = annoCorrenteRoma();
+    // GLI ORDINI DEI SOLI CARICHI DI QUELL'ANNO VALGONO PER UN ANNO PASSATO, NON
+    // PER L'ANNO DOPO (revisione del 14/10/2026). La pagina lascia scegliere
+    // anche l'anno dopo, e li' la giacenza di un impianto e' la fotografia di
+    // oggi: contarle accanto i soli carichi di quell'anno, che non ci sono ancora,
+    // dava sui dati veri del 2027 Irigom 652,84 t con 0 ordini (prima 233), e in
+    // tutto 3.476,53 t con 0 ordini invece di 866. La regola degli impianti qui
+    // sotto, i carichi non ancora nel file (nAnno) e l'etichetta della colonna
+    // (ordini_dei_carichi_del) la usano solo per un anno passato; sull'anno in
+    // corso e su quello dopo tutto il file, come prima.
+    const ordiniDiUnAnnoPassato = annoNum < annoDiOggi;
     // UN ANNO PRIMA DEL GESTIONALE (decisioni dell'utente del 13/10/2026): un
     // anno chiuso che qui non e' mai stato aperto, senza siti ne' dichiarazioni.
     // La giacenza dei suoi impianti non si ricostruisce, e tutti e due i moduli
     // lo dicono con lo stesso perche' (annoPrimaDelGestionale).
     const primaDelGestionale = annoPrimaDelGestionale({ anno: annoNum, annoDiOggi, sitiDellAnno: giacenzeSito });
     const fineAnnoChiuso = `${annoNum}-12-31`;
+    // Il giorno in cui un carico passato da uno stoccaggio e' arrivato
+    // all'impianto: la fine della sua secondaria (giornoAllImpianto, il giorno del
+    // riepilogo delle dichiarazioni). Serve agli ordini di un anno che non e'
+    // quello in corso, qui sotto.
+    const finiSec = finiDelleSecondarie(secAll);
     for (const r of nonDichiarati) {
       portaleConosce.segna(r);
       const { sito, td, anomalia } = attribuisci(r);
@@ -258,6 +296,21 @@ export default async function(req) {
         giacPortaleMap.set(key, (giacPortaleMap.get(key) || 0) + t);
         if (!classiImpiantoMap.has(key)) classiImpiantoMap.set(key, classiVuote());
         classiImpiantoMap.get(key)[classeDa(r.prodotto)] += kg;
+        // GLI ORDINI DI UN IMPIANTO SU UN ANNO CHE NON E' QUELLO IN CORSO (giro del
+        // 14/10/2026, sull'approvazione dell'utente). Sulle righe degli impianti la
+        // colonna contava ancora tutto il file di oggi: sul 2025 dei dati veri
+        // Tecnogum 320, Irigom 233, T-Cycle 118, Green Tyre 139, Gatim 56, accanto
+        // a una giacenza che e' la lettura del 31/12 o «—». Il file e' una
+        // fotografia di oggi, e quegli ordini non sono di quell'anno. Ora la regola
+        // e' quella dello stoccaggio qui sopra (nellAttesaDellAnno): su un anno
+        // passato contano solo i carichi arrivati all'impianto in quell'anno, per
+        // fine trasporto (la secondaria, se il carico e' passato da un piazzale),
+        // cioe' quelli di quell'anno che oggi sono ancora da dichiarare. La
+        // giacenza non cambia: e' il conto degli ordini, e la pagina lo dice
+        // («dei carichi del 2025»). Sull'anno in corso, e sull'anno dopo, la cui
+        // giacenza e' la fotografia di oggi, tutto il file, come prima
+        // (ordiniDiUnAnnoPassato).
+        if (ordiniDiUnAnnoPassato) contaOrdine = nellAttesaDellAnno(giornoAllImpianto(r, { finiSecondarie: finiSec, finePrimaria: (id) => fineRete.get(id) || '' }), annoNum, annoDiOggi);
       }
       if (contaOrdine) ordiniMap.set(key, (ordiniMap.get(key) || 0) + 1);
 
@@ -341,7 +394,7 @@ export default async function(req) {
     const oggi = giornoRoma(new Date().toISOString());
     let datiAggiornatiAl = '';
     for (const r of [...reteAll, ...aciAll, ...extraAll, ...secAll]) {
-      const g = isTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
+      const g = isTerminato(r) ? giornoDi(r.trasporto_finito_il) : '';
       if (g && g > datiAggiornatiAl && g <= oggi) datiAggiornatiAl = g;
     }
     // Una primaria di CLASSE 9 che sta nell'archivio della rete e' ACI: decide
@@ -490,12 +543,16 @@ export default async function(req) {
       const ns = carichiNonNoti.segna(r, tipo);
       if (!ns) return;
       const key = ns + '|imp';
-      if (!aggiuntiMap.has(key)) aggiuntiMap.set(key, { kg: 0, classi: classiVuote(), n: 0 });
+      if (!aggiuntiMap.has(key)) aggiuntiMap.set(key, { kg: 0, classi: classiVuote(), n: 0, nAnno: 0 });
       const a = aggiuntiMap.get(key);
       const kg = Number(r.peso_effettivo) || 0;
       a.kg += kg;
       a.classi[classeDa(r.classe, r.prodotto)] += kg;
       a.n++;
+      // Fra gli ordini da dichiarare di un anno passato solo quelli arrivati
+      // all'impianto in quell'anno, come le righe del file (14/10/2026); sull'anno
+      // in corso e su quello dopo tutti (ordiniDiUnAnnoPassato).
+      if (!ordiniDiUnAnnoPassato || nellAttesaDellAnno(r.trasporto_finito_il, annoNum, annoDiOggi)) a.nAnno++;
     };
     // La giacenza a portale di un impianto e' della RETE (il portale l'ACI degli
     // impianti non la tiene per noi): una riga di classe 9 non ci entra, qualunque
@@ -814,7 +871,9 @@ export default async function(req) {
       let sitoNome = g?.sito || nomiSito.get(ns) || ns;
 
       // Gli ordini del file del portale, piu' i carichi che il file non contiene ancora.
-      const ordini_da_dichiarare = (ordiniMap.get(key) || 0) + (td === 'imp' && aggiuntiMap.has(key) ? aggiuntiMap.get(key).n : 0);
+      // Su un anno passato, degli uni e degli altri solo quelli arrivati in
+      // quell'anno (14/10/2026): sull'anno in corso e su quello dopo nAnno e' n.
+      const ordini_da_dichiarare = (ordiniMap.get(key) || 0) + (td === 'imp' && aggiuntiMap.has(key) ? aggiuntiMap.get(key).nAnno : 0);
       const arretrato_per_anno = arretratoAnniMap.get(key) || {};
 
       // Giacenza a portale, un canale per volta. Per gli impianti e' la rete: la
@@ -1372,6 +1431,14 @@ export default async function(req) {
     // foglio Excel, come la Quadratura delle Dichiarazioni. Sull'anno in corso
     // e' tutto il file: null, e l'etichetta resta quella di sempre.
     totali.in_attesa_dei_carichi_del = annoNum !== annoDiOggi ? annoNum : null;
+    // DI QUALI CARICHI SONO GLI ORDINI DA DICHIARARE (revisione del 14/10/2026):
+    // su un anno passato quelli di tutte le righe sono i carichi di quell'anno
+    // ancora da dichiarare oggi, e chi scrive l'etichetta della colonna (la
+    // pagina, il PDF, l'Excel, la casella in testa) la prende da qui. Non e'
+    // l'anno dell'attesa: sull'anno dopo gli impianti contano tutto il file.
+    // C'e' solo su un anno passato, perche' la risposta dell'anno in corso resti
+    // quella di prima, al carattere (prove/velocitaGiacenze.mjs).
+    if (ordiniDiUnAnnoPassato) totali.ordini_dei_carichi_del = annoNum;
     // Di quell'attesa, quanto per noi e' un giro chiuso (decisioni dell'utente del
     // 13/10/2026): il totale della colonna resta il numero del portale, e accanto
     // si dice quanto non e' un'attesa da risolvere. Solo se c'e'.

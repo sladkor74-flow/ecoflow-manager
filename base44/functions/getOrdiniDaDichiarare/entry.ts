@@ -4,7 +4,8 @@ import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { giornoRoma, annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { formulariDelFile, ruoloDellaRiga, giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, inizioAggiunti } from "../../shared/giacenzaPortale.ts";
+import { formulariDelFile, ruoloDellaRiga, giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, inizioAggiunti, finiDelleSecondarie, giornoDelCarico, nellAttesaDellAnno } from "../../shared/giacenzaPortale.ts";
+import { eTerminato } from "../../shared/movimenti.ts";
 import { carichiNonNelFile, riconciliazioneDaDichiarare } from "../../shared/riconciliazioneDaDichiarare.ts";
 
 // Restituisce l'elenco paginato degli ordini in attesa di dichiarazione (OrdineNonDichiarato).
@@ -49,6 +50,17 @@ import { carichiNonNelFile, riconciliazioneDaDichiarare } from "../../shared/ric
 // pulsante della scheda Situazione - anche riconciliazione: righe del file +
 // carichi non ancora nel file - dichiarato dopo la fotografia = giacenza a
 // portale, e righe + carichi = il numero del pulsante (11/10/2026, vedi riconcilia).
+//
+// carichi_del (anno, dal 14/10/2026) -> solo i carichi arrivati in quell'anno al
+// sito a cui il portale li attribuisce: all'impianto (la fine della secondaria,
+// se il carico e' passato da un piazzale) o al piazzale, per fine trasporto. E'
+// la regola con cui le Giacenze di un anno passato contano gli ordini da
+// dichiarare (giornoDelCarico e nellAttesaDellAnno,
+// shared/giacenzaPortale.ts): il pulsante di quell'anno apre l'elenco con
+// carichi_del, e l'elenco dice lo stesso numero. Sull'anno in corso e su quello
+// dopo non filtra niente. Con riconcilia la riga dice solo gli ordini (file +
+// carichi non ancora nel file = pulsante): la giacenza di un anno chiuso e' la
+// lettura del 31/12, non questo elenco.
 //
 // I formulari si leggono solo per gli ordini del file (22/09/2026). La scheda Da
 // dichiarare chiama questa funzione a ogni pagina, filtro o ricerca: leggere
@@ -105,7 +117,7 @@ async function leggiOrdini(entity, ids, fn) {
  * italiano), il report delle dichiarazioni solo per i numeri d'ordine che il file
  * non ha, e le dichiarazioni mensili, che sono poche.
  */
-async function riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini, fileKg }) {
+async function riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini, fileKg, carichiDel = null, annoDiOggi = Number(oggiRoma().slice(0, 4)) }) {
   const foto = giornoFotografia(righeFile);
   if (!foto) return { senza_fotografia: true };
   const portaleConosce = ordiniNotiAlPortale();
@@ -114,12 +126,18 @@ async function riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini, fileKg }
   const d = new Date(`${inizio}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() - 1);
   const finestra = { stato: 'terminato', trasporto_finito_il: { $gte: `${d.toISOString().slice(0, 10)}T00:00:00` } };
-  const annoDiOggi = Number(oggiRoma().slice(0, 4));
+  // I CARICHI DI UN ANNO PASSATO (14/10/2026): i carichi non
+  // ancora nel file si cercano da inizioAggiunti in avanti, quindi un anno finito
+  // prima non ne puo' avere, e primarie, secondarie e report non si leggono
+  // nemmeno. Chi la rete non la dichiara si legge nei siti di quell'anno, come le
+  // Giacenze di quell'anno; il dichiarato dopo la fotografia non serve, perche'
+  // la riga di quell'anno non arriva a una giacenza.
+  const nessunAggiunto = carichiDel !== null && `${carichiDel}-12-31` < inizio;
   const [primarie, secondarie, giacenzeSito, dichiarazioniSito] = await Promise.all([
-    fetchAll(svc.PrimariaRete, finestra),
-    fetchAll(svc.Secondaria, finestra),
-    fetchAll(svc.GiacenzaSito, { anno: annoDiOggi }),
-    fetchAll(svc.DichiarazioneSito),
+    nessunAggiunto ? Promise.resolve([]) : fetchAll(svc.PrimariaRete, finestra),
+    nessunAggiunto ? Promise.resolve([]) : fetchAll(svc.Secondaria, finestra),
+    fetchAll(svc.GiacenzaSito, { anno: carichiDel !== null ? carichiDel : annoDiOggi }),
+    carichiDel !== null ? Promise.resolve([]) : fetchAll(svc.DichiarazioneSito),
   ]);
   // Chi la rete non la dichiara per accordo (oggi Tecnogum) non ha una giacenza
   // di rete che il portale tenga per noi: non c'e' niente da riconciliare.
@@ -138,6 +156,15 @@ async function riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini, fileKg }
   const carichi = carichiNonNelFile({ foto, portaleConosce, chiaveDi: norm, nonDichiaraRete });
   for (const r of candidatePrimarie) carichi.segna(r, 'primaria');
   for (const r of candidateSecondarie) carichi.segna(r, 'secondaria');
+  if (carichiDel !== null) {
+    // Gli ordini di quell'anno: le righe del file arrivate in quell'anno (l'elenco)
+    // piu' i carichi non ancora nel file arrivati in quell'anno = il numero del
+    // pulsante delle Giacenze di quell'anno. Niente giacenza (null): e' la lettura
+    // del 31/12, o «—», non la somma di questo elenco.
+    const ordini = carichi.di(sitoNorm).ordini.filter(o => nellAttesaDellAnno(o.fine_trasporto, carichiDel, annoDiOggi));
+    const aggiunti = { n: ordini.length, kg: ordini.reduce((s, o) => s + o.kg, 0), ordini };
+    return { ...riconciliazioneDaDichiarare({ foto, fileOrdini, fileKg, aggiunti, dichiaratoDopoKg: 0 }), carichi_del: carichiDel, dichiarato_dopo_kg: null, giacenza_kg: null };
+  }
   const dopo = dichiaratoDopoLaFotografia(dichiarazioniSito, foto, norm).get(sitoNorm) || 0;
   return riconciliazioneDaDichiarare({ foto, fileOrdini, fileKg, aggiunti: carichi.di(sitoNorm), dichiaratoDopoKg: dopo });
 }
@@ -155,6 +182,16 @@ export default async function(req) {
     // dal suo piazzale e gia' ripartiti, che dichiara chi li ha ricevuti.
     const ruoloChiesto = ['imp', 'stoc'].includes(String(body.ruolo || '').trim().toLowerCase()) ? String(body.ruolo).trim().toLowerCase() : null;
     const anno = body.anno ?? body.anno_chiusura;
+    // L'anno dei carichi (carichi_del, 14/10/2026): sull'anno in corso vale tutto
+    // il file, come senza (nellAttesaDellAnno), e la riga di riconciliazione resta
+    // quella che arriva alla giacenza. Anche sull'anno dopo (revisione del
+    // 14/10/2026): li' le Giacenze contano tutto il file accanto alla fotografia di
+    // oggi, e un elenco dei soli carichi di quell'anno era vuoto, con una riga che
+    // chiamava quella giacenza «la lettura del 31/12». Il filtro vale solo per un
+    // anno passato, come ordiniDiUnAnnoPassato in calcolaGiacenze.
+    const annoDiOggi = Number(oggiRoma().slice(0, 4));
+    const carichiChiesti = body.carichi_del === undefined || body.carichi_del === null || body.carichi_del === '' ? null : Number(body.carichi_del);
+    const carichiDel = carichiChiesti !== null && Number.isFinite(carichiChiesti) && carichiChiesti < annoDiOggi ? carichiChiesti : null;
 
     const norm = normalizzaRagioneSociale;
     const tutte = !!body.tutte;
@@ -207,16 +244,28 @@ export default async function(req) {
     // ruolo lo dice la primaria nel gestionale, e si legge qui senza una lettura
     // in piu' (utente, 08/10/2026).
     const tipoPrimaria = new Map();
+    // Il giorno in cui un carico e' arrivato al sito, per carichi_del: la fine
+    // trasporto della primaria terminata (come fineRete nelle Giacenze) e quella
+    // delle secondarie lette qui, le stesse delle righe che servono. Nessuna
+    // lettura in piu' (14/10/2026).
+    const finePrimarie = new Map();
+    const secondarieLette = [];
     await Promise.all([
       leggiOrdini(svc.PrimariaRete, [...idPrimarie], (r) => {
         formulari.segna(r, 'primaria');
         const id = String(r.id_ordine || '').trim();
         const td = String(r.tipo_destinazione || '').trim().toLowerCase();
         if (id && td) tipoPrimaria.set(id, td.startsWith('stoc') ? 'stoc' : 'imp');
+        const fine = eTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
+        if (id && fine) finePrimarie.set(id, fine);
       }),
       // Le secondarie ACI non portano righe di questo file, che e' della rete.
-      leggiOrdini(svc.Secondaria, [...idSecondarie], (r) => { if (!eAci(r)) formulari.segna(r, 'secondaria'); }),
+      leggiOrdini(svc.Secondaria, [...idSecondarie], (r) => { secondarieLette.push(r); if (!eAci(r)) formulari.segna(r, 'secondaria'); }),
     ]);
+    const finiSecondarie = finiDelleSecondarie(secondarieLette);
+    const giornoDelSuoArrivo = (r) => giornoDelCarico(r, ruoloDellaRiga(r, (id) => tipoPrimaria.get(id) || ''), {
+      finiSecondarie, finePrimaria: (id) => finePrimarie.get(id) || '',
+    });
     // I formulari da sistemare di una riga del file, e se il carico resta fuori dai
     // mesi: conta il movimento che l'ha portato all'impianto.
     const dateDiRiga = (r) => formulari.diRiga(r);
@@ -250,6 +299,9 @@ export default async function(req) {
       // Chiesto il ruolo, restano solo le righe di quel titolo: dal pulsante
       // dell'impianto si vede quello che l'impianto deve dichiarare, e basta.
       if (ruoloChiesto && ruoloDellaRiga(r, (id) => tipoPrimaria.get(id) || '') !== ruoloChiesto) continue;
+      // Su un anno passato, solo i carichi arrivati in quell'anno: gli ordini che
+      // il pulsante delle Giacenze di quell'anno conta.
+      if (carichiDel !== null && !nellAttesaDellAnno(giornoDelSuoArrivo(r), carichiDel, annoDiOggi)) continue;
       filtrate.push(r);
       dateFiltrate.set(r, date);
       if (!giornoRoma(r.fine_trasporto)) { senzaFineAPortale++; if (date.fine_dal_gestionale) senzaFineDalGestionale++; }
@@ -302,7 +354,10 @@ export default async function(req) {
     let riconciliazione = null;
     if (body.riconcilia === true && sitoNorm && ruoloChiesto === 'imp' && !provUpper && annoNum === null && !ricercaLower && !soloDate) {
       try {
-        riconciliazione = await riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini: totale_righe, fileKg: totale_kg });
+        // L'anno dei carichi e l'anno di oggi viaggiano con la domanda (14/10/2026):
+        // senza, i siti si leggevano con un anno vuoto e Tecnogum, che la rete non
+        // la dichiara, non si riconosceva piu' (prove/riconciliazioneDaDichiarare.mjs).
+        riconciliazione = await riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini: totale_righe, fileKg: totale_kg, carichiDel, annoDiOggi });
       } catch (e) {
         riconciliazione = { errore: e && e.message ? e.message : String(e) };
       }

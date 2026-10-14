@@ -748,18 +748,65 @@ export function nellAttesaDellAnno(giorno, anno, annoDiOggi) {
   return !!g && Number(g.slice(0, 4)) === Number(anno);
 }
 
+/**
+ * LE FINI DELLE SECONDARIE, PER NUMERO D'ORDINE (giro del 14/10/2026).
+ *
+ * Un carico del file passato da uno stoccaggio arriva all'impianto con la
+ * secondaria, e il suo giorno e' la fine trasporto della secondaria. Stava
+ * dentro collocaFotografia; ora la chiedono anche le Giacenze e l'elenco degli
+ * ordini da dichiarare, per contare gli ordini di un anno che non e' quello in
+ * corso con lo stesso giorno del riepilogo delle dichiarazioni.
+ *   fine(id)       il giorno italiano di fine trasporto della secondaria, '' se non c'e'
+ *   senzaFine(id)  vero se nel gestionale la secondaria e' terminata senza fine trasporto
+ */
+export function finiDelleSecondarie(secondarie = []) {
+  const fine = new Map(); // id della secondaria -> giorno in cui e' arrivata all'impianto
+  const senza = new Set(); // id delle secondarie terminate che nel gestionale non hanno la fine trasporto
+  for (const r of secondarie || []) {
+    const id = String(r && r.id_ordine || '').trim();
+    const g = giornoRoma(r && r.trasporto_finito_il);
+    if (id && g) fine.set(id, g);
+    else if (id && eTerminato(r)) senza.add(id);
+  }
+  return { fine: (id) => fine.get(id) || '', senzaFine: (id) => senza.has(id) };
+}
+
+/**
+ * IL GIORNO IN CUI UN CARICO DEL FILE E' ARRIVATO ALL'IMPIANTO (giro del
+ * 14/10/2026): la fine trasporto della secondaria, se il carico e' passato da
+ * uno stoccaggio; se no quella della riga, e se la riga non la scrive quella
+ * della primaria nel gestionale. Sempre la fine trasporto, mai la chiusura. Una
+ * secondaria terminata senza fine trasporto non ha un giorno di arrivo, e non si
+ * ripiega su quello della primaria, che e' piu' vecchio: ''.
+ * E' il giorno con cui collocaFotografia mette un carico nel mese del riepilogo,
+ * e quello con cui le Giacenze e l'elenco contano gli ordini di un anno.
+ */
+export function giornoAllImpianto(r, { finiSecondarie = finiDelleSecondarie([]), finePrimaria = () => '' } = {}) {
+  const sec = String((r && r.destinazione_secondaria) || '').trim();
+  const secId = String((r && r.ordine_secondaria) || '').trim();
+  if (sec && secId && finiSecondarie.senzaFine(secId)) return '';
+  return (sec && secId && finiSecondarie.fine(secId)) || giornoRoma(r && r.fine_trasporto) || finePrimaria(String((r && r.ordine_primaria) || '').trim()) || '';
+}
+
+/**
+ * IL GIORNO IN CUI UN CARICO DEL FILE E' ARRIVATO AL SITO A CUI IL PORTALE LO
+ * ATTRIBUISCE (giro del 14/10/2026): al piazzale per una riga dello stoccaggio
+ * (giornoAlPiazzale), all'impianto per le altre (giornoAllImpianto). Con
+ * nellAttesaDellAnno dice se una riga conta fra gli ordini da dichiarare di un
+ * anno: la stessa domanda per la colonna delle Giacenze e per l'elenco che il
+ * suo pulsante apre (getOrdiniDaDichiarare, carichi_del).
+ */
+export function giornoDelCarico(r, ruolo, { finiSecondarie = finiDelleSecondarie([]), finePrimaria = () => '' } = {}) {
+  return ruolo === 'stoc' ? giornoAlPiazzale(r, finePrimaria) : giornoAllImpianto(r, { finiSecondarie, finePrimaria });
+}
+
 export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s || '').trim().toLowerCase(), ruoloPrimaria = () => '', secondarie = [], finePrimaria = () => '', anno = null, annoDiOggi = null } = {}) {
   // L'attesa dell'anno guardato (nellAttesaDellAnno): senza anno, tutto il file.
   const contaAttesa = (giorno) => anno === null || anno === undefined || nellAttesaDellAnno(giorno, anno, annoDiOggi);
   const somma = (mappa, chiave, valore) => mappa.set(chiave, (mappa.get(chiave) || 0) + valore);
-  const fineSecondaria = new Map(); // id della secondaria -> giorno in cui e' arrivata all'impianto
-  const secondarieSenzaFine = new Set(); // id delle secondarie terminate che nel gestionale non hanno la fine trasporto
-  for (const r of secondarie || []) {
-    const id = String(r && r.id_ordine || '').trim();
-    const g = giornoRoma(r && r.trasporto_finito_il);
-    if (id && g) fineSecondaria.set(id, g);
-    else if (id && eTerminato(r)) secondarieSenzaFine.add(id);
-  }
+  // Le fini delle secondarie: il giorno in cui un carico passato da uno
+  // stoccaggio e' arrivato all'impianto (finiDelleSecondarie, giornoAllImpianto).
+  const finiSecondarie = finiDelleSecondarie(secondarie);
   const esito = {
     portale: new Map(), inAttesa: new Map(), attesaCoppia: new Map(), aPortale: new Set(),
     perMese: new Map(), perGiorno: new Map(), senzaGiorno: new Map(),
@@ -768,7 +815,6 @@ export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s ||
   for (const r of nonDichiarati || []) {
     const sec = String(r.destinazione_secondaria || '').trim();
     const sito = sec || String(r.destinazione || '').trim();
-    const idPrimaria = String(r.ordine_primaria || '').trim();
     const ruolo = ruoloDellaRiga(r, ruoloPrimaria);
     const ns = chiaveDi(sito);
     // Il file degli ordini non dichiarati e' della rete: una riga ACI, se mai ci
@@ -789,8 +835,8 @@ export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s ||
     }
     somma(esito.portale, ns, kg / 1000);
     const secId = String(r.ordine_secondaria || '').trim();
-    const secondariaSenzaFine = !!(sec && secId && secondarieSenzaFine.has(secId));
-    const g = secondariaSenzaFine ? '' : ((sec && secId && fineSecondaria.get(secId)) || giornoRoma(r.fine_trasporto) || finePrimaria(idPrimaria) || '');
+    const secondariaSenzaFine = !!(sec && secId && finiSecondarie.senzaFine(secId));
+    const g = giornoAllImpianto(r, { finiSecondarie, finePrimaria });
     // Partito dallo stoccaggio verso l'impianto: l'attesa e' dell'anno in cui e'
     // arrivato all'impianto, come le partenze della scheda Stoccaggi.
     if (sec && r.destinazione && contaAttesa(g)) somma(esito.attesaCoppia, `${chiaveDi(r.destinazione)}|${ns}`, kg / 1000);

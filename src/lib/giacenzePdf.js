@@ -99,6 +99,11 @@ export function situazionePdf(anno, righe, totali) {
   // quell'anno (calcolaGiacenze, revisione finale del 13/10/2026): lo dice
   // l'etichetta, come la pagina e la Quadratura delle Dichiarazioni.
   const attesaDel = (totali && totali.in_attesa_dei_carichi_del) || null;
+  // Su un anno passato gli ordini da dichiarare sono i carichi di quell'anno
+  // ancora aperti oggi (giro del 14/10/2026): lo dice la colonna, come la
+  // pagina. L'anno e' ordini_dei_carichi_del, mai quello dell'attesa: sull'anno
+  // dopo l'attesa e' dei carichi di quell'anno, gli ordini sono tutto il file.
+  const ordiniDel = (totali && totali.ordini_dei_carichi_del) || null;
   // Un totale senza numero si scrive «—»: esportaTabella lascia vuota una cella
   // numerica null, e nel riepilogo non scriveva niente (14/10/2026).
   const oManca = (v) => (manca(v) ? '—' : v);
@@ -131,7 +136,7 @@ export function situazionePdf(anno, righe, totali) {
         { titolo: 'ACI (kg)', tipo: 'intero', peso: 0.8 },
         { titolo: attesaDel ? `In attesa dich., dei carichi del ${attesaDel}` : 'In attesa dich.', tipo: 't', peso: 1 },
         { titolo: 'Attesa per noi chiusa', tipo: 't', peso: 0.9 },
-        { titolo: 'Ordini da dich.', tipo: 'intero', peso: 0.8 },
+        { titolo: ordiniDel ? `Ordini da dich., dei carichi del ${ordiniDel} ancora da dichiarare oggi` : 'Ordini da dich.', tipo: 'intero', peso: 0.8 },
         { titolo: 'Dichiarato', tipo: 't', peso: 1 },
       ],
       righe: righe.map(r => ({

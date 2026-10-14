@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { conBattito } from "../../shared/battito.ts";
-import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
@@ -75,6 +75,18 @@ async function riepilogoDelleDichiarazioni(req) {
     const t3 = (v) => Math.round(v * 1000) / 1000;
     const peso = (r) => (Number(r.peso_effettivo) || 0);
     const somma = (mappa, chiave, valore) => mappa.set(chiave, (mappa.get(chiave) || 0) + valore);
+    // IL GIORNO ITALIANO DI UNA DATA SI CALCOLA UNA VOLTA PER CHIAMATA (giro della
+    // velocita' del 14/10/2026): qui sotto la fine trasporto di una primaria si
+    // chiedeva due o tre volte, e quella di ogni riga del report una, sempre
+    // passando dal fuso di Roma. Si ricorda il giorno di ogni testo gia' visto;
+    // il giorno e' quello di giornoRoma, sempre.
+    const giorniLetti = new Map();
+    const giornoDi = (v) => {
+      if (typeof v !== 'string') return giornoRoma(v);
+      let g = giorniLetti.get(v);
+      if (g === undefined) { g = giornoRoma(v); giorniLetti.set(v, g); }
+      return g;
+    };
     // Il mese e l'anno di un movimento sono quelli della fine del trasporto, sul
     // giorno italiano: la regola di tutto il gestionale (shared/movimenti.ts).
     const periodo = (r) => {
@@ -135,9 +147,27 @@ async function riepilogoDelleDichiarazioni(req) {
     // si chiude il 2026 - le dichiarazioni dell'anno nuovo caricate dopo la
     // fotografia entravano in un modulo e non nell'altro. Qui servono solo a
     // questo conto, quindi si leggono tutte: l'archivio e' piccolo.
-    const [giacenzeSito, dichiarazioni, dichiarazioniTutte, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni, giacenzeAnnoDopo] = await Promise.all([
-      fetchAll(svc.GiacenzaSito, { anno: annoNum }),
-      fetchAll(svc.DichiarazioneSito, { anno: annoNum }),
+    //
+    // OGNI ARCHIVIO SI LEGGE UNA VOLTA, E TUTTI INSIEME (giro della velocita' del
+    // 14/10/2026, sull'approvazione dell'utente: «per me ok ... sulla velocita'»).
+    // Le dichiarazioni mensili si leggevano due volte, quelle dell'anno e tutte:
+    // quelle dell'anno ora si prendono da tutte, in memoria, nello stesso ordine
+    // (fetchAll ordina tutte e due le letture allo stesso modo, e filtrare non
+    // sposta niente). Lo stesso per i siti: quelli dell'anno e, per un anno
+    // chiuso, quelli dell'anno dopo vengono da una lettura sola. E il report
+    // delle dichiarazioni e le primarie di rete, i due archivi grandi, si
+    // leggevano dopo tutti gli altri e una pagina per volta: sette richieste in
+    // fila dopo le prime dieci. Ora partono con le altre, a pagine da 5000 in
+    // ordine di id (fetchAll, l'ordine in cui perPagina le passava), e si
+    // scorrono dopo, nello stesso ordine di prima: chi le segna (il portale che
+    // conosce un ordine, le uscite dal report, i carichi non ancora nel file) ha
+    // bisogno che il report sia letto tutto prima delle primarie, e cosi' e'.
+    // Sui dati veri dell'11/10/2026: 15 richieste invece di 16 sull'anno in
+    // corso e 15 invece di 17 su un anno chiuso; le richieste in fila, una dopo
+    // l'altra, 4 invece di 8 (le quattro pagine del report). Le risposte sono
+    // identiche sul 2026, sul 2025 e sul 2024 (prove/velocitaGiacenze.mjs).
+    const [giacenzeSitoTutte, dichiarazioniTutte, aci, extra, secondarie, terziarie, nonDichiarati, rilevazioni, reportDichiarazioni, primarieRete] = await Promise.all([
+      fetchAll(svc.GiacenzaSito),
       fetchAll(svc.DichiarazioneSito),
       fetchAll(svc.PrimariaAci),
       fetchAll(svc.ExtraRaccolta),
@@ -145,9 +175,15 @@ async function riepilogoDelleDichiarazioni(req) {
       fetchAll(svc.Terziaria),
       fetchAll(svc.OrdineNonDichiarato),
       fetchAll(svc.GiacenzaStoccaggio),
-      // Le aperture dell'anno dopo: per un anno chiuso sono la lettura del 31/12.
-      annoChiuso ? fetchAll(svc.GiacenzaSito, { anno: annoNum + 1 }) : Promise.resolve([]),
+      fetchAll(svc.DichiarazioneTrattamento, null, 'id'),
+      fetchAll(svc.PrimariaRete, null, 'id'),
     ]);
+    // I siti e le dichiarazioni dell'anno, come li dava il filtro per anno (il
+    // campo e' un numero obbligatorio in tutti e due gli archivi).
+    const giacenzeSito = giacenzeSitoTutte.filter(g => g.anno === annoNum);
+    const dichiarazioni = dichiarazioniTutte.filter(d => d.anno === annoNum);
+    // Le aperture dell'anno dopo: per un anno chiuso sono la lettura del 31/12.
+    const giacenzeAnnoDopo = annoChiuso ? giacenzeSitoTutte.filter(g => g.anno === annoNum + 1) : [];
 
     // --- La fotografia del portale ---
     // Il file degli ordini non dichiarati e' una fotografia, del giorno in cui e'
@@ -179,11 +215,13 @@ async function riepilogoDelleDichiarazioni(req) {
     const fineSecondarie = new Map();
     for (const r of secondarie) {
       const idSec = String(r.id_ordine || '').trim();
-      const g = giornoRoma(r.trasporto_finito_il);
+      const g = giornoDi(r.trasporto_finito_il);
       if (idSec && g) fineSecondarie.set(idSec, g);
     }
     const uscite = raccoglitoreUscite({ chiaveDi: norm, fineSecondaria: (id) => fineSecondarie.get(id) || '', anno: annoNum });
-    await perPagina(svc.DichiarazioneTrattamento, null, (r) => {
+    // Il report si scorre qui, letto con gli altri archivi (14/10/2026): prima
+    // si leggeva qui, una pagina per volta.
+    const rigaDelReport = (r) => {
       // Che il portale conosca quell'ordine e' un fatto, chiunque l'abbia
       // dichiarato: si segna prima di qualunque filtro.
       portaleConosce.segna(r, 'dichiarazioni');
@@ -202,11 +240,12 @@ async function riepilogoDelleDichiarazioni(req) {
       uscite.segna(r);
       // Il portale lo conosce ma non lo conta piu' in giacenza: per chi non ha
       // la fine trasporto la differenza si dice (22/09/2026).
-      if (eAci({ prodotto: r.prodotto }) || !giornoRoma(r.fine_trasporto).startsWith(String(annoNum))) return;
+      if (eAci({ prodotto: r.prodotto }) || !giornoDi(r.fine_trasporto).startsWith(String(annoNum))) return;
       const ns = norm(String(r.destinazione_secondaria || '').trim() || r.destinazione);
       if (!ns) return;
       somma(dichiaratoPortale, ns, Number(r.peso_associato_kg) || 0);
-    });
+    };
+    for (const r of reportDichiarazioni) rigaDelReport(r);
 
     // I terminati con le date da sistemare, per soggetto e canale (22/09/2026).
     // Si segnano mentre si leggono gli archivi; se il portale li conosce lo si
@@ -238,7 +277,7 @@ async function riepilogoDelleDichiarazioni(req) {
     // Giacenze e nell'elenco «Da dichiarare»: tre copie con lo stesso esito.
     const nonAncora = carichiNonNelFile({ foto: fotoPortale, portaleConosce, chiaveDi: norm, nonDichiaraRete });
     let movimentiFinoAl = '';
-    const segnaFine = (r) => { const g = giornoRoma(r.trasporto_finito_il); if (g > movimentiFinoAl) movimentiFinoAl = g; };
+    const segnaFine = (r) => { const g = giornoDi(r.trasporto_finito_il); if (g > movimentiFinoAl) movimentiFinoAl = g; };
     // DOVE ENTRA UN MOVIMENTO: chi lo riceve, con che ruolo, su che canale, e per
     // una secondaria da quale piazzale parte. Lo dice shared/ingressoMovimento.ts,
     // lo stesso file che chiedono le Giacenze (chiusura dell'audit, 11/10/2026):
@@ -350,7 +389,7 @@ async function riepilogoDelleDichiarazioni(req) {
     // movimenti con la fine trasporto, di qualunque anno.
     const movPiazzale = new Map(); // ns|canale -> [{ giorno, kg }] (+ entrate, - partenze)
     const segnaPiazzale = (ns, canale, r, kg) => {
-      const giorno = giornoRoma(r.trasporto_finito_il);
+      const giorno = giornoDi(r.trasporto_finito_il);
       if (!ns || !giorno || !CANALI_PORTALE.includes(canale)) return;
       const k = `${ns}|${canale}`;
       if (!movPiazzale.has(k)) movPiazzale.set(k, []);
@@ -442,9 +481,10 @@ async function riepilogoDelleDichiarazioni(req) {
     // La fine trasporto delle primarie di rete nel gestionale, per le righe del file
     // del portale che non la scrivono (piu' sotto).
     const fineRete = new Map(); // id_ordine -> giorno
-    await perPagina(svc.PrimariaRete, null, (r) => {
+    // Le primarie di rete si scorrono qui, lette con gli altri archivi (14/10/2026).
+    const primariaDiRete = (r) => {
       const idRete = String(r.id_ordine || '').trim();
-      const giornoRete = eTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
+      const giornoRete = eTerminato(r) ? giornoDi(r.trasporto_finito_il) : '';
       if (idRete && giornoRete) fineRete.set(idRete, giornoRete);
       // IL CANALE LO DECIDE IL MATERIALE, NON L'ARCHIVIO IN CUI LA RIGA SI TROVA.
       //
@@ -472,7 +512,8 @@ async function riepilogoDelleDichiarazioni(req) {
       if (canaleRiga === 'RETE') reteTutte += peso(r);
       if (c.ruolo === 'stoc') return;
       aggiungi(c.ns, canaleRiga, canaleRiga === 'ACI' ? 'primaria' : '', c.p.mese, peso(r));
-    });
+    };
+    for (const r of primarieRete) primariaDiRete(r);
     for (const r of aci) {
       const c = primaria(r, 'PrimariaAci');
       if (!c || c.ruolo === 'stoc') continue;

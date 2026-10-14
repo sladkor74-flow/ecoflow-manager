@@ -387,6 +387,11 @@ const SENZA_IN_ATTESA = "Il materiale in attesa di dichiarazione lo dice il file
 const SENZA_ORDINI = "Gli ordini da dichiarare si contano sul file degli ordini non dichiarati del portale, che e' della rete: su questo canale non ce n'e' nessuno da contare.";
 // L'attesa di un anno che non e' quello in corso (revisione finale del 13/10/2026).
 const attesaDellAnnoTitolo = (anno) => `Il file degli ordini non dichiarati e' di oggi: per il ${anno} l'attesa degli stoccaggi conta solo i carichi arrivati al piazzale nel ${anno}, per fine trasporto, e cosi' i loro ordini da dichiarare. Lo stesso numero della Quadratura delle Dichiarazioni.`;
+// E GLI ORDINI DA DICHIARARE DI TUTTE LE RIGHE (giro del 14/10/2026, sull'approvazione
+// dell'utente): sugli impianti la colonna contava ancora tutto il file di oggi,
+// accanto alla lettura del 31/12. Ora anche li', su un anno passato, i soli
+// carichi di quell'anno, e l'elenco che il pulsante apre e' lo stesso.
+const ordiniDellAnnoTitolo = (anno) => `Il file degli ordini non dichiarati e' di oggi: per il ${anno} si contano solo i carichi arrivati nel ${anno}, per fine trasporto (all'impianto, o al piazzale per gli stoccaggi), che oggi sono ancora da dichiarare, piu' quelli del ${anno} che il file non ha ancora. Il pulsante apre l'elenco di quei carichi. La giacenza di un anno chiuso resta la lettura del 31/12: questi ordini sono di oggi.`;
 const SENZA_DICHIARATO = "Il dichiarato dell'anno: per la rete viene dal report del portale, per ACI ed extra raccolta dalle righe mensili trascritte dall'amministratore nel modulo Dichiarazioni Impianti - le stesse che decurtano la giacenza. Un trattino vuol dire che il dato non c'e' ancora, non che e' zero.";
 // UN PIAZZALE NON DICHIARA, e il trattino sulla sua riga non e' un'attesa.
 // Dichiara chi tratta: il materiale che sta a terra qui finisce nella
@@ -489,6 +494,12 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
   const kg = (r, c) => (r.giacenza_classi_kg ? r.giacenza_classi_kg[c] || 0 : null);
   // L'anno dei carichi dell'attesa, se non e' tutto il file (calcolaGiacenze).
   const attesaDellAnno = (totali && totali.in_attesa_dei_carichi_del) || null;
+  // L'anno dei carichi degli ordini da dichiarare, solo su un anno passato
+  // (revisione del 14/10/2026). Non e' l'anno dell'attesa: sull'anno dopo
+  // l'attesa e' dei carichi di quell'anno, ma gli impianti contano tutto il file
+  // accanto alla fotografia di oggi, e l'etichetta «ancora da dichiarare oggi»
+  // non sarebbe vera (ordini_dei_carichi_del di calcolaGiacenze).
+  const ordiniDellAnno = (totali && totali.ordini_dei_carichi_del) || null;
 
   return (
     <div className="bg-card border rounded-lg overflow-hidden">
@@ -524,7 +535,10 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                 In attesa di dichiarazione
                 {attesaDellAnno && <span className="block text-[11px] font-normal text-muted-foreground">dei carichi del {attesaDellAnno}</span>}
               </th>
-              <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Ordini da dichiarare</th>
+              <th className="px-3 py-2 font-semibold text-right" rowSpan={2} title={ordiniDellAnno ? ordiniDellAnnoTitolo(ordiniDellAnno) : undefined}>
+                Ordini da dichiarare
+                {ordiniDellAnno && <span className="block text-[11px] font-normal text-muted-foreground">dei carichi del {ordiniDellAnno} ancora da dichiarare oggi</span>}
+              </th>
               <th className="px-3 py-2 font-semibold text-right" rowSpan={2}>Dichiarato nell&apos;anno</th>
               <th className="px-3 py-2 font-semibold" rowSpan={2}>Tipologia trattamento</th>
             </tr>
@@ -666,7 +680,8 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                               onClick={() => onVaiDaDichiarare(r.sito, r.tipo_destinazione)}
                               /* Gli ordini di un'attesa che per noi e' un giro chiuso restano quelli
                                  del portale, ma non sono da dichiarare per nessuno (13/10/2026). */
-                              title={tuttaChiusa ? `Gli ordini che il portale attribuisce ancora allo stoccaggio: ${r.in_attesa_chiusa_perche}. Non c'e' niente da fare.` : undefined}
+                              title={tuttaChiusa ? `Gli ordini che il portale attribuisce ancora allo stoccaggio: ${r.in_attesa_chiusa_perche}. Non c'e' niente da fare.`
+                                : ordiniDellAnno ? `Gli ordini dei carichi arrivati nel ${ordiniDellAnno} che oggi sono ancora da dichiarare: il pulsante apre il loro elenco.` : undefined}
                             >
                               {formatIntero(ordini || 0)}
                             </Button>

@@ -68,25 +68,46 @@ const nomeMese = (m) => {
 // ancora, l'elenco qui sopra ha solo le righe del file: questa riga dice quanti
 // e quali sono, toglie le dichiarazioni caricate dopo la fotografia e arriva alla
 // giacenza delle Giacenze. Se qualcosa non torna, lo si vede qui e non a occhio.
-function Riconciliazione({ r, sito }) {
+//
+// SU UN ANNO PASSATO (giro del 14/10/2026, sull'approvazione
+// dell'utente) la riga dice solo gli ordini: quelli del file arrivati in
+// quell'anno piu' i carichi di quell'anno che il file non ha ancora = il numero
+// del pulsante della Situazione di quell'anno (carichi_del). La giacenza di un
+// anno chiuso e' la lettura del 31/12 salvata dalla chiusura, o «—»: questo
+// elenco, che e' di oggi, non ci arriva, e la riga non lo fa credere.
+export function Riconciliazione({ r, sito }) {
   const [aperto, setAperto] = useState(false);
   if (!r) return null;
   if (r.errore) return <p className="text-xs text-amber-800">La riconciliazione con la giacenza non si è potuta calcolare: {r.errore}</p>;
   if (r.senza_fotografia) return <p className="text-xs text-muted-foreground">Il file degli ordini non dichiarati non è caricato: la riconciliazione con la giacenza non si fa.</p>;
   if (r.non_dovuta) return <p className="text-xs text-muted-foreground">Per accordo {sito} non ci dichiara la rete: il portale non tiene per noi una giacenza di rete, e non c&apos;è niente da riconciliare.</p>;
+  const dellAnno = r.carichi_del !== null && r.carichi_del !== undefined;
   return (
     <div className="text-xs border rounded-lg bg-card px-3 py-2 space-y-1">
-      <p>
-        <strong>Riconciliazione con la giacenza:</strong>{' '}
-        file del portale{r.foto_del ? ` del ${fmtData(r.foto_del)}` : ''} {formatIntero(r.file_ordini)} {r.file_ordini === 1 ? 'ordine' : 'ordini'}, {kg(r.file_kg)} kg
-        {' '}+ {formatIntero(r.aggiunti_n)} {r.aggiunti_n === 1 ? 'carico' : 'carichi'} non ancora nel file, {kg(r.aggiunti_kg)} kg
-        {' '}− dichiarato a portale dopo la fotografia, {kg(r.dichiarato_dopo_kg)} kg
-        {' '}= <strong className="tabular-nums">giacenza a portale {kg(r.giacenza_kg)} kg</strong>, lo stesso numero delle Giacenze.
-      </p>
-      <p className="text-muted-foreground">
-        Ordini: {formatIntero(r.file_ordini)} nel file + {formatIntero(r.aggiunti_n)} non ancora nel file = {formatIntero(r.ordini_pulsante)}, il numero del pulsante della scheda Situazione.
-        {r.aggiunti_n > 0 && <>{' '}<button type="button" className="text-primary underline" onClick={() => setAperto(v => !v)}>{aperto ? 'nascondi' : 'quali sono'}</button></>}
-      </p>
+      {dellAnno ? (
+        <p>
+          <strong>Ordini dei carichi del {r.carichi_del} ancora da dichiarare oggi:</strong>{' '}
+          {formatIntero(r.file_ordini)} nel file del portale{r.foto_del ? ` del ${fmtData(r.foto_del)}` : ''} ({kg(r.file_kg)} kg)
+          {' '}+ {formatIntero(r.aggiunti_n)} {r.aggiunti_n === 1 ? 'carico' : 'carichi'} non ancora nel file ({kg(r.aggiunti_kg)} kg)
+          {' '}= <strong className="tabular-nums">{formatIntero(r.ordini_pulsante)}</strong>, il numero del pulsante della scheda Situazione del {r.carichi_del}.
+          {' '}La giacenza del {r.carichi_del} non è la somma di questo elenco, che è di oggi: è la lettura del 31/12 salvata dalla chiusura dell&apos;anno,
+          e senza quella lettura non c&apos;è un numero, che non vuol dire zero.
+        </p>
+      ) : (
+        <p>
+          <strong>Riconciliazione con la giacenza:</strong>{' '}
+          file del portale{r.foto_del ? ` del ${fmtData(r.foto_del)}` : ''} {formatIntero(r.file_ordini)} {r.file_ordini === 1 ? 'ordine' : 'ordini'}, {kg(r.file_kg)} kg
+          {' '}+ {formatIntero(r.aggiunti_n)} {r.aggiunti_n === 1 ? 'carico' : 'carichi'} non ancora nel file, {kg(r.aggiunti_kg)} kg
+          {' '}− dichiarato a portale dopo la fotografia, {kg(r.dichiarato_dopo_kg)} kg
+          {' '}= <strong className="tabular-nums">giacenza a portale {kg(r.giacenza_kg)} kg</strong>, lo stesso numero delle Giacenze.
+        </p>
+      )}
+      {(!dellAnno || r.aggiunti_n > 0) && (
+        <p className="text-muted-foreground">
+          {!dellAnno && <>Ordini: {formatIntero(r.file_ordini)} nel file + {formatIntero(r.aggiunti_n)} non ancora nel file = {formatIntero(r.ordini_pulsante)}, il numero del pulsante della scheda Situazione.</>}
+          {r.aggiunti_n > 0 && <>{' '}<button type="button" className="text-primary underline" onClick={() => setAperto(v => !v)}>{aperto ? 'nascondi' : dellAnno ? 'quali sono i carichi non ancora nel file' : 'quali sono'}</button></>}
+        </p>
+      )}
       {aperto && r.aggiunti_n > 0 && (
         <table className="text-[11px]">
           <tbody>
@@ -125,7 +146,43 @@ export function attesaTuttaChiusa(righeGiacenze, sito, ruolo) {
   return { t: Number(r.in_attesa_chiusa_t), perche: r.in_attesa_chiusa_perche, motivo: motivoChiusi(r.in_attesa_chiusa_perche) };
 }
 
-export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEsterno, onPulisciFiltroSito, righeGiacenze = null }) {
+// IL PDF DI UN ANNO PASSATO DICE DI QUALI CARICHI E' (revisione del 14/10/2026).
+// Aperto dal pulsante del 2025, il PDF portava i soli carichi del 2025 ancora da
+// dichiarare oggi, ma si leggeva identico a quello di tutto il file: l'anno stava
+// solo nel nome del file. Sui dati veri quello di Irigom diceva «Ordini 0»,
+// mentre oggi Irigom ne ha 233 aperti. E' la lista di lavoro che si passa agli
+// impianti: in testa e nella prima nota si dice di quali carichi e', con le
+// parole della scritta sopra l'elenco. Sull'anno in corso il documento resta
+// quello di sempre.
+export function pdfDeiCarichiDel(documento, carichiDel) {
+  if (carichiDel === null || carichiDel === undefined || !documento) return documento;
+  return {
+    ...documento,
+    sottotitolo: [`Carichi del ${carichiDel} ancora da dichiarare oggi`, documento.sottotitolo].filter(Boolean).join(' · '),
+    note: [
+      `Il file degli ordini non dichiarati del portale e’ di oggi: qui ci sono solo i carichi arrivati nel ${carichiDel}, per fine trasporto, all’impianto o al piazzale a cui il portale li attribuisce, che oggi sono ancora da dichiarare. Tutto il file di oggi e’ l’elenco dell’anno in corso.`,
+      ...(documento.note || []),
+    ],
+  };
+}
+
+// GLI ORDINI DI UN ANNO CHE NON E' QUELLO IN CORSO (giro del 14/10/2026,
+// sull'approvazione dell'utente). Il file degli ordini non dichiarati e' una
+// fotografia di oggi: sulle righe degli impianti del 2025 la Situazione contava
+// tutto il file (sui dati veri Tecnogum 320, Irigom 233, T-Cycle 118, Green Tyre
+// 139, Gatim 56) accanto alla lettura del 31/12, e l'elenco aperto dal pulsante
+// era il file intero. Ora la pagina delle Giacenze passa l'anno che guarda,
+// quando e' un anno passato (carichiDel), e l'elenco chiede a
+// getOrdiniDaDichiarare solo i carichi arrivati in quell'anno al sito a cui il
+// portale li attribuisce, per fine trasporto, che oggi sono ancora da dichiarare:
+// gli stessi che conta il pulsante (carichi_del). Anche l'Excel e il PDF.
+// Sull'anno in corso carichiDel non c'e' e l'elenco e' quello di sempre. Vale
+// solo un anno passato (revisione del 14/10/2026): sull'anno dopo le Giacenze
+// contano tutto il file accanto alla fotografia di oggi, getOrdiniDaDichiarare
+// non filtra, e la scritta «ancora da dichiarare oggi» sopra un elenco intero
+// non sarebbe vera.
+export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEsterno, onPulisciFiltroSito, righeGiacenze = null, carichiDel = null }) {
+  const carichiDellAnno = carichiDel === null || carichiDel === undefined || carichiDel === '' || !Number.isFinite(Number(carichiDel)) || Number(carichiDel) >= annoDiOggi() ? null : Number(carichiDel);
   // Si nasce gia' col filtro che ci hanno passato: arrivando dal pulsante di un
   // impianto nella scheda Situazione, la prima lettura deve essere la sua e non
   // quella di tutti gli ordini.
@@ -172,6 +229,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
       if (ricerca) payload.ricerca = ricerca;
       if (soloDate) payload.solo_date_da_sistemare = true;
       if (ruolo) payload.ruolo = ruolo;
+      if (carichiDellAnno !== null) payload.carichi_del = carichiDellAnno;
       // Il pulsante di un impianto e nessun altro filtro: l'elenco e' tutto quello
       // che il portale aspetta da lui, e si chiede anche la riconciliazione con la
       // giacenza (11/10/2026). Sfogliando le pagine si tiene quella che c'e'.
@@ -187,12 +245,12 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
       console.error(e);
     }
     if (sequenza.valida(mia)) setLoading(false);
-  }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo, offset, sequenza]);
+  }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo, offset, sequenza, carichiDellAnno]);
 
   useEffect(() => { load(); }, [load]);
 
   // Reset offset quando cambiano i filtri
-  useEffect(() => { setOffset(0); }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo]);
+  useEffect(() => { setOffset(0); }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo, carichiDellAnno]);
 
   // La ricerca scritta vale dopo ATTESA_RICERCA_MS dall'ultimo tasto. Ricerca e
   // prima pagina cambiano insieme: una lettura sola, non una con la pagina
@@ -223,15 +281,18 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
     if (ricerca) payload.ricerca = ricerca;
     if (soloDate) payload.solo_date_da_sistemare = true;
     if (ruolo) payload.ruolo = ruolo;
+    if (carichiDellAnno !== null) payload.carichi_del = carichiDellAnno;
     return payload;
-  }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo]);
+  }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo, carichiDellAnno]);
 
   const handleExport = async () => {
     // Scarica tutto l'elenco filtrato (senza limite) per l'export
     try {
       // tutte: le righe non si tagliano a mille, come il totale.
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
-      await exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg);
+      // L'anno dei carichi va anche al foglio (null sull'anno in corso): la lista
+      // di lavoro per gli impianti deve dire di quali carichi e', come il PDF.
+      await exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg, { carichi_del: carichiDellAnno });
     } catch (e) {
       alert('Errore nell\'export: ' + e.message);
     }
@@ -245,13 +306,16 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   // quello dell'orologio del dispositivo: un dispositivo con un altro fuso, a
   // cavallo della mezzanotte del 31/12, scriveva un altro anno (revisione della
   // chiusura dell'audit, 11/10/2026, la regola di src/lib/periodoPagine.js).
+  // Su un anno passato il PDF e' di quell'anno, porta i soli carichi di
+  // quell'anno ancora da dichiarare oggi (carichi_del, 14/10/2026) e lo dice in
+  // testa e nelle note (pdfDeiCarichiDel).
   const chiusi = attesaTuttaChiusa(righeGiacenze, sito, ruolo);
   const sezioniPdf = async () => {
     const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
-    return daDichiararePdf(annoChiusura || annoDiOggi(), res.data, {
+    return pdfDeiCarichiDel(daDichiararePdf(annoChiusura || carichiDellAnno || annoDiOggi(), res.data, {
       sito, ruolo, provincia, anno: annoChiusura, ricerca, solo_date: soloDate,
       ...(chiusi ? { per_noi_chiusi: chiusi.motivo } : {}),
-    });
+    }), carichiDellAnno);
   };
 
   const righe = data?.righe || [];
@@ -329,6 +393,16 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
           che li mette insieme e arriva alla giacenza (11/10/2026). Prima questo
           commento lo affermava e basta, ed era falso appena un carico arrivava
           dopo l'ultimo file, cioe' quasi ogni settimana. */}
+      {/* Su un anno passato si dice di quali carichi e'
+          l'elenco, sopra tutto il resto (14/10/2026). */}
+      {carichiDellAnno !== null && (
+        <p className="text-sm border rounded-lg bg-muted/40 px-3 py-2 text-muted-foreground">
+          <strong className="text-foreground">Carichi del {carichiDellAnno} ancora da dichiarare oggi.</strong>{' '}
+          Il file degli ordini non dichiarati del portale è di oggi: qui si vedono solo i carichi arrivati nel {carichiDellAnno}, per fine trasporto,
+          all&apos;impianto o al piazzale a cui il portale li attribuisce, gli stessi che conta il pulsante della scheda Situazione del {carichiDellAnno}.
+          Tutto il file di oggi si vede scegliendo l&apos;anno in corso.
+        </p>
+      )}
       {chiusi && (
         <p className="text-sm border rounded-lg bg-muted/40 px-3 py-2 text-muted-foreground cursor-help" title={chiusi.perche}>
           <strong className="text-foreground">Per noi chiusi: {chiusi.motivo}.</strong>{' '}

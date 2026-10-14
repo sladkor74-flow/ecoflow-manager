@@ -61,6 +61,17 @@ export default function Giacenze() {
 
   const destinazioni = data ? [...new Set(data.righe.map(r => r.sito))].sort() : [];
 
+  // L'ANNO DEI CARICHI DEGLI ORDINI DA DICHIARARE (giro del 14/10/2026,
+  // sull'approvazione dell'utente). Il file degli ordini non dichiarati e' di
+  // oggi: su un anno passato la colonna della Situazione conta solo i carichi
+  // arrivati in quell'anno che oggi sono ancora da dichiarare, e l'elenco che il
+  // suo pulsante apre, l'Excel della pagina e quelli della scheda dicono gli
+  // stessi (carichi_del di getOrdiniDaDichiarare). Sull'anno in corso null: tutto
+  // il file, come sempre. E null anche sull'anno dopo, che il menu offre
+  // (revisione del 14/10/2026): li' la giacenza degli impianti e' la fotografia di
+  // oggi, e la colonna conta tutto il file (ordiniDiUnAnnoPassato in calcolaGiacenze).
+  const carichiDel = Number(anno) < annoDiOggi() ? Number(anno) : null;
+
   const vaiDaDichiarareConSito = (sito, ruolo) => {
     setFiltroSito(sito);
     setFiltroRuolo(ruolo || '');
@@ -72,7 +83,9 @@ export default function Giacenze() {
     try {
       // Recupera l'intero elenco ordini da dichiarare (senza filtri): tutte le
       // righe, non le prime mille sotto il totale di tutte.
-      const ordRes = await base44.functions.invoke('getOrdiniDaDichiarare', { tutte: true, offset: 0 });
+      // Su un anno passato, i soli carichi di quell'anno: gli ordini del foglio
+      // sono quelli della colonna (14/10/2026).
+      const ordRes = await base44.functions.invoke('getOrdiniDaDichiarare', { tutte: true, offset: 0, ...(carichiDel !== null ? { carichi_del: carichiDel } : {}) });
       await exportGiacenzeAllExcel(data, ordRes.data, anno);
     } catch (e) { alert('Errore export: ' + e.message); }
     setExporting(false);
@@ -147,6 +160,7 @@ export default function Giacenze() {
                 filtroSitoEsterno={filtroSito} filtroRuoloEsterno={filtroRuolo}
                 onPulisciFiltroSito={() => { setFiltroSito(''); setFiltroRuolo(''); }}
                 righeGiacenze={Number(anno) === annoDiOggi() ? data.righe : null}
+                carichiDel={carichiDel}
               />
             </TabsContent>
 

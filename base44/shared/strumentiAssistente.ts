@@ -2387,6 +2387,11 @@ export const STRUMENTI = [
           // risolvere: il totale resta il numero del portale (decisioni del 13/10/2026).
           ...(attesaChiusa > 0 ? { in_attesa_chiusa_t: attesaChiusa, in_attesa_da_risolvere_t: Math.round((attesa - attesaChiusa) * 1000) / 1000 } : {}),
           ordini_da_dichiarare: utili.reduce((s, r) => s + (Number(r.ordini_da_dichiarare) || 0), 0),
+          // Su un anno passato gli ordini sono i carichi di quell'anno ancora da
+          // dichiarare oggi (calcolaGiacenze, giro del 14/10/2026): il file del
+          // portale e' di oggi. Mai dall'anno dell'attesa: sull'anno dopo gli
+          // ordini sono tutto il file. Un campo nei totali, non per riga (punto 24).
+          ...(d.totali && d.totali.ordini_dei_carichi_del ? { ordini_dei_carichi_del: d.totali.ordini_dei_carichi_del, ordini_quali: `i carichi arrivati nel ${d.totali.ordini_dei_carichi_del} che oggi sono ancora da dichiarare: il file degli ordini non dichiarati del portale e' di oggi` } : {}),
           ...(senzaFile.length ? { impianti_senza_file_del_portale_esclusi: senzaFile } : {}),
           ...(reteNonDovuta.length ? { impianti_che_per_accordo_non_dichiarano_la_rete: reteNonDovuta } : {}),
           ...(senzaRilevazione.length ? { stoccaggi_senza_rilevazione_esclusi: senzaRilevazione } : {}),

@@ -54,7 +54,13 @@ export default function GiacenzeKpi({ totali }) {
     // stavano per intero su due IMPIANTI (Gatim 25,17 e Tecnogum 1,64). Chi lo
     // leggeva andava a cercarli nei piazzali. Il numero era giusto, la parola no.
     { label: 'Giacenza rete a portale', value: fmt(totali.giacenza_portale_t), unit: 't', icon: Warehouse, color: 'text-primary', subtitle: sottotitoloRete, perche: percheRete },
-    { label: 'Ordini da dichiarare', value: fmt(totali.ordini_da_dichiarare, 0), unit: '', icon: ClipboardList, color: 'text-amber-600' },
+    // Su un anno passato gli ordini sono i carichi di quell'anno ancora da
+    // dichiarare oggi (calcolaGiacenze, giro del 14/10/2026): il file del portale
+    // e' di oggi. Lo dice la casella, come la colonna della Situazione. L'anno
+    // si legge da ordini_dei_carichi_del, mai dall'anno dell'attesa: sull'anno
+    // dopo l'attesa e' dei carichi di quell'anno, gli ordini sono tutto il file.
+    { label: 'Ordini da dichiarare', value: fmt(totali.ordini_da_dichiarare, 0), unit: '', icon: ClipboardList, color: 'text-amber-600',
+      ...(totali.ordini_dei_carichi_del ? { subtitle: `dei carichi del ${totali.ordini_dei_carichi_del} ancora da dichiarare oggi` } : {}) },
     { label: 'Dichiarato nell\'anno', value: fmt(totali.dichiarato_t), unit: 't', icon: FileCheck, color: 'text-success', subtitle: 'rete, per fine trasporto' },
     { label: 'Raccolto RETE nell\'anno', value: fmt(totali.conferito_primarie_t), unit: 't', icon: PackageOpen, color: 'text-accent', subtitle: `ACI ${fmt(totali.conferito_aci_t)} t · Extra ${fmt(totali.conferito_extra_t)} t, fuori target` },
     { label: 'Copertura target RETE', value: copertura != null ? fmt(copertura, 1) : '—', unit: '%', icon: Target, color: copertura != null && copertura >= 100 ? 'text-success' : 'text-amber-600' },

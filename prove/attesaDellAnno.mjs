@@ -222,7 +222,13 @@ console.log('2. LE DUE FUNZIONI VERE, SU UN ARCHIVIO COSTRUITO');
   verifica('gli ordini da dichiarare di Nappi Sud nel 2025 sono i due carichi del 2025, non i tre del file',
     A[2025].ordini[`${NAPPI}|stoc`] === 2, J(A[2025].ordini));
   verifica("nel 2026, l'anno in corso, tutti e tre, come prima", A[2026].ordini[`${NAPPI}|stoc`] === 3, J(A[2026].ordini));
-  verifica("e la riga dell'impianto non cambia con l'anno: la fotografia e' quella", A[2025].ordini[`${ALFA}|imp`] === A[2026].ordini[`${ALFA}|imp`] && A[2026].ordini[`${ALFA}|imp`] === 2, J([A[2025].ordini, A[2026].ordini]));
+  // E DAL 14/10/2026 ANCHE LA RIGA DELL'IMPIANTO (ordini degli anni passati,
+  // sull'approvazione dell'utente): su un anno che non e' quello in corso
+  // contano solo i carichi arrivati all'impianto in quell'anno. Prima qui si
+  // verificava il contrario, che la riga restasse la fotografia di oggi
+  // (prove/ordiniAnniPassati.mjs).
+  verifica("e la riga dell'impianto segue la stessa regola: nel 2025 il solo carico arrivato ad ALFA nel 2025, nel 2026 tutto il file",
+    A[2025].ordini[`${ALFA}|imp`] === 1 && A[2026].ordini[`${ALFA}|imp`] === 2, J([A[2025].ordini, A[2026].ordini]));
   verifica("le Giacenze dicono di quali carichi e' l'attesa: del 2025 sul 2025, tutto il file (null) sull'anno in corso",
     A[2025].attesaDel === 2025 && A[2026].attesaDel === null, `${A[2025].attesaDel} / ${A[2026].attesaDel}`);
 }
@@ -358,7 +364,9 @@ console.log("4. LE GIACENZE DI UN ANNO CHIUSO DICONO DI QUALI CARICHI E' L'ATTES
   const iA = x25[0].findIndex(h => /^In attesa/.test(h));
   const nappi25 = x25.find(r => r[0] === 'NAPPI SUD SRL' && r[1] === 'Stoccaggio') || [];
   verifica("il foglio del 2025: l'intestazione dice «dei carichi del 2025», e accanto le 4 t gli ordini sono i 2 di quei carichi",
-    x25[0][iA] === 'In attesa di dichiarazione, dei carichi del 2025 (t)' && x25[0][iA + 1] === 'Ordini da dichiarare' && nappi25[iA] === 4 && nappi25[iA + 1] === 2, `${J(x25[0])} ${J(nappi25)}`);
+    // Dalla chiusura del giro del 14/10/2026 anche gli ordini dicono di quali
+    // carichi sono (prove/ordiniAnniPassatiEtichette.mjs).
+    x25[0][iA] === 'In attesa di dichiarazione, dei carichi del 2025 (t)' && x25[0][iA + 1] === 'Ordini da dichiarare, dei carichi del 2025 ancora da dichiarare oggi' && nappi25[iA] === 4 && nappi25[iA + 1] === 2, `${J(x25[0])} ${J(nappi25)}`);
   verifica('il foglio del 2026 com\'era', x26[0].includes('In attesa di dichiarazione (t)') && !x26[0].some(h => /carichi del/.test(h)), J(x26[0]));
 }
 

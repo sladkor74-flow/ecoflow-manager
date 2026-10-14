@@ -173,8 +173,11 @@ console.log("IL FOGLIO DEGLI STOCCAGGI DICE PERCHE' MANCA LA GIACENZA DI UN PIAZ
 console.log("IL PDF DELL'ELENCO «DA DICHIARARE» PRENDE L'ANNO DI OGGI IN ITALIA");
 {
   const t = sorgente('src/components/giacenze/DaDichiarareTable.jsx');
+  // Dal 14/10/2026 fra i due c'e' l'anno dei carichi che la pagina delle Giacenze
+  // passa su un anno che non e' quello in corso (prove/ordiniAnniPassati.mjs):
+  // l'ultimo ripiego resta annoDiOggi.
   verifica("senza un anno scelto vale annoDiOggi, non l'orologio del dispositivo",
-    t.includes('daDichiararePdf(annoChiusura || annoDiOggi(), res.data, {') && !t.includes('new Date().getFullYear()') && t.includes("import { annoDiOggi } from '@/lib/periodoPagine';"));
+    t.includes('daDichiararePdf(annoChiusura || carichiDellAnno || annoDiOggi(), res.data, {') && !t.includes('new Date().getFullYear()') && t.includes("import { annoDiOggi } from '@/lib/periodoPagine';"));
 }
 
 console.log('IL NOME DEL GRUPPO DELLE TERZIARIE E\' UNO SOLO');
