@@ -27,9 +27,11 @@
       "enum": [
         "aperto",
         "in_corso",
-        "completato"
+        "completato",
+        "cancellato"
       ],
-      "default": "aperto"
+      "default": "aperto",
+      "description": "cancellato lo scrive solo il controllo degli ordini, quando il portale da tutti gli ordini dell attivita cancellati: va fra i Cancellati della pagina e non conta fra le cose da fare"
     },
     "data_ricezione": {
       "type": "string",
@@ -49,7 +51,7 @@
     },
     "riferimento_ordine": {
       "type": "string",
-      "description": "Uno o piu ID ordine Ecotyre da completare, separati da virgola: quando risultano tutti terminati (fine trasporto) il gestionale chiude l attivita da solo. Un ordine cancellato non la chiude: si segnala e decide l utente"
+      "description": "Uno o piu ID ordine Ecotyre da completare, separati da virgola: quando risultano tutti terminati (fine trasporto) il gestionale chiude l attivita da solo; se il portale li da tutti cancellati la passa fra le cancellate (stato cancellato), con alcuni terminati e gli altri cancellati la chiude evasa in parte; in tutti i casi solo se ha visto gli ordini aperti"
     },
     "ordini_totali": {
       "type": "number",
@@ -77,7 +79,7 @@
     "chiusa_dal_gestionale_il": {
       "type": "string",
       "format": "date",
-      "description": "Giorno in cui il gestionale l ha chiusa"
+      "description": "Giorno in cui il gestionale l ha chiusa; per una cancellata e il giorno in cui il gestionale l ha trovata cancellata: il portale non scrive quello della cancellazione"
     },
     "completata_il": {
       "type": "string",
@@ -86,11 +88,11 @@
     },
     "chiusura_nota": {
       "type": "string",
-      "description": "Perche e quando si e chiusa: chiusa dal gestionale il GG/MM/AAAA, l ordine ET... risulta terminato"
+      "description": "Perche e quando si e chiusa: chiusa dal gestionale il GG/MM/AAAA, l ordine ET... risulta terminato; oppure cancellata dal gestionale il GG/MM/AAAA, l ordine ET... (motivo) risulta cancellato a portale"
     },
     "avviso_ordini": {
       "type": "string",
-      "description": "Perche l attivita resta aperta anche se un suo ordine non e in corso: ordine cancellato, ordine eseguito a portale senza il clic su Chiudi, terminato senza la data di fine trasporto, ID che non si trova"
+      "description": "Perche l attivita resta aperta anche se un suo ordine non e in corso: ordine eseguito a portale senza il clic su Chiudi, terminato senza la data di fine trasporto, ID che non si trova, ordine gia cancellato quando l attivita e stata scritta (il gestionale non ha visto il passaggio). Su un attivita gia chiusa dice che cosa guardare, per esempio un ordine che il portale ha riassegnato"
     }
   },
   "required": [

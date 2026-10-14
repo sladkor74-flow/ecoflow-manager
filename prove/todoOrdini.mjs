@@ -7,7 +7,11 @@
 //   - il passaggio si deve VEDERE: il primo giro guarda e non chiude mai, e un
 //     ordine gia' terminato quando l'attivita' e' comparsa non la chiude;
 //   - vale la FINE TRASPORTO e mai la chiusura a portale (regola 1);
-//   - un ordine CANCELLATO non chiude niente e si segnala;
+//   - un ordine CANCELLATO a portale manda l'attivita' fra le cancellate, da
+//     sola (richiesta dell'utente del 14/10/2026; fino a quel giorno restava
+//     aperta con l'avviso "lo decidi tu"), anche lui col passaggio visto: uno
+//     gia' cancellato al primo giro la lascia aperta, e l'avviso dice perche'.
+//     La prova piena e' in prove/todoCancellatiDalPortale.mjs;
 //   - lo stato "eseguito" e' un limbo e si dice sempre;
 //   - con piu' ordini si chiude quando sono terminati tutti;
 //   - una chiusura si fa una volta sola (riaperta a mano, non si richiude).
@@ -148,20 +152,27 @@ verifica('terminati tutti, si chiude', finita.chiusa === true && finita.campi.st
 verifica("e la nota dice gli ordini e l'ultimo trasporto", finita.campi.chiusura_nota === 'chiusa dal gestionale il 28/09/2026: gli ordini ET26000002 e ET26000003 risultano terminati, l' + "'ultimo trasporto finito il 20/09/2026", finita.campi.chiusura_nota);
 
 // ---------------------------------------------------------------------------
-console.log('UN ORDINE CANCELLATO NON CHIUDE NIENTE, SI SEGNALA (regola dell' + "'utente)");
+console.log('UN ORDINE CANCELLATO A PORTALE: L' + "'ATTIVITA' PASSA DA SOLA FRA LE CANCELLATE (14/10/2026)");
+// Regola dell'utente del 14/10/2026: «a me non serve decidere sul gestionale cio'
+// che e' gia' chiaro ed evidente sul portale». Fino a quel giorno l'attivita'
+// restava aperta con l'avviso "che cosa farne lo decidi tu".
 
 const daCancellare = { titolo: 'Ritiro Verdi', riferimento_ordine: 'ET26000004', stato: 'aperto' };
-// Prima era assegnato: il passaggio c'e' stato, ma verso la cancellazione.
+// Prima era assegnato: il passaggio c'e' stato, verso la cancellazione.
 const c1 = controlloAttivita(daCancellare, statoOrdini([], [{ id_ordine: 'ET26000004', stato: 'assegnato' }]), OGGI);
+verifica("finche' e' assegnato resta aperta", c1.chiusa === false && c1.campi.stato === undefined, J(c1.campi));
 const cancellata = controlloAttivita(giroDopo(daCancellare, c1.campi), stato, OGGI);
-verifica('non si chiude', cancellata.chiusa === false && cancellata.campi.stato === undefined, J(cancellata.campi));
-verifica('e si dice perche' + "', col motivo del portale", cancellata.campi.avviso_ordini.includes('ET26000004 (Mancanza di pfu)')
-  && cancellata.campi.avviso_ordini.includes('cancellato') && cancellata.campi.avviso_ordini.includes('decidi tu'), cancellata.campi.avviso_ordini);
+verifica('cancellato a portale: passa fra le cancellate, da sola', cancellata.chiusa === true && cancellata.come === 'cancellata'
+  && cancellata.campi.stato === 'cancellato' && cancellata.campi.chiusa_dal_gestionale === true, J(cancellata.campi));
+verifica("e si dice perche', col motivo del portale, senza chiedere una decisione", cancellata.campi.chiusura_nota === "cancellata dal gestionale il 28/09/2026: l'ordine ET26000004 (Mancanza di pfu) risulta cancellato a portale"
+  && !/decidi tu/.test(J(cancellata.campi)), J(cancellata.campi));
 const mista = { titolo: 'Due ritiri', riferimento_ordine: 'ET26000003, ET26000004', stato: 'aperto' };
 const m1 = controlloAttivita(mista, stato, OGGI);
+verifica('con un ordine ancora assegnato resta aperta, e dice del cancellato', m1.chiusa === false && m1.campi.stato === undefined
+  && m1.campi.avviso_ordini.includes('ET26000004 (Mancanza di pfu)') && m1.campi.avviso_ordini.includes("resta aperta per l'altro ordine"), J(m1.campi));
 const m2 = controlloAttivita(giroDopo(mista, m1.campi), statoDopo, OGGI);
-verifica("un cancellato blocca la chiusura anche se l'altro e' terminato", m2.chiusa === false
-  && m2.campi.ordini_terminati === 1 && m2.campi.avviso_ordini.includes('ET26000004'), J(m2.campi));
+verifica("un terminato e un cancellato: completata ed evasa in parte", m2.chiusa === true && m2.come === 'in_parte'
+  && m2.campi.stato === 'completato' && m2.campi.ordini_terminati === 1 && /evasa in parte/.test(m2.campi.chiusura_nota) && m2.campi.chiusura_nota.includes('ET26000004'), J(m2.campi));
 
 console.log('IL LIMBO "ESEGUITO" SI DICE SEMPRE');
 const eseguita = { titolo: 'Ritiro Gialli', riferimento_ordine: 'ET26000006', stato: 'aperto' };
@@ -297,8 +308,13 @@ verifica("l'ordine scritto male si segnala, non si ignora", todo('t6').avviso_or
   && todo('t6').stato === 'aperto' && todo('t6').ordini_totali === 0, J(todo('t6')));
 verifica("quella a meta' resta aperta, con l'avanzamento e l'attesa", todo('t2').stato === 'aperto'
   && todo('t2').ordini_totali === 2 && todo('t2').ordini_terminati === 1 && todo('t2').ordini_da_attendere === 'ET26000003', J(todo('t2')));
-verifica("quella con l'ordine cancellato resta aperta e si segnala", todo('t4').stato === 'aperto'
-  && todo('t4').avviso_ordini.includes('Mancanza di pfu') && r.body.da_guardare.some(x => x.id === 't4'), J(todo('t4')));
+// Il suo ordine era gia' cancellato quando il gestionale ha cominciato a
+// guardarla: nessun passaggio, quindi non passa fra le cancellate (revisione del
+// 14/10/2026: un'attivita' scritta su un ordine gia' cancellato parla d'altro, e
+// sparirebbe appena salvata). Lo dice, senza chiedere una decisione.
+verifica("quella con l'ordine gia' cancellato al primo giro resta aperta, e dice perche'", todo('t4').stato === 'aperto'
+  && todo('t4').avviso_ordini.includes('Mancanza di pfu') && todo('t4').avviso_ordini.includes('non passa da sola fra le cancellate')
+  && !/decidi tu/.test(todo('t4').avviso_ordini) && (r.body.cancellate || []).length === 0 && r.body.da_guardare.some(x => x.id === 't4'), J(todo('t4')));
 verifica('il terminato senza data non chiude niente e si dice', todo('t5').stato === 'in_corso'
   && todo('t5').avviso_ordini.includes('senza la data di fine trasporto'), J(todo('t5')));
 verifica("l'attivita' senza ID ordine non si tocca", !globalThis.__SCRITTI.some(s => s.id === 't3') && todo('t3').ordini_totali === undefined);

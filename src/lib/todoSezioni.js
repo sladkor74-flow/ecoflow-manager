@@ -19,6 +19,20 @@
 //
 // I CONTEGGI DICONO SOLO I DA FARE. «Tutti (40)» con dentro trenta attivita'
 // chiuse diceva un lavoro che non c'era.
+//
+// LE CANCELLATE NELLA LORO SEZIONE (14/10/2026). Richiesta dell'utente,
+// testuale: «qualora vi fossero degli ordini tra quelli aperti che venissero non
+// eseguiti e quindi terminati bensi' cancellati a portale devono comparire
+// automaticamente nei cancellati con data di cancellazione; a me non serve
+// decidere sul gestionale cio' che e' gia' chiaro ed evidente sul portale».
+// Un'attivita' i cui ordini il portale da' tutti cancellati la passa il controllo
+// degli ordini allo stato `cancellato` (todoOrdini.ts), e qui va nella terza
+// parte, i CANCELLATI: non e' da fare e non e' fatta. Una richiesta ECT coi suoi
+// ordini tutti cancellati diventa annullata (statoRichiesta) e sta fra le
+// completate come le annullate dal foglio. Il giorno della cancellazione il file
+// del portale non lo porta: per tutte e due si dice il giorno in cui il
+// gestionale l'ha trovata cancellata, e per quello che e' (revisione del
+// 14/10/2026: prima si prendeva Ordine_chiuso_il, che e' un'altra cosa).
 
 /** 'AAAA-MM-GG' se il valore comincia con un giorno, altrimenti ''. */
 const giorno = (v) => {
@@ -41,6 +55,9 @@ const piuRecenti = (giornoDi, poi) => (a, b) => {
 
 /** Fatta: lo stato salvato e' `completato`. Aperte e in corso sono da fare. */
 export const eCompletata = (t) => !!t && t.stato === 'completato';
+
+/** Cancellata: lo stato salvato e' `cancellato` (i suoi ordini cancellati a portale). */
+export const eCancellata = (t) => !!t && t.stato === 'cancellato';
 
 // Il prefisso che il controllo degli ordini mette davanti al perche'
 // (controlloAttivita: «chiusa dal gestionale il GG/MM/AAAA: ...»): a video il
@@ -100,29 +117,76 @@ export function testoCompletamento(c) {
   return c.prima ? `${base} Il gestionale l’aveva chiusa una prima volta (${c.prima}).` : base;
 }
 
+// Il prefisso che il controllo degli ordini mette davanti al perche' di una
+// cancellata (controlloAttivita: «cancellata dal gestionale il GG/MM/AAAA: ...»).
+const PREFISSO_CANCELLATA = /^cancellata dal gestionale il \d{2}\/\d{2}\/\d{4}:\s*/i;
+
 /**
- * Le attivita' divise: { daFare, completati }. I da fare restano nell'ordine in
- * cui arrivano (la pagina le legge dalle piu' nuove); i completati vanno dai piu'
- * recenti, col giorno del completamento. A pari giorno l'ultima modifica, poi la
- * creazione.
+ * Quando e perche' un'attivita' risulta cancellata: null se non lo e'.
+ * { giorno: 'AAAA-MM-GG' | null, perche }.
+ *
+ * `giorno` e' quello in cui il gestionale l'ha trovata cancellata e l'ha passata
+ * qui (chiusa_dal_gestionale_il). Il giorno della cancellazione a portale il file
+ * non lo porta, e non si inventa: la riga dice il giorno che si sa, per quello
+ * che e', e la sezione spiega perche' (AttivitaCancellate.jsx).
+ */
+export function cancellazioneAttivita(t) {
+  if (!eCancellata(t)) return null;
+  const nota = String(t.chiusura_nota || '').trim();
+  return {
+    giorno: giorno(t.chiusa_dal_gestionale_il) || null,
+    perche: nota.replace(PREFISSO_CANCELLATA, '') || 'i suoi ordini risultano cancellati a portale',
+  };
+}
+
+/** La riga che dice quando e perche' un'attivita' e' cancellata, col giorno detto una volta. */
+export function testoCancellazione(c) {
+  if (!c) return '';
+  return c.giorno ? `Passata fra le cancellate il ${gg(c.giorno)}: ${c.perche}.` : `Passata fra le cancellate: ${c.perche}.`;
+}
+
+/**
+ * Le attivita' divise: { daFare, completati, cancellati }. I da fare restano
+ * nell'ordine in cui arrivano (la pagina le legge dalle piu' nuove); i completati
+ * vanno dai piu' recenti, col giorno del completamento, e le cancellate dalle
+ * piu' recenti, col giorno in cui il gestionale le ha passate li'. A pari giorno
+ * l'ultima modifica, poi la creazione.
  */
 export function dividiAttivita(todos) {
   const daFare = [];
   const completati = [];
-  for (const t of todos || []) (eCompletata(t) ? completati : daFare).push(t);
-  completati.sort(piuRecenti(
-    t => (completamentoAttivita(t) || {}).giorno,
-    (a, b) => String(b.updated_date || '').localeCompare(String(a.updated_date || ''))
-      || String(b.created_date || '').localeCompare(String(a.created_date || '')),
-  ));
-  return { daFare, completati };
+  const cancellati = [];
+  for (const t of todos || []) (eCompletata(t) ? completati : eCancellata(t) ? cancellati : daFare).push(t);
+  const poi = (a, b) => String(b.updated_date || '').localeCompare(String(a.updated_date || ''))
+    || String(b.created_date || '').localeCompare(String(a.created_date || ''));
+  completati.sort(piuRecenti(t => (completamentoAttivita(t) || {}).giorno, poi));
+  cancellati.sort(piuRecenti(t => (cancellazioneAttivita(t) || {}).giorno, poi));
+  return { daFare, completati, cancellati };
 }
 
-/** I numeri della pagina: da fare (aperte + in corso), aperte, in corso, completate. */
+/**
+ * Il testo dell'elenco dei da fare quando nel filtro non c'e' niente. `quanti`
+ * sono i numeri delle tre parti ({ daFare, completati, cancellati }). Con le sole
+ * cancellate, o con completate e cancellate, l'elenco non diceva «Nessuna
+ * attività. Crea la prima» o «sono tutte completate» mentre poco sotto c'erano i
+ * Cancellati (revisione del 14/10/2026): si dice dove sono.
+ */
+export function testoElencoVuoto(filtro, quanti, isAdmin) {
+  const { daFare = 0, completati = 0, cancellati = 0 } = quanti || {};
+  if (!daFare && !completati && !cancellati) return `Nessuna attività.${isAdmin ? ' Crea la prima col pulsante «Nuovo To-Do».' : ''}`;
+  if (!daFare && completati && cancellati) return 'Niente da fare: le attività sono tutte completate o cancellate, le trovi qui sotto.';
+  if (!daFare && cancellati) return 'Niente da fare: le attività sono tutte fra le cancellate, le trovi qui sotto.';
+  if (!daFare) return 'Niente da fare: le attività sono tutte completate, le trovi qui sotto.';
+  if (filtro === 'in_corso') return 'Nessuna attività in corso.';
+  if (filtro === 'aperto') return 'Nessuna attività aperta.';
+  return 'Niente da fare.';
+}
+
+/** I numeri della pagina: da fare (aperte + in corso), aperte, in corso, completate, cancellate. */
 export function conteggiAttivita(todos) {
-  const { daFare, completati } = dividiAttivita(todos);
+  const { daFare, completati, cancellati } = dividiAttivita(todos);
   const inCorso = daFare.filter(t => t.stato === 'in_corso').length;
-  return { da_fare: daFare.length, aperto: daFare.length - inCorso, in_corso: inCorso, completati: completati.length };
+  return { da_fare: daFare.length, aperto: daFare.length - inCorso, in_corso: inCorso, completati: completati.length, cancellati: cancellati.length };
 }
 
 // IL NUMERO ACCANTO ALLA TO-DO LIST NEL MENU (decisioni dell'utente del
@@ -131,7 +195,9 @@ export function conteggiAttivita(todos) {
 // cinque minuti, delle sole attivita' da fare - aperte e in corso, lo stato che
 // l'archivio scrive per difetto - e mai l'elenco intero, che coi completati
 // cresce ogni mese. La pagina puo' dire il numero nuovo con l'evento
-// EVENTO_TODO ({ detail: { da_fare } }), senza un'altra lettura.
+// EVENTO_TODO ({ detail: { da_fare } }), senza un'altra lettura. Un'attivita'
+// passata fra le cancellate (stato `cancellato`, 14/10/2026) non e' da fare:
+// resta fuori dalla lettura e dal numero, come una completata.
 export const STATI_DA_FARE = ['aperto', 'in_corso'];
 export const EVENTO_TODO = 'todo-aggiornata';
 const MASSIMO_DA_FARE = 500;
@@ -180,20 +246,57 @@ export const eChiusaRichiesta = (esito) => esito === 'evasa' || esito === 'annul
  * statoRichiesta di adesso, passato da chi chiama: la stessa regola che scrive
  * l'esito, senza scrivere niente. Per quella regola una richiesta col ritiro
  * fatto e' evasa, con o senza la spunta.
+ *
+ * Dal 14/10/2026 si rileggono con statoRichiesta anche un'«aperta» salvata e una
+ * richiesta CHIUSA DAL PORTALE (annullata senza il motivo del foglio, evasa senza
+ * spunta, senza la data del foglio e senza il ritiro rilevato: chiusaDalPortale
+ * in richiesteEct.ts, che qui si ripete perche' questo file non importa niente;
+ * la prova controlla che dicano lo stesso). Quella regola guarda lo stato dei suoi
+ * ordini salvato con lei (ordini_stato_json): se il portale li da' tutti
+ * cancellati la richiesta e' annullata, se ne ha riassegnato uno e' di nuovo
+ * aperta, anche quando l'esito scritto e' rimasto indietro. Su tutte le altre
+ * statoRichiesta dice lo stesso dell'esito salvato: legge i campi che l'hanno
+ * scritto.
  */
 export function esitoDellaPagina(r, statoRichiesta) {
   const salvato = r && r.esito;
-  return !salvato || salvato === 'da_confermare' ? statoRichiesta(r || {}) : salvato;
+  const dalPortale = !!r && ((salvato === 'annullata' && !r.motivo_annullamento)
+    || (salvato === 'evasa' && !r.evasione_confermata && !r.evaso_il && !r.evasione_rilevata_il));
+  return !salvato || salvato === 'da_confermare' || salvato === 'aperta' || dalPortale ? statoRichiesta(r || {}) : salvato;
 }
+
+/** Le voci salvate dello stato degli ordini di una richiesta (ordini_stato_json), o []. */
+const vociOrdini = (r) => {
+  try {
+    const v = r && r.ordini_stato_json ? JSON.parse(r.ordini_stato_json) : [];
+    return Array.isArray(v) ? v.filter(x => x && x.id_ordine) : [];
+  } catch { return []; }
+};
+/** "ET1, ET2 e ET3". */
+const elencoIds = (ids) => (ids.length <= 1 ? (ids[0] || '') : ids.slice(0, -1).join(', ') + ' e ' + ids[ids.length - 1]);
+/** "l’ordine ET1 (Mancanza PFU) risulta cancellato a portale", al plurale se sono piu' di uno. */
+const testoCancellatiRichiesta = (voci) => {
+  const quali = voci.map(v => (v.motivo ? `${v.id_ordine} (${v.motivo})` : v.id_ordine));
+  return quali.length === 1 ? `l’ordine ${quali[0]} risulta cancellato a portale` : `gli ordini ${elencoIds(quali)} risultano cancellati a portale`;
+};
 
 /**
  * Quando e perche' una richiesta e' chiusa: null se e' ancora da fare.
- * { giorno, ritiro, come: 'terminati' | 'foglio' | 'a_mano' | 'annullata', perche, da_rispondere }.
+ * { giorno, ritiro, come: 'terminati' | 'foglio' | 'in_parte' | 'a_mano' | 'annullata', perche, da_rispondere }.
  *
  * Il giorno e' quello del RITIRO, come nella colonna Ritiro: dal foglio del
  * consorzio o dalla fine trasporto dei nostri terminati (regola 1). Se manca e
  * la richiesta e' stata spuntata a mano, il giorno della spunta. Un'annullata
- * non ha giorno: si dice il motivo.
+ * non ha giorno: si dice il motivo, e sta in fondo.
+ *
+ * DAL 14/10/2026 il portale chiude da solo anche quello che cancella
+ * (statoRichiesta). Un'annullata senza motivo dal foglio coi suoi ordini tutti
+ * cancellati a portale ha `dal_portale` e `visto_il`, il giorno in cui il
+ * gestionale ha visto cancellato l'ultimo dei suoi ordini, cioe' quello in cui si
+ * e' annullata da sola (il giorno della cancellazione il portale non lo scrive):
+ * resta 'annullata', cosi' chi la disegna la tratta come le altre annullate.
+ * 'in_parte' e' un'evasa con alcuni ordini terminati e gli altri cancellati, col
+ * giorno dell'ultimo ritiro.
  *
  * `da_rispondere`: la richiesta e' evasa ma la spunta non c'e' ancora, cioe' al
  * consorzio non si e' risposto. E' la stessa voce della dashboard (cruscotto.ts,
@@ -202,22 +305,45 @@ export function esitoDellaPagina(r, statoRichiesta) {
  */
 export function completamentoRichiesta(r, esito) {
   if (!r || !eChiusaRichiesta(esito)) return null;
+  const voci = vociOrdini(r);
+  const cancellati = voci.filter(v => v.stato === 'cancellato');
+  const terminati = voci.filter(v => v.stato === 'terminato');
   if (esito === 'annullata') {
-    return { giorno: null, ritiro: null, come: 'annullata', perche: String(r.motivo_annullamento || '').trim(), da_rispondere: false };
+    const motivo = String(r.motivo_annullamento || '').trim();
+    if (!motivo && cancellati.length && cancellati.length === voci.length) {
+      const visti = cancellati.map(v => giorno(v.visto_il));
+      return {
+        giorno: null,
+        ritiro: null,
+        come: 'annullata',
+        dal_portale: true,
+        perche: testoCancellatiRichiesta(cancellati),
+        // il piu' recente, e solo se c'e' per tutti: con un giorno che manca non
+        // si sa quando si e' visto l'ultimo
+        visto_il: visti.every(Boolean) ? [...visti].sort()[visti.length - 1] : null,
+        da_rispondere: false,
+      };
+    }
+    return { giorno: null, ritiro: null, come: 'annullata', perche: motivo, da_rispondere: false };
   }
   const dalFoglio = giorno(r.evaso_il);
   const daiTerminati = giorno(r.evasione_rilevata_il);
   const spunta = r.evasione_confermata ? giorno(r.evasione_confermata_il) : '';
   const piu = Number(r.ordini_totali) > 1;
-  const come = daiTerminati ? 'terminati' : dalFoglio ? 'foglio' : 'a_mano';
+  const inParte = cancellati.length > 0 && terminati.length > 0 && cancellati.length + terminati.length === voci.length;
+  const ultimoRitiro = terminati.map(v => giorno(v.giorno)).filter(Boolean).sort().pop() || '';
+  const come = daiTerminati ? 'terminati' : dalFoglio ? 'foglio' : inParte ? 'in_parte' : 'a_mano';
+  const quali = (vv) => vv.map(v => v.id_ordine);
   const perche = come === 'terminati' ? (piu ? 'gli ordini risultano terminati' : 'l’ordine risulta terminato')
     : come === 'foglio' ? 'evasa secondo il foglio delle richieste'
-      : 'spuntata a mano';
+      : come === 'in_parte' ? `${terminati.length === 1 ? `l’ordine ${quali(terminati)[0]} risulta terminato` : `gli ordini ${elencoIds(quali(terminati))} risultano terminati`} e ${testoCancellatiRichiesta(cancellati)}`
+        : 'spuntata a mano';
+  const ritiro = (come === 'terminati' ? daiTerminati : come === 'foglio' ? dalFoglio : come === 'in_parte' ? ultimoRitiro : '') || null;
   return {
     // Il giorno che ordina la sezione e' quello che la scheda scrive: il ritiro
     // (dai terminati e' la fine trasporto, regola 1), altrimenti la spunta.
-    giorno: (come === 'terminati' ? daiTerminati : dalFoglio) || spunta || null,
-    ritiro: (come === 'terminati' ? daiTerminati : dalFoglio) || null,
+    giorno: ritiro || spunta || null,
+    ritiro,
     come,
     perche,
     da_rispondere: !r.evasione_confermata,
@@ -227,8 +353,10 @@ export function completamentoRichiesta(r, esito) {
 /** La riga che dice quando e perche' una richiesta e' chiusa, col giorno una volta sola. */
 export function testoCompletamentoRichiesta(c) {
   if (!c) return '';
+  if (c.come === 'annullata' && c.dal_portale) return c.visto_il ? `Annullata da sola il ${gg(c.visto_il)}: ${c.perche}.` : `Annullata da sola: ${c.perche}.`;
   if (c.come === 'annullata') return c.perche ? `Annullata: ${c.perche}.` : 'Annullata.';
   if (c.come === 'terminati') return `Completata da sola: ${c.perche}, ritiro del ${gg(c.ritiro)}.`;
+  if (c.come === 'in_parte') return `Evasa in parte, da sola: ${c.perche}${c.ritiro ? `; ritiro del ${gg(c.ritiro)}` : ''}.`;
   if (c.come === 'foglio') return `Completata: ${c.perche}, ritiro del ${gg(c.ritiro)}.`;
   return c.giorno ? `Completata il ${gg(c.giorno)}, spuntata a mano.` : 'Completata, spuntata a mano.';
 }

@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
-import { Loader2, Plus, CheckSquare, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Loader2, Plus, CheckSquare, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { oggiRoma } from '@/lib/giornoItaliano';
-import { conteggiAttivita, campiCambioStato, EVENTO_TODO } from '@/lib/todoSezioni';
+import { conteggiAttivita, dividiAttivita, campiCambioStato, EVENTO_TODO } from '@/lib/todoSezioni';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import RichiesteEct from '@/components/todo/RichiesteEct';
 import ElencoAttivita, { PRIORITA } from '@/components/todo/ElencoAttivita';
+import AttivitaCancellate from '@/components/todo/AttivitaCancellate';
 
 // Un giorno 'AAAA-MM-GG' scritto all'italiana, senza passare da new Date: la
 // data del ritiro e' un giorno, non un istante, e non deve scivolare di un fuso.
@@ -65,7 +66,10 @@ export default function TodoPage() {
   }, [todos, elencoIntero]);
 
   // Un'attivita' con un ID ordine scritto sopra si chiude da sola quando quell'
-  // ordine risulta terminato: il controllo gira a ogni caricamento delle primarie
+  // ordine risulta terminato, e dal 14/10/2026 passa da sola fra le cancellate
+  // quando il portale lo da' cancellato (in tutti e due i casi col passaggio
+  // visto: uno gia' chiuso quando l'attivita' compare non la chiude, e cosi' una
+  // appena scritta non sparisce al controllo subito dopo): il controllo gira a ogni caricamento delle primarie
   // (RICALCOLI in src/lib/importGrandeFile.js) e anche qui, all'apertura della
   // pagina. Serve perche' se quel ricalcolo non e' partito - la scheda chiusa, la
   // rete caduta - un'attivita' gia' fatta resterebbe aperta fino al caricamento
@@ -132,6 +136,10 @@ export default function TodoPage() {
     }
   };
   const toggleStato = (todo) => cambiaStato(todo, todo.stato === 'completato' ? 'aperto' : 'completato');
+  // Una cancellata si riapre e basta: torna fra i da fare, e il segno
+  // chiusa_dal_gestionale che resta le evita di essere ricancellata (14/10/2026).
+  // La spunta non serve qui: farebbe di una cancellata una completata.
+  const riapri = (todo) => cambiaStato(todo, 'aperto');
   const cycleStato = (todo) => {
     const order = ['aperto', 'in_corso', 'completato'];
     return cambiaStato(todo, order[(order.indexOf(todo.stato) + 1) % order.length]);
@@ -145,9 +153,10 @@ export default function TodoPage() {
     } catch (e) { console.error(e); }
   };
 
-  // Solo i da fare: aperte e in corso. Le completate hanno il loro numero sulla
-  // loro sezione.
+  // Solo i da fare: aperte e in corso. Le completate e le cancellate hanno il
+  // loro numero sulla loro sezione.
   const counts = conteggiAttivita(todos);
+  const { cancellati } = dividiAttivita(todos);
 
   return (
     <div className="p-4 lg:p-8 max-w-[1200px] mx-auto space-y-6">
@@ -185,8 +194,12 @@ export default function TodoPage() {
         passa da assegnato a terminato e solo allora segna l&apos;attività come completata, con la data della fine trasporto e il
         motivo scritto sotto. Il passaggio deve avvenire <strong>da quando l&apos;attività c&apos;è</strong>: se l&apos;ordine risultava già
         terminato quando l&apos;hai scritta, la chiusura automatica non scatta e la riga te lo dice, perché il lavoro di cui parla
-        l&apos;attività — un sollecito, una pratica, una fattura — quello nessuno l&apos;ha ancora fatto. Se l&apos;ordine risulta
-        <strong> cancellato</strong> l&apos;attività resta aperta e te lo dice: quel ritiro non si farà e la decisione è tua.
+        l&apos;attività — un sollecito, una pratica, una fattura — quello nessuno l&apos;ha ancora fatto. Allo stesso modo, se il
+        portale dà <strong>cancellati</strong> gli ordini che l&apos;attività aspettava, lei passa da sola fra i <strong>cancellati</strong>,
+        col motivo e il giorno in cui il gestionale l&apos;ha visto: non c&apos;è niente da decidere qui. Se alcuni ordini sono terminati e
+        gli altri cancellati si chiude come evasa in parte. Un ordine ancora assegnato o «eseguito» la tiene aperta. Se invece
+        l&apos;ordine era già cancellato quando l&apos;hai scritta, l&apos;attività resta qui, perché parla d&apos;altro (contestare la
+        cancellazione, rifare l&apos;ordine), e la riga te lo dice.
         Il controllo si rifà a ogni caricamento delle primarie e ogni volta che apri questa pagina. Un&apos;attività completata,
         a mano o da sola, esce dall&apos;elenco e passa fra i <strong>completati</strong>, in fondo alla pagina; se la riapri torna qui.
       </p>
@@ -197,10 +210,25 @@ export default function TodoPage() {
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
           <span>
             {esitoOrdini.chiuse.length === 1
-              ? "Un'attività si è chiusa da sola, il suo ordine risulta terminato: "
-              : `${esitoOrdini.chiuse.length} attività si sono chiuse da sole, i loro ordini risultano terminati: `}
-            {esitoOrdini.chiuse.map(x => `${x.titolo} (${x.ordini}${x.ritiro ? `, ritiro del ${gg(x.ritiro)}` : ''})`).join('; ')}.
+              ? "Un'attività si è chiusa da sola: "
+              : `${esitoOrdini.chiuse.length} attività si sono chiuse da sole: `}
+            {esitoOrdini.chiuse.map(x => `${x.titolo} (${x.ordini}${x.ritiro ? `, ritiro del ${gg(x.ritiro)}` : ''}${x.come === 'in_parte' ? ', evasa in parte: qualche ordine risulta cancellato a portale' : ''})`).join('; ')}.
             {esitoOrdini.chiuse.length === 1 ? ' La trovi fra i completati.' : ' Le trovi fra i completati.'}
+          </span>
+        </div>
+      )}
+      {/* Le attivita' passate da sole fra le cancellate: il portale ha cancellato i
+          loro ordini (richiesta dell'utente del 14/10/2026). Non e' un allarme:
+          e' quello che e' successo, e dove trovarle. */}
+      {esitoOrdini && esitoOrdini.cancellate?.length > 0 && (
+        <div className="flex items-start gap-2 text-sm border border-slate-200 bg-slate-50 text-slate-800 rounded-lg px-3 py-2">
+          <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            {esitoOrdini.cancellate.length === 1
+              ? "Un'attività è passata da sola fra i cancellati, il portale dà i suoi ordini cancellati: "
+              : `${esitoOrdini.cancellate.length} attività sono passate da sole fra i cancellati, il portale dà i loro ordini cancellati: `}
+            {esitoOrdini.cancellate.map(x => `${x.titolo} (${x.ordini})`).join('; ')}.
+            {esitoOrdini.cancellate.length === 1 ? ' La trovi in fondo alla pagina.' : ' Le trovi in fondo alla pagina.'}
           </span>
         </div>
       )}
@@ -268,8 +296,9 @@ export default function TodoPage() {
               <p className="text-xs text-muted-foreground mt-1">
                 Quando l&apos;ordine passa da assegnato a terminato il gestionale segna l&apos;attività come completata da sé,
                 con la data della fine trasporto. Puoi metterne più di uno separati da virgola: si chiude quando sono terminati tutti.
-                Se un ordine risulta cancellato l&apos;attività resta aperta e te lo dice, perché quel ritiro non si farà. Un ordine
-                già terminato adesso non chiude niente: il passaggio si conta da quando l&apos;attività c&apos;è.
+                Se il portale cancella gli ordini l&apos;attività passa da sola fra i cancellati, col motivo; se alcuni sono
+                terminati e gli altri cancellati si chiude come evasa in parte. Un ordine già terminato o già cancellato adesso non
+                chiude niente: il passaggio si conta da quando l&apos;attività c&apos;è.
               </p>
             </div>
           </div>
@@ -283,15 +312,20 @@ export default function TodoPage() {
       {loading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Caricamento...</div>
       ) : (
-        <ElencoAttivita
-          todos={todos}
-          filtro={filterStato}
-          isAdmin={isAdmin}
-          onSpunta={toggleStato}
-          onCiclo={cycleStato}
-          onElimina={handleDelete}
-          onSalvaOrdine={salvaOrdine}
-        />
+        <div className="space-y-4">
+          <ElencoAttivita
+            todos={todos}
+            filtro={filterStato}
+            isAdmin={isAdmin}
+            onSpunta={toggleStato}
+            onCiclo={cycleStato}
+            onElimina={handleDelete}
+            onSalvaOrdine={salvaOrdine}
+          />
+          {/* Sotto i completati, le cancellate: i loro ordini il portale li ha
+              cancellati, e ci passano da sole (14/10/2026). */}
+          <AttivitaCancellate todos={cancellati} isAdmin={isAdmin} onRiapri={riapri} onElimina={handleDelete} />
+        </div>
       )}
       </>)}
     </div>

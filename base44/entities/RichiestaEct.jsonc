@@ -83,7 +83,7 @@
     },
     "ordini_stato_json": {
       "type": "string",
-      "description": "A che punto sono i suoi ordini, uno per uno: [{ id_ordine, stato, giorno }] con stato terminato, eseguito, cancellato, assegnato, senza_data o sconosciuto. Con piu ordini sulla stessa richiesta serve a sapere QUALI mancano, non solo quanti"
+      "description": "A che punto sono i suoi ordini, uno per uno: [{ id_ordine, stato, giorno }] con stato terminato, eseguito, cancellato, assegnato, senza_data o sconosciuto. Con piu ordini sulla stessa richiesta serve a sapere QUALI mancano, non solo quanti. I cancellati portano { id_ordine, stato: cancellato, motivo, visto_il }: visto_il e il giorno in cui il gestionale l ha visto cancellato la prima volta, perche il portale non scrive quello della cancellazione"
     },
     "evasione_confermata": {
       "type": "boolean",
@@ -103,7 +103,7 @@
         "annullata"
       ],
       "default": "aperta",
-      "description": "da_confermare quando fra i terminati risulta il ritiro ma la spunta non c e ancora"
+      "description": "annullata anche da sola, quando il portale da tutti i suoi ordini cancellati; evasa anche in parte, con alcuni ordini terminati e gli altri cancellati: chiuse cosi le ricalcola ogni caricamento delle primarie, perche il portale puo riassegnare l ordine. da_confermare solo per le richieste salvate prima del 29/09/2026, quando fra i terminati risultava il ritiro ma la spunta non c era ancora"
     },
     "motivo_annullamento": {
       "type": "string",

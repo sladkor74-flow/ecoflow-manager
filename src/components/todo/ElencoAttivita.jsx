@@ -2,7 +2,7 @@ import React from 'react';
 import { CheckSquare, Square, AlertCircle, CheckCircle2, Trash2 } from 'lucide-react';
 import OrdiniAttivita from '@/components/todo/OrdiniAttivita';
 import SezioneCompletati from '@/components/todo/SezioneCompletati';
-import { dividiAttivita, daFareDelFiltro, completamentoAttivita, testoCompletamento } from '@/lib/todoSezioni';
+import { dividiAttivita, daFareDelFiltro, completamentoAttivita, testoCompletamento, testoElencoVuoto } from '@/lib/todoSezioni';
 
 // LE ATTIVITA' DELLA TO-DO LIST: l'elenco da fare e, sotto, la sezione dei
 // completati (richiesta dell'utente del 12/10/2026). Prima un'attivita'
@@ -95,20 +95,14 @@ function RigaCompletata({ todo, isAdmin, onSpunta, onElimina, onSalvaOrdine }) {
   );
 }
 
-function testoVuoto(filtro, daFare, completati, isAdmin) {
-  if (!daFare && !completati) return `Nessuna attività.${isAdmin ? ' Crea la prima col pulsante «Nuovo To-Do».' : ''}`;
-  if (!daFare) return 'Niente da fare: le attività sono tutte completate, le trovi qui sotto.';
-  if (filtro === 'in_corso') return 'Nessuna attività in corso.';
-  if (filtro === 'aperto') return 'Nessuna attività aperta.';
-  return 'Niente da fare.';
-}
-
 /**
  * `filtro`: 'tutti' (aperte e in corso), 'aperto' o 'in_corso'. Le completate non
  * stanno in nessun filtro: stanno nella loro sezione.
  */
 export default function ElencoAttivita({ todos, filtro = 'tutti', isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine }) {
-  const { daFare, completati } = dividiAttivita(todos);
+  // Le cancellate dal portale (14/10/2026) stanno nella loro sezione, sotto i
+  // completati: l'elenco vuoto lo dice, invece di «Nessuna attività».
+  const { daFare, completati, cancellati } = dividiAttivita(todos);
   const visibili = daFareDelFiltro(daFare, filtro);
   const azioni = { isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine };
   return (
@@ -116,7 +110,7 @@ export default function ElencoAttivita({ todos, filtro = 'tutti', isAdmin, onSpu
       <div className="space-y-2" data-elenco="da-fare">
         {visibili.map((todo) => <RigaDaFare key={todo.id} todo={todo} {...azioni} />)}
         {visibili.length === 0 && (
-          <div className="text-center py-8 px-3 text-muted-foreground border rounded-lg">{testoVuoto(filtro, daFare.length, completati.length, isAdmin)}</div>
+          <div className="text-center py-8 px-3 text-muted-foreground border rounded-lg">{testoElencoVuoto(filtro, { daFare: daFare.length, completati: completati.length, cancellati: cancellati.length }, isAdmin)}</div>
         )}
       </div>
       <SezioneCompletati

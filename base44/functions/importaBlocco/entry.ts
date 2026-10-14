@@ -7,11 +7,13 @@ import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, dataPrimaria, record
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { fetchAll, RIGHE_PER_PAGINA, ultimaPagina } from "../../shared/fetchAll.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
-import { evasioneOrdini, listaOrdini, statoRichiesta, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare, statoOrdiniRichiesta } from "../../shared/richiesteEct.ts";
+import { evasioneOrdini, listaOrdini, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare, daRicalcolare, ordiniEdEsitoRichiesta } from "../../shared/richiesteEct.ts";
 import { statoOrdini } from "../../shared/todoOrdini.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti, dataItaliana } from "../../shared/reportSettimanali.ts";
 import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
+import { ordiniEseguiti, testoRegistro } from "../../shared/ordiniEseguiti.ts";
+import { leggiEseguiti } from "../../shared/ordiniEseguitiLettura.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
 const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA', 'extra raccolta']]
@@ -470,9 +472,12 @@ async function riconosciRitiriEct(base44) {
   const svc = base44.asServiceRole.entities;
   const anno = Number(oggiRoma().slice(0, 4));
   const tutte = await fetchAll(svc.RichiestaEct, { anno });
-  const richieste = tutte.filter(r => r.esito !== 'evasa' && r.esito !== 'annullata');
-  // Le evase gia' spuntate non si toccano: si guardano solo per le date.
-  const evase = tutte.filter(r => r.esito === 'evasa');
+  // Le aperte, e quelle che ha chiuso il portale cancellandone gli ordini: il
+  // portale le puo' riaprire riassegnando l'ordine (daRicalcolare, 14/10/2026).
+  const richieste = tutte.filter(daRicalcolare);
+  // Le evase gia' spuntate non si toccano: si guardano solo per le date. Un'evasa
+  // in parte e' gia' fra quelle da ricalcolare, e le sue date si dicono li'.
+  const evase = tutte.filter(r => r.esito === 'evasa' && !daRicalcolare(r));
   if (!richieste.length && !evase.length) return { controllate: 0, aggiornate: 0, da_confermare: [], terminati_senza_fine: [], ordini_con_date_da_sistemare: [] };
 
   // Gli stessi archivi del caricamento delle richieste: gli assegnati e tutte le
@@ -503,10 +508,12 @@ async function riconosciRitiriEct(base44) {
     campi.ordini_totali = ev.totali;
     campi.ordini_evasi = ev.evasi;
     campi.evasione_rilevata_il = dataRitiro(r.evasione_rilevata_il, ids, ev, terminati, presenti);
-    campi.esito = statoRichiesta({ ...r, ...campi });
-    // A che punto sono i suoi ordini, uno per uno: con piu' ordini sulla stessa
-    // richiesta, '2 su 3' dice quanti e non quali.
-    campi.ordini_stato_json = JSON.stringify(statoOrdiniRichiesta(ids, statoTuttiGliOrdini));
+    // A che punto sono i suoi ordini, uno per uno (con piu' ordini sulla stessa
+    // richiesta, '2 su 3' dice quanti e non quali), e POI l'esito, che li legge:
+    // al contrario l'esito restava indietro di un caricamento. Il giorno in cui un
+    // ordine si e' visto cancellato si porta avanti dal salvato (14/10/2026). E' la
+    // stessa funzione del caricamento del foglio ECT (importaRichiesteEct).
+    Object.assign(campi, ordiniEdEsitoRichiesta(r, campi, ids, statoTuttiGliOrdini, oggiRoma()));
     const senzaData = ids.filter(id => senzaFine.has(id));
     if (campi.esito === 'aperta' && senzaData.length) terminatiSenzaFine.push({ pdr: r.pdr_nome, id_ordine: senzaData.join(', ') });
     conDate.push(...ordiniConDateDaSistemare(r.pdr_nome, ids, terminati, daSistemare));
@@ -1123,8 +1130,26 @@ export default async function(req) {
       // Gli ordini in stato "eseguito": a portale hanno tutti i dati ma nessuno
       // ha premuto Chiudi. Non sono terminati e non entrano in nessun conto: si
       // dicono, altrimenti spariscono in silenzio (regola dell'utente 24/09/2026).
+      //
+      // DAGLI ARCHIVI DOPO IL CARICAMENTO, CON GLI ID (richiesta dell'utente del
+      // 14/10/2026: «devono essere sempre segnalati indicando l'id ordine»). Una
+      // lettura filtrata per stato su primarie rete e ACI, a scrittura finita:
+      // dice quelli del file E quelli conservati dagli anni prima, che il file
+      // non porta, con la regola della dashboard e delle pagine
+      // (ordiniEseguiti.ts). Gli ID restano scritti nel registro e tornano al
+      // browser per l'esito sotto la scheda. Se la lettura non riesce vale il
+      // conto che il browser ha fatto sul file, come prima.
+      let eseguitiArchivio = null;
+      try {
+        const letti = await leggiEseguiti(base44.asServiceRole.entities, ARCHIVI_CON_STORICO);
+        eseguitiArchivio = ordiniEseguiti(letti, { oggi: oggiRoma(), annoInizio: annoInizioPrimarie() });
+      } catch (_e) {
+        eseguitiArchivio = null;
+      }
       const eseguiti = body.eseguiti || null;
-      if (eseguiti && (Number(eseguiti.rete_ordini) > 0 || Number(eseguiti.aci_ordini) > 0)) {
+      if (eseguitiArchivio && !eseguitiArchivio.non_letti.length) {
+        if (eseguitiArchivio.gruppi.length) messaggio += ` — ${testoRegistro(eseguitiArchivio)}`;
+      } else if (eseguiti && (Number(eseguiti.rete_ordini) > 0 || Number(eseguiti.aci_ordini) > 0)) {
         const quote = [
           Number(eseguiti.rete_ordini) > 0 ? `rete ${eseguiti.rete_ordini}` : '',
           Number(eseguiti.aci_ordini) > 0 ? `ACI ${eseguiti.aci_ordini}` : '',
@@ -1152,7 +1177,9 @@ export default async function(req) {
         forzato: conferme(conferma_forzatura).size > 0 ? true : undefined,
         modalita: 'sostituzione',
       }, nonContati.length > 0 || incerte > 0);
-      return Response.json({ registrato: true, esito });
+      // Gli ordini in «eseguito» riletti dall'archivio tornano al browser, che
+      // li mostra sotto la scheda con gli ID (null se la lettura non e' riuscita).
+      return Response.json({ registrato: true, esito, eseguiti: eseguitiArchivio });
     }
 
     // === REGISTRAZIONE: registro dei caricamenti a fine importazione ===

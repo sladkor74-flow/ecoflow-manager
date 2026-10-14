@@ -60,8 +60,9 @@ prova('la divisione delle attivita', () => {
   verifica('niente si perde e niente sta in due posti', daFare.length + completati.length === TODOS.length && !daFare.some(t => completati.includes(t)));
 });
 prova('i conteggi', () => {
+  // Dal 14/10/2026 anche le cancellate hanno il loro numero (prove/todoCancellatiDalPortale.mjs): qui nessuna.
   verifica('i numeri della pagina dicono solo i da fare: 3 da fare, 2 aperti, 1 in corso (le completate a parte: 4)',
-    J(f('conteggiAttivita')(TODOS)) === J({ da_fare: 3, aperto: 2, in_corso: 1, completati: 4 }), J(f('conteggiAttivita')(TODOS)));
+    J(f('conteggiAttivita')(TODOS)) === J({ da_fare: 3, aperto: 2, in_corso: 1, completati: 4, cancellati: 0 }), J(f('conteggiAttivita')(TODOS)));
   const { daFare } = f('dividiAttivita')(TODOS);
   verifica('i filtri dei da fare: tutti, aperti, in corso', ids(f('daFareDelFiltro')(daFare, 'tutti')) === 'abf'
     && ids(f('daFareDelFiltro')(daFare, 'aperto')) === 'af' && ids(f('daFareDelFiltro')(daFare, 'in_corso')) === 'b');

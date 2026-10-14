@@ -5,7 +5,8 @@ import { annotaFileDaRimuovere, voceDaRimuovere } from "../../shared/fileDaRimuo
 import { urlScaricabile, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { leggiFoglio, riconosciOrdine, scadenzaDaNota, statoRichiesta, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare } from "../../shared/richiesteEct.ts";
+import { leggiFoglio, riconosciOrdine, scadenzaDaNota, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare, ordiniEdEsitoRichiesta } from "../../shared/richiesteEct.ts";
+import { statoOrdini } from "../../shared/todoOrdini.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
 
@@ -103,6 +104,15 @@ export default async function(req) {
     // Un ritiro con un'altra data obbligatoria che manca o non torna conta, ma si
     // dice (daSistemare, regola dell'utente del 22/09/2026).
     const { terminati, senzaFine, daSistemare } = ritiriTerminati([...rete, ...aci]);
+    // Lo stato di ogni ordine - terminato, eseguito, cancellato, assegnato - con la
+    // stessa funzione del ricalcolo dopo le primarie e della to-do list
+    // (statoOrdini): si salva con la richiesta (ordini_stato_json) e decide la
+    // richiesta che il portale ha gia' chiuso cancellandone gli ordini
+    // (statoRichiesta, 14/10/2026). Prima questo caricamento non lo scriveva, e
+    // l'esito si calcolava senza: una richiesta col suo ordine cancellato tornava
+    // «in attesa» a ogni caricamento del foglio.
+    const statoTuttiGliOrdini = statoOrdini([...rete, ...aci], [...assRete, ...assAci]);
+    const oggi = oggiRoma();
 
     const abbinate = abbinaRichieste(righe, esistenti);
 
@@ -153,8 +163,11 @@ export default async function(req) {
         ordini_totali: ev.totali,
         ordini_evasi: ev.evasi,
       };
-      const conStato = { ...campi, evasione_confermata: gia ? !!gia.evasione_confermata : false };
-      campi.esito = statoRichiesta(conStato);
+      // Lo stato dei suoi ordini e poi l'esito, con la stessa funzione del
+      // ricalcolo dopo le primarie (ordiniEdEsitoRichiesta): il giorno in cui un
+      // ordine si e' visto cancellato si porta avanti dal salvato.
+      const salvato = { ordini_stato_json: gia ? gia.ordini_stato_json : null, id_ordine_manuale: gia ? gia.id_ordine_manuale : '', evasione_confermata: gia ? !!gia.evasione_confermata : false };
+      Object.assign(campi, ordiniEdEsitoRichiesta(salvato, campi, ids, statoTuttiGliOrdini, oggi));
 
       if (!gia) { await svc.RichiestaEct.create(campi); creati++; }
       else {
@@ -163,8 +176,11 @@ export default async function(req) {
       }
       // Chi risulta ritirato e non ha ancora la spunta va detto subito, sia che la
       // riga sia nuova sia che fosse gia' in elenco: e' quello su cui l utente
-      // deve mettere le mani per rispondere al consorzio.
-      if (campi.esito === 'da_confermare' && !(gia && gia.evasione_confermata) && rilevata) {
+      // deve mettere le mani per rispondere al consorzio. Dal 29/09/2026 una
+      // richiesta ritirata e' «evasa» da sola e statoRichiesta non dice piu'
+      // «da_confermare»: il confronto con quell'esito era rimasto, e l'elenco
+      // usciva sempre vuoto (14/10/2026). Si dice chi diventa evasa adesso.
+      if (campi.esito === 'evasa' && !(gia && gia.evasione_confermata) && !(gia && gia.esito === 'evasa') && rilevata) {
         daConfermare.push({ pdr: r.pdr_nome, id_ordine: ids.join(', '), evasa_il: rilevata });
       }
       // Ancora aperta ma con un ordine terminato senza fine trasporto: si dice,

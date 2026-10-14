@@ -198,6 +198,26 @@ export function riconosciOrdine(richiesta, ordini) {
  *
  * Una richiesta ANNULLATA resta annullata: quel ritiro non si fara', e un ordine
  * terminato per caso su un altro conto non la riapre.
+ *
+ * QUELLO CHE IL PORTALE DICE IN MODO CERTO NON SI DECIDE A MANO (richiesta
+ * dell'utente del 14/10/2026: «a me non serve decidere sul gestionale cio' che e'
+ * gia' chiaro ed evidente sul portale»). Si legge lo stato dei suoi ordini salvato
+ * con la richiesta (ordini_stato_json, statoOrdiniRichiesta): se il portale li da'
+ * tutti CANCELLATI la richiesta e' annullata da sola, come quelle che il foglio
+ * del consorzio dice annullate; se nessuno e' piu' aperto e alcuni sono terminati
+ * e altri cancellati e' EVASA IN PARTE, e va fra le completate: al consorzio si
+ * risponde con i ritiri fatti e quelli cancellati. Fino a quel giorno una
+ * richiesta col suo ordine cancellato restava «in attesa del ritiro» per sempre,
+ * e a scadenza passata finiva fra quelle da sollecitare. Lo stato salvato vale
+ * solo se copre TUTTI gli ordini di adesso: con un ID scritto a mano dopo, quello
+ * stato e' di un altro elenco e non decide niente.
+ *
+ * Quello che ha chiuso il portale lo puo' riaprire il portale (revisione del
+ * 14/10/2026): un ordine cancellato per errore torna assegnato con lo stesso ID,
+ * e la richiesta torna aperta. Per questo una richiesta chiusa cosi' si ricalcola
+ * a ogni caricamento (daRicalcolare), e lo stato dei suoi ordini si scrive PRIMA
+ * dell'esito che lo legge (ordiniEdEsitoRichiesta). Le annullate dal foglio e le
+ * evase coi ritiri tutti fatti restano come sono.
  */
 export function statoRichiesta(r) {
   if (r.motivo_annullamento) return 'annullata';
@@ -205,7 +225,85 @@ export function statoRichiesta(r) {
   // La data di evasione viene dal foglio del consorzio o dai nostri terminati: in
   // tutti e due i casi il ritiro c'e' stato, e la richiesta e' evasa.
   if (r.evaso_il || r.evasione_rilevata_il) return 'evasa';
+  const o = ordiniSalvatiRichiesta(r);
+  if (o && o.cancellati.length === o.voci.length) return 'annullata';
+  if (o && o.cancellati.length > 0 && o.cancellati.length + o.terminati.length === o.voci.length) return 'evasa';
   return 'aperta';
+}
+
+/**
+ * Lo stato degli ordini di una richiesta com'e' stato salvato (ordini_stato_json),
+ * uno per ogni ordine di adesso (listaOrdini): { voci, terminati, cancellati },
+ * con le voci di statoOrdiniRichiesta. null se la richiesta non ha ordini, se lo
+ * stato non c'e' o non si legge, o se manca anche un solo ordine: uno stato
+ * incompleto non decide niente.
+ */
+export function ordiniSalvatiRichiesta(r) {
+  const ids = listaOrdini(r);
+  if (!ids.length || !r || !r.ordini_stato_json) return null;
+  let salvati = [];
+  try { salvati = JSON.parse(r.ordini_stato_json); } catch { return null; }
+  if (!Array.isArray(salvati)) return null;
+  const perId = new Map(salvati.filter(s => s && s.id_ordine).map(s => [String(s.id_ordine).trim(), s]));
+  const voci = ids.map(id => perId.get(id) || null);
+  if (voci.some(v => !v)) return null;
+  return { voci, terminati: voci.filter(v => v.stato === 'terminato'), cancellati: voci.filter(v => v.stato === 'cancellato') };
+}
+
+/**
+ * Chiusa SOLO dallo stato dei suoi ordini a portale: annullata senza il motivo
+ * del foglio, o evasa senza la spunta, senza la data del foglio e senza il
+ * ritiro rilevato (cioe' evasa in parte, con un ordine cancellato). E' l'unica
+ * chiusura che il portale puo' disfare: le altre le ha decise il foglio del
+ * consorzio, un ritiro fatto o chi lavora.
+ */
+export function chiusaDalPortale(r) {
+  if (!r) return false;
+  if (r.esito === 'annullata') return !r.motivo_annullamento;
+  if (r.esito === 'evasa') return !r.evasione_confermata && !r.evaso_il && !r.evasione_rilevata_il;
+  return false;
+}
+
+/**
+ * Le richieste che ogni caricamento delle primarie ricalcola (importaBlocco,
+ * azione ritiri_ect): le aperte (e le «da_confermare» di prima del 29/09/2026), e
+ * quelle chiuse dal portale, che il portale puo' riaprire. Senza queste ultime
+ * una richiesta annullata perche' il suo ordine risultava cancellato restava
+ * «Annullata.» per sempre, anche col suo ordine riassegnato (revisione del
+ * 14/10/2026).
+ */
+export function daRicalcolare(r) {
+  if (!r) return false;
+  if (r.esito === 'evasa' || r.esito === 'annullata') return chiusaDalPortale(r);
+  return true;
+}
+
+/**
+ * Lo stato dei suoi ordini e l'esito di una richiesta, ricalcolati insieme e
+ * nell'ordine giusto: PRIMA lo stato degli ordini di adesso, POI l'esito, che lo
+ * legge. Calcolati al contrario, l'esito leggeva lo stato salvato al caricamento
+ * prima ed era indietro di un giro: la pagina la diceva cancellata, la dashboard
+ * e l'assistente aperta e scaduta (revisione del 14/10/2026). Il giorno in cui un
+ * ordine si e' visto cancellato si porta avanti dal salvato (`r.ordini_stato_json`),
+ * e la prima volta e' `oggi`.
+ *
+ * `campi` sono quelli gia' ricalcolati da chi chiama (ID riconosciuti, ritiro
+ * rilevato): l'esito si calcola sulla richiesta con quelli sopra.
+ * Torna { ordini_stato_json, esito }.
+ */
+export function ordiniEdEsitoRichiesta(r, campi, ids, stato, oggi) {
+  const ordini_stato_json = JSON.stringify(statoOrdiniRichiesta(ids, stato, r && r.ordini_stato_json, oggi));
+  return { ordini_stato_json, esito: statoRichiesta({ ...(r || {}), ...(campi || {}), ordini_stato_json }) };
+}
+
+/**
+ * Evasa IN PARTE: nessun ordine e' piu' da ritirare, alcuni risultano terminati e
+ * gli altri cancellati a portale. «Gli ordini risultano tutti ritirati» non vale
+ * per lei: chi la racconta deve dirlo (la dashboard, cruscotto.ts).
+ */
+export function evasaInParte(r) {
+  const o = ordiniSalvatiRichiesta(r);
+  return !!o && o.cancellati.length > 0 && o.terminati.length > 0 && o.cancellati.length + o.terminati.length === o.voci.length;
 }
 
 /**
@@ -217,12 +315,31 @@ export function statoRichiesta(r) {
  * Gli stati sono quelli del portale, piu' il limbo "eseguito" (dati inseriti ma
  * Chiudi non premuto) che va sempre segnalato, e "senza data" per un terminato a
  * cui manca la fine trasporto - che non conta come ritirato (regola 1) ma c'e'.
+ *
+ * IL GIORNO DI UN CANCELLATO (14/10/2026). `giorno` resta quello del ritiro, e un
+ * cancellato non ce l'ha. Il giorno della cancellazione il file del portale non
+ * lo porta (Ordine_chiuso_il e' il clic su Chiudi di un trasporto gia' fatto, non
+ * la cancellazione: vedi todoOrdini.ts). Si scrive in `visto_il` il giorno in cui
+ * il gestionale l'ha visto cancellato la prima volta, se chi chiama passa lo
+ * stato salvato prima (`precedenti`, il testo di ordini_stato_json) e `oggi`: si
+ * porta avanti dal salvato, cosi' non cambia a ogni ricalcolo. Senza, resta vuoto:
+ * un giorno che non si sa non si inventa.
  */
-export function statoOrdiniRichiesta(ids, stato) {
+export function statoOrdiniRichiesta(ids, stato, precedenti = null, oggi = null) {
   const { terminati, senzaFine, cancellati, eseguiti, presenti } = stato || {};
+  let prima = [];
+  try { prima = precedenti ? JSON.parse(precedenti) : []; } catch { prima = []; }
+  const vistoPrima = new Map((Array.isArray(prima) ? prima : []).filter(s => s && s.stato === 'cancellato' && s.visto_il).map(s => [s.id_ordine, s.visto_il]));
   return (ids || []).map(id => {
     if (terminati && terminati.has(id)) return { id_ordine: id, stato: 'terminato', giorno: terminati.get(id) };
-    if (cancellati && cancellati.has(id)) return { id_ordine: id, stato: 'cancellato', motivo: cancellati.get(id) || '' };
+    if (cancellati && cancellati.has(id)) {
+      return {
+        id_ordine: id,
+        stato: 'cancellato',
+        motivo: cancellati.get(id) || '',
+        visto_il: vistoPrima.get(id) || (oggi ? String(oggi).slice(0, 10) : ''),
+      };
+    }
     if (eseguiti && eseguiti.has(id)) return { id_ordine: id, stato: 'eseguito', giorno: '' };
     if (senzaFine && senzaFine.has(id)) return { id_ordine: id, stato: 'senza_data', giorno: '' };
     if (presenti && presenti.has(id)) return { id_ordine: id, stato: 'assegnato', giorno: '' };

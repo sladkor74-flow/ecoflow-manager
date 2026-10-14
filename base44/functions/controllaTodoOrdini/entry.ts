@@ -11,14 +11,21 @@ import { eAmministratore } from "../../shared/permessi.ts";
 // Sull'attivita' l'utente scrive l'ID ordine da completare; quando quell'ordine
 // passa da assegnato a terminato l'attivita' e' fatta e si chiude da sola, con
 // scritto perche' e quando. Le regole stanno tutte in shared/todoOrdini.ts:
-// vale la FINE TRASPORTO (regola 1), un ordine cancellato non chiude niente e si
-// segnala, con piu' ordini si chiude quando sono terminati tutti.
+// vale la FINE TRASPORTO (regola 1), con piu' ordini si chiude quando nessuno e'
+// piu' aperto. Dal 14/10/2026 un'attivita' i cui ordini il portale da' tutti
+// CANCELLATI passa da sola fra le cancellate (stato 'cancellato'), e una con
+// alcuni terminati e gli altri cancellati si chiude come evasa in parte:
+// richiesta dell'utente, «a me non serve decidere sul gestionale cio' che e' gia'
+// chiaro ed evidente sul portale». Prima restava aperta con l'avviso "che cosa
+// farne lo decidi tu".
 //
 // IL PRIMO GIRO SU UN'ATTIVITA' NON CHIUDE MAI: scrive che cosa sta guardando e
-// che cosa c'e' da attendere. Il passaggio da assegnato a terminato si deve vedere
-// (parole dell'utente: "solo allora"), e le attivita' scritte prima portano un
-// ordine "correlato" che di solito e' terminato da mesi: chiudendole al primo giro
-// si sarebbe archiviato in blocco del lavoro mai fatto.
+// che cosa c'e' da attendere. Il passaggio da assegnato a terminato - o a
+// cancellato - si deve vedere (parole dell'utente: "solo allora"), e le attivita'
+// scritte prima portano un ordine "correlato" che di solito e' chiuso da mesi:
+// chiudendole al primo giro si sarebbe archiviato in blocco del lavoro mai fatto.
+// E un'attivita' scritta adesso su un ordine gia' cancellato sparirebbe dai da
+// fare appena salvata: la pagina chiama questo controllo subito dopo.
 //
 // Parte da sola dopo ogni caricamento delle primarie, come gli altri ricalcoli
 // (RICALCOLI in src/lib/importGrandeFile.js: regola 2, ogni caricamento aggiorna
@@ -50,7 +57,9 @@ import { eAmministratore } from "../../shared/permessi.ts";
 // Il corpo della richiesta non si legge: chi chiama non sceglie niente, nemmeno
 // quali attivita' guardare. Lo decidono i dati, e una prova lo blocca.
 //
-// Risposte: 200 con { controllate, aggiornate, chiuse, da_guardare, avviso };
+// Risposte: 200 con { controllate, aggiornate, chiuse, cancellate, da_guardare, avviso }
+// (chiuse: le completate, anche in parte; cancellate: quelle passate fra le
+// cancellate; ognuna con id, titolo, ordini, ritiro e come);
 // 401 a chi non e' entrato nel gestionale;
 // 200 con rinviato: true, senza scrivere niente, se le primarie si stanno
 // caricando o un caricamento le ha lasciate a meta' (su un archivio a meta' un
@@ -92,7 +101,7 @@ export default async function(req) {
     const puoScrivere = eAmministratore(user);
     const svc = base44.asServiceRole.entities;
     const oggi = oggiRoma();
-    const niente = { controllate: 0, aggiornate: 0, chiuse: [], da_guardare: [], avviso: '' };
+    const niente = { controllate: 0, aggiornate: 0, chiuse: [], cancellate: [], da_guardare: [], avviso: '' };
 
     // Le attivita' sono poche e stanno in un archivio piccolo: si leggono tutte e
     // si tengono quelle che hanno scritto qualcosa sull'ordine da completare.
@@ -141,7 +150,7 @@ export default async function(req) {
     const daGuardare = [];
     const errori = [];
     for (const t of attivita) {
-      const { esito, campi, chiusa } = controlloAttivita(t, stato, oggi);
+      const { esito, campi, chiusa, come } = controlloAttivita(t, stato, oggi);
       const cambiato = Object.keys(campi).some(k => String(t[k] ?? '') !== String(campi[k] ?? ''));
       if (cambiato && puoScrivere) {
         try {
@@ -154,22 +163,27 @@ export default async function(req) {
       }
       // Una chiusura si racconta solo se e' stata salvata. A chi non puo'
       // scrivere si dice che cosa si chiuderebbe, senza chiuderlo.
-      if (chiusa) (puoScrivere ? chiuse : daChiudere).push({ id: t.id, titolo: t.titolo, ordini: esito.ids.join(', '), ritiro: esito.ultima });
-      if (campi.avviso_ordini) daGuardare.push({ id: t.id, titolo: t.titolo, avviso: campi.avviso_ordini });
+      if (chiusa) (puoScrivere ? chiuse : daChiudere).push({ id: t.id, titolo: t.titolo, ordini: esito.ids.join(', '), ritiro: esito.ultimo_ritiro, come });
+      // Con lo stato in cui resta: di una gia' chiusa non si dice che resta aperta.
+      if (campi.avviso_ordini) daGuardare.push({ id: t.id, titolo: t.titolo, avviso: campi.avviso_ordini, stato: (puoScrivere && campi.stato) || t.stato });
     }
 
+    // Le cancellate si dicono a parte dalle completate: non sono un lavoro fatto.
+    const cancellate = chiuse.filter(x => x.come === 'cancellata');
+    const completate = chiuse.filter(x => x.come !== 'cancellata');
     const risposta = {
       controllate: attivita.length,
       aggiornate,
-      chiuse,
+      chiuse: completate,
+      cancellate,
       da_guardare: daGuardare,
-      avviso: testoControlloTodo(chiuse, daGuardare),
+      avviso: testoControlloTodo(completate, daGuardare, cancellate),
       ...(puoScrivere ? {} : {
         da_chiudere: daChiudere,
         non_salvato: true,
         sola_lettura: true,
         avviso: daChiudere.length
-          ? `${daChiudere.length === 1 ? "Un'attivita' risulta" : daChiudere.length + ' attivita risultano'} da chiudere, ma le modifiche le fa l'amministratore: si chiudono alla sua prima apertura della To-Do List.`
+          ? `${daChiudere.length === 1 ? "Un'attivita' risulta" : daChiudere.length + ' attivita risultano'} da chiudere o da passare fra le cancellate, ma le modifiche le fa l'amministratore: si fanno alla sua prima apertura della To-Do List.`
           : '',
       }),
     };
