@@ -24,8 +24,11 @@ function Destinazione({ v, canale }) {
       <ArrowRight className="w-3 h-3 text-muted-foreground self-center" />
       <span className="font-medium">{v.impianto}</span>
       <span className="tabular-nums">{t(v.t)} t</span>
+      {/* Un carico di rete verso chi la rete non la dichiara a SMOCO (Tecnogum: non
+          ci fattura il trattamento) e' per noi un giro chiuso (decisioni dell'utente
+          del 13/10/2026): non aspetta niente da nessuno. */}
       {canale === 'RETE' && v.dichiara === false && (
-        <span className="text-muted-foreground">· della rete non manda dichiarazione: quel trattamento non glielo paghiamo</span>
+        <span className="text-muted-foreground">· per noi un giro chiuso: sulla rete non dichiara a SMOCO, perché quel trattamento non ce lo fattura</span>
       )}
       {canale === 'RETE' && v.dichiara !== false && v.in_attesa_t > 0 && (
         <span className="text-amber-700">· {t(v.in_attesa_t)} t che il portale aspetta ancora che {v.impianto} dichiari</span>
@@ -108,6 +111,17 @@ function Scheda({ s }) {
             {c.verso.length > 0
               ? <ul className="mt-1 space-y-0.5">{c.verso.map(v => <Destinazione key={v.chiave} v={v} canale={c.canale} />)}</ul>
               : <p className="mt-1 text-muted-foreground">Nessuna secondaria partita quest&apos;anno.</p>}
+            {/* L'ATTESA CHE PER NOI E' UN GIRO CHIUSO (decisioni dell'utente del
+                13/10/2026): il numero e' quello del portale, che serve alla
+                quadratura, e si dice per quello che e', in grigio: non e'
+                un'attesa da risolvere. Le stesse parole delle Giacenze. */}
+            {c.canale === 'RETE' && s.in_attesa_chiusa_t > 0 && (
+              <p className="mt-1 text-muted-foreground">
+                {t(s.in_attesa_chiusa_t)} t {s.in_attesa_chiusa_perche}.
+                {s.in_attesa_portale_t > s.in_attesa_chiusa_t + 0.0005 ? ` Le altre ${t(s.in_attesa_portale_t - s.in_attesa_chiusa_t)} t che il portale attribuisce allo stoccaggio sono ancora in piazzale.` : ''}
+                {' '}Nessuna dichiarazione le chiuderà e non c&apos;è niente da fare: il numero resta quello del portale, e serve alla quadratura.
+              </p>
+            )}
           </div>
         ))}
         {/* Uno stoccaggio che compare solo per i formulari da sistemare non ha mesi da mostrare. */}

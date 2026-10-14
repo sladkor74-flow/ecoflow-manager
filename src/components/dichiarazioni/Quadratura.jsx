@@ -132,6 +132,21 @@ export default function Quadratura({ dati }) {
         la riga lo segnala con il peso, e dice quanto dello scarto viene da lì.
       </p>
 
+      {/* UN ANNO PRIMA DEL GESTIONALE (decisioni dell'utente del 13/10/2026): la
+          giacenza degli impianti non si ricostruisce, e il confronto col portale
+          non si fa. Si dice una volta, con le parole delle Giacenze. */}
+      {dati.prima_del_gestionale && dati.perche_prima_del_gestionale && (
+        <p className="text-xs border rounded-lg bg-muted/40 px-3 py-2 text-muted-foreground">{dati.perche_prima_del_gestionale}</p>
+      )}
+      {/* IL TOTALE A PORTALE CON UN IMPIANTO SENZA NUMERO E' «—» (revisione del
+          14/10/2026): si dice qui, con le parole del banner delle Giacenze, invece
+          di sommare quelle righe come zero. */}
+      {!dati.prima_del_gestionale && dati.totali && dati.totali.perche_totali && dati.totali.perche_totali.RETE && (
+        <p className="text-xs border rounded-lg bg-muted/40 px-3 py-2 text-muted-foreground">
+          <span className="font-semibold">Totale Rete a portale: —. </span>{dati.totali.perche_totali.RETE}
+        </p>
+      )}
+
       <DateDaSistemare gruppi={gruppiQuadratura(righe)} mostraSito />
 
       <div className="border rounded-xl bg-card" data-scorre-lato>
@@ -181,6 +196,9 @@ export default function Quadratura({ dati }) {
                       // Un anno chiuso senza la lettura del 31/12: non e' «da
                       // verificare» e non e' un vuoto, e' un confronto che per un anno
                       // passato non si fa col portale di oggi (11/10/2026).
+                      if (s.prima_del_gestionale && s.quadra !== true && s.quadra !== false) {
+                        return <span className="text-muted-foreground cursor-help" title={s.perche_prima_del_gestionale || (s.quadratura_anno_chiuso && s.quadratura_anno_chiuso.perche) || ''}>prima del gestionale: non si ricostruisce</span>;
+                      }
                       if (s.quadratura_anno_chiuso && !s.quadratura_anno_chiuso.lettura && s.quadra !== true && s.quadra !== false) {
                         return <span className="text-muted-foreground cursor-help" title={s.quadratura_anno_chiuso.perche}>anno chiuso: vale per l&apos;anno in corso</span>;
                       }
@@ -209,8 +227,17 @@ export default function Quadratura({ dati }) {
                     {/* Su un anno chiuso il numero e' dei soli carichi di quell'anno: il
                         file del portale e' di oggi (seconda revisione del 13/10/2026,
                         sul 2025 c'erano 860,099 t di Nappi Sud, tutte del 2026). */}
-                    {stoc && s.in_attesa_dichiarazione_t > 0 && (
+                    {/* Quella che per noi e' un giro chiuso (decisioni dell'utente del
+                        13/10/2026) non e' un'attesa da risolvere: si dice per quello
+                        che e', con le parole delle Giacenze, e il resto come prima. */}
+                    {stoc && s.in_attesa_dichiarazione_t > 0 && s.in_attesa_chiusa_t > 0 && (
+                      <span className="block text-[11px] text-muted-foreground" title="Nessuna dichiarazione le chiudera' e non c'e' niente da fare: il numero resta quello del portale, e serve alla quadratura.">{t(s.in_attesa_chiusa_t)} t{dati.anno_chiuso ? ` di carichi del ${dati.anno}` : ''} {s.in_attesa_chiusa_perche}</span>
+                    )}
+                    {stoc && s.in_attesa_dichiarazione_t > 0 && !(s.in_attesa_chiusa_t > 0) && (
                       <span className="block text-[11px] text-muted-foreground">{t(s.in_attesa_dichiarazione_t)} t{dati.anno_chiuso ? ` di carichi del ${dati.anno}` : ''} gia' partite che il portale attribuisce ancora allo stoccaggio, finche' l'impianto non dichiara</span>
+                    )}
+                    {stoc && s.in_attesa_chiusa_t > 0 && s.in_attesa_dichiarazione_t - s.in_attesa_chiusa_t > 0.0005 && (
+                      <span className="block text-[11px] text-muted-foreground">le altre {t(Math.round((s.in_attesa_dichiarazione_t - s.in_attesa_chiusa_t) * 1000) / 1000)} t che il portale attribuisce allo stoccaggio sono ancora in piazzale</span>
                     )}
                   </td>
                 </tr>

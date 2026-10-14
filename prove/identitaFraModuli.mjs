@@ -542,5 +542,133 @@ console.log('4. LE PRUDENZE');
   verifica('un passo per una voce sola chiama solo la sua funzione', J(n.invocate) === J(['riepilogoDichiarazioni']) && scritto(n).voci.length === 1, J(n.invocate));
 }
 
+// 5. GLI ANNI PASSATI (decisioni dell'utente del 13/10/2026). Il guardiano
+// controlla l'anno in corso; un anno passato lo guarda chi apre le pagine, e i
+// due moduli devono dire lo stesso numero anche li', con la stessa regola. Sul
+// 2025 dei dati veri non lo dicevano: Irigom 652,84 t nelle Giacenze (il
+// portale di oggi) contro 4.439,08 nelle Dichiarazioni (tutto l'arrivato),
+// Tecnogum 1.833,43 contro 2.007,08, Innorec 0 contro 1.254,41; sul 2024 Green
+// Tyre 337,96 contro 0. Le regole sono in shared/giacenzaPortale.ts:
+// - un anno chiuso si legge con la lettura del 31/12 salvata dalla chiusura
+//   (letturaDelTrentuno), in tutti e due i moduli, non col portale di oggi;
+// - un anno chiuso mai aperto nel gestionale (nessun sito dell'anno,
+//   annoPrimaDelGestionale) non si ricostruisce: «—» in tutti e due, con lo
+//   stesso perche'.
+// Gli stessi confronti di confrontaTutto: la voce (a) del catalogo, e la
+// giacenza del canale delle Dichiarazioni contro il numero delle Giacenze.
+console.log('5. GLI ANNI PASSATI: LO STESSO NUMERO, O «—» IN TUTTI E DUE COL PERCHE\'');
+const CAMPO_G = { RETE: 'giacenza_portale_t', ACI: 'giacenza_aci_t', EXTRA_RACCOLTA: 'giacenza_extra_t' };
+const t2 = (x) => (x === null || x === undefined ? null : Math.round(Number(x) * 100) / 100);
+const normSito = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/srl$/, '');
+// I due moduli su un anno, con l'orologio e l'archivio dati.
+const dueModuli = async (db, anno, ora = ADESSO) => {
+  globalThis.__DB = db; globalThis.__SCRITTE = []; globalThis.__RUOLO = 'admin';
+  const chiama = async (nome) => (await conOra(() => FUNZIONI[nome].default({ json: async () => ({ anno }) }), ora)).json();
+  return { G: await chiama('calcolaGiacenze'), R: await chiama('riepilogoDichiarazioni') };
+};
+// Impianto per impianto e canale per canale: la giacenza del canale delle
+// Dichiarazioni e il numero delle Giacenze (lo script del revisore R6).
+const diversiFra = (G, R) => {
+  const out = [];
+  for (const s of (R.siti || []).filter(x => x.tipo_destinazione !== 'stoc')) {
+    const g = (G.righe || []).find(x => x.tipo_destinazione !== 'stoc' && normSito(x.sito) === normSito(s.sito));
+    for (const c of s.giacenze_canale || []) if (!g || t2(g[CAMPO_G[c.canale]]) !== t2(c.giacenza_t)) out.push(`${s.sito} ${c.canale}: Giacenze ${g ? g[CAMPO_G[c.canale]] : 'manca'}, Dichiarazioni ${c.giacenza_t}`);
+  }
+  return out;
+};
+await carica();
+{
+  // 5a. Il 2025 dell'archivio di Irigom: nessun sito del 2025, un anno prima del gestionale.
+  const { G, R } = await dueModuli(archivio(), 2025);
+  const a = VOCI_INVARIANTI[0].verifica({ giacenze: G, dichiarazioni: R });
+  verifica('5a. un anno prima del gestionale: le Giacenze e le Dichiarazioni lo dicono tutte e due', G.totali && G.totali.prima_del_gestionale === true && R.prima_del_gestionale === true && R.totali.prima_del_gestionale === true, J([G.totali && G.totali.prima_del_gestionale, R.prima_del_gestionale]));
+  verifica('5a. con lo stesso perche\', parola per parola', !!R.perche_prima_del_gestionale && G.totali.perche_prima_del_gestionale === R.perche_prima_del_gestionale && /^Il 2025 e' prima del gestionale/.test(R.perche_prima_del_gestionale), J([G.totali.perche_prima_del_gestionale, R.perche_prima_del_gestionale]));
+  const irG = (G.righe || []).find(x => x.tipo_destinazione === 'imp' && normSito(x.sito) === normSito(IRI)) || {};
+  const irR = (R.siti || []).find(x => x.tipo_destinazione !== 'stoc' && normSito(x.sito) === normSito(IRI)) || {};
+  verifica('5a. Irigom: «—» sui tre canali nelle Giacenze (era il portale di oggi)', irG.giacenza_portale_t === null && irG.giacenza_aci_t === null && irG.giacenza_extra_t === null, J([irG.giacenza_portale_t, irG.giacenza_aci_t, irG.giacenza_extra_t]));
+  verifica('5a. e nelle Dichiarazioni: la giacenza del canale, la calcolata e il portale, tutti «—»', (irR.giacenze_canale || []).length === 3 && irR.giacenze_canale.every(c => c.giacenza_t === null && c.perche === R.perche_prima_del_gestionale)
+    && irR.giacenza_calcolata_t === null && irR.giacenza_portale_t === null && irR.quadra === null, J([irR.giacenze_canale, irR.giacenza_calcolata_t, irR.giacenza_portale_t]));
+  verifica('5a. il perche\' della riga delle Giacenze e dei canali e\' quello delle Dichiarazioni', irG.perche_senza_giacenza === R.perche_prima_del_gestionale && irG.perche_canali && irG.perche_canali.ACI === R.perche_prima_del_gestionale && irG.perche_canali.EXTRA_RACCOLTA === R.perche_prima_del_gestionale, J([irG.perche_senza_giacenza, irG.perche_canali]));
+  verifica('5a. la riga «Da dichiarare» non dice un numero che non c\'e\'', (irR.flussi || []).every(f => f.resta_t === null && f.prima_del_gestionale === true && f.mesi.every(m => m.giacenza_fine_kg === null && m.resta_kg === null)), J((irR.flussi || []).map(f => [f.canale, f.resta_t])));
+  verifica('5a. e la sua storia dice perche\', non «Oggi non resta niente da dichiarare»', (irR.flussi || []).every(f => (f.racconto || []).some(x => x.startsWith("Il 2025 è prima del gestionale: quell'anno non è stato aperto qui")) && !(f.racconto || []).some(x => /^Oggi /.test(x))), J((irR.flussi || []).map(f => f.racconto)));
+  verifica('5a. la voce (a) del catalogo torna, e la giacenza del canale e\' quella delle Giacenze', a.ok === true && !diversiFra(G, R).length, J([a.dettaglio, diversiFra(G, R)]));
+  const b = VOCI_INVARIANTI[1].verifica({ dichiarazioni: R });
+  verifica('5a. e la voce (b) non grida su un anno che non ha giacenze', b.ok === true, J(b.dettaglio));
+  verifica('5a. i totali delle Giacenze sono «—», non zero', G.totali.giacenza_portale_t === null && G.totali.giacenza_aci_t === null && G.totali.giacenza_extra_t === null, J([G.totali.giacenza_portale_t, G.totali.giacenza_aci_t, G.totali.giacenza_extra_t]));
+}
+{
+  // 5b. Lo stesso 2025, ma aperto nel gestionale: i siti del 2025 ci sono, e la
+  // chiusura ha salvato la lettura del 31/12/2025 (Irigom 385,36 t, apertura del
+  // 2026). Le Giacenze dicevano il portale di oggi su qualunque anno; ora la
+  // lettura, come la Quadratura delle Dichiarazioni.
+  const db = archivio();
+  db.GiacenzaSito.push(
+    { id: 'gs25-iri', sito: IRI, tipo_destinazione: 'imp', anno: 2025, dichiara_rete: true, tipologia_trattamento: 'Frantumazione' },
+    { id: 'gs25-alfa', sito: ALFA, tipo_destinazione: 'imp', anno: 2025, dichiara_rete: true },
+    { id: 'gs25-tec', sito: TEC, tipo_destinazione: 'imp', anno: 2025, dichiara_rete: false },
+  );
+  const { G, R } = await dueModuli(db, 2025);
+  const irG = (G.righe || []).find(x => x.tipo_destinazione === 'imp' && normSito(x.sito) === normSito(IRI)) || {};
+  const irR = (R.siti || []).find(x => x.tipo_destinazione !== 'stoc' && normSito(x.sito) === normSito(IRI)) || {};
+  verifica('5b. un anno chiuso aperto nel gestionale non e\' «prima del gestionale»', G.totali.prima_del_gestionale === false && !R.prima_del_gestionale, J([G.totali.prima_del_gestionale, R.prima_del_gestionale]));
+  verifica('5b. Irigom a portale: la lettura del 31/12/2025, 385,36 t, nelle Giacenze come nelle Dichiarazioni (non le 652,84 di oggi)', irG.giacenza_portale_t === 385.36 && irR.giacenza_portale_t === 385.36 && irG.fotografia && irG.fotografia.del === '2025-12-31', J([irG.giacenza_portale_t, irR.giacenza_portale_t, irG.fotografia]));
+  const a = VOCI_INVARIANTI[0].verifica({ giacenze: G, dichiarazioni: R });
+  verifica('5b. la voce (a) del catalogo torna', a.ok === true && a.confronti > 0, J([a.confronti, a.dettaglio]));
+  // Senza la lettura salvata: «—» in tutti e due, non il portale di oggi.
+  const senza = archivio();
+  senza.GiacenzaSito = senza.GiacenzaSito.map(x => ({ ...x, apertura_del: undefined }));
+  senza.GiacenzaSito.push({ id: 'gs25-iri', sito: IRI, tipo_destinazione: 'imp', anno: 2025, dichiara_rete: true });
+  const s2 = await dueModuli(senza, 2025);
+  const irG2 = (s2.G.righe || []).find(x => x.tipo_destinazione === 'imp' && normSito(x.sito) === normSito(IRI)) || {};
+  const irR2 = (s2.R.siti || []).find(x => x.tipo_destinazione !== 'stoc' && normSito(x.sito) === normSito(IRI)) || {};
+  verifica('5b. senza la lettura del 31/12 salvata: «—» in tutti e due, col perche\'', irG2.giacenza_portale_t === null && irR2.giacenza_portale_t === null && /lettura del 31\/12\/2025/.test(irG2.perche_senza_giacenza || ''), J([irG2.giacenza_portale_t, irR2.giacenza_portale_t, irG2.perche_senza_giacenza]));
+}
+{
+  // 5c. L'anno in corso non e' mai «prima del gestionale», anche senza siti preparati.
+  const db = archivio();
+  db.GiacenzaSito = [];
+  const { G, R } = await dueModuli(db, 2026);
+  verifica('5c. l\'anno in corso senza siti non e\' un anno prima del gestionale', G.totali.prima_del_gestionale === false && !R.prima_del_gestionale, J([G.totali.prima_del_gestionale, R.prima_del_gestionale]));
+}
+{
+  // 5e. L'anno appena chiuso guardato prima della chiusura (revisione del
+  // 14/10/2026): il 2026 il 05/01/2027, senza la lettura del 31/12. Le righe di
+  // Irigom e di Alfa sono «—» in tutti e due i moduli; il totale delle Giacenze
+  // contava solo il piazzale e quello a portale delle Dichiarazioni diceva 0.
+  // Ora tutti e due «—», con le stesse parole (prove/totaleSenzaRighe.mjs).
+  const { G, R } = await dueModuli(archivio(), 2026, OraVera.parse('2027-01-05T10:00:00Z'));
+  const a = VOCI_INVARIANTI[0].verifica({ giacenze: G, dichiarazioni: R });
+  verifica('5e. il 2026 guardato il 05/01/2027: la voce (a) torna', a.ok === true && a.confronti > 0, J([a.confronti, a.dettaglio]));
+  const pG = G.totali.perche_totali && G.totali.perche_totali.RETE, pR = R.totali.perche_totali && R.totali.perche_totali.RETE;
+  verifica('5e. e i due totali a portale sono «—», non zero, col perche\' detto con le stesse parole',
+    G.totali.giacenza_portale_t === null && R.totali.giacenza_portale_t === null && !!pG && pG === pR && /^Il totale non si fa: 2 righe non hanno il numero \(ALFA RECYCLING SRL, IRIGOM SRL\)/.test(pG) && /lettura del 31\/12\/2026/.test(pG),
+    J([G.totali.giacenza_portale_t, R.totali.giacenza_portale_t, pG, pR]));
+}
+{
+  // 5d. Sui dati veri (../dati-veri/, se c'e'): il 2024 e il 2025, e l'anno in corso
+  // che non cambia di un chilo (lo dice prove/datiVeri.mjs, 158 numeri).
+  const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+  const { gunzipSync } = await import('node:zlib');
+  const CARTELLA = process.env.DATI_VERI || qui('../../dati-veri/');
+  const copie = existsSync(CARTELLA) ? readdirSync(CARTELLA).filter(n => /^treadrider-dati-veri-\d{4}-\d{2}-\d{2}\.json\.gz$/.test(n)).sort() : [];
+  if (!copie.length) console.log(`  nessuna copia dei dati veri in ${CARTELLA}: 5d saltata`);
+  else {
+    const DATI = JSON.parse(gunzipSync(readFileSync(CARTELLA + copie[copie.length - 1])).toString('utf8'));
+    const ORA = OraVera.parse(DATI.meta.letto_fino_al);
+    const ANNO = Number(String(DATI.meta.letto_fino_al).slice(0, 4));
+    for (const anno of [ANNO - 2, ANNO - 1, ANNO]) {
+      const { G, R } = await dueModuli(DATI.archivi, anno, ORA);
+      const a = VOCI_INVARIANTI[0].verifica({ giacenze: G, dichiarazioni: R });
+      const diversi = diversiFra(G, R);
+      verifica(`5d. dati veri, ${anno}: la voce (a) torna e la giacenza del canale e' quella delle Giacenze, impianto per impianto`, a.ok === true && a.confronti > 0 && !diversi.length, J([a.confronti, a.dettaglio, diversi.slice(0, 6)]));
+      const sitiAnno = (DATI.archivi.GiacenzaSito || []).filter(x => Number(x.anno) === anno).length;
+      const atteso = anno < ANNO && !sitiAnno;
+      verifica(`5d. dati veri, ${anno}: ${atteso ? 'prima del gestionale, detto da tutti e due' : "aperto nel gestionale, nessun «prima del gestionale»"}`,
+        G.totali.prima_del_gestionale === atteso && !!R.prima_del_gestionale === atteso && (!atteso || G.totali.perche_prima_del_gestionale === R.perche_prima_del_gestionale), J([G.totali.prima_del_gestionale, R.prima_del_gestionale]));
+    }
+    verifica('5d. sui dati veri niente scritto', !(globalThis.__SCRITTE || []).length, J(globalThis.__SCRITTE));
+  }
+}
+
 console.log(`\n${ok} superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

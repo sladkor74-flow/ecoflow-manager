@@ -24,6 +24,13 @@ const CLASSI = [
 ];
 
 const IN_ATTESA_TOOLTIP = "Materiale gia' partito da questo stoccaggio verso un impianto: il portale lo attribuisce ancora qui finche' il destinatario non presenta la dichiarazione. Non e' giacenza.";
+// L'ATTESA CHE PER NOI E' UN GIRO CHIUSO (decisioni dell'utente del 13/10/2026:
+// «tutte le 249,06 t sono andate in Tecnogum [...] per cio' che ci riguarda il
+// cerchio e' chiuso»). Il numero resta quello del portale, che serve alla
+// quadratura; la cella lo dice per quello che e', in grigio e non in ambra: non
+// e' un'attesa da risolvere. Il perche' lo manda il calcolo, con le stesse parole
+// delle Dichiarazioni (attesaChiusaPerNoi).
+const attesaChiusaTooltip = (r) => `${String(r.in_attesa_chiusa_perche || '').replace(/^./, x => x.toUpperCase())}. Nessuna dichiarazione le chiudera' e non c'e' niente da fare: il numero resta quello del portale, e serve alla quadratura.`;
 const RILEVAZ_OBSOLETA_TOOLTIP = "L'ultima rilevazione ha oltre trenta giorni: il numero non invecchia, perche' viene dai movimenti, ma il riscontro col portale si', e conviene rifarlo dalla pagina Unita' Locali di Stoccaggio.";
 
 // Una classe sotto zero non e' un errore di conto da aggiustare: e' quello che
@@ -158,6 +165,20 @@ function SaldoArchivio({ r, canale }) {
 function DettaglioImpianto({ r }) {
   const f = r.fotografia;
   if (!f) return null;
+  // UN ANNO CHIUSO: LA LETTURA DEL 31/12 (decisioni dell'utente del 13/10/2026).
+  // Il numero non e' la fotografia di oggi ma la lettura che la chiusura ha
+  // salvato, meno quello che dell'anno si e' dichiarato dopo: lo stesso numero a
+  // portale della Quadratura delle Dichiarazioni.
+  if (f.lettura_del_trentuno) {
+    return (
+      <div className="mt-1 text-xs text-muted-foreground" title="Per un anno chiuso il numero a portale e' la lettura del 31/12 salvata dalla chiusura dell'anno, al netto delle dichiarazioni dell'anno caricate dopo: il portale di oggi e' un altro giorno">
+        {f.rete_non_dichiarata
+          ? 'la rete non la dichiara per accordo: il portale non ne tiene la giacenza per noi'
+          : f.del ? `lettura del ${fmtDate(f.del)} salvata dalla chiusura: ${fmt(f.foto_t)} t` : 'nessuna lettura del 31/12 salvata dalla chiusura'}
+        {f.dichiarato_dopo_t > 0 && <span className="block">− {fmt(f.dichiarato_dopo_t)} t dell&apos;anno dichiarate dopo</span>}
+      </div>
+    );
+  }
   const aggiornata = f.aggiunti > 0 || f.dichiarato_dopo_t > 0;
   return (
     <div className="mt-1 text-xs text-muted-foreground" title="La giacenza a portale segue i caricamenti: alla fotografia si aggiungono i carichi che il file del portale non contiene ancora, riconosciuti dal numero d'ordine, e si tolgono le dichiarazioni caricate dopo">
@@ -471,6 +492,20 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
 
   return (
     <div className="bg-card border rounded-lg overflow-hidden">
+      {/* UN ANNO PRIMA DEL GESTIONALE (decisioni dell'utente del 13/10/2026): la
+          giacenza degli impianti non si ricostruisce, e si dice una volta sopra
+          i numeri, con le parole delle Dichiarazioni. Le celle dicono «—». */}
+      {totali && totali.prima_del_gestionale && totali.perche_prima_del_gestionale && (
+        <p className="px-3 py-2 text-xs border-b bg-muted/40 text-muted-foreground">{totali.perche_prima_del_gestionale}</p>
+      )}
+      {/* UN TOTALE CON UNA RIGA SENZA NUMERO E' «—» (revisione del 14/10/2026):
+          si dice una volta sopra i numeri quale canale e perche', come il
+          perche' dell'anno qui sopra. Prima la riga senza numero valeva zero. */}
+      {totali && !totali.prima_del_gestionale && totali.perche_totali && CANALI_RIGHE.filter(c => totali.perche_totali[c.chiave]).map(c => (
+        <p key={c.chiave} className="px-3 py-2 text-xs border-b bg-muted/40 text-muted-foreground">
+          <span className="font-semibold">Totale {c.nome}: —. </span>{totali.perche_totali[c.chiave]}
+        </p>
+      ))}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
@@ -550,6 +585,11 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                   const inAttesa = c.in_attesa ? c.in_attesa(r) : null;
                   const ordini = c.ordini ? c.ordini(r) : null;
                   const dichiarato = c.dichiarato ? c.dichiarato(r) : null;
+                  // Di quell'attesa, quanto per noi e' un giro chiuso (decisioni
+                  // dell'utente del 13/10/2026): tutta, e la cella e' grigia; una
+                  // parte, e resta ambra col «di cui». Solo la rete ha un'attesa.
+                  const chiusa = c.in_attesa && inAttesa > 0.01 && r.in_attesa_chiusa_t > 0 ? r.in_attesa_chiusa_t : 0;
+                  const tuttaChiusa = chiusa > 0 && chiusa >= inAttesa - 0.0005;
                   return (
                     <React.Fragment key={c.chiave}>
                       <tr className="border-t hover:bg-muted/30">
@@ -563,7 +603,7 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                               calcolo, riga per riga (11/10/2026): un impianto senza il
                               file del portale e un piazzale senza lettura non sono la
                               stessa cosa, e nessuno dei due e' uno zero. */}
-                          <ValoreGiacenza valore={giacenza} negativa={c.negativa ? c.negativa(r) : false} perche={c.chiave !== 'RETE' ? c.senza_giacenza : r.rete_non_dovuta ? RETE_NON_DOVUTA : (r.perche_senza_giacenza || c.senza_giacenza)} />
+                          <ValoreGiacenza valore={giacenza} negativa={c.negativa ? c.negativa(r) : false} perche={c.chiave !== 'RETE' ? ((r.perche_canali && r.perche_canali[c.chiave]) || c.senza_giacenza) : r.rete_non_dovuta ? RETE_NON_DOVUTA : (r.perche_senza_giacenza || c.senza_giacenza)} />
                           {c.barra && (
                             <div className="mt-1 h-1 bg-muted rounded-full overflow-hidden">
                               <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />
@@ -592,18 +632,26 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                         {/* Le classi sono del piazzale e stanno sulla riga del
                             sito: qui non si ripetono. */}
                         <td className="px-3 py-2 border-l" colSpan={CLASSI.length}></td>
-                        <td className={`px-3 py-2 text-right border-l ${inAttesa > 0.01 ? 'text-amber-600' : ''}`}>
+                        <td className={`px-3 py-2 text-right border-l ${inAttesa > 0.01 && !tuttaChiusa ? 'text-amber-600' : ''}`}>
                           {inAttesa === null ? (
                             <span className="text-muted-foreground cursor-help" title={SENZA_IN_ATTESA}>—</span>
                           ) : inAttesa > 0.01 ? (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="cursor-help underline decoration-dotted underline-offset-2">{fmt(inAttesa)} t</span>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs text-xs">{IN_ATTESA_TOOLTIP}</TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
+                            <>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className={`cursor-help underline decoration-dotted underline-offset-2 ${tuttaChiusa ? 'text-muted-foreground' : ''}`}>{fmt(inAttesa)} t</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-xs text-xs">{chiusa > 0 ? attesaChiusaTooltip(r) : IN_ATTESA_TOOLTIP}</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              {/* Il giro chiuso si dice sotto il numero: tutta l'attesa, o la sua parte. */}
+                              {chiusa > 0 && (
+                                <span className="block text-[10px] leading-tight text-muted-foreground">
+                                  {tuttaChiusa ? 'per noi chiuse: giro chiuso' : `di cui ${fmt(chiusa)} t per noi chiuse`}
+                                </span>
+                              )}
+                            </>
                           ) : <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-3 py-2 text-right">
@@ -613,9 +661,12 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-7"
+                              className={`h-7 ${tuttaChiusa ? 'text-muted-foreground' : ''}`}
                               /* il ruolo viaggia col nome: dal pulsante dell'impianto si aprono solo i suoi */
                               onClick={() => onVaiDaDichiarare(r.sito, r.tipo_destinazione)}
+                              /* Gli ordini di un'attesa che per noi e' un giro chiuso restano quelli
+                                 del portale, ma non sono da dichiarare per nessuno (13/10/2026). */
+                              title={tuttaChiusa ? `Gli ordini che il portale attribuisce ancora allo stoccaggio: ${r.in_attesa_chiusa_perche}. Non c'e' niente da fare.` : undefined}
                             >
                               {formatIntero(ordini || 0)}
                             </Button>
@@ -670,13 +721,17 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                   <td className="px-3 py-2 text-right tabular-nums">
                     {/* Il totale di un canale non ha la bandierina del conto: se
                         esce sotto zero lo dice il numero, e va guardato. */}
-                    <ValoreGiacenza valore={c.giacenza(totali)} negativa={false} perche={c.senza_giacenza} />
+                    <ValoreGiacenza valore={c.giacenza(totali)} negativa={false} perche={totali.perche_prima_del_gestionale || (totali.perche_totali && totali.perche_totali[c.chiave]) || c.senza_giacenza} />
                   </td>
                   <td className="px-3 py-2 border-l" colSpan={CLASSI.length}></td>
                   <td className="px-3 py-2 text-right">
                     {inAttesa === null
                       ? <span className="font-normal text-muted-foreground cursor-help" title={SENZA_IN_ATTESA}>—</span>
                       : <>{fmt(inAttesa)} t</>}
+                    {/* Il totale resta il numero del portale; accanto, quanto per noi e' chiuso (13/10/2026). */}
+                    {inAttesa !== null && totali.in_attesa_chiusa_t > 0 && (
+                      <span className="block text-[10px] font-normal leading-tight text-muted-foreground">di cui {fmt(totali.in_attesa_chiusa_t)} t per noi chiuse</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     {ordini === null

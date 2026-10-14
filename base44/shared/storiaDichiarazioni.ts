@@ -318,8 +318,17 @@ const ilCanale = (canale) => (canale === 'ACI' ? "l'ACI" : canale === 'EXTRA_RAC
  * anno sono i carichi, perche' il file e' di un altro anno. Senza `inAttesaT`
  * (null) la frase sul portale non si scrive e `in_attesa_t` resta null, non
  * zero: non e' «niente in attesa», e' un numero che non c'e'.
+ *
+ * L'ATTESA CHE PER NOI E' UN GIRO CHIUSO (decisioni dell'utente del 13/10/2026:
+ * «tutte le 249,06 t sono andate in Tecnogum [...] per cio' che ci riguarda il
+ * cerchio e' chiuso»). `attesaChiusa` ({ t, perche }) e' quanto di quell'attesa
+ * e' partito tutto verso chi la rete non la dichiara a SMOCO, deciso da
+ * attesaChiusaPerNoi (shared/giacenzaPortale.ts), lo stesso numero delle
+ * Giacenze. Allora la frase non lo dice piu' «in attesa di una dichiarazione»,
+ * che non arrivera' mai: lo dice attribuito dal portale allo stoccaggio, ma per
+ * noi chiuso, e il numero resta quello del portale, per la quadratura.
  */
-export function stoccaggioDelSito({ sito, canale, entrato = [], uscito = [], verso = [], inPiazzaleT = null, inAttesaT = null, annoCarichi = null, fotoIl = '' } = {}) {
+export function stoccaggioDelSito({ sito, canale, entrato = [], uscito = [], verso = [], inPiazzaleT = null, inAttesaT = null, attesaChiusa = null, annoCarichi = null, fotoIl = '' } = {}) {
   const entratoKg = MESI.map((_, i) => kgInt(entrato[i]));
   const uscitoKg = MESI.map((_, i) => kgInt(uscito[i]));
   const totEntrato = entratoKg.reduce((s, x) => s + x, 0);
@@ -337,7 +346,17 @@ export function stoccaggioDelSito({ sito, canale, entrato = [], uscito = [], ver
   // Su un anno che non e' quello in corso il numero e' dei soli carichi di
   // quell'anno, e la frase lo dice (seconda revisione del 13/10/2026).
   const diCarichi = annoCarichi ? ` di carichi del ${annoCarichi}` : '';
-  if (canale === 'RETE' && nonDichiarano.length) {
+  const chiusaT = conAttesa && attesaChiusa && Number(attesaChiusa.t) > 0 ? Math.min(Number(attesaChiusa.t), Number(inAttesaT) || 0) : 0;
+  if (canale === 'RETE' && chiusaT > 0) {
+    // Il giro chiuso (decisioni dell'utente del 13/10/2026): il numero del
+    // portale, e per quello che e', non come un'attesa da risolvere.
+    const attesa = Number(inAttesaT) || 0;
+    const delFile = fotoIl ? ` del file degli ordini non dichiarati del ${giornoIt(fotoIl)}` : '';
+    const perche = String(attesaChiusa.perche || '');
+    frasi.push(chiusaT >= attesa
+      ? `Le ${formatoTonnellate(attesa)} t${diCarichi}${delFile} sono ${perche}. Nessuna dichiarazione le chiuderà e non c'è niente da fare: il numero resta quello del portale, e serve alla quadratura.`
+      : `Delle ${formatoTonnellate(attesa)} t${diCarichi} che il portale${fotoIl ? `, nel file degli ordini non dichiarati del ${giornoIt(fotoIl)},` : ''} attribuisce ancora allo stoccaggio di ${sito}, ${formatoTonnellate(chiusaT)} t sono ${perche}; le altre ${formatoTonnellate(Math.round((attesa - chiusaT) * 1000) / 1000)} t sono ancora in piazzale.`);
+  } else if (canale === 'RETE' && nonDichiarano.length) {
     const attesa = Number(inAttesaT) || 0;
     const perAccordo = `${elenco(nonDichiarano)} sulla rete non ci ${nonDichiarano.length === 1 ? 'dichiara' : 'dichiarano'}, per accordo`;
     frasi.push(!conAttesa
@@ -362,6 +381,8 @@ export function stoccaggioDelSito({ sito, canale, entrato = [], uscito = [], ver
     verso: destinazioni,
     in_piazzale_t: inPiazzaleT === undefined ? null : inPiazzaleT,
     in_attesa_t: canale === 'RETE' && conAttesa ? (Number(inAttesaT) || 0) : null,
+    // Di quell'attesa, quanto per noi e' un giro chiuso (null: niente).
+    in_attesa_chiusa_t: canale === 'RETE' && chiusaT > 0 ? chiusaT : null,
     foto_il: fotoIl || '',
     frasi,
   };
@@ -465,6 +486,10 @@ export function comeFinisceLoSpostamento(m, precedente) {
  * eccesso, e sulla riga che cedeva lo dice `mesi[i].giacenza_canale_fine_kg`, la
  * giacenza del canale a fine mese (comeFinisceLoSpostamento, revisione finale
  * del 13/10/2026).
+ *
+ * `prima_del_gestionale` (decisioni dell'utente del 13/10/2026): la riga e' di
+ * un anno che il gestionale non ha mai aperto, e dopo gli arrivi il racconto
+ * dice solo perche' la giacenza non c'e', con le parole delle Giacenze.
  */
 export function raccontoDellaRiga(riga) {
   const r = riga || {};
@@ -509,6 +534,16 @@ export function raccontoDellaRiga(riga) {
     frasi.push(`Per accordo ${sito} non ci dichiara la rete: il trattamento non è a nostro carico e il portale non tiene per noi una giacenza di rete. Quello che arriva si vede nella riga del conferito; da dichiarare non resta niente.`);
     return frasi;
   }
+  // 2b. Un anno prima del gestionale (decisioni dell'utente del 13/10/2026):
+  // senza la giacenza da cui l'anno e' partito e senza le sue dichiarazioni,
+  // quello che restava da dichiarare non si ricostruisce. Sul 2025 la riga di
+  // Irigom diceva «Oggi non resta niente da dichiarare» con 4.439,08 t di
+  // giacenza a fine dicembre accanto, e Tecnogum «lo stesso numero delle
+  // Giacenze», che dicono «—». Si racconta quello che e' arrivato, e il perche'.
+  if (r.prima_del_gestionale) {
+    frasi.push(`Il ${anno} è prima del gestionale: quell'anno non è stato aperto qui, e le sue dichiarazioni e la giacenza da cui è partito non ci sono. Quanto restava da dichiarare non si può ricostruire, qui come nelle Giacenze: «—», che non vuol dire zero. Quello che è arrivato si vede nella riga del conferito.`);
+    return frasi;
+  }
 
   // 3. Lo stoccaggio dello stesso sito, sullo stesso canale.
   if (stoc) {
@@ -527,7 +562,14 @@ export function raccontoDellaRiga(riga) {
     const versoDetto = dest.length === 1 ? dest[0].impianto : elenco(dest.map(d => `${d.impianto} (${t(d.kg)})`));
     const tot = kgInt(stoc.entrato_t * 1000);
     const usc = kgInt(stoc.uscito_t * 1000);
-    frasi.push(`Lo stoccaggio, ${t(tot)}, ${usc >= tot && usc > 0 ? `è ripartito tutto in secondaria verso ${versoDetto}` : usc > 0 ? `è ripartito per ${t(usc)} in secondaria verso ${versoDetto}` : 'non è ancora ripartito'}: non entra in questa riga e qui non si dichiara, perché lo dichiara l'impianto che lo riceve, nel mese in cui arriva.`);
+    // Ripartito tutto verso chi la rete non la dichiara a SMOCO (Tecnogum): non
+    // lo dichiarera' nessuno, e per noi il giro e' chiuso (decisioni dell'utente
+    // del 13/10/2026). Prima diceva che lo dichiara l'impianto che lo riceve.
+    const nonDichiaranti = dest.filter(d => d && d.dichiara === false).map(d => d.impianto);
+    const giroChiuso = r.canale === 'RETE' && usc > 0 && dest.length > 0 && nonDichiaranti.length === dest.length;
+    frasi.push(`Lo stoccaggio, ${t(tot)}, ${usc >= tot && usc > 0 ? `è ripartito tutto in secondaria verso ${versoDetto}` : usc > 0 ? `è ripartito per ${t(usc)} in secondaria verso ${versoDetto}` : 'non è ancora ripartito'}: non entra in questa riga e qui non si dichiara, ${giroChiuso
+      ? `e ${elenco(nonDichiaranti)} sulla rete non ${nonDichiaranti.length === 1 ? 'dichiara' : 'dichiarano'} a SMOCO: per noi il giro è chiuso.`
+      : "perché lo dichiara l'impianto che lo riceve, nel mese in cui arriva."}`);
     // La prima frase dello stoccaggio e' la regola, appena detta: qui le altre.
     for (const f of (stoc.frasi || []).slice(1)) frasi.push(f);
   }

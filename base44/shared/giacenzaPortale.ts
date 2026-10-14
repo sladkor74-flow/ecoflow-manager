@@ -149,6 +149,100 @@ export function aperturaNetta(riga, canale, dichiarazioniSito, chiaveDi) {
 }
 
 /**
+ * LA GIACENZA DI RETE A PORTALE DI UN IMPIANTO IN UN ANNO CHIUSO: LA LETTURA DEL
+ * 31/12 (decisioni dell'utente del 13/10/2026: i due moduli dicono lo stesso
+ * numero anche sugli anni passati, con la stessa regola).
+ *
+ * Per un anno chiuso il portale di oggi non dice niente: e' un altro giorno. Il
+ * numero a portale di quell'anno e' la lettura del 31/12 che la chiusura ha
+ * salvato come apertura dell'anno dopo (apertura_del = AAAA-12-31), al netto
+ * delle dichiarazioni dell'anno chiuso caricate dopo (aperturaNetta). Le
+ * Dichiarazioni la usavano gia' per la quadratura di un anno chiuso; le Giacenze
+ * dicevano il portale di oggi su qualunque anno: sul 2025 dei dati veri Irigom
+ * 652,84 t, lo stesso numero del 2026, e T-Cycle 364,80. Ora tutti e due la
+ * chiedono qui. Una giacenza di riferimento scritta a mano, senza il giorno,
+ * non e' una lettura.
+ *
+ * @param {array} giacenzeAnnoDopo  le righe GiacenzaSito dell'anno dopo
+ * @param {object} opzioni { chiave, canale ('RETE'|'ACI'), anno, dichiarazioni (tutte le DichiarazioneSito), chiaveDi }
+ * @returns {{ letta_t, dichiarato_dopo_t, netta_t } | null} null se la chiusura non l'ha salvata
+ */
+export function letturaDelTrentuno(giacenzeAnnoDopo, { chiave, canale = 'RETE', anno, dichiarazioni = [], chiaveDi = (s) => String(s || '').trim().toLowerCase() } = {}) {
+  const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
+  const fineAnno = `${anno}-12-31`;
+  const campo = canale === 'ACI' ? 'giacenza_riferimento_aci_t' : 'giacenza_riferimento_t';
+  const righe = (giacenzeAnnoDopo || []).filter(x => x && chiaveDi(x.sito) === chiave
+    && (String(x.tipo_destinazione || '').toLowerCase().trim() || 'imp') === 'imp'
+    && String(x.apertura_del || '').slice(0, 10) === fineAnno && x[campo] !== undefined && x[campo] !== null && x[campo] !== '');
+  if (!righe.length) return null;
+  const pezzi = righe.map(x => aperturaNetta(x, canale, dichiarazioni, chiaveDi));
+  return {
+    letta_t: t3(pezzi.reduce((s, x) => s + x.lorda_t, 0)),
+    dichiarato_dopo_t: t3(pezzi.reduce((s, x) => s + x.dichiarato_dopo_t, 0)),
+    netta_t: t3(pezzi.reduce((s, x) => s + x.netta_t, 0)),
+  };
+}
+
+// Perche' un impianto di un anno chiuso non ha una giacenza di rete nelle
+// Giacenze: la chiusura dell'anno non ha salvato la lettura del 31/12. Le
+// Dichiarazioni, nello stesso caso, non fanno la quadratura e lo dicono.
+export const PERCHE_SENZA_LETTURA_DEL_TRENTUNO = (anno) => `Il ${anno} e' chiuso: la giacenza di rete a portale di un anno chiuso e' la lettura del 31/12/${anno}, che la chiusura dell'anno salva come apertura del ${Number(anno) + 1}, e questa lettura non c'e'. Il portale di oggi e' un altro giorno e non si usa. Non vuol dire zero.`;
+
+/**
+ * UN ANNO PRIMA DEL GESTIONALE (decisioni dell'utente del 13/10/2026).
+ *
+ * Il gestionale e' nato a fine estate 2026, e il 2026 e' stato aperto qui: i
+ * siti dell'anno (GiacenzaSito), l'apertura letta al 31/12/2025 e tutte le
+ * dichiarazioni mese per mese. Il 2025 e il 2024 no: ci sono i movimenti, ma
+ * non le dichiarazioni ne' la giacenza da cui l'anno e' partito. La giacenza
+ * calcolata di quegli anni era tutto quello che e' arrivato (Irigom 2025: 4.439,08
+ * t nelle Dichiarazioni) e le Giacenze dicevano il portale di oggi (652,84 t):
+ * due numeri, nessuno dei due vero. Un anno chiuso senza nessuna riga
+ * GiacenzaSito non e' stato aperto nel gestionale, e la sua giacenza degli
+ * impianti non si ricostruisce: tutti e due i moduli dicono «—» con lo stesso
+ * perche'. L'anno in corso non e' mai un anno prima del gestionale, anche se
+ * nessuno l'ha ancora preparato.
+ */
+export function annoPrimaDelGestionale({ anno, annoDiOggi, sitiDellAnno = [] } = {}) {
+  return Number(anno) < Number(annoDiOggi) && !(sitiDellAnno || []).length;
+}
+export const PERCHE_ANNO_PRIMA_DEL_GESTIONALE = (anno) => `Il ${anno} e' prima del gestionale: quell'anno non e' stato aperto qui, e le sue dichiarazioni e la giacenza da cui e' partito non ci sono. La giacenza degli impianti al 31/12/${anno} non si puo' ricostruire, in nessuno dei due moduli: non vuol dire zero. Quello che e' arrivato si vede nel conferito; quello che di quell'anno resta da dichiarare oggi sta nell'anno in corso, nella casella «dall'anno prima».`;
+
+/**
+ * IL TOTALE DI UNA COLONNA CON UNA RIGA SENZA NUMERO NON E' UN TOTALE (revisione
+ * del 14/10/2026 sulle decisioni dell'utente del 13/10/2026).
+ *
+ * Il 2026 guardato il 05/01/2027, prima che la chiusura dell'anno salvi la
+ * lettura del 31/12: le righe dei cinque impianti che dichiarano la rete dicono
+ * «—» col loro perche', ma il totale della colonna delle Giacenze e la KPI
+ * «Giacenza rete a portale» dicevano 25,88 t, il solo piazzale di Nappi Sud, e
+ * il totale delle Dichiarazioni 0: righe senza numero contate come zero, senza
+ * dirlo. Una riga che il numero non ce l'ha perche' manca il dato (ha un
+ * perche') fa del totale un «—», e il totale dice quali righe mancano e perche'.
+ * Una riga senza numero per accordo o per natura - la rete di chi non la
+ * dichiara, l'extra raccolta di un piazzale che non ne ha - non manca: li' non
+ * c'e' niente da sommare. La stessa regola nei due moduli e sui tre canali; i
+ * siti in ordine alfabetico, cosi' gli stessi buchi danno le stesse parole.
+ *
+ * @param {Array<{ sito: string, t: number|null, perche?: string|null }>} voci  una per riga: perche' manca il dato, vuoto se non manca
+ * @returns {{ t: number|null, mancano: string[], perche: string|null }} t la somma delle righe col numero, null se ne manca uno
+ */
+export function totaleDellaColonna(voci) {
+  const mancano = [];
+  const motivi = new Set();
+  let somma = 0;
+  for (const v of voci || []) {
+    const t = v ? v.t : null;
+    if (t !== null && t !== undefined && t !== '' && Number.isFinite(Number(t))) { somma += Number(t); continue; }
+    if (v && v.perche) { mancano.push(String(v.sito || '')); motivi.add(v.perche); }
+  }
+  if (!mancano.length) return { t: somma, mancano, perche: null };
+  mancano.sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }));
+  return { t: null, mancano, perche: PERCHE_TOTALE_SENZA_RIGHE(mancano, motivi.size === 1 ? [...motivi][0] : null) };
+}
+export const PERCHE_TOTALE_SENZA_RIGHE = (siti, percheComune = null) => `Il totale non si fa: ${siti.length === 1 ? `la riga di ${siti[0]} non ha il numero` : `${siti.length} righe non hanno il numero (${siti.join(', ')})`}, e una riga senza numero non vale zero.${percheComune ? ` ${percheComune}` : " Il perche' lo dice ogni riga."}`;
+
+/**
  * DA QUANDO SI CERCANO I CARICHI CHE IL FILE DEL PORTALE NON HA ANCORA (10/10/2026).
  *
  * Alla fotografia si aggiungono i carichi di rete arrivati che il file non
@@ -587,9 +681,12 @@ export function formulariDelFile() {
  *   anno, annoDiOggi   l'anno guardato e quello in corso: inAttesa e attesaCoppia
  *                      contano solo i carichi di quell'anno se non e' quello in
  *                      corso (nellAttesaDellAnno); senza, tutto il file
- * @returns {{ portale, inAttesa, attesaCoppia, aPortale, perMese, perGiorno, senzaGiorno }}
+ * @returns {{ portale, inAttesa, attesaCoppia, aPortale, perMese, perGiorno, senzaGiorno, primoInAttesa, inAttesaSenzaGiorno }}
  *   portale       Map ns impianto -> t della fotografia
  *   inAttesa      Map ns stoccaggio -> t gia' partite che il portale attribuisce ancora allo stoccaggio
+ *   primoInAttesa Map ns stoccaggio -> il giorno del carico in attesa arrivato per primo al piazzale
+ *   inAttesaSenzaGiorno Set degli stoccaggi con un carico in attesa senza giorno di arrivo
+ *                 (le due servono ad attesaChiusaPerNoi, qui sotto)
  *   attesaCoppia  Map 'nsStoccaggio|nsImpianto' -> t partite e non ancora dichiarate
  *   aPortale      Set di chi compare nella fotografia
  *   perMese       Map 'ns|AAAA-MM' -> kg ancora da dichiarare, arrivati all'impianto in quel mese
@@ -666,6 +763,7 @@ export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s ||
   const esito = {
     portale: new Map(), inAttesa: new Map(), attesaCoppia: new Map(), aPortale: new Set(),
     perMese: new Map(), perGiorno: new Map(), senzaGiorno: new Map(),
+    primoInAttesa: new Map(), inAttesaSenzaGiorno: new Set(),
   };
   for (const r of nonDichiarati || []) {
     const sec = String(r.destinazione_secondaria || '').trim();
@@ -679,7 +777,14 @@ export function collocaFotografia(nonDichiarati, { chiaveDi = (s) => String(s ||
     esito.aPortale.add(ns);
     const kg = Number(r.peso_non_dichiarato_kg) || 0;
     if (ruolo === 'stoc') {
-      if (contaAttesa(giornoAlPiazzale(r, finePrimaria))) somma(esito.inAttesa, ns, kg / 1000);
+      const alPiazzale = giornoAlPiazzale(r, finePrimaria);
+      if (contaAttesa(alPiazzale)) {
+        somma(esito.inAttesa, ns, kg / 1000);
+        // Da quando il portale aspetta: per sapere dove sono andati quei carichi
+        // (attesaChiusaPerNoi, decisioni dell'utente del 13/10/2026).
+        if (!alPiazzale) esito.inAttesaSenzaGiorno.add(ns);
+        else if (!esito.primoInAttesa.has(ns) || alPiazzale < esito.primoInAttesa.get(ns)) esito.primoInAttesa.set(ns, alPiazzale);
+      }
       continue;
     }
     somma(esito.portale, ns, kg / 1000);
@@ -721,6 +826,79 @@ export function fotoAFineMese(collocata, ns, anno) {
     for (const [giorno, v] of giorni) if (giorno <= fine) kg += v;
     return Math.round(kg);
   });
+}
+
+// --- L'ATTESA CHE PER NOI E' UN GIRO CHIUSO (decisioni dell'utente del 13/10/2026) ---
+//
+// Le parole dell'utente: «tutte le 249,06 t sono andate in Tecnogum per il quale
+// impianto, come gia' sai, noi nel 2026 non facciamo dichiarazioni perche' loro
+// non ci fatturano i conferimenti rete (trattamento); per cio' che ci riguarda il
+// cerchio e' chiuso». Un carico di rete partito da uno stoccaggio verso un
+// impianto che la rete non la dichiara a SMOCO (dichiara_rete falso in
+// GiacenzaSito, oggi Tecnogum) non aspetta niente da nessuno: il portale lo
+// attribuisce ancora allo stoccaggio, perche' nessuna dichiarazione lo
+// chiudera', ma per noi e' chiuso. Le 181,299 t che il file del 09/10/2026
+// attribuisce allo stoccaggio di T-Cycle restano il numero del portale, che
+// serve alla quadratura, e nessun conto cambia; le pagine le dicono per quello
+// che sono, non come un'attesa da risolvere.
+//
+// Il file non dice dove e' andato un carico in attesa su uno stoccaggio: lo
+// dicono le partenze. Si chiude solo quello che non puo' essere andato altrove:
+// TUTTE le partenze di rete dello stoccaggio dal giorno in cui e' arrivato il
+// primo carico in attesa sono andate a chi la rete non la dichiara, e quello
+// che c'e' ancora in piazzale non e' partito. Una partenza senza fine trasporto
+// conta come una partenza di quei giorni: non si sa quando e', e se e' andata a
+// un impianto che dichiara il giro non si puo' dire chiuso. Su uno stoccaggio
+// che manda a tutti e due (Nappi Sud: Irigom e Tecnogum) l'attesa resta
+// un'attesa: dire quale parte e' di Tecnogum sarebbe un'ipotesi.
+
+/**
+ * Le partenze di rete degli stoccaggi: per ognuno, il giorno di fine trasporto
+ * e la chiave di chi ha ricevuto. Chi chiama passa ogni secondaria con la
+ * risposta di ingressoMovimento (Giacenze e Dichiarazioni, la stessa regola).
+ */
+export function partenzeDegliStoccaggi() {
+  const per = new Map(); // ns stoccaggio -> [{ giorno, verso }]
+  return {
+    segna(r, d) {
+      if (!d || d.tipo !== 'secondaria' || d.canale !== 'RETE' || !d.partenza || !eTerminato(r)) return;
+      const k = d.partenza.chiave;
+      if (!per.has(k)) per.set(k, []);
+      per.get(k).push({ giorno: giornoRoma(r && r.trasporto_finito_il), verso: d.arrivo ? d.arrivo.chiave : '' });
+    },
+    di(ns) { return per.get(ns) || []; },
+  };
+}
+
+/** Il perche', detto uguale nei due moduli: «attribuite dal portale allo stoccaggio, ma per noi chiuse: ...». */
+export const percheAttesaChiusa = (nomi) => {
+  const v = [...new Set((nomi || []).filter(Boolean))];
+  const chi = v.length <= 1 ? (v[0] || '') : `${v.slice(0, -1).join(', ')} e ${v[v.length - 1]}`;
+  return `attribuite dal portale allo stoccaggio, ma per noi chiuse: ${chi} sulla rete non ${v.length === 1 ? 'dichiara' : 'dichiarano'} a SMOCO`;
+};
+
+/**
+ * QUANTO DELL'ATTESA DI UNO STOCCAGGIO E' PER NOI UN GIRO CHIUSO.
+ *
+ * @param {object} opzioni
+ *   attesaT        le t che il portale attribuisce ancora allo stoccaggio (quelle della pagina)
+ *   primoArrivo    il giorno del primo carico in attesa (collocaFotografia().primoInAttesa)
+ *   senzaGiorno    vero se un carico in attesa non ha il giorno di arrivo
+ *   partenze       [{ giorno, verso }] (partenzeDegliStoccaggi().di)
+ *   nonDichiarano  Map chiave -> nome degli impianti con dichiara_rete falso
+ *   inPiazzaleT    la giacenza di rete del piazzale, la stessa nei due moduli
+ * @returns {{ chiusa_t, verso, perche } | null} null se niente si puo' dire chiuso
+ */
+export function attesaChiusaPerNoi({ attesaT, primoArrivo = '', senzaGiorno = false, partenze = [], nonDichiarano = new Map(), inPiazzaleT = null } = {}) {
+  const attesa = Number(attesaT) || 0;
+  if (!(attesa > 0) || !nonDichiarano || !nonDichiarano.size || senzaGiorno || !primoArrivo) return null;
+  if (inPiazzaleT === null || inPiazzaleT === undefined) return null;
+  const dopo = (partenze || []).filter(p => !p.giorno || p.giorno >= primoArrivo);
+  if (!dopo.length || dopo.some(p => !nonDichiarano.has(p.verso))) return null;
+  const chiusa = Math.round(Math.min(attesa, Math.max(0, attesa - Math.max(0, Number(inPiazzaleT) || 0))) * 1000) / 1000;
+  if (!(chiusa > 0)) return null;
+  const verso = [...new Set(dopo.map(p => nonDichiarano.get(p.verso)))];
+  return { chiusa_t: chiusa, verso, perche: percheAttesaChiusa(verso) };
 }
 
 /**

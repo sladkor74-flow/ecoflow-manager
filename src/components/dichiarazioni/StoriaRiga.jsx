@@ -110,7 +110,9 @@ export function RigaGiacenzaFineMese({ flusso, nonDovuta, sfondo }) {
     <tr className={sfondo}>
       <td className="px-3 pb-1 sticky left-0 bg-inherit text-[11px] text-muted-foreground">
         giacenza a fine mese
-        <span className="block text-[10px] leading-tight">entrato meno dichiarazioni caricate</span>
+        {/* Un anno prima del gestionale (decisioni dell'utente del 13/10/2026): la
+            giacenza non si ricostruisce, e la riga lo dice invece dei «—» muti. */}
+        <span className="block text-[10px] leading-tight">{flusso.prima_del_gestionale ? 'prima del gestionale: non si ricostruisce' : 'entrato meno dichiarazioni caricate'}</span>
       </td>
       <td className="px-1 pb-1 text-center tabular-nums text-[11px] text-muted-foreground">
         {!nonDovuta && partenza > 0 ? tonnellate(partenza) : <span className="text-muted-foreground/50">—</span>}
@@ -166,7 +168,10 @@ export function RigheStoccaggio({ stoccaggio, sfondo }) {
           <td className="px-3 py-0.5 sticky left-0 bg-sky-50 dark:bg-sky-950 text-[11px] text-sky-900 dark:text-sky-200">
             ripartito in secondaria verso {v.impianto}
             <span className="block text-[10px] leading-tight text-sky-800/80 dark:text-sky-300/80">
-              {v.dichiara ? `lo dichiara ${v.impianto}, nella sua riga` : `${v.impianto} non ci dichiara la rete, per accordo`}
+              {/* Verso chi la rete non la dichiara a SMOCO il giro per noi e' chiuso
+                  (decisioni dell'utente del 13/10/2026): Tecnogum non ci fattura il
+                  trattamento, e nessuno lo dichiarera'. */}
+              {v.dichiara ? `lo dichiara ${v.impianto}, nella sua riga` : `per noi un giro chiuso: ${v.impianto} sulla rete non dichiara a SMOCO`}
               {' '}
               <Popover>
                 <PopoverTrigger asChild>

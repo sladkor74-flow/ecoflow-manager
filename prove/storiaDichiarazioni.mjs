@@ -17,7 +17,8 @@
 // 2. gli agganci di ogni dichiarazione, anche presa dal portale in due giorni
 //    (Irigom, febbraio: 547.260 kg l'11/03 e 174.400 il 12/03);
 // 3. lo stoccaggio dello stesso sito e dove si dichiara (Tecnogum non dichiara:
-//    il portale tiene 181,299 t in attesa sullo stoccaggio di T-Cycle);
+//    il portale tiene 181,299 t in attesa sullo stoccaggio di T-Cycle, che dalle
+//    decisioni dell'utente del 13/10/2026 sono per noi un giro chiuso);
 // 4. il racconto della riga, e le parole al tocco della pagina;
 // 5. sui dati veri (../dati-veri/, se c'e'): i numeri del caso T-Cycle, la
 //    giacenza dell'ultimo mese uguale al «Da dichiarare» e alle Giacenze su ogni
@@ -46,6 +47,7 @@ import * as STORIA from '../base44/shared/storiaDichiarazioni.ts';
 import { allineaAllaGiacenza, chiudiFraIFlussi } from '../base44/shared/usciteDichiarate.ts';
 import { fotografiaDelGiorno, leggiFotografia } from '../base44/shared/indicatoriGiorno.ts';
 import { MESI } from '../base44/shared/dichiarazioniImpianti.ts';
+import { percheAttesaChiusa } from '../base44/shared/giacenzaPortale.ts';
 import { caricaLibPagine } from './dati/libPagine.mjs';
 
 const { giacenzaAFineMese, abbinaCaricamenti, agganciDellaRiga, stoccaggioDelSito, raccontoDellaRiga } = STORIA;
@@ -130,13 +132,31 @@ const STOC = stoccaggioDelSito({
   uscito: [14040, 57500, 65120, 56000, 56400, 0, 0, 0, 0, 0, 0, 0],
   verso: [{ impianto: 'TECNOGUM SRL', chiave: 'tecnogum', kg: 249060, dichiara: false, mesi_kg: [14040, 57500, 65120, 56000, 56400, 0, 0, 0, 0, 0, 0, 0] }],
   inPiazzaleT: 0, inAttesaT: 181.299, fotoIl: '2026-10-09',
+  // Le 181,299 t sono partite tutte verso Tecnogum, che sulla rete non dichiara a
+  // SMOCO: per noi un giro chiuso (decisioni dell'utente del 13/10/2026), come lo
+  // passa il riepilogo sui dati veri.
+  attesaChiusa: { t: 181.299, perche: percheAttesaChiusa(['TECNOGUM SRL']) },
 });
 {
   verifica('entrato in stoccaggio: 249,06 t, da gennaio a maggio', STOC && STOC.entrato_kg.reduce((s, x) => s + x, 0) === 249060 && STOC.entrato_t === 249.06, J(STOC && STOC.entrato_kg));
   verifica('ripartito tutto verso Tecnogum, mese per mese', STOC && STOC.verso.length === 1 && STOC.verso[0].mesi_kg.reduce((s, x) => s + x, 0) === 249060 && STOC.verso[0].dichiara === false);
   verifica("la frase dice dove si dichiara: l'impianto che lo riceve", STOC && /li dichiara l'impianto che li riceve, nella sua riga, nel mese in cui arrivano/.test(STOC.frasi[0]), STOC && STOC.frasi[0]);
-  verifica('e che cosa dice il portale di quello che Tecnogum non dichiara: 181,299 t in attesa, col giorno del file',
-    STOC && STOC.frasi.some(f => /TECNOGUM SRL sulla rete non ci dichiara, per accordo/.test(f) && /09\/10\/2026/.test(f) && /181,299 t allo stoccaggio di T-CYCLE INDUSTRIES SRL/.test(f)), J(STOC && STOC.frasi));
+  // GIRO CHIUSO (decisioni dell'utente del 13/10/2026): le 181,299 t restano il
+  // numero del portale, col giorno del file, ma non sono piu' «in attesa di una
+  // dichiarazione»: sono attribuite allo stoccaggio, e per noi chiuse.
+  verifica('e che cosa dice il portale di quello che Tecnogum non dichiara: 181,299 t, col giorno del file, per noi chiuse',
+    STOC && STOC.frasi.some(f => f === "Le 181,299 t del file degli ordini non dichiarati del 09/10/2026 sono attribuite dal portale allo stoccaggio, ma per noi chiuse: TECNOGUM SRL sulla rete non dichiara a SMOCO. Nessuna dichiarazione le chiuderà e non c'è niente da fare: il numero resta quello del portale, e serve alla quadratura.")
+      && !STOC.frasi.some(f => /in attesa di una dichiarazione/.test(f)) && STOC.in_attesa_t === 181.299 && STOC.in_attesa_chiusa_t === 181.299, J(STOC && STOC.frasi));
+  // Senza il giro chiuso (chi chiama non lo passa) la frase resta quella di prima.
+  const senzaGiro = stoccaggioDelSito({ sito: 'T-CYCLE INDUSTRIES SRL', canale: 'RETE', entrato: dodici({ 0: 1000 }), uscito: dodici({ 0: 1000 }),
+    verso: [{ impianto: 'TECNOGUM SRL', kg: 1000, dichiara: false }], inPiazzaleT: 0, inAttesaT: 181.299, fotoIl: '2026-10-09' });
+  verifica('senza il giro chiuso la frase sul portale e\' quella di prima, e il campo nuovo e\' null',
+    senzaGiro.frasi.some(f => /TECNOGUM SRL sulla rete non ci dichiara, per accordo/.test(f) && /09\/10\/2026/.test(f) && /181,299 t allo stoccaggio di T-CYCLE INDUSTRIES SRL, in attesa/.test(f)) && senzaGiro.in_attesa_chiusa_t === null, J(senzaGiro.frasi));
+  // Chiuso in parte: il resto e' ancora in piazzale, e si dice.
+  const inParte = stoccaggioDelSito({ sito: 'T-CYCLE INDUSTRIES SRL', canale: 'RETE', entrato: dodici({ 0: 1000 }), uscito: dodici({ 0: 1000 }),
+    verso: [{ impianto: 'TECNOGUM SRL', kg: 1000, dichiara: false }], inPiazzaleT: 2, inAttesaT: 10, attesaChiusa: { t: 8, perche: percheAttesaChiusa(['TECNOGUM SRL']) }, fotoIl: '2026-10-09' });
+  verifica('chiuso in parte: 8 t per noi chiuse, le altre 2 t ancora in piazzale',
+    inParte.frasi.some(f => f === 'Delle 10,00 t che il portale, nel file degli ordini non dichiarati del 09/10/2026, attribuisce ancora allo stoccaggio di T-CYCLE INDUSTRIES SRL, 8,00 t sono attribuite dal portale allo stoccaggio, ma per noi chiuse: TECNOGUM SRL sulla rete non dichiara a SMOCO; le altre 2,00 t sono ancora in piazzale.') && inParte.in_attesa_chiusa_t === 8, J(inParte.frasi));
   verifica('un sito che nell\'anno non ha mosso niente in stoccaggio non ha righe', stoccaggioDelSito({ sito: 'X', canale: 'RETE', entrato: zeri(), uscito: zeri() }) === null);
 }
 
@@ -159,6 +179,11 @@ const RACCONTO = raccontoDellaRiga({
   verifica('da quando riceve, in impianto', ha(/^Nel 2026 T-CYCLE INDUSTRIES SRL riceve in impianto PFU della rete da gennaio: 707,44 t fino a ottobre\.$/), RACCONTO[0]);
   verifica('fino a quando ha avuto anche lo stoccaggio, e a che cosa serviva', ha(/^Fino a maggio T-CYCLE INDUSTRIES SRL ha ricevuto i PFU in due modi: in impianto, per il trattamento e le uscite su nave, e in stoccaggio, tal quali, per mandarli a un altro impianto; da giugno solo in impianto\.$/), tutto);
   verifica('lo stoccaggio, dove e\' ripartito, e che qui non si dichiara', ha(/^Lo stoccaggio, 249,06 t, è ripartito tutto in secondaria verso TECNOGUM SRL: non entra in questa riga e qui non si dichiara/), tutto);
+  // E non lo dichiara nessuno: Tecnogum sulla rete non dichiara a SMOCO, il giro
+  // per noi e' chiuso (decisioni dell'utente del 13/10/2026). Prima diceva che lo
+  // dichiara l'impianto che lo riceve.
+  verifica('ripartito verso chi non dichiara: per noi il giro e\' chiuso, non «lo dichiara l\'impianto che lo riceve»',
+    ha(/^Lo stoccaggio, 249,06 t, è ripartito tutto in secondaria verso TECNOGUM SRL: non entra in questa riga e qui non si dichiara, e TECNOGUM SRL sulla rete non dichiara a SMOCO: per noi il giro è chiuso\.$/) && !ha(/^Lo stoccaggio.*lo dichiara l'impianto che lo riceve/), tutto);
   verifica('la dichiarazione di marzo: il giorno, quanto, quali mesi, e la regola del portale',
     ha(/^La dichiarazione di marzo, caricata il 03\/04\/2026, ha coperto 146,86 t: gennaio, febbraio e 22,70 t di marzo, perché il portale copre sempre prima i carichi più vecchi ancora aperti\.$/), tutto);
   verifica('che cosa e\' rimasto dopo, e chi l\'ha coperto poi: le 20,62 t di marzo', ha(/^Sono rimaste in giacenza 20,62 t di marzo, non ancora uscite su nave, coperte poi dalla dichiarazione di giugno\.$/), tutto);
@@ -516,11 +541,14 @@ if (!copie.length) {
     // giacenza_canale_fine_kg (revisione finale del 13/10/2026) su quei mesi e
     // sul mese dopo.
     const NUOVI_MESE = ['giacenza_fine_kg', 'dichiarazione_copre', 'coperto_da', 'copre', 'spostato_dal_canale_kg', 'giacenza_canale_fine_kg'];
+    // Decisioni dell'utente del 13/10/2026: quanto dell'attesa sullo stoccaggio
+    // per noi e' un giro chiuso (Tecnogum sulla rete non dichiara a SMOCO).
+    const NUOVI_STOCCAGGIO = ['in_attesa_chiusa_t', 'in_attesa_chiusa_perche'];
     const senza = (o, chiavi) => Object.fromEntries(Object.entries(o).filter(([k]) => !chiavi.includes(k)));
     const pulita = {
       ...R,
       siti: R.siti.map(s => ({ ...s, flussi: (s.flussi || []).map(f => ({ ...senza(f, NUOVI_FLUSSO), mesi: f.mesi.map(m => senza(m, NUOVI_MESE)) })) })),
-      stoccaggi: R.stoccaggi.map(s => ({ ...s, canali: s.canali.map(c => ({ ...c, verso: c.verso.map(v => senza(v, ['mesi_kg'])) })) })),
+      stoccaggi: R.stoccaggi.map(s => ({ ...senza(s, NUOVI_STOCCAGGIO), canali: s.canali.map(c => ({ ...c, verso: c.verso.map(v => senza(v, ['mesi_kg'])) })) })),
     };
     const pulitaH = { ...H, siti: H.siti.map(s => ({ ...s, flussi: (s.flussi || []).map(f => ({ ...f, mesi: f.mesi.map(m => senza(m, NUOVI_MESE)) })) })) };
     verifica('la risposta di oggi, tolti i campi nuovi, e\' quella di prima della storia al carattere', J(pulita) === J(pulitaH), `${J(pulita).length} contro ${J(pulitaH).length}`);
@@ -555,7 +583,7 @@ if (!copie.length) {
   } catch (e) { verifica('il riepilogo si disegna', false, String(e && e.message).slice(0, 300)); }
   const testo = html.replace(/<[^>]+>/g, ' ').replace(/&#x27;|&apos;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ');
   verifica('la pagina disegna la giacenza a fine mese di ogni riga', (testo.match(/giacenza a fine mese/g) || []).length >= 8, String((testo.match(/giacenza a fine mese/g) || []).length));
-  verifica('e sotto T-Cycle le righe dello stoccaggio, verso Tecnogum', /in stoccaggio nel mese/.test(testo) && /ripartito in secondaria verso TECNOGUM SRL/.test(testo) && /249,06 t in tutto/.test(testo) && /TECNOGUM SRL non ci dichiara la rete, per accordo/.test(testo), '');
+  verifica('e sotto T-Cycle le righe dello stoccaggio, verso Tecnogum', /in stoccaggio nel mese/.test(testo) && /ripartito in secondaria verso TECNOGUM SRL/.test(testo) && /249,06 t in tutto/.test(testo) && /per noi un giro chiuso: TECNOGUM SRL sulla rete non dichiara a SMOCO/.test(testo), '');
   verifica('i numeri della riga nuova di T-Cycle: 124,16 a febbraio e 20,62 a marzo', testo.includes('124,16') && testo.includes('20,62'));
   verifica('nessun «NaN» o «undefined» a video', !/NaN|undefined/.test(testo), (testo.match(/.{40}(NaN|undefined).{40}/) || [])[0]);
   verifica('il pulsante della storia accanto a ogni riga', (html.match(/aria-label="La storia di/g) || []).length >= 8);

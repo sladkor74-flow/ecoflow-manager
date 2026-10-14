@@ -14,6 +14,8 @@ import { annoDelRecord } from "./regolePredittivita.ts";
 import { targetImpiantoDellAnno, targetPrimariePerRuolo, recordDellAnno } from "./annoTarget.ts";
 import { ripartisciQuota, normalizzaQuote } from "./ripartizioneTarget.ts";
 import { targetDelPortale, targetMensiliValidi } from "./targetRaccoglitori.ts";
+// I mesi di TargetMensile come li scrive Target & Status (qui sotto, MESI_TARGET).
+import { MESI } from "./targetRaccoglitori.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { eTerminato } from "./movimenti.ts";
@@ -21,8 +23,18 @@ import { giornoRoma } from "./giornoItaliano.ts";
 
 const attivo = (imp) => imp && (!imp.stato || imp.stato === 'attivo');
 
-/** I mesi come li scrive TargetMensile, in minuscolo. */
-const MESI_TARGET = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+/**
+ * IL MESE DI UN TARGET MENSILE SI LEGGE COM'E' SCRITTO (rilievo della revisione,
+ * corretto con le decisioni del 13/10/2026). Qui si leggeva in minuscolo, mentre
+ * targetMensiliValidi riconosce il doppione col mese com'e' scritto e Target &
+ * Status, l'Andamento, gli avvisi ed EcoTyna leggono «Ottobre» e basta: due righe
+ * «Ottobre» e «ottobre» erano due target per la regola dei doppioni, si sommavano
+ * nella ripartizione fra gli impianti, e altrove la seconda non c'era. Ora la
+ * regola e' una: i mesi di TargetMensile sono quelli di targetRaccoglitori.ts
+ * (MESI, «Gennaio» ... «Dicembre»), e una riga con un mese scritto in un altro
+ * modo non vale in nessun modulo.
+ */
+const MESI_TARGET = MESI;
 
 /**
  * Il record di Target & Status che vale per ogni impianto in un anno, per nome
@@ -176,7 +188,7 @@ export function ripartisciTargetPrimarie({ raccoglitori = [], mensili = [], conf
     const k = kr + '|' + testo(m.regione);
     let x = mesiTarget.get(k);
     if (!x) { x = { tot: Array.from({ length: 12 }, () => 0), scritto: vuotoMesi() }; mesiTarget.set(k, x); }
-    const i = MESI_TARGET.indexOf(testo(m.mese));
+    const i = MESI_TARGET.indexOf(m.mese);
     if (i < 0) continue;
     const q = m.non_raccoglie ? 0 : Number(m.target) || 0;
     if (!(q > 0)) continue;
