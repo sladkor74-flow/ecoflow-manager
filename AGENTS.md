@@ -78,11 +78,14 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Il motore degli alert al cambio d'anno (12/10/2026)
   - Le attivita' della to-do list che si chiudono da sole (28/09/2026)
   - La to-do list: i completati nella loro sezione (12/10/2026)
+  - La to-do list: i cancellati dal portale (14/10/2026)
   - EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
+  - EcoTyna: il modulo giusto per ogni domanda sulla commessa (14/10/2026)
   - La voce di EcoTyna: il testo detto, frase per frase (11/10/2026)
 - **I caricamenti, lo storico e il registro**
   - Lo storico: si carica solo cio' che serve all'operativita' (25/09/2026)
   - Il caricamento delle primarie: che cosa si crede e che cosa si ripara (28/09/2026)
+  - Gli ordini rimasti «eseguito»: una regola sola, a ogni caricamento (14/10/2026)
   - Il registro dei caricamenti
   - Lo storico delle modifiche: chi ha cambiato un numero che fa i conti (11/10/2026)
   - I conti che si salvano non si salvano su un archivio a meta' (11/10/2026)
@@ -176,6 +179,15 @@ da una copia del sorgente in cui e' sostituito solo quell'import
 (`caricaPagina(..., { file })`, 14/10/2026): `prove/pagineAnniPassati.mjs`,
 `prove/perNoiChiusiDallaPagina.mjs`.
 
+**Una prova che dice «N giorni fa» ferma l'orologio** (revisione del
+14/10/2026). Se chiama una funzione o una pagina che chiede oggi a `oggiRoma()`,
+la prova sostituisce `Date` per il tempo della chiamata: `alGiorno` in
+`prove/ordiniEseguiti.mjs`, come in `prove/attesaDellAnno.mjs`. Altrimenti passa
+il giorno in cui la si scrive e cade il giorno dopo, anche nel giro di GitHub a
+ogni push: in `prove/ordiniEseguiti.mjs` «26 giorni fa» sarebbe diventato 27 dal
+15/10/2026. Per vedere se una prova dipende dal giorno: `node --import <file che
+sposta Date di qualche giorno> prove/<prova>.mjs`.
+
 ### Il giro di GitHub: le prove a ogni push su main (14/10/2026)
 
 I controlli giravano solo sul PC, prima di un commit. La piattaforma pero' fa
@@ -260,9 +272,11 @@ parte piu' fino al mese dopo: un commit senza il giro non e' un commit provato.
 **I numeri del giro, alla chiusura del 14/10/2026** (`npm run prove:ci` sul
 PC, albero di lavoro con le migliorie del giorno): 275 prove in 1 min 4 s, 8
 alla volta. 236 superate, 39 in parte o saltate (35 per la sola copia dei dati
-veri, 2 per i soli documenti del PC, 2 per tutti e due), 0 fallite. La
-modalita' CI le elenca una per una con quello che e' mancato a ciascuna: quella
-parte gira solo sul PC.
+veri, 2 per i soli documenti del PC, 2 per tutti e due), 0 fallite. Alla
+chiusura delle richieste del 14/10/2026 sera: 279 prove in 1 min 2 s, 238
+superate, 41 in parte o saltate (36 per la sola copia, 2 per i soli documenti
+del PC, 3 per tutti e due), 0 fallite. La modalita' CI le elenca una per una con
+quello che e' mancato a ciascuna: quella parte gira solo sul PC.
 
 ### Lo stile dei commenti
 
@@ -348,6 +362,17 @@ entrano coppie: `tariffeVisibili.ts` (la parte attiva delle tariffe per chi non
 e' amministratore) la usa solo la funzione `leggiTariffe`, e nel browser
 `src/lib/leggiTariffe.js` chiama la funzione, come per il surplus. Le coppie
 restano 31.
+
+**Con le richieste del 14/10/2026 sera entra `ordiniEseguiti`, e le coppie
+diventano 32** (aggiunta all'elenco dalla chiusura del giro). E' la regola degli
+ordini rimasti «eseguito»: gli stessi gruppi e le stesse frasi per l'esito del
+caricamento, la voce della dashboard, l'avviso delle pagine e il foglio da
+scaricare. La lettura (`ordiniEseguitiLettura.ts`) e' solo delle funzioni,
+perche' le pagine non leggono archivi per nome; il foglio
+(`src/lib/ordiniEseguitiExcel.js`) solo delle pagine. Nello stesso giro
+`esitoDellaPagina` (`src/lib/todoSezioni.js`, senza import) ripete la regola di
+`chiusaDalPortale` di `richiesteEct.ts`: non e' uno specchio, e che dicano la
+stessa cosa lo controlla `prove/todoCancellatiDalPortale.mjs`.
 
 **Gli import in `src/lib` vanno bene in tutte due le forme.** La convenzione e'
 l'alias `@/` (39 dei 92 file; 12 usano un relativo, fra cui i cinque che prendono
@@ -5308,9 +5333,11 @@ allora** indicarli come completati».
   spuntata a mano): cosi' una riapertura a mano resta aperta. E chi e' stato chiuso
   dal gestionale una volta non si richiude (`chiusa_dal_gestionale`): a decidere e'
   chi lavora.
-- Un ordine **cancellato** non chiude niente e si segnala col motivo; un
-  **"eseguito"** si segnala sempre; un terminato **senza fine trasporto** non conta
-  (regola 1); una fine trasporto **nel futuro** non chiude niente.
+- Un ordine **cancellato** a portale, dopo il passaggio, manda l'attivita' fra le
+  cancellate (vedi «La to-do list: i cancellati dal portale», 14/10/2026): fino a
+  quel giorno non chiudeva niente e chiedeva all'utente che cosa farne. Un
+  **"eseguito"** si segnala sempre; un terminato **senza fine trasporto** non
+  conta (regola 1); una fine trasporto **nel futuro** non chiude niente.
 - Un ID che non si trova si dice con tutte le sue cause possibili (scritto male,
   ordine non ancora caricato, codice che non e' un ordine): mandare a ricaricare un
   file che c'e' gia' e' una bugia comoda. E se la domanda per numero d'ordine non
@@ -5373,6 +5400,71 @@ ECT evasa stava nella tabella delle aperte con la targhetta verde.
   senza letture, e solo con l'elenco intero: con 500 righe lette il suo conto
   potrebbe essere piu' basso di quello vero (chiusura del giro, 14/10/2026).
   Prova: `prove/menuTodo.mjs` (sezione 3 per la pagina).
+
+### La to-do list: i cancellati dal portale (14/10/2026)
+
+Parole dell'utente: *«nella to-do list, qualora vi fossero degli ordini tra
+quelli aperti che venissero non eseguiti e quindi terminati bensì cancellati a
+portale devono comparire automaticamente nei cancellati con data di
+cancellazione; a me non serve decidere sul gestionale ciò che è già chiaro ed
+evidente sul portale»*.
+
+- **Lo stato `cancellato`** (enum di `Todo.stato` in `base44/entities/Todo.jsonc`:
+  senza quel valore l'aggiornamento poteva essere rifiutato dallo schema). Lo
+  scrive solo `controllaTodoOrdini` (amministratore; agli altri `da_chiudere`),
+  con `chiusa_dal_gestionale`, `chiusa_dal_gestionale_il` e `chiusura_nota`
+  «cancellata dal gestionale il GG/MM/AAAA: l'ordine ET... (motivo) risulta
+  cancellato a portale». Ordini tutti cancellati: fra i **Cancellati**
+  (`src/components/todo/AttivitaCancellate.jsx`, sotto i completati, chiusa
+  all'apertura, Riapri ed Elimina solo amministratore). Alcuni terminati e gli
+  altri cancellati: completata, «evasa in parte». Un assegnato, un "eseguito", un
+  terminato senza data o un ID che non si trova la tengono aperta.
+- **Il passaggio vale anche per i cancellati** («ordini tra quelli aperti»): si
+  chiude solo se il gestionale ha visto gli ordini aperti (`ordini_da_attendere`)
+  e adesso non ne resta nessuno; il primo giro non chiude niente. Un'attivita'
+  scritta su un ordine gia' cancellato resta da fare - parla d'altro: contestare
+  la cancellazione, rifare l'ordine - e l'avviso dice perche' (`fermo` in
+  `avvisoOrdini`). Senza questa regola spariva appena salvata, perche' la pagina
+  la controlla subito (revisione del 14/10/2026). Eccezione di una volta sola:
+  un'attivita' che porta ancora la domanda del gestionale di prima («che cosa
+  farne lo decidi tu», `DOMANDA_DI_PRIMA`) coi suoi ordini tutti cancellati passa
+  fra le cancellate; la domanda si toglie con la stessa scrittura.
+- **Il giorno della cancellazione il portale non lo scrive.** `Ordine_chiuso_il`
+  di un cancellato e' il clic su Chiudi di un trasporto gia' fatto (PRIMARIE del
+  12/10/2026: 3 cancellati su 460, tutti con fine trasporto e FIR; copia dei dati
+  veri dell'11/10: 3 su 452 di rete, 0 su 6 ACI). A video il giorno che si sa,
+  per quello che e': «Passata fra le cancellate il ...» (`chiusa_dal_gestionale_il`)
+  per le attivita', «Annullata da sola il ...» per le richieste (`visto_il` in
+  `ordini_stato_json`, portato avanti dal salvato). Mai `ordine_chiuso_il` come
+  giorno della cancellazione, e nessun campo `cancellata_il`.
+- **Riaperta a mano** (Riapri porta ad `aperto`, mai alla spunta) non si
+  ricancella. Una cancellata il cui ordine il portale riassegna resta cancellata,
+  e l'avviso dice «se serve ancora riaprila»; la riga del caricamento la dice fra
+  le attivita' «gia' chiuse», non fra quelle che «restano aperte»
+  (`testoControlloTodo`, `stato` in `da_guardare`).
+- **I numeri.** Il «Da fare» della pagina, `EVENTO_TODO` e `contaDaFare` non
+  contano le cancellate; l'elenco vuoto dice dove sono (`testoElencoVuoto`, usato
+  da `ElencoAttivita.jsx`): con sole cancellate non dice piu' «Nessuna attività».
+- **Le richieste ECT** (`richiesteEct.ts`): coi loro ordini tutti cancellati sono
+  `annullata` da sole, con alcuni terminati e gli altri cancellati `evasa` in
+  parte (da rispondere al consorzio; la voce `ect:da-rispondere` della dashboard
+  lo dice con `evasaInParte`, invece di «gli ordini risultano tutti ritirati»).
+  Chiuse cosi' (`chiusaDalPortale`) le puo' riaprire il portale riassegnando
+  l'ordine: ogni caricamento delle primarie le ricalcola (`daRicalcolare` in
+  `riconosciRitiriEct` di `importaBlocco`) e scrive PRIMA lo stato degli ordini e
+  POI l'esito (`ordiniEdEsitoRichiesta`, la stessa del caricamento del foglio ECT).
+  Al contrario l'esito restava indietro di un giro, e la pagina, la dashboard ed
+  EcoTyna dicevano tre cose diverse: una richiesta col suo ordine cancellato
+  restava salvata «aperta» e la dashboard la diceva oltre il termine.
+  `esitoDellaPagina` rilegge le stesse richieste che `daRicalcolare` ricalcola.
+  Lo schema `RichiestaEct.jsonc` lo dice: `visto_il` dei cancellati, `annullata`
+  ed `evasa` anche dal portale, `da_confermare` solo prima del 29/09/2026.
+- Prove: `prove/todoCancellatiDalPortale.mjs` (regola, sezioni, richieste, banco
+  con `controllaTodoOrdini` e `importaRichiesteEct` veri, pagina montata e sezioni
+  disegnate con React), `prove/todoOrdini.mjs`, e
+  `prove/cancellatiDalPortaleAgganci.mjs` per gli agganci fuori dalla regola: gli
+  schemi, il ricalcolo dopo le primarie sul banco con `importaBlocco` vero, la
+  voce della dashboard, l'elenco vuoto disegnato con React.
 
 ### EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
 
@@ -5783,6 +5875,16 @@ istruita, e sono state misurate sul codice:
   lo dice nella regola 3-sedecies. Prima «Bari» al posto di «BA» dava 0 t senza
   avviso; sui dati veri dell'11/10 sono 602,84 t in 210 formulari. Prova:
   `prove/ecotynaProvince.mjs`.
+- **Lo stesso vale per il comune** (revisione del 14/10/2026). Un comune scritto
+  male o diverso dal portale («Lavelo» per LAVELLO) dava uno zero «vero».
+  `ordini_aperti`, `ordini_chiusi` e `raccolto` lo cercano fra i comuni degli
+  ordini del canale di ogni anno (`comuneRiconosciuto` in
+  `strumentiAssistente.ts`, nessuna lettura in piu'). Gli aperti leggono i
+  terminati solo se il comune non e' fra gli aperti, con la stessa lettura (e la
+  cache) del controllo PDR: se c'e' e' uno zero vero, detto col nome del portale.
+  Se non c'e' da nessuna parte il numero e' non calcolabile, con `avviso_comune`
+  e i comuni a una o due lettere di distanza («forse LAVELLO»), senza scegliere
+  al posto di chi chiede. Prova: `prove/ecotynaModuliGiusti.mjs`, sezione 7.
 - **Torna al testo verificato** (A75, 12/10/2026). Accanto al badge «Aggiornata
   il» di una voce verificata, l'amministratore ritira l'aggiornamento approvato
   per errore. Il ritiro funziona come `mettiDaParte`: attiva = false, motivo
@@ -5807,6 +5909,109 @@ istruita, e sono state misurate sul codice:
   due volte, e il dettaglio porta il file e la nota sul contratto caricato dopo
   anche quando il requisito e' valido. Nessuna lettura in piu'. Prova:
   `prove/contrattoNuovoRaggiungibile.mjs`, sezione 6.
+
+### EcoTyna: il modulo giusto per ogni domanda sulla commessa (14/10/2026)
+
+Parole dell'utente: *«oggi ho provato a chiederle circa gli ordini aperti in una
+determinata provincia e lei mi ha risposto erroneamente perchè pescava tra le
+'richieste ect' e non tra gli assegnati. [...] quello che voglio dire è che lei
+deve avere esattamente bene a mente il modulo o i moduli giusti per cercare le
+risposte su domande afferenti alla commessa Ecotyre del nostro gestionale»*.
+Nessuno strumento leggeva gli Assegnati, e il pianificatore prendeva il nome che
+somigliava di piu': «richieste» diventava `richieste_ect`, cioe' le richieste
+arrivate via email.
+
+- **La mappa delle domande** (`MAPPA_DOMANDE` in `base44/shared/pianoAssistente.ts`,
+  fra le Regole di `istruzioniPiano`; le descrizioni del catalogo la ripetono).
+  Conta che cosa chiede la domanda, non il nome dello strumento che le somiglia:
+  per chi chiede «richieste», «ritiri» e «ordini» sono la stessa cosa, gli
+  ordini del portale.
+  - Ordini APERTI (quanti, quali, dove, da quanto aspettano, «da ritirare», «in
+    attesa», l'arretrato): `ordini_aperti`, gli Assegnati. RETE per i gommisti,
+    ACI per demolitori e autodemolizioni, EXTRA_RACCOLTA per le campagne.
+  - Ordini CHIUSI (se e quando e' stato chiuso un ordine, l'ultimo ritiro di un
+    PDR, quanti in un periodo e in una provincia, quanti ne ha fatti un
+    raccoglitore): `ordini_chiusi`, i Terminati Rete, i Terminati ACI o l'Extra
+    Raccolta, sul giorno di fine trasporto. Per le sole tonnellate resta
+    `raccolto`.
+  - «Ordini» senza dire aperti o chiusi: con un periodo, o con «fatti»,
+    «gestiti», «serviti», sono i CHIUSI («quanti ordini ha fatto Emmesse a
+    settembre?»); senza periodo gli APERTI («quanti ordini ci sono a Siracusa?»).
+  - Secondarie e terziarie, aperte o chiuse: `secondarie` e `terziarie`. La
+    predittivita' resta `proiezione_secondarie`.
+  - Il fatturato o il costo di un fornitore in un periodo: `fatturazione` PASSIVA
+    col fornitore (riservata all'amministratore: lo strumento lo dice da se');
+    quanto spetta da Ecotyre: ATTIVA. I prezzi in €/t restano `tariffe`.
+  - `richieste_ect` SOLO per le richieste arrivate via email, ricevute dal
+    consorzio, le Richieste ECT o la To-Do List: mai per ordini aperti o chiusi.
+  - Un ID ordine o un formulario: `cerca_movimento`, che dal 14/10/2026 guarda
+    anche Assegnati Rete e ACI (un ordine aperto risultava «non trovato»).
+- **Gli strumenti nuovi contano come i moduli** (`base44/shared/strumentiAssistente.ts`).
+  - `ordini_aperti` legge Assegnati Rete, Assegnati ACI o le schede «assegnato»
+    dell'extra raccolta e conta come la pagina (`computeAssegnatiMatrix`): un
+    ordine per riga, la provincia in sigla, l'eta' con `etaArretrato` del
+    cruscotto. Non prende anno e mese: un aperto si conta qualunque sia
+    l'immissione, e il periodo travasato dal piano toglieva quelli di prima. Dice
+    anche gli «eseguito» del canale con l'ID.
+  - `ordini_chiusi` legge le righe del raccolto con gli stessi filtri
+    (`movimenti()`: con la cache nessuna lettura in piu'), piu' PDR e comune.
+    Conta gli ORDINI (`chiaveOrdine`) come la matrice per provincia dei
+    Terminati Rete, con formulari e tonnellate accanto. Il giorno e' la fine del
+    trasporto, mai la chiusura a portale (regola 1).
+  - Il PDR con la regola del campo «PDR» dei Terminati Rete (`pdrChiesto`,
+    `delPdr`): un numero da solo e' il codice `id_pdr` e vale uguale, non
+    contenuto; altrimenti tutte le parole del nome. Le funzioni non leggono `src`,
+    quindi la regola e' scritta due volte e la prova le confronta sui dati veri.
+  - `secondarie` e `terziarie` leggono l'archivio intero del modulo, una volta
+    per domanda, e contano come le pagine: le chiuse per fine trasporto nel
+    periodo, le aperte tutte. Le secondarie restano divise per canale; le
+    terziarie non hanno canale.
+  - Sui dati veri dell'11/10/2026 dicono i numeri dei moduli: a Cosenza, rete,
+    da luglio a settembre 46 ordini chiusi (181,40 t); l'ultimo ritiro del PDR
+    42872 il 07/10/2026 (due ordini); terziarie di agosto 17; aperti di rete a
+    Siracusa nel file PRIMARIE.xlsx 3, come la pagina.
+- **La guardia dopo il pianificatore** (`correggiPiano`). Il pianificatore e' un
+  modello: quando sbaglia, sbaglia il modulo, e la risposta esce sicura con un
+  numero vero di un'altra cosa. Senza modello, dalle parole della domanda, si
+  correggono gli errori evidenti della mappa: le Richieste ECT senza che la
+  domanda parli di email, una domanda sulle email senza le Richieste ECT, uno
+  strumento che non legge quello che la domanda chiede, il canale degli ordini
+  sbagliato (demolitori = ACI). Uno strumento legittimo scelto in piu' non si
+  tocca: la guardia corregge, non ripianifica. I filtri che la domanda dice e il
+  piano ha dimenticato si aggiungono. Il perche' viaggia coi parametri sotto
+  `CHIAVE_SCELTA` e arriva a «Dove ho guardato»; due chiamate uguali a meno della
+  nota o dell'ordine dei filtri diventano una.
+- **La guardia corregge solo gli errori EVIDENTI** (revisione del 14/10/2026).
+  - Fra ordini aperti e chiusi sceglie solo se la domanda lo dice a parole:
+    aperti, da ritirare, in attesa; oppure chiusi, ritirati, terminati, fatti,
+    gestiti, serviti. Altrimenti la scelta del pianificatore resta. Solo al
+    posto di uno strumento sbagliato decide il periodo: con un periodo i chiusi
+    («quanti ordini ha fatto Emmesse a settembre?»), senza gli aperti («quanti
+    ordini ci sono a Siracusa?»).
+  - Il canale lo impone solo se la domanda ne nomina uno in positivo e da solo e
+    il piano ne aveva uno diverso. Non contano «esclusa l'extra raccolta»,
+    «esclusi i demolitori», «senza l'ACI», «ACI compresa», «oltre a», «in tutto».
+    Aci Sant'Antonio, Aci Catena, Aci Castello, Aci Bonaccorsi e le frazioni di
+    Acireale sono comuni della rete, non il canale ACI.
+  - Una sigla di provincia attaccata a una parola con la maiuscola fa parte di un
+    nome (CL Service, BS Ecoservizi). Una provincia che e' una parola del nome
+    scritto dal piano non si aggiunge come filtro («Ecologia Bari» non e' la
+    provincia di Bari).
+  - Un piano vuoto con `serve_normativa` vero, o su una domanda di procedura («va
+    chiuso», «entro quanti giorni», «quali documenti servono», «quante copie»),
+    resta vuoto.
+  - I mesi si leggono in tutte le forme: «luglio-settembre», «dal 1 luglio al 30
+    settembre», «da luglio a oggi», «da luglio in poi». «Luglio e settembre» sono
+    due mesi; «da luglio 2025 a oggi» non si traduce in mesi.
+  - Ogni filtro preso dalla domanda si scrive in «Dove ho guardato» («filtri
+    presi dalla domanda: ...»).
+  - Limite noto: la guardia non corregge un anno scritto dal pianificatore che
+    contraddice la domanda («nel 2025» con il periodo 2026), perche' non cambia i
+    valori scritti dal piano.
+- Prova: `prove/ecotynaModuliGiusti.mjs`: la mappa fra le regole, il catalogo,
+  la batteria delle domande scritte come le scrive l'utente (errori di battitura
+  compresi), gli strumenti sui dati veri contro i moduli, gli Assegnati come la
+  pagina, «Dove ho guardato», e la sezione 7 per la revisione.
 
 ### La voce di EcoTyna: il testo detto, frase per frase (11/10/2026)
 
@@ -6000,7 +6205,9 @@ function vera e il modulo del browser con un SDK finto e i guasti in mezzo.
   volta, che e' la scheda aperta) e Terziarie (due avvisi, perche' li' il canale
   lo decide il materiale e rete e ACI non si sommano mai). Senza quell'avviso una
   secondaria nel limbo non si vedeva da nessuna parte. Guardia in
-  `prove/storicoConservato.mjs`.
+  `prove/storicoConservato.mjs`. Dal 14/10/2026 l'elenco con gli ID lo fa una
+  regola sola, per tutti i caricamenti, la dashboard e le pagine: vedi «Gli
+  ordini rimasti "eseguito": una regola sola, a ogni caricamento».
 - **Un caricamento aggiorna i moduli solo se e' riuscito** (`moduliDaRicalcolare`),
   e quando non partono si dice quali restano indietro (`ricalcoliFermi`). I
   ricalcoli (`RICALCOLI` in `src/lib/importGrandeFile.js`) sono **cinque** per le
@@ -6023,6 +6230,80 @@ function vera e il modulo del browser con un SDK finto e i guasti in mezzo.
   mandandone una sola il pulsante "Forza caricamento" girava in tondo. Un collega
   che sta caricando adesso non e' un tentativo morto: glielo si dice subito,
   senza offrirgli niente da forzare.
+
+### Gli ordini rimasti «eseguito»: una regola sola, a ogni caricamento (14/10/2026)
+
+Parole dell'utente: *«ad ogni caricamento di primarie, secondarie o terziarie,
+qualora risultassero degli ordini in stato "eseguito", quindi non terminato, non
+cancellato e non assegnato, devono essere sempre segnalati indicando l'id ordine
+affinchè vi si possa porre subito rimedio; questo è infatti uno stato di "limbo"
+che non ha alcun senso e deve tramutarsi in un altro dei tre stati. fallo nel
+modo migliore, più elegante, professionale e meno invasivo possibile»*.
+
+Fino a quel giorno lo dicevano in quattro modi diversi: la finestra del
+caricamento delle primarie (solo i conti, dal file), le pagine (gli ID in una
+tendina), lo storico conservato (solo quanti) e la chiusura del mese. Secondarie
+e terziarie, al caricamento, non lo dicevano affatto, e la dashboard nemmeno.
+
+- **La regola e' una** (`base44/shared/ordiniEseguiti.ts`, specchio
+  `src/lib/ordiniEseguiti.js`). `ordiniEseguiti(archivi, { oggi, annoInizio })`
+  prende le righe in «eseguito» (`eEseguito`) e le divide in sei gruppi mai
+  sommati (`GRUPPI_ESEGUITI`): primarie rete, primarie ACI, secondarie rete e
+  ACI, terziarie rete e ACI. Secondarie e terziarie si dividono per materiale con
+  `canaleDi`, come nelle loro pagine. Per ogni ordine: ID (o formulario),
+  raccoglitore o trasportatore, punto di raccolta o stoccaggio, provincia,
+  destinazione, immissione, fine trasporto e da quanti giorni, chili (null se
+  nessuna riga dice il peso) e che cosa manca (`cosaManca`). L'extra raccolta
+  non c'e': ha solo assegnato e terminato.
+- **Da quanti giorni** si misura dalla fine del trasporto, il giorno da cui
+  l'ordine si poteva chiudere: il caricamento che l'ha visto «eseguito» per la
+  prima volta non e' scritto da nessuna parte.
+- **Una lettura per archivio, filtrata per stato** (`FILTRO_ESEGUITI`;
+  `leggiEseguiti` in `base44/shared/ordiniEseguitiLettura.ts`, a parte perche'
+  le pagine non leggono archivi per nome): poche righe, di solito nessuna, mai
+  una per riga o per soggetto. Un archivio che non risponde vale null e finisce
+  in `non_letti`: mai «nessun eseguito».
+- **Chi la usa.**
+  - Le primarie: `importaBlocco` (azione registra) rilegge PrimariaRete e
+    PrimariaAci a scrittura finita, cosi' vede quelli del file e quelli
+    conservati dagli anni prima, e scrive gli ID nel registro (`testoRegistro`).
+    Il browser li prende (`eseguitiDopoIlCaricamento` in
+    `src/lib/importGrandeFile.js`); se la rilettura non e' riuscita ripiega sul
+    conto fatto sul file, meglio dei soli ordini del file che un «nessuno» falso.
+  - Secondarie e terziarie: `importEcotyreFile` fa lo stesso dopo la scrittura
+    (`avviso_eseguiti`, e `non_riletti` quando la rilettura non riesce).
+  - Sotto la scheda di Caricamento Dati: `EsitoEseguiti`
+    (`src/components/shared/OrdiniInEseguito.jsx`), un riquadro ambra piccolo,
+    mai una finestra che interrompe, e niente se non ce n'e'. «Quali sono» apre
+    gli ID; un pulsante li copia tutti, uno scarica il foglio
+    (`src/lib/ordiniEseguitiExcel.js`, un foglio per gruppo con la veste dei
+    documenti del gestionale).
+  - La dashboard: una voce sola di «Da gestire» (`voceEseguiti`, area «Chiusura
+    a portale»), con gli ID nel dettaglio e il collegamento al modulo;
+    `cruscottoOperativo` passa `dati.eseguiti`. Firma fissa e gli ID come
+    elementi: nascosta, torna solo per un ordine nuovo, non ogni mattina perche'
+    crescono i giorni. Senza niente trovato e con un archivio non letto, la voce
+    «non verificati»: mai un verde falso.
+  - Le pagine: `AvvisoEseguiti.jsx` passa le righe della pagina alla stessa
+    regola e mostra lo stesso elenco (`ElencoEseguiti`).
+- **Si segnala e si mantiene** (decisione del 28/09/2026, nella sezione sopra):
+  mai cancellato, mai sommato ai terminati. Si risolve da solo al caricamento
+  dopo, quando il portale gli da' lo stato definitivo.
+- **Fuori dall'export non sparisce da solo** (revisione del 14/10/2026). Un
+  «eseguito» immesso prima dell'anno da cui parte l'export (`fuori_export`: di
+  solito un limbo a cavallo del 1° gennaio) il file di sempre non lo riscrive.
+  Dopo il Chiudi a portale resta «eseguito» finche' non si carica un export che
+  parte dal suo anno.
+  - Le frasi lo dicono con gli anni: `fraseFuoriExport` e `spiegazioneEseguiti`,
+    usate dalla voce di «Da gestire», dall'esito sotto la scheda di Caricamento
+    Dati e dall'avviso delle pagine.
+  - La promessa «spariscono da soli» vale solo per quelli che l'export riporta.
+  - Ogni gruppo porta `fuori_export` e `anno_fuori_export`, contati prima di
+    tagliare l'elenco.
+- Prova: `prove/ordiniEseguiti.mjs` (la regola, lo specchio, i caricamenti di
+  secondarie, terziarie e primarie sul banco, il registro, la dashboard, a video,
+  i dati veri). Sulla copia dei dati veri dell'11/10/2026 non ce n'e' nessuno
+  (10.487 righe di primarie rete, 162 ACI, 725 secondarie, 427 terziarie).
 
 ### Il registro dei caricamenti
 
