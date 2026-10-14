@@ -1,0 +1,77 @@
+# IL CONTROLLO AUTOMATICO PRIMA DELLA PUBBLICAZIONE (14/10/2026).
+#
+# Le prove, eslint, gli specchi e la build giravano solo sul PC, prima di un
+# commit. La piattaforma pero' fa commit da sola su main, e l'utente pubblica da
+# li': un errore entrato cosi' non lo provava nessuno. Questo giro parte a ogni
+# push su main, anche quelli della piattaforma, e a mano (Actions, «Prove», «Run
+# workflow»). Non ferma la pubblicazione: segna il commit con la croce rossa e
+# dice quale controllo e' caduto.
+#
+# I DATI VERI NON VENGONO MAI QUI. La copia (../dati-veri) e i documenti
+# dell'utente stanno solo sul PC: npm run prove:ci fa girare le prove che li
+# leggono senza quella parte, le conta a parte e dice quali sono
+# (prove/esegui.mjs, prove/dati/soloIlRepository.mjs). Il quinto controllo,
+# Giacenze e Dichiarazioni sui dati veri, resta sul PC. Le prove girano con l'ora
+# e la lingua del PC (Europe/Rome, italiano): le imposta npm run prove:ci, non
+# questo file, cosi' la modalita' CI lanciata sul PC e' la stessa.
+# Nessun segreto: il flusso legge il repository e basta.
+#
+# I MINUTI. Un giro costa circa 5-6 minuti di GitHub Actions (misura del
+# 14/10/2026: le prove da sole, due alla volta come sul runner di un repository
+# privato, fra un minuto e mezzo e due sul PC), e un repository privato ne ha
+# 2.000 al mese nel piano gratuito: circa 350 giri. Finiti quelli, il giro non
+# parte piu' fino al mese dopo.
+name: Prove
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Un push nuovo ferma il giro di quello prima: conta l'ultimo commit, e i minuti
+# non si sprecano sui commit gia' superati.
+concurrency:
+  group: prove-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Tutta la storia: alcune prove confrontano col codice di commit
+          # vecchi (git show), e con la storia tagliata npm run prove:ci si ferma.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Dipendenze
+        id: dipendenze
+        run: npm ci --no-audit --no-fund
+
+      # I quattro controlli girano tutti anche se uno cade, per vedere subito
+      # quali sono caduti.
+      - name: eslint
+        if: ${{ !cancelled() && steps.dipendenze.outcome == 'success' }}
+        run: npx eslint --quiet .
+
+      - name: Specchi
+        if: ${{ !cancelled() && steps.dipendenze.outcome == 'success' }}
+        run: node prove/specchi.mjs
+
+      - name: Build
+        if: ${{ !cancelled() && steps.dipendenze.outcome == 'success' }}
+        run: npx vite build
+
+      - name: Prove
+        if: ${{ !cancelled() && steps.dipendenze.outcome == 'success' }}
+        run: npm run prove:ci
