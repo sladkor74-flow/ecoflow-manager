@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { MESI } from '@/lib/pfuConstants';
@@ -9,11 +9,6 @@ import RegionTable from '@/components/target-status/RegionTable';
 import ImpiantiTable from '@/components/target-status/ImpiantiTable';
 import TargetChart from '@/components/target-status/TargetChart';
 import ExportButtons from '@/components/target-status/ExportButtons';
-import TargetRaccoglitoriGrid from '@/components/target-status/TargetRaccoglitoriGrid';
-import CommessaEcotyreForm from '@/components/target-status/CommessaEcotyreForm';
-import ConfigurazioneImpianti from '@/components/target-status/ConfigurazioneImpianti';
-import ZoneRaccoglitori from '@/components/target-status/ZoneRaccoglitori';
-import NuovoAnno from '@/components/target-status/NuovoAnno';
 import ReportGenerale from '@/components/target-status/ReportGenerale';
 import CanaleAci from '@/components/target-status/CanaleAci';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
@@ -29,6 +24,26 @@ import { targetAnnuoDellAnno, regioniDellAnno, attesoDellaRegione, profiloMensil
 import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
 import { useTargetCambiati, testoRilettura, oraRoma } from '@/lib/eventiDati';
 import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
+
+// LE SCHEDE SI SCARICANO QUANDO SI APRONO (14/10/2026).
+//
+// La pagina si apre sull'Andamento, e le altre cinque schede - target dei
+// raccoglitori, commessa, impianti e stoccaggi, zone, nuovo anno - erano tutte
+// nel suo pacchetto: circa 280 kB, coi loro elenchi a tendina e lo storico delle
+// modifiche, che chi guarda l'Andamento non usa. Ora ciascuna e' un file a
+// parte, scaricato la prima volta che la si apre, come le pagine in App.jsx;
+// nell'attesa la scheda mostra il cerchio che gira e le linguette restano a
+// video. Gli altri 385 kB erano la presentazione (pptxgenjs, ora presa dentro
+// exportPPT in statusExports.js). La prima apertura della pagina, avvio
+// compreso, passa da 1.221 a 556 kB: prova in prove/pacchettiLeggeri.mjs.
+const TargetRaccoglitoriGrid = lazy(() => import('@/components/target-status/TargetRaccoglitoriGrid'));
+const CommessaEcotyreForm = lazy(() => import('@/components/target-status/CommessaEcotyreForm'));
+const ConfigurazioneImpianti = lazy(() => import('@/components/target-status/ConfigurazioneImpianti'));
+const ZoneRaccoglitori = lazy(() => import('@/components/target-status/ZoneRaccoglitori'));
+const NuovoAnno = lazy(() => import('@/components/target-status/NuovoAnno'));
+const AttesaScheda = () => (
+  <div className="flex items-center justify-center py-20 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Apertura della scheda…</div>
+);
 
 // Target & Status: unico punto in cui si scrivono i target.
 // RETE, ACI ed Extra Raccolta sono canali indipendenti: i target si confrontano
@@ -524,26 +539,26 @@ export default function TargetStatus() {
         </TabsContent>
 
         <TabsContent value="raccoglitori" className="mt-4">
-          {scheda === 'raccoglitori' && <TargetRaccoglitoriGrid key={anno} anno={anno} isAdmin={puoScrivere} user={user} />}
+          {scheda === 'raccoglitori' && <Suspense fallback={<AttesaScheda />}><TargetRaccoglitoriGrid key={anno} anno={anno} isAdmin={puoScrivere} user={user} /></Suspense>}
         </TabsContent>
 
         <TabsContent value="commessa" className="mt-4">
-          {scheda === 'commessa' && <CommessaEcotyreForm key={anno} anno={anno} isAdmin={puoScrivere} user={user} onModificato={setCommessaModificata} />}
+          {scheda === 'commessa' && <Suspense fallback={<AttesaScheda />}><CommessaEcotyreForm key={anno} anno={anno} isAdmin={puoScrivere} user={user} onModificato={setCommessaModificata} /></Suspense>}
         </TabsContent>
 
         <TabsContent value="impianti" className="mt-4">
           {/* una per anno: niente di un anno resta a video, modificabile, quando si passa a un altro */}
-          {scheda === 'impianti' && <ConfigurazioneImpianti key={anno} anno={anno} solaLettura={!puoScrivere} user={user} />}
+          {scheda === 'impianti' && <Suspense fallback={<AttesaScheda />}><ConfigurazioneImpianti key={anno} anno={anno} solaLettura={!puoScrivere} user={user} /></Suspense>}
         </TabsContent>
 
         {/* Le zone di competenza stanno qui, con gli altri perimetri della commessa
             (decisione dell'utente, 29/09/2026): a leggerle e' Verifiche Fornitori. */}
         <TabsContent value="nuovo-anno" className="mt-4">
-          {scheda === 'nuovo-anno' && <NuovoAnno anno={anno} />}
+          {scheda === 'nuovo-anno' && <Suspense fallback={<AttesaScheda />}><NuovoAnno anno={anno} /></Suspense>}
         </TabsContent>
 
         <TabsContent value="zone" className="mt-4">
-          {scheda === 'zone' && <ZoneRaccoglitori isAdmin={puoScrivere} />}
+          {scheda === 'zone' && <Suspense fallback={<AttesaScheda />}><ZoneRaccoglitori isAdmin={puoScrivere} /></Suspense>}
         </TabsContent>
       </Tabs>
     </div>

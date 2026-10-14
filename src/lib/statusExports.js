@@ -12,7 +12,6 @@
 // lo scarto senza dati - esce «—», mai 0,00 (tonnellate di src/lib/target.js,
 // la stessa delle card). La data e l'anno sono quelli italiani, non del
 // dispositivo.
-import pptxgen from 'pptxgenjs';
 import { base44 } from '@/api/base44Client';
 import { tonnellate } from '@/lib/target';
 import { oggiRoma } from '@/lib/giornoItaliano';
@@ -112,8 +111,17 @@ export async function exportPDF(kpis, mergedData, regioneData, impiantiData, ann
 // leftoverTotale, che ha lo stesso segno. Lo scarto no: deltaMeseCorrente era
 // target meno raccolto, di segno opposto, e si scrive «—» piuttosto che un
 // numero col segno sbagliato. anno e' quello scelto nella pagina.
+//
+// LA LIBRERIA DELLE PRESENTAZIONI SI SCARICA QUANDO SI PREME «PPT» (14/10/2026).
+// pptxgenjs, col suo jszip, pesa 385 kB, e importata in testa a questo file
+// finiva nel pacchetto di Target & Status: chi apriva la pagina scaricava un
+// pezzo di 595 kB, 385 per un pulsante che si preme di rado. Come
+// xlsx, jspdf ed exceljs (AGENTS.md, «Le librerie pesanti si caricano quando
+// servono»), si prende qui dentro; la funzione era gia' asincrona e il pulsante
+// (ExportButtons) la aspetta. prove/pacchettiLeggeri.mjs lo controlla.
 export async function exportPPT(kpis, mergedData, regioneData, impiantiData, anno) {
   const k = kpis || {};
+  const { default: pptxgen } = await import('pptxgenjs');
   const pptx = new pptxgen();
   pptx.defineLayout({ name: 'Wide', width: 13.33, height: 7.5 });
   pptx.layout = 'Wide';

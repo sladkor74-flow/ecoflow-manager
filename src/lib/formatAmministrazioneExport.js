@@ -141,10 +141,12 @@ const quanteRighe = (t) => (t.surplus.length ? t.righe_a_parole : `${t.righe.len
  *
  * IL SURPLUS NEL PDF (13/10/2026 sera): le righe dei surplus sotto i
  * formulari, col colore 'surplus' di esportaTabella (indaco in corsivo con la
- * barra), e il TOTALE: i chili dei formulari, gli euro col surplus. Il
- * «Totale formulari» sta nel sottotitolo e non in una riga: il piede del PDF
- * conta le righe della tabella, e con una riga di totale in piu' le conterebbe
- * sbagliate.
+ * barra), e il TOTALE: i chili dei formulari, gli euro col surplus.
+ *
+ * IL «TOTALE FORMULARI» HA LA SUA RIGA (14/10/2026), come nell'Excel: chili ed
+ * euro dei soli formulari, sotto di loro e sopra i surplus. E' un subtotale di
+ * esportaTabellaPdf, che il piede non conta: prima stava solo nel sottotitolo,
+ * perche' una riga in piu' il piede l'avrebbe contata fra quelle della tabella.
  */
 export async function exportAmministrazioneAttivaPdf(tipologia, righe, anno, mese) {
   const t = tabellaAmministrazione(tipologia, righe, anno, mese);
@@ -161,6 +163,7 @@ export async function exportAmministrazioneAttivaPdf(tipologia, righe, anno, mes
     // «237,13 €». L'Excel resta sul tipo e sul titolo (revisione del 13/10/2026).
     colonne: t.colonne.map((c, i) => ({ ...c, tipo: c.tipoPdf || c.tipo, valore: (r) => r[i] })),
     righe: [...t.righe, ...t.surplus.map(s => s.celle)],
+    ...(t.surplus.length ? { subtotali: [{ dopo: t.righe.length, etichetta: 'Totale formulari', valori: { [t.iKg]: t.totale_kg, [t.iTotale]: t.totale_euro_formulari } }] } : {}),
     totali: { etichetta: 'TOTALE', valori: { [t.iKg]: t.totale_kg, [t.iTotale]: t.totale_euro } },
     ...(delSurplus.size ? { colore: (r) => (delSurplus.has(r) ? 'surplus' : null) } : {}),
   });

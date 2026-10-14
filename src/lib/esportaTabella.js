@@ -5,6 +5,8 @@
 //
 // colonne: [{ titolo, valore: (riga) => any, tipo: 'testo'|'kg'|'t'|'euro'|'prezzo'|'prezzoLibero'|'data'|'intero', peso?: number }]
 // totali:  { etichetta, valori: { [indiceColonna]: numero } }
+// subtotali (solo PDF): [{ dopo, etichetta, valori }] - righe di totale in mezzo
+//   alla tabella, scritte dopo le prime `dopo` righe; il piede non le conta.
 // documento: { canale, periodo, entita, perFineTrasporto, stato } - il blocco di
 //   testa comune (intestazioneDocumento di fogliProfessionali.js): canale,
 //   periodo per fine trasporto, dati fino al degli archivi in entita, generato
@@ -162,8 +164,17 @@ function piedi(doc, intest, { M, W, H, sinistra = '' }) {
  * ogni pagina, righe alternate, totali e numero di pagina.
  * colore(riga) opzionale: 'ambra' o 'rosso' per evidenziare una riga, 'surplus'
  * per la riga di un surplus sulle tariffe.
+ *
+ * LE RIGHE DI TOTALE IN MEZZO ALLA TABELLA (subtotali, 14/10/2026). Il report
+ * dell'attiva col surplus vuole sotto i formulari il «Totale formulari», poi le
+ * righe dei surplus, poi il TOTALE, come il suo Excel. Con un solo `totali` il
+ * «Totale formulari» poteva stare solo nel sottotitolo: messo fra le righe, il
+ * piede l'avrebbe contato («382 righe» per 380 formulari e un surplus).
+ * subtotali: [{ dopo, etichetta, valori: { [indiceColonna]: numero } }], ognuno
+ * scritto dopo le prime `dopo` righe, in grassetto e nel colore dei totali, con
+ * l'etichetta nella prima colonna come il TOTALE. Il piede conta solo le righe.
  */
-export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottotitolo, colonne, righe, totali, colore, documento }) {
+export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottotitolo, colonne, righe, totali, subtotali, colore, documento }) {
   const intest = await documentoDa({ titolo, sottotitolo, ...(documento || {}) });
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -217,13 +228,21 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
   const conteggio = `${formatIntero(righe.length)} ${righe.length === 1 ? 'riga' : 'righe'}`;
 
   // Anche le celle vanno a capo, fino a tre righe: una nota lunga non si perde.
-  const riga = (celle, { sfondo, grassetto, corsivo, barra, coloreTesto, altezza: minima = 6 } = {}) => {
+  // `distesa`: la prima cella, un'etichetta di testo, si allarga sulle celle
+  // vuote che la seguono invece di andare a capo. «Totale formulari» nella
+  // colonna stretta della Regione del report ACI usciva su due righe.
+  const vuota = (v) => v === null || v === undefined || v === '';
+  const riga = (celle, { sfondo, grassetto, corsivo, barra, coloreTesto, distesa, altezza: minima = 6 } = {}) => {
     const stile = grassetto ? 'bold' : corsivo ? 'italic' : 'normal';
     doc.setFont('helvetica', stile);
     doc.setFontSize(7.4);
+    let primaLarga = larghezze[0];
+    if (distesa && !NUMERICI.has(colonne[0].tipo)) {
+      for (let j = 1; j < colonne.length && vuota(celle[j]); j++) primaLarga += larghezze[j];
+    }
     const testi = colonne.map((c, i) => {
       const v = celle[i];
-      return v === null || v === undefined || v === '' ? [] : doc.splitTextToSize(perPdf(v), larghezze[i] - 3).slice(0, 3);
+      return vuota(v) ? [] : doc.splitTextToSize(perPdf(v), (i === 0 ? primaLarga : larghezze[i]) - 3).slice(0, 3);
     });
     const altezza = minima + (Math.max(1, ...testi.map(t => t.length)) - 1) * 3.3;
     if (y + altezza > H - 12) {
@@ -256,12 +275,25 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
     y += altezza;
   };
 
+  // Un subtotale si scrive prima della riga numero `dopo` (contata da zero), o
+  // in fondo se `dopo` arriva alla fine; un numero fuori misura va in fondo.
+  const posto = (s) => Math.min(Math.max(0, Math.trunc(Number(s.dopo) || 0)), righe.length);
+  const subtotaliDopo = (n) => {
+    for (const s of subtotali || []) {
+      if (posto(s) !== n) continue;
+      y += 1.5;
+      riga(colonne.map((c, i) => (i === 0 ? s.etichetta : (s.valori && s.valori[i] !== undefined ? testoCella(s.valori[i], c.tipo) : ''))),
+        { grassetto: true, coloreTesto: C.scuro, distesa: true });
+    }
+  };
+
   testata();
   intestazioni();
   if (!righe.length) {
     riga(colonne.map((c, i) => (i === 0 ? 'Nessuna riga' : '')), { coloreTesto: C.grigio });
   }
   righe.forEach((r, i) => {
+    subtotaliDopo(i);
     const evidenza = colore ? colore(r) : null;
     const surplus = evidenza === 'surplus';
     riga(colonne.map(c => testoCella(c.valore(r), c.tipo)), {
@@ -271,6 +303,7 @@ export async function esportaTabellaPdf({ nomeFile, intestazione, titolo, sottot
       coloreTesto: evidenza ? C[evidenza] : null,
     });
   });
+  subtotaliDopo(righe.length);
   if (totali) {
     y += 1.5;
     riga(colonne.map((c, i) => (i === 0 ? totali.etichetta : (totali.valori[i] !== undefined ? testoCella(totali.valori[i], c.tipo) : ''))),

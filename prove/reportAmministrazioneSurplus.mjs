@@ -285,11 +285,11 @@ console.log('4. I PDF: LA RIGA DEL SURPLUS INTERA, NEL SUO COLORE');
   const COLORE = /0\.93 0\.95 1\.? rg/, TESTO = /0\.216 0\.188 0\.639 rg/;
   const pezzi = ['Fuel Surcharge', 'consorzio Ecotyre', 'dal 01/10/2026 al 31/12/2026'];
   for (const [nome, fai, attesi] of [
-    ['report attiva, rete', () => fatt.exportFatturazioneAttivaPdf('RETE', CON.RETE, 2026, 'Ottobre', { stato: STATO }), { base: '+5,00 €/t sulle 471,65 t del mese', importo: '2.358,25 €', totale: '97.631,55 €', sotto: '95 righe e la riga del Fuel Surcharge  ·  formulari € 95.273,30  ·  cliente Ecotyre', piede: '96 righe' }],
-    ['report attiva, ACI', () => fatt.exportFatturazioneAttivaPdf('ACI', CON.ACI, 2026, 'Ottobre', { stato: STATO }), { base: '+5,00 €/t sulle 7,60 t del mese', importo: '38,00 €', totale: '1.862,00 €', sotto: '3 righe e la riga del Fuel Surcharge  ·  formulari € 1.824,00  ·  cliente Ecotyre', piede: '4 righe' }],
-    ['report attiva, extra raccolta', () => fatt.exportFatturazioneAttivaPdf('EXTRA_RACCOLTA', CON.EXTRA_RACCOLTA, 2026, 'Ottobre', { stato: STATO }), { base: '+5,00 €/t sulle 0,46 t del mese', importo: '2,30 €', totale: '215,22 €', sotto: '2 righe e la riga del Fuel Surcharge  ·  formulari € 212,92  ·  cliente Ecotyre', piede: '3 righe' }],
-    ['format, rete', () => amm.exportAmministrazioneAttivaPdf('RETE', CON.RETE, 2026, 'Ottobre'), { base: '+5,00 €/t sulle 471,65 t del mese', importo: '2.358,25 €', totale: '97.631,55 €', sotto: '95 righe e la riga del Fuel Surcharge  ·  471.650 kg  ·  formulari € 95.273,30', piede: '96 righe', prezzo: '0,005 €', kg: '471.650' }],
-    ['format, ACI', () => amm.exportAmministrazioneAttivaPdf('ACI', CON.ACI, 2026, 'Ottobre'), { base: '+5,00 €/t sulle 7,60 t del mese', importo: '38,00 €', totale: '1.862,00 €', sotto: '3 righe e la riga del Fuel Surcharge  ·  7.600 kg  ·  formulari € 1.824,00', piede: '4 righe', kg: '7.600' }],
+    ['report attiva, rete', () => fatt.exportFatturazioneAttivaPdf('RETE', CON.RETE, 2026, 'Ottobre', { stato: STATO }), { base: '+5,00 €/t sulle 471,65 t del mese', importo: '2.358,25 €', totale: '97.631,55 €', sotto: '95 righe e la riga del Fuel Surcharge  ·  formulari € 95.273,30  ·  cliente Ecotyre', piede: '96 righe', sub: ['95.273,30 €'] }],
+    ['report attiva, ACI', () => fatt.exportFatturazioneAttivaPdf('ACI', CON.ACI, 2026, 'Ottobre', { stato: STATO }), { base: '+5,00 €/t sulle 7,60 t del mese', importo: '38,00 €', totale: '1.862,00 €', sotto: '3 righe e la riga del Fuel Surcharge  ·  formulari € 1.824,00  ·  cliente Ecotyre', piede: '4 righe', sub: ['1.824,00 €'] }],
+    ['report attiva, extra raccolta', () => fatt.exportFatturazioneAttivaPdf('EXTRA_RACCOLTA', CON.EXTRA_RACCOLTA, 2026, 'Ottobre', { stato: STATO }), { base: '+5,00 €/t sulle 0,46 t del mese', importo: '2,30 €', totale: '215,22 €', sotto: '2 righe e la riga del Fuel Surcharge  ·  formulari € 212,92  ·  cliente Ecotyre', piede: '3 righe', sub: ['212,92 €'] }],
+    ['format, rete', () => amm.exportAmministrazioneAttivaPdf('RETE', CON.RETE, 2026, 'Ottobre'), { base: '+5,00 €/t sulle 471,65 t del mese', importo: '2.358,25 €', totale: '97.631,55 €', sotto: '95 righe e la riga del Fuel Surcharge  ·  471.650 kg  ·  formulari € 95.273,30', piede: '96 righe', prezzo: '0,005 €', kg: '471.650', sub: ['471.650', '95.273,30 €'] }],
+    ['format, ACI', () => amm.exportAmministrazioneAttivaPdf('ACI', CON.ACI, 2026, 'Ottobre'), { base: '+5,00 €/t sulle 7,60 t del mese', importo: '38,00 €', totale: '1.862,00 €', sotto: '3 righe e la riga del Fuel Surcharge  ·  7.600 kg  ·  formulari € 1.824,00', piede: '4 righe', kg: '7.600', sub: ['7.600', '1.824,00 €'] }],
   ]) {
     const p = await pdf(fai);
     // le righe di una cella che va a capo sono scritte una dopo l'altra: unite, la cella e' intera
@@ -300,6 +300,18 @@ console.log('4. I PDF: LA RIGA DEL SURPLUS INTERA, NEL SUO COLORE');
       J(p.scritte.slice(p.scritte.indexOf('TOTALE'), p.scritte.indexOf('TOTALE') + 3)));
     verifica(`${nome}: il sottotitolo col totale dei formulari, e il piede «${attesi.piede}»`, p.scritte.includes(attesi.sotto) && p.scritte.some(s => s === attesi.piede), J(p.scritte.filter(s => /righe/.test(s))));
     verifica(`${nome}: la riga nel colore del surplus, come nei fogli della passiva`, COLORE.test(p.flusso) && TESTO.test(p.flusso));
+    // IL «TOTALE FORMULARI» HA LA SUA RIGA ANCHE NEL PDF (14/10/2026): sotto
+    // l'ultimo formulario, sopra il surplus e il TOTALE, coi numeri dei soli
+    // formulari (nel format anche i chili), come nell'Excel. Il piede resta
+    // quello di prima: formulari e surplus, non la riga del totale.
+    const iSub = p.scritte.indexOf('Totale formulari');
+    const iTot = p.scritte.indexOf('TOTALE');
+    const iUltimoFir = p.scritte.reduce((u, s, i) => (/^FIR\d+$/.test(s) ? i : u), -1);
+    const iSurplus = p.scritte.indexOf(attesi.importo, iSub + 1);
+    verifica(`${nome}: la riga «Totale formulari» (${attesi.sub.join(', ')}), una sola, dopo l'ultimo formulario e prima del surplus e del TOTALE`,
+      iSub > 0 && p.scritte.filter(s => s === 'Totale formulari').length === 1 && uguali(p.scritte.slice(iSub + 1, iSub + 1 + attesi.sub.length), attesi.sub)
+      && iUltimoFir > 0 && iUltimoFir < iSub && iSurplus > iSub && iSurplus < iTot,
+      J({ iSub, iUltimoFir, iSurplus, iTot, dopo: p.scritte.slice(iSub, iSub + 4) }));
   }
   // senza surplus: niente colore del surplus, niente parole nuove, il sottotitolo di prima
   const p0 = await pdf(() => fatt.exportFatturazioneAttivaPdf('RETE', SENZA.RETE, 2026, 'Ottobre', { stato: STATO }));
@@ -307,6 +319,9 @@ console.log('4. I PDF: LA RIGA DEL SURPLUS INTERA, NEL SUO COLORE');
     p0.scritte.includes('95 righe  ·  cliente Ecotyre') && !/Fuel|formulari €/.test(p0.testo) && !COLORE.test(p0.flusso) && p0.scritte.includes('95.273,30 €'), J(p0.scritte.filter(s => /righe/.test(s))));
   const m0 = await pdf(() => amm.exportAmministrazioneAttivaPdf('RETE', SENZA.RETE, 2026, 'Ottobre'));
   verifica('...e quello del format: «95 righe · 471.650 kg»', m0.scritte.includes('95 righe  ·  471.650 kg') && !/Fuel/.test(m0.testo) && !COLORE.test(m0.flusso), J(m0.scritte.filter(s => /righe/.test(s))));
+  verifica('...e senza surplus nessuna riga «Totale formulari»: il TOTALE e\' gia\' quello dei formulari, piede «95 righe»',
+    !p0.scritte.includes('Totale formulari') && !m0.scritte.includes('Totale formulari') && p0.scritte.includes('95 righe') && m0.scritte.includes('95 righe'),
+    J([p0.scritte.filter(s => /Totale|righe/.test(s)), m0.scritte.filter(s => /Totale|righe/.test(s))]));
   // il caso piu' lungo: un accordo commerciale, a 12,50 €/t, su 1.120,245 t e su colonne strette
   const lunga = (tip) => [{ ...CON[tip].find(eRigaSurplus), tariffa_valore: 12.5, kg_riferimento: 1120245, totale: 14003.06, note: 'Bonus trasporti (accordo commerciale), dal 16/10/2026 al 31/12/2026, sulle stesse 1.120,245 t del mese', descrizione: 'Bonus trasporti' }];
   for (const [nome, fai] of [
@@ -318,6 +333,39 @@ console.log('4. I PDF: LA RIGA DEL SURPLUS INTERA, NEL SUO COLORE');
     verifica(`${nome}: anche la riga piu' lunga arriva intera (accordo commerciale, +12,50 €/t sulle 1.120,245 t)`,
       ['Bonus trasporti', 'accordo commerciale', 'dal 16/10/2026 al 31/12/2026', '+12,50 €/t sulle 1.120,245 t del mese'].every(t => p.testo.replace(/\s+/g, ' ').includes(t)), J(p.scritte.slice(-22)));
   }
+}
+
+console.log('4b. LE RIGHE DI TOTALE IN MEZZO ALLA TABELLA (subtotali di esportaTabellaPdf)');
+{
+  // L'opzione da sola, sulla macchina comune: dove si scrive, che cosa dice, e
+  // che il piede non la conta. Anche a cavallo di una pagina e con un `dopo`
+  // fuori misura.
+  const colonne = [{ titolo: 'Voce', tipo: 'testo', valore: (r) => r[0] }, { titolo: 'Chili', tipo: 'kg', valore: (r) => r[1] }, { titolo: 'Importo', tipo: 'euro', valore: (r) => r[2] }];
+  const tabella = (righe, subtotali, totali) => pdf(() => globalThis.__TABELLA.esportaTabellaPdf({ nomeFile: 'prova', titolo: 'Prova', colonne, righe, subtotali, totali, documento: { stato: STATO } }));
+  const p = await tabella([['a', 1000, 10], ['b', 2000, 20], ['c', null, 5]], [{ dopo: 2, etichetta: 'Parziale', valori: { 1: 3000, 2: 30 } }], { etichetta: 'TOTALE', valori: { 1: 3000, 2: 35 } });
+  const corpo = p.scritte.slice(p.scritte.indexOf('a'), p.scritte.indexOf('TOTALE') + 3);
+  verifica('dopo le prime due righe, coi suoi numeri all\'italiana; poi la terza riga e il TOTALE',
+    uguali(corpo, ['a', '1.000', '10,00 €', 'b', '2.000', '20,00 €', 'Parziale', '3.000', '30,00 €', 'c', '5,00 €', 'TOTALE', '3.000', '35,00 €']), J(corpo));
+  verifica('il piede conta le righe della tabella, non il subtotale: «3 righe»', p.scritte.includes('3 righe') && !p.scritte.includes('4 righe'), J(p.scritte.filter(s => /righe/.test(s))));
+  // a cavallo di pagina: 150 righe, il subtotale dopo la 100a
+  const molte = Array.from({ length: 150 }, (_, i) => [`r${i + 1}`, 1000, 1]);
+  const q = await tabella(molte, [{ dopo: 100, etichetta: 'Parziale', valori: { 2: 100 } }], { etichetta: 'TOTALE', valori: { 2: 150 } });
+  const iParz = q.scritte.indexOf('Parziale');
+  const pagine = q.scritte.filter(s => /Pagina \d+ di \d+/.test(s)).length;
+  verifica('su piu\' pagine: il subtotale fra la riga 100 e la 101, una volta sola, e il piede «150 righe» su ogni pagina',
+    iParz > q.scritte.indexOf('r100') && iParz < q.scritte.indexOf('r101') && q.scritte[iParz + 1] === '100,00 €' && q.scritte.filter(s => s === 'Parziale').length === 1
+    && pagine > 1 && q.scritte.filter(s => s === '150 righe').length === pagine, J({ iParz, pagine, n: q.scritte.filter(s => s === '150 righe').length }));
+  const r = await tabella([['a', 1, 1]], [{ dopo: 99, etichetta: 'In fondo', valori: { 2: 1 } }, { dopo: -3, etichetta: 'In cima', valori: {} }]);
+  verifica('un `dopo` oltre la fine va in fondo, uno negativo in cima', r.scritte.indexOf('In cima') < r.scritte.indexOf('a') && r.scritte.indexOf('In fondo') > r.scritte.indexOf('a') && r.scritte.includes('1 riga'),
+    J(r.scritte.slice(r.scritte.indexOf('In cima'), r.scritte.indexOf('In fondo') + 2)));
+  const s = await tabella([['a', 1, 1]]);
+  verifica('senza subtotali la tabella di prima', !/Parziale|In fondo|In cima/.test(s.testo) && s.scritte.includes('1 riga'));
+  // in una prima colonna stretta l'etichetta si allarga sulle celle vuote che
+  // la seguono, e non va a capo; una cella di dati lunga invece a capo ci va
+  const strette = [{ titolo: 'Reg.', tipo: 'testo', peso: 0.2, valore: (x) => x[0] }, ...Array.from({ length: 10 }, (_, i) => ({ titolo: `C${i}`, tipo: 'testo', valore: () => '' })), { titolo: 'Importo', tipo: 'euro', valore: (x) => x[1] }];
+  const n = await pdf(() => globalThis.__TABELLA.esportaTabellaPdf({ nomeFile: 'prova', titolo: 'Prova', colonne: strette, righe: [['Campania', 1]], subtotali: [{ dopo: 1, etichetta: 'Totale formulari', valori: { 11: 1 } }], documento: { stato: STATO } }));
+  verifica('nella colonna stretta «Totale formulari» resta su una riga, «Campania» va a capo come prima',
+    n.scritte.includes('Totale formulari') && !n.scritte.includes('Campania'), J(n.scritte.slice(n.scritte.indexOf('Importo'), n.scritte.indexOf('Importo') + 8)));
 }
 
 console.log('5. DUE RECORD DELLO STESSO SURPLUS: DUE RIGHE, DISTINTE');
@@ -355,6 +403,21 @@ console.log('6. I DATI VERI DELL\'11/10/2026');
     const { ws } = await excel(() => amm.exportAmministrazioneAttiva('RETE', ott.RETE, 2026, 'Ottobre'));
     const n = ws.rowCount;
     verifica('...e nel format, calcolato, i chili del TOTALE restano 321.830', calcolaCella(ws, `G${n}`) === 321830 && al2(calcolaCella(ws, `I${n}`)) === t.totale, J([calcolaCella(ws, `G${n}`), calcolaCella(ws, `I${n}`)]));
+    // i PDF di ottobre vero (14/10/2026): la riga «Totale formulari» coi numeri
+    // dei formulari, il surplus, il TOTALE, e il piede che conta 114 righe
+    const eu = (v) => `${v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+    for (const [nome, fai, sub] of [
+      ['report attiva', () => fatt.exportFatturazioneAttivaPdf('RETE', ott.RETE, 2026, 'Ottobre', { stato: STATO }), [eu(t.totale_formulari)]],
+      ['format', () => amm.exportAmministrazioneAttivaPdf('RETE', ott.RETE, 2026, 'Ottobre'), ['321.830', eu(t.totale_formulari)]],
+    ]) {
+      const p = await pdf(fai);
+      const i = p.scritte.indexOf('Totale formulari');
+      const iTot = p.scritte.indexOf('TOTALE');
+      verifica(`...e il PDF del ${nome} di ottobre: «Totale formulari» ${sub.join(' ')}, poi 1.609,15 € del Fuel Surcharge, poi il TOTALE ${eu(t.totale)}; piede «114 righe»`,
+        i > 0 && uguali(p.scritte.slice(i + 1, i + 1 + sub.length), sub) && p.scritte.indexOf('1.609,15 €', i) > i && p.scritte.indexOf('1.609,15 €', i) < iTot
+        && p.scritte.slice(iTot + 1, iTot + 3).includes(eu(t.totale)) && p.scritte.includes('114 righe'),
+        J({ sub: p.scritte.slice(i, i + 3), tot: p.scritte.slice(iTot, iTot + 3), piede: p.scritte.filter(s => /righe$/.test(s)) }));
+    }
 
     // settembre senza surplus: i numeri che l'utente ha verificato, e nessuna riga in piu'
     const set = vere('Settembre', []);

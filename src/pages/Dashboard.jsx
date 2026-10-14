@@ -11,19 +11,40 @@ import EsportaPdf from '@/components/shared/EsportaPdf';
 import IntestazioneCommessa, { IndiceSezioni } from '@/components/dashboard/IntestazioneCommessa';
 import DaGestire from '@/components/dashboard/DaGestire';
 import QuadroInBreve from '@/components/dashboard/QuadroInBreve';
-import SezioneRete from '@/components/dashboard/SezioneRete';
-import SezioneAci from '@/components/dashboard/SezioneAci';
-import SezioneExtra from '@/components/dashboard/SezioneExtra';
 import SezioneImpianti from '@/components/dashboard/SezioneImpianti';
 import SezioneFatturazione from '@/components/dashboard/SezioneFatturazione';
 import SezioneEconomia from '@/components/dashboard/SezioneEconomia';
 import FreschezzaDati from '@/components/dashboard/FreschezzaDati';
 import { vociDalMargine, unisciVoci, contaPerSezione, riassuntoControlli } from '@/components/dashboard/vociDashboard';
-import { argomentiQuadroPdf } from '@/components/dashboard/esportaQuadro';
 
 // La chiusura del mese legge una dozzina di archivi (statoChiusuraMese): si
 // scarica e si legge solo quando si apre la sua sezione, che parte sempre chiusa.
 const ChiusuraMese = lazy(() => import('@/components/dashboard/ChiusuraMese'));
+
+// I GRAFICI SI SCARICANO MENTRE ARRIVANO I DATI (14/10/2026).
+//
+// Il grafico mese per mese della rete (ReteMesi, dentro SezioneRete) porta con
+// se' la libreria dei grafici, che con le sue dipendenze era quasi tutto il
+// pacchetto della pagina: 477 kB, da scaricare prima di disegnare anche solo
+// l'intestazione, e solo dopo partivano le letture del cruscotto e del quadro.
+// Le tre sezioni dei canali si disegnano comunque solo quando il quadro e'
+// arrivato (getDashboardRaccolta), quindi si scaricano a parte: la pagina si
+// apre subito, le letture partono subito, e il pezzo dei grafici si chiede al
+// primo disegno (preparaSezioni, qui sotto) e arriva mentre il server conta.
+// Sono tre insieme perche' SezioneAci prende due riquadri da SezioneRete, e
+// SezioneExtra una tabella da SezioneAci: una sola resterebbe legata alle altre.
+// Il nome resta quello della sezione, per chi la cerca nell'albero (le prove).
+const preparaSezioni = () => Promise.all([
+  import('@/components/dashboard/SezioneRete'),
+  import('@/components/dashboard/SezioneAci'),
+  import('@/components/dashboard/SezioneExtra'),
+]);
+const SezioneRete = lazy(() => import('@/components/dashboard/SezioneRete'));
+const SezioneAci = lazy(() => import('@/components/dashboard/SezioneAci'));
+const SezioneExtra = lazy(() => import('@/components/dashboard/SezioneExtra'));
+SezioneRete.displayName = 'SezioneRete';
+SezioneAci.displayName = 'SezioneAci';
+SezioneExtra.displayName = 'SezioneExtra';
 
 // IL QUADRO DELLA COMMESSA (migliorie dell'11/10/2026).
 //
@@ -124,6 +145,9 @@ export default function Dashboard() {
     leggiQuadro();
     return () => { letturaQuadro.current++; };
   }, [leggiQuadro]);
+  // Le sezioni dei canali, coi grafici, si scaricano intanto che il quadro
+  // arriva. Se non arrivano qui, ci riprova il Suspense quando servono.
+  useEffect(() => { preparaSezioni().catch(() => {}); }, []);
   const raccoltaPronta = raccolta.anno === anno && (raccolta.dati || raccolta.errore);
   const quadro = raccolta.anno === anno && raccolta.dati ? raccolta.dati.quadro : null;
 
@@ -269,7 +293,11 @@ export default function Dashboard() {
       <EsportaPdf
         etichetta="Esporta il quadro (PDF)"
         disabilitato={!quadro}
-        sezioni={() => argomentiQuadroPdf({ quadro, impianti, annoInCorso, mesiAttiva, margine: margineAnno, conEconomia, isAdmin })}
+        // Il PDF si prepara al clic, e il suo modulo si scarica allora (14/10/2026).
+        sezioni={async () => {
+          const { argomentiQuadroPdf } = await import('@/components/dashboard/esportaQuadro');
+          return argomentiQuadroPdf({ quadro, impianti, annoInCorso, mesiAttiva, margine: margineAnno, conEconomia, isAdmin });
+        }}
       />
     </div>
   );
@@ -312,11 +340,11 @@ export default function Dashboard() {
       {!raccoltaPronta ? (
         <div className="flex items-center py-6 text-muted-foreground text-sm"><Loader2 className="w-5 h-5 animate-spin mr-2" aria-hidden="true" /> Lettura della commessa del {anno}…</div>
       ) : quadro ? (
-        <>
+        <Suspense fallback={<div className="flex items-center py-6 text-muted-foreground text-sm"><Loader2 className="w-5 h-5 animate-spin mr-2" aria-hidden="true" /> Apertura delle sezioni rete, ACI ed extra raccolta…</div>}>
           <SezioneRete quadro={quadro} arretrato={cruscotto?.arretrato?.RETE || null} annoInCorso={annoInCorso} {...sezioneProps('rete')} />
           <SezioneAci quadro={quadro} arretrato={cruscotto?.arretrato?.ACI || null} annoInCorso={annoInCorso} {...sezioneProps('aci')} />
           <SezioneExtra quadro={quadro} {...sezioneProps('extra')} />
-        </>
+        </Suspense>
       ) : !raccolta.errore ? (
         <p className="text-sm text-muted-foreground">{raccolta.dati?.quadro_perche || 'Il quadro della commessa non è arrivato.'}</p>
       ) : null}

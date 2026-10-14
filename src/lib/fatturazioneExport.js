@@ -111,8 +111,9 @@ export function tabellaAttiva(tipologia, righe, anno, mese) {
 /**
  * Il sottotitolo del report: «380 righe  ·  cliente Ecotyre», e con un surplus
  * «380 righe e la riga del Fuel Surcharge  ·  formulari € 226.288,48  ·
- * cliente Ecotyre»: nel PDF il Totale formulari sta qui (vedi
- * exportFatturazioneAttivaPdf).
+ * cliente Ecotyre». Dal 14/10/2026 il Totale formulari ha anche la sua riga
+ * nel PDF (vedi exportFatturazioneAttivaPdf); qui resta, uguale nel foglio
+ * «Note» dell'Excel e nella testa del PDF.
  */
 const sottotitoloAttiva = (t) => (t.surplus.length
   ? `${t.righe_a_parole}  ·  formulari ${euro(t.totale_formulari)}  ·  cliente Ecotyre`
@@ -204,10 +205,15 @@ const notaSurplus = (s) => `${s.nome}${s.origine ? ` (${s.origine})` : ''}${s.va
 //
 // IL SURPLUS NEL PDF (13/10/2026 sera): le righe dei surplus sotto i
 // formulari, col colore 'surplus' di esportaTabella (indaco in corsivo con la
-// barra, come nei fogli della passiva), e il TOTALE che le comprende. Il
-// «Totale formulari» sta nel sottotitolo e non in una riga: il piede del PDF
-// conta le righe della tabella, e con una riga di totale in piu' direbbe 382
-// righe per 380 formulari e un surplus.
+// barra, come nei fogli della passiva), e il TOTALE che le comprende.
+//
+// IL «TOTALE FORMULARI» HA LA SUA RIGA ANCHE NEL PDF (14/10/2026). Stava solo
+// nel sottotitolo, perche' il piede del PDF conta le righe della tabella e con
+// una riga di totale in piu' avrebbe detto 382 righe per 380 formulari e un
+// surplus. Ora esportaTabellaPdf ha i subtotali, che il piede non conta: sotto i
+// formulari il «Totale formulari», poi i surplus, poi il TOTALE, come nell'Excel.
+// Il piede dice ancora formulari e surplus («381 righe»), il sottotitolo resta
+// quello del foglio «Note». Senza surplus il PDF e' quello di prima.
 export async function exportFatturazioneAttivaPdf(tipologia, righe, anno, mese, opzioni = {}) {
   const t = tabellaAttiva(tipologia, righe, anno, mese);
   // esportaTabella si porta dietro jspdf: pigro anche lui.
@@ -220,6 +226,7 @@ export async function exportFatturazioneAttivaPdf(tipologia, righe, anno, mese, 
     sottotitolo: sottotitoloAttiva(t),
     colonne: t.colonne.map((c, i) => ({ ...c, valore: (r) => r[i] })),
     righe: [...t.righe, ...t.surplus.map(s => s.celle)],
+    ...(t.surplus.length ? { subtotali: [{ dopo: t.righe.length, etichetta: 'Totale formulari', valori: { [t.iTotale]: t.totale_formulari } }] } : {}),
     totali: { etichetta: 'TOTALE', valori: { [t.iTotale]: t.totale } },
     ...(delSurplus.size ? { colore: (r) => (delSurplus.has(r) ? 'surplus' : null) } : {}),
     documento: { canale: tipologia, periodo: `${mese} ${anno}`, entita: ARCHIVI_ATTIVA[tipologia] || [], ...(opzioni.stato !== undefined ? { stato: opzioni.stato } : {}) },
