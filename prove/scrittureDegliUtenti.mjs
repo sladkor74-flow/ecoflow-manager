@@ -93,7 +93,17 @@ for (const n of file) {
   for (const r of righe) if (/"data\.[a-z_]+"\s*:/.test(r)) conPrefisso.push(`${n}: ${r.trim()}`);
 }
 verifica('nessuna regola e\' scritta come null', nulli.length === 0, nulli.join(' | '));
-verifica('nessuna condizione usa il prefisso "data." non confermato', conPrefisso.length === 0, conPrefisso.join(' | '));
+// LE CONDIZIONI SU UN CAMPO NOSTRO GIA' GUARDATE, una per una.
+// - ModificaDato (revisione del 14/10/2026): chi non e' amministratore riceve le
+//   sole righe dello storico con riservato falso, perche' lo storico tiene una
+//   copia dei surplus, che legge solo l'amministratore. Le righe le crea solo
+//   l'amministratore, e riservato si scrive sempre vero o falso: una riga
+//   senza il campo resterebbe a lui, dalla parte sicura (prove/chiLeggeCosa.mjs,
+//   sezione 10).
+const GUARDATE = ['ModificaDato.jsonc: "data.riservato": false'];
+const nonGuardate = conPrefisso.filter(x => !GUARDATE.includes(x));
+verifica('nessuna condizione usa il prefisso "data." non confermato', nonGuardate.length === 0, nonGuardate.join(' | '));
+verifica('e quelle guardate ci sono ancora (se no si tolgono dall\'elenco)', GUARDATE.every(x => conPrefisso.includes(x)), conPrefisso.join(' | '));
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

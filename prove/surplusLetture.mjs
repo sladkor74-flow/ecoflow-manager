@@ -312,7 +312,13 @@ function analizza(sorgenti) {
   // fetchAllClient(base44.entities.SurplusTariffa, ...)) o letto direttamente
   // (.SurplusTariffa.list / .filter / .get), o entities['SurplusTariffa'].
   const legge = (f) => /\.\s*SurplusTariffa\b\s*(?:\.\s*(?:list|filter|get)\s*\(|[,)])/.test(f.struttura)
-    || /\[\s*['"`]SurplusTariffa['"`]\s*\]/.test(f.codice);
+    || /\[\s*['"`]SurplusTariffa['"`]\s*\]/.test(f.codice)
+    // La funzione leggiSurplus (13/10/2026): SurplusTariffa lo legge solo
+    // l'amministratore, e una pagina che serve a tutti lo chiede alla funzione,
+    // che legge l'archivio intero (src/lib/leggiSurplus.js). Conta come lettura
+    // la sua chiamata, col nome con cui il file la importa.
+    || f.importazioni.some(imp => baseDi(imp.da) === 'leggiSurplus' && imp.importato === 'leggiSurplus'
+      && new RegExp(`(?<![\\w$.])${imp.locale.replace(/[.$]/g, (c) => '\\' + c)}\\s*\\(`).test(f.struttura));
 
   // I nomi con cui un file chiama una funzione definita in `daFile`: il suo nome
   // nel file stesso, il nome locale (anche con alias) in chi la importa da li',
@@ -833,6 +839,15 @@ console.log('1. LA GUARDIA SI PROVA DA SOLA, SU SORGENTI COSTRUITI');
       '}',
     ].join('\n'),
   });
+  // La lettura dalla funzione leggiSurplus (13/10/2026): la pagina che serve
+  // anche a chi non e' amministratore chiede i surplus alla funzione.
+  const daFunzione = (riga) => guardiaFinta({ ...base, 'src/pages/Extra.jsx': base['src/pages/Extra.jsx']
+    .replace("import { contestoPrezzi } from '@/lib/extraRaccoltaCalc';", "import { contestoPrezzi } from '@/lib/extraRaccoltaCalc';\nimport { leggiSurplus as chiedi } from '@/lib/leggiSurplus';")
+    .replace('fetchAllClient(base44.entities.SurplusTariffa).then(setSurplus);', riga) });
+  verifica('la chiamata di leggiSurplus, anche con un altro nome, vale come lettura di SurplusTariffa',
+    (trova(daFunzione('chiedi().then(setSurplus);'), 'chiamata', 'src/pages/Extra.jsx:7') || {}).ok === true, JSON.stringify(falliti(daFunzione('chiedi().then(setSurplus);'))));
+  verifica('e una funzione qualunque no', (trova(daFunzione('leggiAltro().then(setSurplus);'), 'chiamata', 'src/pages/Extra.jsx:7') || {}).ok === false);
+  verifica('e nemmeno leggiSurplus importata e mai chiamata', (trova(daFunzione('leggiAltro().then(setSurplus); const f = chiedi;'), 'chiamata', 'src/pages/Extra.jsx:7') || {}).ok === false);
   verifica('la lettura in parallelo si segue per posizione', (trova(parallela('tariffe, fornitori, extra'), 'chiamata', 'src/pages/Extra.jsx:4') || {}).ok === true);
   verifica('e una variabile della stessa lettura ma di un altro archivio non e\' il surplus', (trova(parallela('tariffe, fornitori, fornitori'), 'chiamata', 'src/pages/Extra.jsx:4') || {}).ok === false);
   // Un modulo condiviso coi tipi del .ts, che lo riceve e lo passa.

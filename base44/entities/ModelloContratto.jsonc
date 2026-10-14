@@ -42,7 +42,7 @@
     },
     "punti_json": {
       "type": "string",
-      "description": "I punti che cambiano, riconosciuti nel format e confermati dall'amministratore (12/10/2026): [{ segnaposto, nome, categoria, tipo, stile, originale, occorrenze }]. Lo stile dice come scrivere una data (02 Gennaio 2026, 01/06/2026). Per i prezzi il valore del format non si conserva: il modello lo legge chiunque sia collegato"
+      "description": "I punti che cambiano, riconosciuti nel format e confermati dall'amministratore (12/10/2026): [{ segnaposto, nome, categoria, tipo, stile, originale, occorrenze }]. Lo stile dice come scrivere una data (02 Gennaio 2026, 01/06/2026). Per i prezzi il valore del format non si conserva: e' un costo dei fornitori, e resta solo nel contratto"
     },
     "fornitore_origine": {
       "type": "string",
@@ -72,7 +72,20 @@
     "tipo_contratto"
   ],
   "rls": {
-    "read": true,
+    // LA LETTURA E' DELL'AMMINISTRATORE (decisione del 13/10/2026).
+    //
+    // Il modello porta il file_uri del .docx, che e' la chiave del documento per
+    // qualunque utente collegato, e i punti che cambiano coi valori del format da
+    // cui e' nato. Lo carica e lo usa solo l'amministratore, nella sezione
+    // «Modelli dei contratti» della scheda Contratti: la pagina riceve i modelli
+    // dalla funzione contrattiAnno, che legge con asServiceRole, e il file si
+    // apre da apriFile. Dal browser restano solo la creazione e la sostituzione
+    // di un modello, dell'amministratore. Prova: prove/chiLeggeCosa.mjs.
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
     "create": {
       "user_condition": {
         "role": "admin"

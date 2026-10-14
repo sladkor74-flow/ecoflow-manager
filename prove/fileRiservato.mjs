@@ -182,10 +182,13 @@ console.log('CHE COSA RESTA APERTO, SCRITTO DOVE SI LEGGE');
     const rls = ENTITA(a.entita).rls || {};
     return rls.read === true;
   }).map(a => a.entita).sort();
-  verifica('restano cinque archivi con il riferimento leggibile da tutti',
-    aperti.join(',') === 'ContrattoFornitore,ModelloContratto,ModelloDocumento,QuadraturaFir,UploadLog,VerificaReport'
-    || aperti.join(',') === 'ContrattoFornitore,EsportazioneFatturazione,ModelloContratto,ModelloDocumento,QuadraturaFir,UploadLog,VerificaReport',
+  // ContrattoFornitore e ModelloContratto dal 13/10/2026 li legge solo
+  // l'amministratore (decisione dell'utente, prove/chiLeggeCosa.mjs).
+  verifica('restano gli archivi con il riferimento leggibile da tutti che si sanno',
+    aperti.join(',') === 'ModelloDocumento,QuadraturaFir,UploadLog,VerificaReport'
+    || aperti.join(',') === 'EsportazioneFatturazione,ModelloDocumento,QuadraturaFir,UploadLog,VerificaReport',
     aperti.join(','));
+  verifica('e i contratti e i loro modelli non sono fra quelli', !aperti.includes('ContrattoFornitore') && !aperti.includes('ModelloContratto'));
   verifica('e il documento di qualifica non e fra quelli', !aperti.includes('DocumentoQualifica'));
   // Nelle istruzioni del progetto la cosa resta scritta, con il motivo: un
   // buco noto che non sta scritto da nessuna parte e' un buco dimenticato.

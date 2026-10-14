@@ -117,7 +117,28 @@
     "tipo_contratto"
   ],
   "rls": {
-    "read": true,
+    // LA LETTURA E' DELL'AMMINISTRATORE (decisione del 13/10/2026).
+    //
+    // Un contratto porta i prezzi dei fornitori (valori_json e importi_json: i
+    // corrispettivi, cioe' i costi di SMOCO) e i riferimenti ai file del
+    // contratto generato, di quello controfirmato e delle versioni sostituite
+    // (file_uri, versioni_json). Un file_uri e' la chiave del documento per
+    // qualunque utente collegato (vedi DocumentoQualifica). Con "read": true li
+    // leggeva chiunque, mentre la pagina li mostra al solo amministratore.
+    //
+    // Chi non e' amministratore non perde niente a video: la scheda Contratti
+    // legge la funzione contrattiAnno, che gira con asServiceRole e gli manda la
+    // situazione senza valori e senza file; generare e caricare il firmato
+    // passano da salvaContrattoFornitore, solo amministratore; il file si apre da
+    // apriFile. Le altre funzioni che li leggono (EcoTyna, il cruscotto, Prepara
+    // l'anno, gestisciAnagrafiche) leggono con asServiceRole. Nessuna pagina li
+    // legge dal browser: le sole scritture dirette (segna inviato, segna
+    // controfirmato) sono dell'amministratore. Prova: prove/chiLeggeCosa.mjs.
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
     "create": {
       "user_condition": {
         "role": "admin"

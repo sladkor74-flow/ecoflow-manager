@@ -7,10 +7,11 @@ import { Loader2, Plus, Pencil, Trash2, Copy, FileSpreadsheet, FileText, AlertTr
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { MESI } from '@/lib/pfuConstants';
-import { calcExtraRaccolta, contestoPrezzi, avvisoPesoMancante, totaliExtraRaccolta } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, contestoPrezzi, conViaggi, avvisoPesoMancante, totaliExtraRaccolta, titoloSurplus } from '@/lib/extraRaccoltaCalc';
 import { formatNumber, formatTonnellate, formatKg } from '@/lib/utils';
 import { euro } from '@/lib/formatoSoldi';
 import { fetchAllClient } from '@/lib/fetchAllClient';
+import { leggiSurplus } from '@/lib/leggiSurplus';
 import * as subfornitori from '@/lib/subfornitori';
 import { testoEuroT, periodoSurplus, statoSurplus, surplusTocca, euroTDi, NOMI_ORIGINE, NOMI_PRESTAZIONE, aiDestinatari } from '@/lib/surplus';
 import { STILE_SURPLUS } from '@/lib/surplusVista';
@@ -88,9 +89,17 @@ const NOME_SURPLUS = 'italic text-foreground';
 const QUOTA_SURPLUS = STILE_SURPLUS.diCui;
 const tIt = (kg) => formatTonnellate((Number(kg) || 0) / 1000);
 // Il titolo della quota di surplus di una riga: quale surplus, a quanto, su quante
-// tonnellate e a chi, e che il centesimo che fa fede e' quello del mese.
-const titoloQuota = (voci) => [
-  ...(voci || []).map(v => `${v.etichetta}: ${testoEuroT(v.euro_t)} su ${tIt(v.kg)} t${v.interno ? `; ${v.fornitore} è interno e non lo riceve` : v.fornitore ? ` a ${v.fornitore}` : ''}`),
+// tonnellate e a chi, e che il centesimo che fa fede e' quello del mese. Anche
+// la quota da Ecotyre dice per chi e': il raccoglitore, mai il produttore
+// (13/10/2026: «il fuel surcharge non riguarda i produttori ma i trasportatori
+// ovvero i raccoglitori», l'utente).
+const aChiVa = (v, daEcotyre) => {
+  if (daEcotyre) return v.fornitore ? ` da Ecotyre, per ${v.fornitore}` : ' da Ecotyre';
+  if (v.interno) return `; ${v.fornitore} è interno e non lo riceve`;
+  return v.fornitore ? ` a ${v.fornitore}` : '';
+};
+const titoloQuota = (voci, daEcotyre = false) => [
+  ...(voci || []).map(v => `${v.etichetta}: ${testoEuroT(v.euro_t)} su ${tIt(v.kg)} t${aChiVa(v, daEcotyre)}`),
   'È la quota di questo intervento: in fattura e in passiva il surplus si calcola una volta sul mese, e il centesimo del mese fa fede.',
 ].join('\n');
 function FasciaSurplus({ p, isAdmin, filtrata }) {
@@ -165,6 +174,13 @@ export default function ExtraRaccolta() {
   // anche i disattivati, che toglie contestoPrezzi come per le tariffe.
   const [surplusAll, setSurplusAll] = useState([]);
   const [surplusNonLetti, setSurplusNonLetti] = useState(false);
+  // I contratti dei trasporti (13/10/2026): una secondaria di extra raccolta si
+  // paga come un trasporto di secondaria, con la tariffa della tratta nel
+  // contratto del vettore (decisione dell'utente del 13/10/2026). Sono costi:
+  // si leggono solo per l'amministratore, e finche' non ci sono (null) il
+  // costo di una secondaria e' quello scritto sull'intervento.
+  const [tariffeTrasporti, setTariffeTrasporti] = useState(null);
+  const [trasportiNonLetti, setTrasportiNonLetti] = useState(false);
   const coda = useRef(null);
   if (!coda.current) coda.current = nuovaCoda();
 
@@ -240,9 +256,12 @@ export default function ExtraRaccolta() {
         if (vivo) setTariffeNonLette(true);
       }
       try {
-        // Una lettura sola, tutti i record: il disattivato lo toglie il calcolo,
-        // come per le tariffe (mai un filtro sullo stato qui).
-        const s = await fetchAllClient(base44.entities.SurplusTariffa, null, '-created_date');
+        // Dalla funzione leggiSurplus, non dall'archivio (decisione del
+        // 13/10/2026): SurplusTariffa lo legge solo l'amministratore, e a chi non
+        // lo e' la funzione da' la sola parte che SMOCO fattura a Ecotyre. Una
+        // chiamata, tutti i record: il disattivato lo toglie il calcolo, come per
+        // le tariffe (mai un filtro sullo stato qui).
+        const s = await leggiSurplus();
         if (vivo) setSurplusAll(s || []);
       } catch {
         if (vivo) setSurplusNonLetti(true);
@@ -250,10 +269,29 @@ export default function ExtraRaccolta() {
     })();
     return () => { vivo = false; };
   }, []);
+  // Una lettura sola, e solo per l'amministratore: le tariffe del trasporto
+  // delle secondarie, tutte (il disattivato lo toglie contestoPrezzi).
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+    let vivo = true;
+    (async () => {
+      try {
+        const t = await fetchAllClient(base44.entities.Tariffa, { prestazione: 'TRASPORTO_SECONDARIA' }, '-created_date');
+        if (vivo) setTariffeTrasporti(t || []);
+      } catch {
+        if (vivo) setTrasportiNonLetti(true);
+      }
+    })();
+    return () => { vivo = false; };
+  }, [isAdmin]);
   // Il contesto dei prezzi e del surplus: lo stesso della fattura e della
   // passiva, con la catena dei subfornitori (il surplus di un subraccoglitore va
-  // al principale, come la tariffa).
-  const contesto = useMemo(() => contestoPrezzi(tariffeAttive, fornitori, surplusAll, subfornitori), [tariffeAttive, fornitori, surplusAll]);
+  // al principale, come la tariffa) e, per l'amministratore, i contratti dei
+  // trasporti, con cui la passiva paga le secondarie. Con i viaggi delle
+  // secondarie (conViaggi, revisione del 14/10/2026): a viaggio lo stesso camion
+  // nello stesso giorno si paga una volta, diviso fra i suoi interventi per peso,
+  // e i viaggi si contano sull'elenco gia' letto, senza letture in piu'.
+  const contesto = useMemo(() => conViaggi(contestoPrezzi(tariffeAttive, fornitori, surplusAll, subfornitori, tariffeTrasporti), records), [tariffeAttive, fornitori, surplusAll, tariffeTrasporti, records]);
 
   // I filtri si dividono in due, come negli altri elenchi: quelli di periodo
   // leggono giornoElenco, gli altri la scheda. Separati, per contare le date da
@@ -307,6 +345,15 @@ export default function ExtraRaccolta() {
   // mese dicono il ricavo della fattura e il costo della passiva al centesimo.
   const kpi = useMemo(() => totaliExtraRaccolta(terminati, contesto), [terminati, contesto]);
   const contoSurplus = kpi.surplus;
+  // Il nome del blocco del surplus nei file, per la nota accanto ai pulsanti:
+  // «Fuel Surcharge ai raccoglitori» (13/10/2026). Chi non e' amministratore non
+  // sente nominare un surplus pagato solo ai fornitori.
+  const bloccoNeiFile = useMemo(() => {
+    const nomi = [...new Set(contoSurplus.per_surplus
+      .filter(p => isAdmin || (p.euro_t_attiva !== null && p.euro_t_attiva !== undefined))
+      .map(p => `«${titoloSurplus(p.nome, p.prestazione)}»`))];
+    return nomi.length ? nomi.join(' e ') : '«del surplus»';
+  }, [contoSurplus, isAdmin]);
   // Un filtro che non e' il periodo restringe gli interventi: il surplus allora
   // e' quello dei soli interventi mostrati, e la fattura del mese lo fa su tutti.
   const filtriOltreIlPeriodo = !!(filters.stato || filters.trasportatore || filters.destinazione || filters.tipologia_trasporto || filters.date);
@@ -415,7 +462,8 @@ export default function ExtraRaccolta() {
   // hanno la riga del Fuel Surcharge prima del Totale imponibile, col centesimo
   // del mese come in fattura. L'analisi per produttore ha costi e margine: il
   // file la porta solo all'amministratore, come la pagina (isAdmin; senza, il
-  // file la toglie).
+  // file la toglie). Dal 13/10/2026 sera l'analisi e' lo standard e il surplus
+  // ha il blocco «... ai raccoglitori», col costo solo all'amministratore.
   const exportExcel = async () => {
     const mese = filters.mese || 'Tutti';
     const anno = filters.anno || Number(oggiRoma().slice(0, 4));
@@ -493,6 +541,10 @@ export default function ExtraRaccolta() {
 
       {surplusNonLetti && (
         <p className="text-xs text-amber-700">I surplus sulle tariffe (come il Fuel Surcharge) non si sono potuti leggere: ricavi e costi qui sono senza surplus, e possono non essere quelli della fattura e della passiva. Ricarica la pagina.</p>
+      )}
+
+      {isAdmin && trasportiNonLetti && (
+        <p className="text-xs text-amber-700">I contratti dei trasporti non si sono potuti leggere: il costo delle secondarie qui è quello scritto sull&apos;intervento, mentre la passiva le paga con la tariffa della tratta. Ricarica la pagina.</p>
       )}
 
       {senzaStato.length > 0 && (
@@ -648,12 +700,16 @@ export default function ExtraRaccolta() {
         {surplusNonLetti && <span className="self-center text-xs text-amber-700">I file si esportano quando i surplus sono letti: ricarica la pagina.</span>}
         <span className="self-center text-xs text-muted-foreground">Totali ed esportazioni comprendono solo i terminati.</span>
         {/* Il surplus nei file (13/10/2026): fino a questa data i file avevano
-            gli importi standard e la nota lo diceva; ora hanno la sua riga. */}
+            gli importi standard e la nota lo diceva; ora hanno la sua riga.
+            Dal 13/10/2026 sera il surplus non sta piu' nell'analisi per
+            produttore: «il fuel surcharge non riguarda i produttori ma i
+            trasportatori ovvero i raccoglitori» (l'utente). Ha il suo blocco,
+            col nome e chi lo riceve: «Fuel Surcharge ai raccoglitori». */}
         {contoSurplus.totale_attivo > 0 && (
-          <span className="self-center text-xs text-muted-foreground">Nei file il surplus ha la sua riga prima del totale imponibile, col centesimo del mese come in fattura{isAdmin ? ', e una riga sua nell\'analisi per produttore' : ''}.</span>
+          <span className="self-center text-xs text-muted-foreground">Nei file il surplus ha la sua riga prima del totale imponibile, col centesimo del mese come in fattura, e il blocco {bloccoNeiFile}: per raccoglitore le tonnellate{isAdmin ? ', il costo' : ''} e il ricavo da Ecotyre, mai per produttore.</span>
         )}
         {isAdmin && !(contoSurplus.totale_attivo > 0) && contoSurplus.totale_passivo > 0 && (
-          <span className="self-center text-xs text-muted-foreground">Nei file il surplus ai fornitori ha una riga sua nell&apos;analisi per produttore.</span>
+          <span className="self-center text-xs text-muted-foreground">Nei file il surplus ai fornitori ha il suo blocco {bloccoNeiFile}, fornitore per fornitore, mai per produttore.</span>
         )}
         <NotaDate righe={terminati} nomi={['intervento esportato', 'interventi esportati']} className="self-center" />
       </div>
@@ -728,7 +784,7 @@ export default function ExtraRaccolta() {
                           {soldi(c.ricavo)}
                           {/* la quota del surplus di questo intervento (13/10/2026) */}
                           {conta && c.surplus_ricavo > 0 && (
-                            <span className={`block text-[11px] whitespace-nowrap ${QUOTA_SURPLUS}`} title={titoloQuota(c.surplus_attivo)}>di cui surplus {euro(c.surplus_ricavo)}</span>
+                            <span className={`block text-[11px] whitespace-nowrap ${QUOTA_SURPLUS}`} title={titoloQuota(c.surplus_attivo, true)}>di cui surplus {euro(c.surplus_ricavo)}</span>
                           )}
                         </>}
                     </td>

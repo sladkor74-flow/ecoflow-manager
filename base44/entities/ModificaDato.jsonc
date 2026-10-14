@@ -80,7 +80,7 @@
     "riservato": {
       "type": "boolean",
       "default": false,
-      "description": "Vero per i costi dei fornitori (tariffe passive, costi dell'extra raccolta, voci della passiva): li vede solo l'amministratore, anche in EcoTyna"
+      "description": "Vero per i costi dei fornitori (tariffe passive, costi dell'extra raccolta, voci della passiva, l'importo ai fornitori di un surplus e tutto un surplus senza importo da Ecotyre): la riga la riceve solo l'amministratore (rls.read), e la vede solo lui, anche in EcoTyna. Sempre vero o falso, mai vuoto"
     }
   },
   // campo non e' obbligatorio: la riga di un record nato o cancellato senza
@@ -88,14 +88,39 @@
   "required": [
     "entita"
   ],
-  // La lettura e' aperta come quella degli archivi che racconta (Tariffa,
-  // ExtraRaccolta e le voci della passiva sono read: true): i costi si tengono
-  // all'amministratore nelle pagine e in EcoTyna col campo riservato.
+  // LA LETTURA: L'AMMINISTRATORE TUTTO, GLI ALTRI LE RIGHE CHE NON SONO COSTI
+  // (revisione del 14/10/2026). Fino ad allora era aperta come quella degli
+  // archivi che racconta, e i costi (riservato) li tenevano all'amministratore
+  // solo la riga Storico ed EcoTyna. Dal 13/10/2026 SurplusTariffa lo legge solo
+  // l'amministratore (decisione dell'utente), ma lo storico ne tiene una copia
+  // campo per campo: euro_t_passiva e tutto un accordo pagato solo da SMOCO -
+  // nome, riferimento, fornitori - restavano qui, leggibili da chiunque fosse
+  // collegato. Ora chi non e' amministratore riceve le sole righe con riservato
+  // falso, le stesse che la riga Storico gli mostrava: a video non cambia
+  // niente. riservato si scrive sempre vero o falso (righeDiModifica, i mesi
+  // chiusi fuori, la conferma della copia d'anno): una riga senza resterebbe
+  // all'amministratore, dalla parte sicura. riservato e' un campo nostro, e in
+  // una condizione un campo nostro vuole il prefisso data. (risposta
+  // dell'assistenza del 02/10/2026, in AGENTS.md). Le funzioni leggono con
+  // asServiceRole, ed EcoTyna continua a togliere i costi a chi non li vede.
+  // Prove: prove/chiLeggeCosa.mjs (sezione 10), prove/scrittureTracciate.mjs.
+  //
   // update e delete: una condizione che nessun utente soddisfa, perche' nessuno
   // ha il ruolo «nessuno». In questo progetto una regola non si scrive mai come
   // null (prove/scrittureDegliUtenti.mjs).
   "rls": {
-    "read": true,
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "data.riservato": false
+        }
+      ]
+    },
     "create": {
       "user_condition": {
         "role": "admin"

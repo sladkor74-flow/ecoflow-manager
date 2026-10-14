@@ -346,9 +346,11 @@ console.log('10. L\'ARCHIVIO SurplusTariffa');
   verifica('nome, canale, prestazione e le due date sono obbligatori', ['nome', 'tipologia', 'prestazione', 'data_inizio_validita', 'data_fine_validita'].every(c => (e.required || []).includes(c)), J(e.required));
   const rls = e.rls || {};
   const admin = (k) => rls[k] && rls[k].user_condition && rls[k].user_condition.role === 'admin';
-  verifica('si legge come le tariffe, e scrive solo l\'amministratore', rls.read === true && admin('create') && admin('update') && admin('delete'), J(rls));
+  // Dal 13/10/2026 (decisione dell'utente) lo legge solo l'amministratore: a chi
+  // non lo e' la parte attiva la da' la funzione leggiSurplus (prove/chiLeggeCosa.mjs).
+  verifica('lo legge e lo scrive solo l\'amministratore', admin('read') && admin('create') && admin('update') && admin('delete'), J(rls));
   const tariffa = JSON.parse(sorgente('../base44/entities/Tariffa.jsonc').split('\n').filter(r => !/^\s*\/\//.test(r)).join('\n'));
-  verifica('le stesse regole della Tariffa, parola per parola', J(rls) === J(tariffa.rls));
+  verifica('la scrittura e\' quella della Tariffa, parola per parola', ['create', 'update', 'delete'].every(k => J(rls[k]) === J(tariffa.rls[k])), J(rls));
 }
 
 console.log('11. IL SORGENTE USA LE REGOLE CHE CI SONO GIA\'');

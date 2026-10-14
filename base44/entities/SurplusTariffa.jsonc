@@ -32,10 +32,22 @@
   // 31/12 dell'anno in cui comincia. Lo stato non_attivo vuol dire «non deve
   // valere mai»; per finire prima si cambia la data di fine.
   //
-  // Le regole di lettura e scrittura sono quelle delle tariffe: si legge, scrive
-  // solo l'amministratore (attraverso gestisciAnagrafiche, che lascia la traccia
-  // nello storico delle modifiche). euro_t_passiva e' un costo dei fornitori:
-  // pagine ed EcoTyna lo mostrano solo all'amministratore.
+  // Scrive solo l'amministratore (attraverso gestisciAnagrafiche, che lascia la
+  // traccia nello storico delle modifiche). Dal 13/10/2026 (decisione
+  // dell'utente) anche la lettura e' solo sua: euro_t_passiva e' un costo dei
+  // fornitori, e un accordo pagato solo da SMOCO e' tutto un costo. A chi non e'
+  // amministratore la parte attiva (quanto SMOCO fattura in piu' a Ecotyre) la
+  // da' la funzione leggiSurplus (base44/shared/surplusVisibile.ts,
+  // src/lib/leggiSurplus.js); le funzioni dei conti leggono con asServiceRole, e
+  // le sole pagine che leggono l'archivio dal browser sono dell'amministratore
+  // (Tariffe & Anagrafiche, la Passiva). Prova: prove/chiLeggeCosa.mjs.
+  //
+  // Lo storico delle modifiche ne tiene una copia campo per campo, e va chiuso
+  // insieme (revisione del 14/10/2026): le righe di euro_t_passiva, e tutte
+  // quelle di un surplus senza importo da Ecotyre, nascono riservate
+  // (campoRiservato), e ModificaDato le da' al solo amministratore. Senza, il
+  // nome, l'elenco dei fornitori e l'importo di un accordo solo passivo si
+  // leggevano li' (prove/chiLeggeCosa.mjs, sezione 10).
   "properties": {
     "nome": {
       "type": "string",
@@ -128,7 +140,11 @@
     "data_fine_validita"
   ],
   "rls": {
-    "read": true,
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
     "create": {
       "user_condition": {
         "role": "admin"
