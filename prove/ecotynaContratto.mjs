@@ -27,6 +27,14 @@
 //    del contratto prima di target_raccoglitori, con le parole delle domande) e
 //    che la domanda dell'utente e quella del chip passano allo strumento senza
 //    filtri ignorati; e la regola 3-septdecies nelle istruzioni della risposta.
+// UNA REGOLA SOLA (migliorie del 14/10/2026, gruppo H-2): prima contrattoRete.ts
+// era una copia delle regole della dashboard, e questa prova la teneva allineata.
+// Ora getDashboardRaccolta conta il contratto con contrattoReteDegliAnni e
+// contrattoDellaRete e' lo stesso conto per un anno: qui si guarda anche il
+// sorgente (lo stesso conto) e i confronti campo per campo restano, perche' sono
+// quelli che dicono che EcoTyna e la dashboard danno gli stessi numeri sulla
+// funzione vera. Che la dashboard risponda come prima, al carattere, lo dice
+// prove/dashboardContrattoUnaRegola.mjs.
 // Senza la copia dei dati veri la parte 2 si salta e lo dice.
 // node prove/ecotynaContratto.mjs
 import { build } from 'esbuild';
@@ -155,7 +163,12 @@ function stessiNumeri(nome, dati, d, { regione = '' } = {}) {
   verifica(`${nome}: gli avvisi del target`, J(dati.avvisi || []) === J(d.avvisi_target || []), `${J(dati.avvisi)} contro ${J(d.avvisi_target)}`);
 }
 
-/** La regola condivisa, ai numeri pieni: contrattoDellaRete e' getDashboardRaccolta con un anno. */
+/**
+ * La regola condivisa, ai numeri pieni: contrattoDellaRete e' getDashboardRaccolta
+ * con un anno. Dal 14/10/2026 fanno lo stesso conto (contrattoReteDegliAnni): il
+ * confronto resta, sulla funzione vera, e dice che nessuno dei due ci mette del
+ * suo dopo.
+ */
 async function stessaRegola(nome, d, anno, oggi) {
   if (!contrattoRete) { verifica(`${nome}: c'e' contrattoDellaRete (base44/shared/contrattoRete.ts)`, false); return; }
   let commesse = null;
@@ -176,6 +189,19 @@ async function stessaRegola(nome, d, anno, oggi) {
 // ─── 1. SU ARCHIVI COSTRUITI ───
 console.log('1. SU ARCHIVI COSTRUITI');
 verifica('c\'e\' lo strumento del contratto (contratto_ecotyre)', !!strumento('contratto_ecotyre'), STRUMENTI.map(s => s.nome).join(', '));
+// Una regola sola (14/10/2026): la dashboard e EcoTyna chiamano lo stesso conto,
+// e la dashboard non ha piu' una copia sua delle regole del contratto.
+{
+  const togli = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+  const gdr = togli(sorgente('base44/functions/getDashboardRaccolta/entry.ts'));
+  const cr = togli(sorgente('base44/shared/contrattoRete.ts'));
+  const unAnno = cr.slice(cr.indexOf('export function contrattoDellaRete('));
+  verifica('la dashboard e EcoTyna fanno lo stesso conto: contrattoReteDegliAnni', /contrattoReteDegliAnni\(\{ commesse: commesseLette, anni, rete, reteAnno, oggi \}\)/.test(gdr)
+    && cr.includes('export function contrattoDellaRete(') && /contrattoReteDegliAnni\(\{ commesse, anni: \[a\], rete: tutte, oggi \}\)/.test(unAnno),
+  (gdr.match(/.*contrattoRete.*/g) || []).join('\n'));
+  verifica('e la dashboard non ha piu\' le regole del contratto sue', !/\b(targetAnnuoDellAnno|regioniDellAnno|attesoAllaData|attesoDellaRegione|giornoDeiDati|commessaDellAnno)\b/.test(gdr),
+    (gdr.match(/.*\b(targetAnnuoDellAnno|regioniDellAnno|attesoAllaData|attesoDellaRegione|giornoDeiDati|commessaDellAnno)\b.*/g) || []).join('\n'));
+}
 const PROFILO = [851.29, 915.48, 868.47, 932.55, 1053.85, 1100, 1100, 550, 1050, 1100, 1100, 950];
 const contratto = (extra = {}) => ({
   id: 'c26', anno: 2026, target_annuo_t: 11550, created_date: '2026-01-05T10:00:00', updated_date: '2026-09-14T17:35:58',

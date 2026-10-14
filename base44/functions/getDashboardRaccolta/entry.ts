@@ -1,12 +1,10 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
-import { PROV_TO_REGION, riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
+import { riepilogoDateVista } from "../../shared/raccoltoCalculator.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { periodoMovimento, giornoMovimento } from "../../shared/movimenti.ts";
-import { commessaDellAnno } from "../../shared/annoTarget.ts";
-import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, attesoDellaRegione, giornoDeiDati } from "../../shared/attesoContratto.ts";
-import { formatoTonnellate } from "../../shared/formato.ts";
+import { periodoMovimento } from "../../shared/movimenti.ts";
+import { contrattoReteDegliAnni, regioneDellaDashboard } from "../../shared/contrattoRete.ts";
 import { quadroCommessa } from "../../shared/quadroCommessa.ts";
 
 // Restituisce aggregati raccolta per la Dashboard filtrati per mese/anno.
@@ -22,6 +20,13 @@ import { quadroCommessa } from "../../shared/quadroCommessa.ts";
 // (prove/dashboardRaccoltaQuadro.mjs li confronta col codice di prima). Con piu'
 // anni il quadro e' null: una commessa e' annuale, e due contratti sommati non
 // sono il contratto di nessuno.
+//
+// IL CONTRATTO DELLA RETE E' UNA REGOLA SOLA (migliorie del 14/10/2026). Target,
+// raccolto, atteso alla data, regioni del contratto e avvisi del target li conta
+// contrattoReteDegliAnni (base44/shared/contrattoRete.ts), lo stesso conto che
+// EcoTyna fa per un anno (contrattoDellaRete): prima qui c'era la regola e la' una
+// sua copia, tenuta allineata da una prova. La risposta e' identica a prima, al
+// carattere (prove/dashboardContrattoUnaRegola.mjs), e le letture sono le stesse.
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -43,14 +48,16 @@ export default async function(req) {
     // Senza anno, l'anno in corso in Italia, come getDashboardStats: prima un anno
     // assente o vuoto arrivava qui come elenco vuoto, cioe' nessun filtro, e i KPI
     // sommavano la raccolta di tutti gli anni contro un target zero mentre i
-    // conteggi della stessa pagina parlavano dell'anno in corso.
-    if (!anni.length) anni.push(Number(oggiRoma().slice(0, 4)));
+    // conteggi della stessa pagina parlavano dell'anno in corso. Il giorno
+    // italiano si prende una volta, e vale per tutta la risposta.
+    const oggi = oggiRoma();
+    if (!anni.length) anni.push(Number(oggi.slice(0, 4)));
 
     // Le letture del quadro partono insieme alle altre: un anno solo, e le
     // pagine sono piccole. Una che non riesce lascia fuori la sua parte, col
     // perche', e il resto della risposta vive.
     const unAnno = anni.length === 1 ? anni[0] : null;
-    const annoPassato = unAnno !== null && unAnno < Number(oggiRoma().slice(0, 4));
+    const annoPassato = unAnno !== null && unAnno < Number(oggi.slice(0, 4));
     const svc = base44.asServiceRole.entities;
     const lettureQuadro = unAnno === null ? Promise.resolve(null) : Promise.all([
       fetchAll(svc.TargetMensile, { anno: unAnno }).catch(() => null),
@@ -64,7 +71,6 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.PrimariaAci, { stato: 'terminato' })
     ]);
 
-    const getRegione = (r) => r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
     const sumTon = (arr) => arr.reduce((s, r) => s + (r.peso_effettivo || 0), 0) / 1000;
 
     // Come in tutto il gestionale il periodo e' quello della fine trasporto, non i
@@ -88,51 +94,27 @@ export default async function(req) {
     // sommi e il target del contratto si confronta solo con la RETE.
     const raccolta_rete = sumTon(reteMese);
     const raccolta_aci = sumTon(aciMese);
-    const raccolto_rete_anno = sumTon(reteAnno);
     const raccolto_aci_anno = sumTon(aciAnno);
 
-    // IL TARGET DEL CONTRATTO, COME IN TARGET & STATUS (chiusura dell'audit,
-    // 11/10/2026). Il contratto dell'anno e' il modificato per ultimo
-    // (commessaDellAnno): qui si prendeva il creato per ultimo, fra i primi 50.
-    // Target annuo e riparto per regione vengono da li' (attesoContratto.ts); le
-    // costanti del 2025 e del 2026 solo come ripiego dichiarato. Un anno senza
-    // contratto non ha target: niente «0%» e niente 11.550 t nel grafico, ma
-    // null e un avviso, come Target & Status.
+    // IL CONTRATTO DELLA RETE (contrattoRete.ts): il contratto dell'anno, il
+    // modificato per ultimo; target annuo e riparto per regione, col ripiego del
+    // 2025-2026 detto come tale; raccolto, percentuale, atteso alla data sul
+    // giorno dei dati (l'ultima fine trasporto della rete, mai oltre oggi), le
+    // regioni col loro atteso e gli avvisi del target. Un anno senza contratto
+    // non ha target: null e un avviso, mai «0%». Le primarie dell'anno sono
+    // quelle scelte qui sopra, le stesse dei mesi e del quadro.
     const commesseLette = await fetchAll(base44.asServiceRole.entities.CommessaEcotyre).catch(() => null);
-    const commesse = commesseLette || [];
-    const contratti = anni.map(a => ({ anno: a, commessa: commessaDellAnno(commesse, a) }));
-    const targetAnni = contratti.map(({ anno: a, commessa }) => ({ anno: a, ...targetAnnuoDellAnno(commessa, a) }));
-    const target = targetAnni.some(x => x.t === null) ? null : targetAnni.reduce((s, x) => s + x.t, 0);
-    const raggiungimento_pct = target ? (raccolto_rete_anno / target) * 100 : null;
-    const avvisi_target = [];
-    if (commesseLette === null) avvisi_target.push(`Il contratto Ecotyre non si è potuto leggere: il target è quello di ripiego, dove c'è.`);
-    for (const x of targetAnni) {
-      if (x.t === null) avvisi_target.push(`Il contratto Ecotyre del ${x.anno} non è inserito in Target & Status: il target RETE e l'atteso non si calcolano.`);
-      else if (x.fonte === 'ripiego') avvisi_target.push(`Il contratto Ecotyre del ${x.anno} non ha il target annuo in Target & Status: si usano le ${formatoTonnellate(x.t)} t scritte nel gestionale come ripiego.`);
-      if (x.da_confermare) avvisi_target.push(`Il contratto Ecotyre del ${x.anno} è copiato dall'anno prima e va confermato in Target & Status.`);
-    }
+    const contratto = contrattoReteDegliAnni({ commesse: commesseLette, anni, rete, reteAnno, oggi });
+    const { raccolto_rete_anno, target, raggiungimento_pct, atteso, target_ripiego, target_da_confermare } = contratto.kpi;
+    const avvisi_target = contratto.avvisi_target;
+    const giornoDati = contratto.giorno_dati;
 
-    // L'ATTESO ALLA DATA: «76,4%» da solo non dice se si e' in linea. Si conta
-    // sui giorni coperti dai dati - l'ultima fine trasporto della rete, mai oltre
-    // oggi - e col profilo mensile del contratto, come l'Andamento per regione di
-    // Target & Status e il controllo dei target mensili (attesoContratto.ts).
-    const giornoDati = giornoDeiDati(rete.reduce((m, r) => { const g = giornoMovimento(r); return g > m ? g : m; }, ''), oggiRoma());
-    const attesi = contratti.map(({ anno: a, commessa }) => attesoAllaData(commessa, a, giornoDati));
-    const attesoAnno = target === null || attesi.some(x => x.atteso_t === null) ? null : attesi.reduce((s, x) => s + x.atteso_t, 0);
-    const atteso = attesoAnno === null ? null : {
-      giorno: giornoDati,
-      atteso_t: attesoAnno,
-      pct: target ? (attesoAnno / target) * 100 : null,
-      // positivo: avanti sull'atteso; negativo: indietro
-      scarto_t: raccolto_rete_anno - attesoAnno,
-    };
-
-    // Previsione ACI del contratto ACI Ecotyre (indicativa) e canale Extra Raccolta.
-    const previsioneAciDi = (a) => {
-      const c = commessaDellAnno(commesse, a);
+    // Previsione ACI del contratto ACI Ecotyre (indicativa), dagli stessi
+    // contratti dell'anno, e canale Extra Raccolta.
+    const previsioneAciDi = (c) => {
       try { return (c ? JSON.parse(c.target_prezzo_regioni_json || '[]') : []).reduce((s, r) => s + (Number(r.target_t) || 0), 0); } catch { return 0; }
     };
-    const previsione_aci = anni.reduce((s, a) => s + previsioneAciDi(a), 0);
+    const previsione_aci = contratto.contratti.reduce((s, x) => s + previsioneAciDi(x.commessa), 0);
     // L'extra raccolta: la raccolta dal produttore, non i trasferimenti in
     // secondaria che stanno nello stesso archivio e riporterebbero lo stesso peso
     // una seconda volta.
@@ -143,56 +125,27 @@ export default async function(req) {
     const raccolta_extra = extra.filter(({ p }) => mesi.length === 0 || mesi.includes(p.mese)).reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
     const raccolto_extra_anno = extra.reduce((s, { r }) => s + (Number(r.peso_effettivo) || 0), 0) / 1000;
 
-    // Raccolta RETE vs ACI per regione (mese+anno selezionati)
+    // Raccolta RETE vs ACI per regione (mese+anno selezionati), con la regione
+    // della dashboard: il campo regione, poi la provincia, poi «Altro».
     const regioniMap = {};
     for (const r of reteMese) {
-      const reg = getRegione(r);
+      const reg = regioneDellaDashboard(r);
       if (!regioniMap[reg]) regioniMap[reg] = { regione: reg, rete: 0, aci: 0 };
       regioniMap[reg].rete += (r.peso_effettivo || 0) / 1000;
     }
     for (const r of aciMese) {
-      const reg = getRegione(r);
+      const reg = regioneDellaDashboard(r);
       if (!regioniMap[reg]) regioniMap[reg] = { regione: reg, rete: 0, aci: 0 };
       regioniMap[reg].aci += (r.peso_effettivo || 0) / 1000;
     }
 
-    // Target vs Raccolto per regione (solo Rete, anno selezionato, tutti i mesi).
-    // Il contratto per regione dell'anno, sommato sugli anni scelti; il riparto
-    // scritto nel codice vale solo per il 2026, l'anno da cui viene: prima valeva
-    // per ogni anno, e il 2027 senza contratto mostrava 11.550 t nel grafico e
-    // «su 0 t» nel numero sopra. Se un anno scelto non ha il riparto, il grafico
-    // mostra il solo raccolto, con il target null. Accanto, l'atteso alla data di
-    // ogni regione, con il profilo del contratto dell'anno.
-    const raccoltoRegRete = {};
-    for (const r of reteAnno) {
-      const reg = getRegione(r);
-      raccoltoRegRete[reg] = (raccoltoRegRete[reg] || 0) + (r.peso_effettivo || 0) / 1000;
-    }
-    const regioniAnni = contratti.map(({ anno: a, commessa }) => ({ anno: a, commessa, ...regioniDellAnno(commessa, a) }));
-    const conRiparto = regioniAnni.every(x => x.righe.length > 0);
-    for (const x of regioniAnni) {
-      if (!x.righe.length && targetAnni.some(t => t.anno === x.anno && t.t !== null)) avvisi_target.push(`Il contratto Ecotyre del ${x.anno} non ha il riparto per regione: il grafico mostra il solo raccolto.`);
-    }
-    const perRegione = new Map();
-    if (conRiparto) {
-      for (const x of regioniAnni) {
-        for (const r of x.righe) {
-          const v = perRegione.get(r.regione) || { target: 0, atteso: 0 };
-          // L'ATTESO DI UNA REGIONE E' SUO (variazioni del contratto, 14/10/2026):
-          // attesoDellaRegione mette le variazioni in vigore della regione intere
-          // nel loro mese, e quelle delle altre regioni non la toccano. Col target
-          // della regione per la quota nazionale, le 100 t di ottobre in Puglia
-          // spostavano un pezzo di atteso anche su Campania e Sicilia.
-          const a = attesoDellaRegione(x.commessa, x.anno, giornoDati, r.regione).atteso_t;
-          v.target += r.target_t;
-          v.atteso = v.atteso === null || a === null ? null : v.atteso + a;
-          perRegione.set(r.regione, v);
-        }
-      }
-    }
-    const target_vs_raccolto = conRiparto
-      ? [...perRegione].map(([reg, v]) => ({ regione: reg, target: v.target, atteso: v.atteso, raccolto: raccoltoRegRete[reg] || 0 }))
-      : Object.entries(raccoltoRegRete).sort((a, b) => b[1] - a[1]).map(([reg, t]) => ({ regione: reg, target: null, atteso: null, raccolto: t }));
+    // Target vs Raccolto per regione (solo Rete, anni selezionati, tutti i mesi):
+    // il contratto per regione, l'atteso alla data e il raccolto di ognuna, dal
+    // conto del contratto qui sopra. Senza il riparto di un anno scelto il
+    // grafico mostra il solo raccolto, col target null.
+    const target_vs_raccolto = contratto.target_vs_raccolto;
+    const conRiparto = contratto.con_riparto;
+    const raccoltoRegRete = contratto.raccolto_per_regione;
 
     // IL QUADRO DELLA COMMESSA dell'anno scelto (quadroCommessa.ts). Il giorno
     // dei dati e' quello dell'atteso: l'ultima fine trasporto della rete, mai oltre
@@ -203,10 +156,10 @@ export default async function(req) {
       quadro_perche = 'Il quadro della commessa si guarda un anno alla volta.';
     } else {
       const [mensili, annui, documenti, prefatture] = await lettureQuadro;
-      const kpiAnno = { raccolto_rete_anno, raccolto_aci_anno, raccolto_extra_anno, previsione_aci, target, raggiungimento_pct, atteso,
-        target_ripiego: targetAnni.filter(x => x.fonte === 'ripiego').map(x => x.anno), target_da_confermare: targetAnni.filter(x => x.da_confermare).map(x => x.anno) };
+      const kpiAnno = { raccolto_rete_anno, raccolto_aci_anno, raccolto_extra_anno, previsione_aci, target, raggiungimento_pct, atteso, target_ripiego, target_da_confermare };
+      const delAnno = contratto.contratti[0];
       quadro = quadroCommessa({
-        anno: unAnno, oggi: oggiRoma(), giornoDati, commessa: contratti[0].commessa, kpi: kpiAnno, fonteTarget: targetAnni[0].fonte,
+        anno: unAnno, oggi, giornoDati, commessa: delAnno.commessa, kpi: kpiAnno, fonteTarget: delAnno.target.fonte,
         rete, reteAnno, aciAnno, extraAnno: extra,
         targetVsRaccolto: target_vs_raccolto, conRiparto, raccoltoPerRegione: raccoltoRegRete,
         mensili: mensili || [], annui: annui || [], senzaFine: senzaFine(rete),
@@ -224,8 +177,7 @@ export default async function(req) {
       // il cui target non e' quello confermato del contratto.
       kpi: {
         raccolta_rete, raccolta_aci, raccolta_extra, raccolto_rete_anno, raccolto_aci_anno, raccolto_extra_anno, previsione_aci, target, raggiungimento_pct, atteso,
-        target_ripiego: targetAnni.filter(x => x.fonte === 'ripiego').map(x => x.anno),
-        target_da_confermare: targetAnni.filter(x => x.da_confermare).map(x => x.anno),
+        target_ripiego, target_da_confermare,
       },
       avvisi_target,
       // In ordine di rete e poi di ACI: ordinare sulla somma dei due canali era
