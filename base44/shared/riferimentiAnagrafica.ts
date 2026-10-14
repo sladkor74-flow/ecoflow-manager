@@ -13,6 +13,16 @@
 // propone l'alternativa che non rompe niente: «disattiva» per un fornitore,
 // «chiudi periodo» per una tariffa ancora aperta. L'eliminazione resta
 // possibile, senza riferimenti o con una conferma che li ha visti elencati.
+//
+// UN FORNITORE CON MOVIMENTI NON SI ELIMINA PIU' (decisioni dell'utente del
+// 13/10/2026). I suoi movimenti terminati sono gia' nei conti, fatturati o da
+// fatturare: con la conferma si poteva eliminarlo lo stesso, e la passiva, il
+// margine e i consuntivi di quei mesi restavano senza il loro soggetto. Ora
+// riferimentiFornitore dice eliminabile: false, gestisciAnagrafiche risponde
+// 409 anche con la conferma e propone solo di disattivarlo. Senza movimenti
+// (le sole tariffe, le voci, i contratti) si elimina come prima, con la
+// conferma. Dal 14/10/2026 contano anche le terziarie, e gli stessi riferimenti
+// fermano la rinomina che lo scollegherebbe da quello che lo usa (testoRinomina).
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { canaleDi } from "./canaleSecondaria.ts";
@@ -24,23 +34,37 @@ import { oggiRoma } from "./giornoItaliano.ts";
 const chiave = (v) => normalizzaRagioneSociale(String(v || ''));
 
 /**
- * Gli archivi dei movimenti che la fatturazione legge, e i campi in cui un
- * fornitore puo' comparire per nome: chi raccoglie o trasporta, chi riceve, e
- * per le secondarie lo stoccaggio da cui partono.
+ * Gli archivi dei movimenti, e i campi in cui un fornitore puo' comparire per
+ * nome: chi raccoglie o trasporta, chi riceve, per le secondarie lo stoccaggio
+ * da cui partono e per secondarie e terziarie la ragione sociale di chi spedisce.
+ *
+ * LE TERZIARIE CONTANO (revisione del 14/10/2026). Sono movimenti terminati
+ * dell'archivio, di SMOCO, che il portale paga in prefattura (gli ordini TER):
+ * non contarle lasciava eliminare senza una domanda chi ha solo terziarie. Sui
+ * dati dell'11/10 erano quattro trasportatori: IMPRIMET SRL (6 terziarie),
+ * KATANE' TRASPORTI S.R.L. (3), PIRRERA ANTONIO (3) e RIA PIETRINA (4). Nelle
+ * terziarie la ragione sociale e' l'impianto da cui partono (Irigom, New Deal,
+ * INNOREC, T-Cycle). Le tariffe invece non danno il prezzo alle terziarie
+ * (ARCHIVI_CON_TARIFFA).
  */
 export const CAMPI_FORNITORE_NEI_MOVIMENTI = {
   PrimariaRete: ['trasportatore', 'destinazione'],
   PrimariaAci: ['trasportatore', 'destinazione'],
   Secondaria: ['trasportatore', 'destinazione', 'stoccaggio', 'ragione_sociale'],
   ExtraRaccolta: ['trasportatore', 'destinazione', 'stoccaggio'],
+  Terziaria: ['trasportatore', 'destinazione', 'ragione_sociale'],
 };
 export const ARCHIVI_MOVIMENTI = Object.keys(CAMPI_FORNITORE_NEI_MOVIMENTI);
+// Gli archivi a cui una tariffa puo' dare il prezzo: le terziarie no, restano
+// fuori dalla fatturazione (le paga il portale in prefattura).
+export const ARCHIVI_CON_TARIFFA = ARCHIVI_MOVIMENTI.filter(a => a !== 'Terziaria');
 
 const NOMI_ARCHIVIO = {
   PrimariaRete: ['primaria di rete terminata', 'primarie di rete terminate'],
   PrimariaAci: ['primaria ACI terminata', 'primarie ACI terminate'],
   Secondaria: ['secondaria terminata', 'secondarie terminate'],
   ExtraRaccolta: ['intervento di extra raccolta terminato', 'interventi di extra raccolta terminati'],
+  Terziaria: ['terziaria terminata', 'terziarie terminate'],
 };
 const movimentiDi = (archivio, n) => plurale(n, ...NOMI_ARCHIVIO[archivio]);
 // un intero col punto delle migliaia, scritto a mano come in formato.ts: Intl
@@ -87,6 +111,9 @@ export function riferimentiFornitore(f, dati = {}) {
     ...Object.entries(movimentiSuoi).map(([a, n]) => `${movimentiDi(a, n)} che lo nominano`),
   ].filter(Boolean);
 
+  // Con movimenti terminati non si elimina (13/10/2026): si disattiva, e a uno
+  // gia' disattivato non si propone di disattivarlo di nuovo.
+  const giaDisattivato = String((f && f.stato) || '').trim().toLowerCase() === 'non_attivo';
   return {
     entita: 'Fornitore', id: f.id, nome: f.ragione_sociale || '',
     tariffe: tariffeSue.length, fatturano_tramite: fatturanoTramite.map(x => x.ragione_sociale || x.id),
@@ -95,7 +122,8 @@ export function riferimentiFornitore(f, dati = {}) {
     gemello: gemello ? { id: gemello.id, nome: gemello.ragione_sociale || '' } : null,
     totale: tariffeSue.length + fatturanoTramite.length + vociSue.length + contrattiSuoi.length + nMovimenti,
     elenco,
-    proposta: 'disattiva',
+    eliminabile: nMovimenti === 0,
+    proposta: giaDisattivato ? 'gia_disattivato' : 'disattiva',
   };
 }
 
@@ -155,7 +183,7 @@ export function riferimentiTariffa(t, dati = {}) {
   const vale = tariffaNonDisattivata(t);
 
   const perArchivio = {};
-  for (const archivio of ARCHIVI_MOVIMENTI) {
+  for (const archivio of ARCHIVI_CON_TARIFFA) {
     let n = 0;
     for (const r of movimenti[archivio] || []) {
       if (!vale || !r || !eTerminato(r)) continue;
@@ -189,12 +217,53 @@ export function testoRiferimenti(r) {
   if (!r || !r.totale) return '';
   // testo a video: con gli accenti
   const chi = r.entita === 'Fornitore' ? `«${r.nome}» è usato da` : `La tariffa (${r.periodo}) è usata da`;
+  // Un fornitore con movimenti terminati non si elimina (13/10/2026): il testo
+  // non offre scelte, dice che cosa resta da fare.
+  if (r.entita === 'Fornitore' && r.eliminabile === false) {
+    const resta = r.proposta === 'gia_disattivato'
+      ? 'È già disattivato: resta così, per i conti già fatti.'
+      : 'Si disattiva: resta per i conti già fatti e non si propone più nelle scelte.';
+    return `${chi}: ${r.elenco.join('; ')}. Non si può eliminare: i suoi movimenti terminati sono già nei conti, fatturati o da fatturare, e resterebbero senza il loro fornitore. ${resta}`;
+  }
   // A una tariffa gia' chiusa non si propone di chiudere il periodo: si dice fin
   // dove vale, e che cosa perde chi la elimina.
   const invece = r.proposta === 'disattiva'
     ? 'Invece di eliminarlo conviene disattivarlo: resta per i conti già fatti e non si propone più.'
-    : r.proposta === 'periodo_chiuso'
+    : r.proposta === 'gia_disattivato'
+      ? 'È già disattivato: eliminandolo, questi restano senza il loro fornitore.'
+      : r.proposta === 'periodo_chiuso'
       ? 'Il suo periodo è già chiuso: vale solo per i giorni che ha coperto e non va allungato. Eliminandola, quei movimenti restano senza prezzo, anche nei mesi già fatturati.'
       : 'Invece di eliminarla conviene chiudere il periodo: resta valida per i giorni che ha coperto, e i mesi già fatturati non perdono il prezzo.';
   return `${chi}: ${r.elenco.join('; ')}. ${invece}`;
+}
+
+// LA RAGIONE SOCIALE DI UN FORNITORE GIA' USATO NON CAMBIA (revisione del
+// 14/10/2026). Dalla scheda Fornitori il nome ora si modifica, e il blocco «con
+// movimenti non si elimina» si aggirava cosi': rinominato, il fornitore non
+// trovava piu' i suoi movimenti, che portano il nome del portale, e si
+// eliminava senza domande (sui dati dell'11/10, BS ECOSERVIZI SRL con 373
+// primarie di rete). Anche senza eliminarlo, la sola rinomina cambiava i conti
+// senza dirlo: la catena dei subfornitori (subfornitori.ts), il fornitore
+// interno, le voci della passiva e i contratti lo cercano per nome, e TORRES
+// GIOVANNI rinominato non fatturava piu' tramite GREEN TYRE PROJECT SRL.
+//
+// Una rinomina che lascia la stessa chiave (maiuscole, punti, S.R.L.: quello che
+// normalizzaRagioneSociale non guarda) passa sempre. Una che cambia la chiave
+// passa solo a un fornitore che niente usa ancora - riferimentiFornitore con
+// totale zero, come un nome sbagliato appena scritto -; a uno usato si risponde
+// che cosa lo usa, e che chi cambia davvero ragione sociale si aggiunge come
+// fornitore nuovo: il vecchio resta per i movimenti col nome di prima.
+
+/** La rinomina cambia il fornitore per il gestionale? (chiave normalizzata diversa) */
+export const cambiaLaChiave = (prima, dopo) => chiave(prima) !== chiave(dopo);
+
+/** Si puo' cambiare la chiave del nome solo a chi niente usa ancora. */
+export const siRinomina = (r) => !!r && r.totale === 0;
+
+/** Il testo del rifiuto di una rinomina che cambia la chiave a un fornitore usato. */
+export function testoRinomina(r, nuovo) {
+  const resta = r.proposta === 'gia_disattivato'
+    ? 'questo, già disattivato, resta per i conti già fatti'
+    : 'disattiva questo, che resta per i conti già fatti';
+  return `«${r.nome}» è usato da: ${r.elenco.join('; ')}. Non si rinomina in «${String(nuovo || '').trim()}»: movimenti, tariffe, voci e contratti lo cercano col nome che ha, e col nome nuovo resterebbero senza il loro fornitore. Della ragione sociale si corregge la scrittura (maiuscole, punti, S.R.L.); se è cambiata davvero, aggiungi il fornitore col nome nuovo e ${resta}.`;
 }

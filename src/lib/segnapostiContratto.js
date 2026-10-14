@@ -84,9 +84,10 @@ export function puntoDi(segnaposto) {
   return { segnaposto: s, nome: s.replace(/_/g, ' ').toLowerCase(), categoria: 'altro', tipo: 'testo' };
 }
 
-// I punti dei prezzi: il loro valore di partenza in un format e' un costo, e
-// nel modello non si conserva (il modello lo legge chiunque sia collegato,
-// i costi solo l'amministratore).
+// I punti dei prezzi: il loro valore di partenza in un format e' un costo dei
+// fornitori, e nel modello non si conserva: resta solo nel contratto (dal
+// 13/10/2026 il modello lo legge solo l'amministratore, ma i suoi punti arrivano
+// a chi apre la scheda Contratti, da contrattiAnno).
 export const ePrezzo = (segnaposto) => puntoDi(segnaposto).tipo === 'prezzo';
 
 // I punti che nel contratto dell'anno nuovo non si riprendono dall'anno prima:
@@ -100,6 +101,82 @@ const SI_RICALCOLANO = /^(DATA_|ANNO$|TARGET_TON$|QUOTA_TON$|QUANTITA|CORRISPETT
 // il tipo del punto: un prezzo, una quantita', una data o un anno si ricalcolano
 // sempre, comunque si chiamino (anche i secondi, TARGET_TON_2).
 const siRicalcola = (k) => SI_RICALCOLANO.test(k) || ['prezzo', 'quantita', 'data', 'anno'].includes(puntoDi(k).tipo);
+
+// ─── i dati fissi di SMOCO ───
+
+// L'ISCRIZIONE DI SMOCO ALL'ALBO NAZIONALE GESTORI AMBIENTALI, categoria 8
+// (intermediazione e commercio di rifiuti senza detenzione), n. BA-11513.
+// Decisione dell'utente del 13/10/2026, testuale: «ogni 5 anni c'è il rinnovo
+// delle autorizzazioni sull'albo, quindi devi sempre considerare come data il
+// «16/05/2025» (fino al 2030 quando verrà rinnovata)». E' un dato di SMOCO e sta
+// solo qui. Nei format dei contratti la riga dell'Albo di SMOCO ha date diverse:
+// il «Contratto Raccolta 2026_RETE MODIFICATO» ha ancora «del 15/05/2020»
+// (l'iscrizione di prima), alcuni contratti 2026 «16/05/2026» o «15/05/2025».
+// Il lettore dei format (src/lib/modelliContratto.js) la riscrive con questa nel
+// modello e nel contratto generato, e lo dice. L'iscrizione dura cinque anni:
+// vale fino al 15/05/2030. Al rinnovo si cambiano qui la data e la scadenza, e i
+// contratti generati dopo prendono quelle; passata la scadenza il lettore avvisa
+// (alboSmocoScaduto). L'altra iscrizione di SMOCO (categoria 4, stesso numero,
+// altra data) non si tocca.
+export const ALBO_SMOCO = Object.freeze({ numero: 'BA-11513', categoria: '8', data: '2025-05-16', scadenza: '2030-05-15' });
+
+/** L'iscrizione di SMOCO all'Albo e' scaduta quel giorno (aaaa-mm-gg)? Allora la data qui sopra va rinnovata. */
+export const alboSmocoScaduto = (oggi) => String(oggi || '').slice(0, 10) > ALBO_SMOCO.scadenza;
+
+// ─── il contratto ACI di raccolta e stoccaggio ───
+
+// Decisione dell'utente del 13/10/2026: chi nell'ACI raccoglie e stocca (oggi
+// Nappi Sud; Ecorecuperi negli anni in cui lo fa) ha UN contratto ACI «raccolta e
+// stoccaggio», coi due prezzi, e non due contratti. I due prezzi li hanno i
+// contratti veri di Nappi Sud (2026: raccolta 92,00 e 82,00, stoccaggio 16,00;
+// 2024: 61,00 e 10,00). Quello di Ecorecuperi del 2024 («Raccolta&stoccaggio»)
+// no: ha un prezzo solo, «Trasporto+Stoccaggio» 105,00, e come format del
+// contratto coi due prezzi non va (revisione del 14/10/2026). Si registra come
+// raccolta ACI (tipo_contratto 'raccolta'); il suo modello e' un modello di
+// raccolta ACI che ha anche il prezzo dello stoccaggio (CORRISPETTIVO_STOCCAGGIO).
+// Lo dice il format, non un campo in piu': un modello di raccolta ACI senza quel
+// prezzo e' il modello della sola raccolta (EMMESSE, Minervini).
+
+const elencoDa = (json) => {
+  if (Array.isArray(json)) return json;
+  try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+};
+
+/** I segnaposto di un modello: quelli dei punti confermati (punti_json), o quelli trovati nel .docx per i modelli di prima. */
+export function segnapostiDelModello(m) {
+  const punti = elencoDa(m && m.punti_json).map(p => p && p.segnaposto).filter(Boolean);
+  return punti.length ? punti : elencoDa(m && m.segnaposti_json).filter(s => typeof s === 'string');
+}
+
+/** E' il modello ACI della raccolta e stoccaggio: raccolta, ACI, e il prezzo dello stoccaggio fra i suoi punti. */
+export function eModelloRaccoltaEStoccaggio(m) {
+  return !!m && m.tipo_contratto === 'raccolta' && (m.canale || 'RETE') === 'ACI'
+    && segnapostiDelModello(m).some(s => String(s).replace(/_\d+$/, '') === 'CORRISPETTIVO_STOCCAGGIO');
+}
+
+/**
+ * E' un contratto ACI di raccolta e stoccaggio: un contratto di raccolta ACI
+ * fatto col modello della raccolta e stoccaggio. Lo dice il contratto, non i
+ * movimenti dell'anno (revisione del 14/10/2026): il contratto 2027 di Nappi Sud
+ * coi due prezzi tornava «sola raccolta» nei mesi senza viaggi ACI, e un
+ * contratto di sola raccolta firmato prima che il fornitore cominciasse a
+ * stoccare copriva uno stoccaggio che non ha. Decide il modello del contratto,
+ * anche se dopo e' stato sostituito da un format nuovo; solo senza il modello
+ * decidono i valori salvati, dove il prezzo dello stoccaggio c'e' se il
+ * modello lo chiedeva.
+ * @param contratto il ContrattoFornitore (valori_json) o la sua riga (valori)
+ * @param modello   il ModelloContratto del contratto (modello_id), se c'e'
+ */
+export function eContrattoRaccoltaEStoccaggio(contratto, modello = null) {
+  if (!contratto || contratto.tipo_contratto !== 'raccolta' || (contratto.canale || 'RETE') !== 'ACI') return false;
+  if (modello) return eModelloRaccoltaEStoccaggio(modello);
+  let valori = contratto.valori;
+  if (!valori || typeof valori !== 'object') {
+    try { valori = JSON.parse(contratto.valori_json || '{}'); } catch { valori = {}; }
+  }
+  return !!valori && typeof valori === 'object' && !Array.isArray(valori)
+    && Object.keys(valori).some(k => k.replace(/_\d+$/, '') === 'CORRISPETTIVO_STOCCAGGIO');
+}
 
 // ─── come si scrive un valore nel testo ───
 
@@ -383,8 +460,13 @@ const stessoRecapito = (a, b) => {
  * @param prezzoUnico la raccolta ha il prezzo unico che comprende il trattamento
  *                    (letto anche sulle copie e sull'anno prima): e' un fatto di
  *                    struttura, e l'avviso c'e' anche senza tariffe confermate
+ * @param stoccaggio  solo per il contratto ACI di raccolta e stoccaggio (decisione
+ *                    dell'utente del 13/10/2026): { tariffe, tariffeCopiate,
+ *                    tariffeRiscritte } dello stoccaggio ACI dello stesso
+ *                    fornitore, divise come quelle della raccolta. Il contratto
+ *                    e' uno e ha i due prezzi; gli avvisi dicono di quale si parla
  */
-export function valoriDelContratto({ anno, tipo, canale, fornitore = null, precedente = null, target = null, tariffe = [], tariffeCopiate = [], tariffeRiscritte = [], prezzoUnico = false }) {
+export function valoriDelContratto({ anno, tipo, canale, fornitore = null, precedente = null, target = null, tariffe = [], tariffeCopiate = [], tariffeRiscritte = [], prezzoUnico = false, stoccaggio = null }) {
   const valori = {};
   const fonti = {};
   const avvisi = [];
@@ -448,33 +530,41 @@ export function valoriDelContratto({ anno, tipo, canale, fornitore = null, prece
   //    della copia finche' non si conferma in blocco: con 72 al posto del 70 del
   //    2026 non e' il prezzo dell'anno prima, e non proporla obbligava a
   //    ribatterlo, sotto un avviso che la diceva «copiata dal 2026».
-  const riscritte = (tariffeRiscritte || []).filter(t => t && !vuoto(t.valore));
-  const confermate = prezziDalleTariffe(tipo, tariffe).valori;
-  const prezzi = prezziDalleTariffe(tipo, [...(tariffe || []), ...riscritte]);
-  for (const [k, v] of Object.entries(prezzi.valori)) metti(k, v, confermate[k] === v ? 'tariffa' : 'tariffa_da_confermare');
-  avvisi.push(...prezzi.avvisi);
-  if (riscritte.length) {
-    avvisi.push(`${riscritte.length === 1 ? 'Tariffa' : 'Tariffe'} ${riscritte.map(prezzoLeggibile).join('; ')} ${riscritte.length === 1 ? 'scritta' : 'scritte'} per il ${anno} ma ancora ${riscritte.length === 1 ? 'segnata' : 'segnate'} da confermare: ${riscritte.length === 1 ? 'confermala' : 'confermale'} in «Prepara l'anno».`);
-  }
-  // Il prezzo unico e' un fatto di struttura, non un prezzo (revisione del
-  // 13/10/2026): la riga del trattamento dice «sta nel contratto di raccolta»
-  // anche quando le tariffe dell'anno sono solo copie o mancano, e allora la
-  // raccolta deve dire che il prezzo da scrivere comprende il trattamento.
-  if (tipo === 'raccolta' && prezzoUnico && !avvisi.includes(AVVISO_PREZZO_UNICO)) avvisi.push(AVVISO_PREZZO_UNICO);
-  // Le tariffe copiate da «Prepara l'anno» portano il prezzo dell'anno prima con
-  // la nota «da confermare»: proporle come prezzo del contratto nuovo era
-  // circolare, perche' la copia si conferma proprio sul contratto (revisione del
-  // 13/10/2026: dopo la copia 23 contratti 2027 proponevano il prezzo del 2026).
-  // Restano un riferimento, detto come tale.
-  const copiate = (tariffeCopiate || []).filter(t => t && !vuoto(t.valore));
-  if (copiate.length) {
-    avvisi.push(`${copiate.length === 1 ? 'Tariffa' : 'Tariffe'} ${copiate.map(prezzoLeggibile).join('; ')} ${copiate.length === 1 ? 'copiata' : 'copiate'} dal ${Number(anno) - 1} con «Prepara l'anno», da confermare: il prezzo lo decide il contratto.`);
-  }
-  if (!(tariffe || []).length && !riscritte.length) {
-    avvisi.push(copiate.length
-      ? `Nel ${anno} non c'è ancora una tariffa passiva ${canale === 'ACI' ? 'ACI' : 'di rete'} confermata per questa prestazione: il prezzo va scritto a mano.`
-      : `In anagrafica non c'è una tariffa passiva ${canale === 'ACI' ? 'ACI' : 'di rete'} valida nel ${anno} per questa prestazione: il prezzo va scritto a mano.`);
-  }
+  //    Nel contratto ACI di raccolta e stoccaggio (13/10/2026) si fa due volte,
+  //    per la raccolta e per lo stoccaggio, e ogni avviso dice di quale prezzo
+  //    parla («Per lo stoccaggio, …»): i due prezzi non si confondono mai.
+  const prezziDi = (tipoPrezzi, { tariffe: elenco = [], tariffeCopiate: copie = [], tariffeRiscritte: riscritteIn = [] } = {}, prefisso = '') => {
+    const di = (a) => (prefisso && a !== AVVISO_PREZZO_UNICO ? `${prefisso}${a[0].toLowerCase()}${a.slice(1)}` : a);
+    const riscritte = (riscritteIn || []).filter(t => t && !vuoto(t.valore));
+    const confermate = prezziDalleTariffe(tipoPrezzi, elenco).valori;
+    const prezzi = prezziDalleTariffe(tipoPrezzi, [...(elenco || []), ...riscritte]);
+    for (const [k, v] of Object.entries(prezzi.valori)) metti(k, v, confermate[k] === v ? 'tariffa' : 'tariffa_da_confermare');
+    avvisi.push(...prezzi.avvisi.map(di));
+    if (riscritte.length) {
+      avvisi.push(di(`${riscritte.length === 1 ? 'Tariffa' : 'Tariffe'} ${riscritte.map(prezzoLeggibile).join('; ')} ${riscritte.length === 1 ? 'scritta' : 'scritte'} per il ${anno} ma ancora ${riscritte.length === 1 ? 'segnata' : 'segnate'} da confermare: ${riscritte.length === 1 ? 'confermala' : 'confermale'} in «Prepara l'anno».`));
+    }
+    // Il prezzo unico e' un fatto di struttura, non un prezzo (revisione del
+    // 13/10/2026): la riga del trattamento dice «sta nel contratto di raccolta»
+    // anche quando le tariffe dell'anno sono solo copie o mancano, e allora la
+    // raccolta deve dire che il prezzo da scrivere comprende il trattamento.
+    if (tipoPrezzi === 'raccolta' && prezzoUnico && !avvisi.includes(AVVISO_PREZZO_UNICO)) avvisi.push(AVVISO_PREZZO_UNICO);
+    // Le tariffe copiate da «Prepara l'anno» portano il prezzo dell'anno prima con
+    // la nota «da confermare»: proporle come prezzo del contratto nuovo era
+    // circolare, perche' la copia si conferma proprio sul contratto (revisione del
+    // 13/10/2026: dopo la copia 23 contratti 2027 proponevano il prezzo del 2026).
+    // Restano un riferimento, detto come tale.
+    const copiate = (copie || []).filter(t => t && !vuoto(t.valore));
+    if (copiate.length) {
+      avvisi.push(di(`${copiate.length === 1 ? 'Tariffa' : 'Tariffe'} ${copiate.map(prezzoLeggibile).join('; ')} ${copiate.length === 1 ? 'copiata' : 'copiate'} dal ${Number(anno) - 1} con «Prepara l'anno», da confermare: il prezzo lo decide il contratto.`));
+    }
+    if (!(elenco || []).length && !riscritte.length) {
+      avvisi.push(di(copiate.length
+        ? `Nel ${anno} non c'è ancora una tariffa passiva ${canale === 'ACI' ? 'ACI' : 'di rete'} confermata per questa prestazione: il prezzo va scritto a mano.`
+        : `In anagrafica non c'è una tariffa passiva ${canale === 'ACI' ? 'ACI' : 'di rete'} valida nel ${anno} per questa prestazione: il prezzo va scritto a mano.`));
+    }
+  };
+  prezziDi(tipo, { tariffe, tariffeCopiate, tariffeRiscritte }, stoccaggio ? 'Per la raccolta, ' : '');
+  if (stoccaggio) prezziDi('stoccaggio', stoccaggio, 'Per lo stoccaggio, ');
 
   return { valori, fonti, avvisi };
 }

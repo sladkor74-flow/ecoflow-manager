@@ -53,6 +53,11 @@ const FUORI_PER_NATURA = {
   'base44/functions/seedTargetMensile/entry.ts': 'seme del 2026',
   'base44/functions/seedTariffe2026/entry.ts': 'seme del 2026',
   'base44/functions/seedTariffeAttive2026/entry.ts': 'seme del 2026',
+  // Dal 13/10/2026 Fornitore e' tracciato (i recapiti dei contratti: cellulare,
+  // pec, referente). La funzione superata creava i fornitori dai nomi, ma
+  // risponde 410 subito dopo l'autenticazione: quel codice non gira, resta solo
+  // da leggere (chiusura del giro del 14/10/2026).
+  'base44/functions/elaboraFatturazionePassiva/entry.ts': 'superata da calcolaPassiva: risponde 410 subito dopo l\'autenticazione, e il codice che creava i fornitori dai nomi non gira',
 };
 
 // chiusuraAnno, ripulisciDichiarazioni e PassivaModulo sono passati
@@ -125,7 +130,7 @@ for (const p of [...Object.keys(FUORI_PER_NATURA), ...Object.keys(DA_PORTARE)]) 
 // cambia attiva, passiva e margine come un prezzo, e chi lo scrive fuori
 // dall'involucro deve far fallire questa prova come per le tariffe.
 verifica('gli archivi tracciati sono quelli dei numeri che fanno i conti',
-  ['ImpiantoTargetSecondaria', 'TargetRaccoglitore', 'TargetMensile', 'GiacenzaSito', 'Tariffa', 'SurplusTariffa', 'CommessaEcotyre', 'DichiarazioneSito', 'ExtraRaccolta', 'VocePassivaAmministrazione'].every(e => ENTITA_TRACCIATE.includes(e)), ENTITA_TRACCIATE.join(','));
+  ['ImpiantoTargetSecondaria', 'TargetRaccoglitore', 'TargetMensile', 'GiacenzaSito', 'Tariffa', 'SurplusTariffa', 'CommessaEcotyre', 'DichiarazioneSito', 'ExtraRaccolta', 'VocePassivaAmministrazione', 'Fornitore'].every(e => ENTITA_TRACCIATE.includes(e)), ENTITA_TRACCIATE.join(','));
 
 console.log('LE PAGINE E LE FUNZIONI CHE DOVEVANO PASSARE DALLO STORICO CI PASSANO');
 const DEVONO = {
@@ -166,7 +171,12 @@ const entita = JSON.parse(leggi('base44/entities/ModificaDato.jsonc').split('\n'
 const rls = entita.rls || {};
 verifica('crearla e\' dell\'amministratore', rls.create && rls.create.user_condition && rls.create.user_condition.role === 'admin', JSON.stringify(rls.create));
 verifica('modificarla e cancellarla non e\' di nessuno', ['update', 'delete'].every(k => rls[k] && rls[k].user_condition && !['admin', 'user'].includes(rls[k].user_condition.role)), JSON.stringify(rls));
-verifica('si legge come gli archivi che racconta', rls.read === true);
+// Dal 14/10/2026 (revisione) le righe dei costi le riceve solo l'amministratore:
+// lo storico tiene una copia campo per campo dei surplus, che legge solo lui
+// (prove/chiLeggeCosa.mjs, sezione 10). Le altre righe le legge chiunque, come
+// gli archivi che racconta.
+verifica("si legge: l'amministratore tutto, gli altri le righe che non sono costi",
+  JSON.stringify(rls.read) === JSON.stringify({ $or: [{ user_condition: { role: 'admin' } }, { 'data.riservato': false }] }), JSON.stringify(rls.read));
 const campi = Object.keys(entita.properties || {});
 verifica('ha i campi dello storico', ['entita', 'record_id', 'etichetta', 'campo', 'prima', 'dopo', 'utente', 'il', 'origine', 'motivo', 'operazione', 'riservato'].every(c => campi.includes(c)), campi.join(','));
 

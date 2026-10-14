@@ -29,7 +29,8 @@
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { leggiModello, generaDocx } from './docxModello.js';
 import {
-  PUNTI_CONTRATTO, puntoDi, ePrezzo, stileDellaData, leggiData, valoriPerIlDocumento, MESI_CONTRATTO,
+  PUNTI_CONTRATTO, puntoDi, ePrezzo, stileDellaData, leggiData, scriviData, valoriPerIlDocumento, MESI_CONTRATTO,
+  ALBO_SMOCO, alboSmocoScaduto,
 } from './segnapostiContratto.js';
 
 const PARTI = /^word\/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$/;
@@ -316,6 +317,77 @@ function zoneDiSmoco(righe, blocco, rappresentante) {
   return { zone, persone };
 }
 
+// ─── l'iscrizione di SMOCO all'Albo: una data sola ───
+//
+// Decisione dell'utente del 13/10/2026: l'iscrizione di SMOCO all'Albo (cat. 8
+// BA-11513) e' del 16/05/2025, valida fino al rinnovo del 2030 (ALBO_SMOCO in
+// segnapostiContratto). E' l'unico dato di SMOCO che il lettore cambia. Nei
+// format la riga dell'Albo ha date diverse: «Contratto Raccolta 2026_RETE
+// MODIFICATO» dice «del 15/05/2020», l'iscrizione di prima; altri contratti del
+// 2026 «16/05/2026» (l'anno cambiato come se fosse quello del contratto) o
+// «15/05/2025». Nel modello e nel contratto generato diventa 16/05/2025, nello
+// stile del format («16/05/2025», «16.05.2025»), e il resto della riga resta
+// com'e'. Lo stesso numero con la categoria 4 (Eco Faso: «n. BA11513 del
+// 01.04.2022 per raccolta e trasporto … categoria 4») e' un'altra iscrizione e
+// non si tocca; senza la categoria scritta il lettore non sceglie, e lo dice. Le
+// date dell'Albo di SMOCO non sono mai un punto: nemmeno l'anno del contratto.
+const [, SIGLA_ALBO, CIFRE_ALBO] = ALBO_SMOCO.numero.match(/^([A-Z]+)[\s-]?(\d+)$/);
+const NUMERO_ALBO = new RegExp(`(?<![A-Za-z0-9])${SIGLA_ALBO}[\\s-]?${CIFRE_ALBO}(?!\\d)`, 'gi');
+const categoriaAlbo = (n) => new RegExp(`\\bcat(?:egoria|\\.)?\\s*${n}(?!\\d)`, 'i');
+const contestoDi = (testo, da, a) => `${da > 40 ? '…' : ''}${testo.slice(Math.max(0, da - 40), da)}«${testo.slice(da, a)}»${testo.slice(a, a + 40)}${a + 40 < testo.length ? '…' : ''}`;
+
+/**
+ * Le date dell'iscrizione di SMOCO all'Albo nelle righe di un documento
+ * ([{ parte, indice, testo }]): il numero BA-11513 seguito da «del <data>». Per
+ * ognuna: { parte, riga, da, a, testo, data (aaaa-mm-gg), categoria ('8', '4' o
+ * null se il testo non la dice), correggi, nuovo (la data giusta nello stile del
+ * format, solo se va corretta), contesto }.
+ */
+export function alboSmocoNelleRighe(righe) {
+  const out = [];
+  const reData = new RegExp(`^\\s*,?\\s*(?:del|in\\s+data)\\s+${DATA}`, 'i');
+  for (const r of righe || []) {
+    const numeri = [...String(r.testo || '').matchAll(NUMERO_ALBO)];
+    numeri.forEach((m, k) => {
+      const fineNumero = m.index + m[0].length;
+      const d = r.testo.slice(fineNumero).match(reData);
+      if (!d) return;
+      const da = fineNumero + d[0].length - d[1].length;
+      const a = da + d[1].length;
+      // La categoria si legge nella sua parte di riga: dopo la data fino al
+      // numero seguente, e subito prima del numero («Iscrizione Albo cat.8 BA-11513»).
+      const dopo = r.testo.slice(a, k + 1 < numeri.length ? numeri[k + 1].index : r.testo.length);
+      const inizio = k > 0 ? numeri[k - 1].index + numeri[k - 1][0].length : 0;
+      const prima = r.testo.slice(Math.max(inizio, m.index - 40), m.index);
+      const categoria = categoriaAlbo(4).test(dopo) || /raccolta\s+e\s+trasporto/i.test(dopo) ? '4'
+        : (categoriaAlbo(8).test(dopo) || categoriaAlbo(8).test(prima) || /intermediazion/i.test(dopo)) ? '8' : null;
+      const data = leggiData(d[1]);
+      const correggi = categoria === ALBO_SMOCO.categoria && data !== ALBO_SMOCO.data;
+      out.push({
+        parte: r.parte, riga: r.indice, da, a, testo: d[1], data, categoria, correggi,
+        nuovo: correggi ? scriviData(ALBO_SMOCO.data, stileDellaData(d[1])) : null,
+        contesto: contestoDi(r.testo, da, a),
+      });
+    });
+  }
+  return out;
+}
+
+/**
+ * Corregge nelle parti di un documento la data dell'iscrizione di SMOCO all'Albo
+ * in categoria 8, dove e' diversa dal 16/05/2025. Cambia solo il testo della
+ * data, con la sua formattazione. @returns { parti, correzioni, saltate }
+ */
+export function correggiAlboSmoco(parti) {
+  const righe = [];
+  for (const parte of Object.keys(parti || {})) righeDi(parti[parte]).forEach((r, i) => righe.push({ parte, indice: i, testo: r.testo }));
+  const correzioni = alboSmocoNelleRighe(righe).filter(o => o.correggi);
+  if (!correzioni.length) return { parti, correzioni, saltate: [] };
+  const occorrenze = correzioni.map(o => ({ parte: o.parte, riga: o.riga, da: o.da, a: o.a, testo: o.testo, attiva: true, con: o.nuovo }));
+  const { parti: corrette, saltate } = applicaPunti(parti, [{ segnaposto: 'ALBO_SMOCO', attivo: true, occorrenze }]);
+  return { parti: corrette, correzioni, saltate };
+}
+
 // ─── il paragrafo del fornitore ───
 
 const PARTE_FORNITORE = /di\s+seguito\s+(?:anche\s+)?(?:indicat[oa]\s+come\s+)?(?:(?:il|la|lo|l['’])\s*)?["“”'«]?\s*(FORNITORE|VETTORE|OPERATORE|SUBFORNITORE|APPALTATORE)/i;
@@ -441,7 +513,10 @@ function leggiBlocco(t) {
  * quantita' e dei prezzi), fornitori (l'anagrafica, per dire di chi e' il
  * contratto compilato).
  *
- * Restituisce { punti, fornitore, anno, avvisi, da_controllare }. Ogni punto:
+ * oggi (aaaa-mm-gg, di norma il giorno italiano di oggi): per dire quando
+ * l'iscrizione di SMOCO all'Albo e' scaduta e va rinnovata (13/10/2026).
+ *
+ * Restituisce { punti, fornitore, anno, avvisi, da_controllare, albo_smoco }. Ogni punto:
  * { segnaposto, nome, categoria, tipo, originale, stile, attivo, da_controllare,
  *   occorrenze: [{ parte, riga, da, a, testo, contesto, attiva, motivo, dubbia }] }.
  * Le occorrenze attive sono quelle che diventano segnaposto; le altre si
@@ -454,7 +529,7 @@ function leggiBlocco(t) {
  * fornitore di partenza rimasto nel documento risultava acceso e completo, e
  * l'amministratore non aveva nessun avviso.
  */
-export function proponiPunti(letto, { tipo = 'raccolta', fornitori = [] } = {}) {
+export function proponiPunti(letto, { tipo = 'raccolta', fornitori = [], oggi = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' }) } = {}) {
   const parti = Object.keys(letto.parti).sort((a, b) => (a === 'word/document.xml' ? -1 : b === 'word/document.xml' ? 1 : a.localeCompare(b)));
   const righe = [];
   for (const parte of parti) righeDi(letto.parti[parte]).forEach((r, i) => righe.push({ parte, indice: i, testo: r.testo, casella: r.casella, riserva: r.riserva }));
@@ -472,7 +547,30 @@ export function proponiPunti(letto, { tipo = 'raccolta', fornitori = [] } = {}) 
   const inSmoco = (r, da, a) => (zone.get(chiave(r)) || []).some(([x, y]) => da < y && a > x);
 
   const libero = (r, da, a) => !(occupato.get(chiave(r)) || []).some(([x, y]) => da < y && a > x);
-  const contesto = (r, da, a) => `${da > 40 ? '…' : ''}${r.testo.slice(Math.max(0, da - 40), da)}«${r.testo.slice(da, a)}»${r.testo.slice(a, a + 40)}${a + 40 < r.testo.length ? '…' : ''}`;
+  const contesto = (r, da, a) => contestoDi(r.testo, da, a);
+
+  // L'iscrizione di SMOCO all'Albo (decisione dell'utente del 13/10/2026): le sue
+  // date non diventano mai un punto, nemmeno l'anno del contratto («16/05/2026»
+  // in un contratto del 2026), e quella della categoria 8 si corregge da se' nel
+  // modello e nel contratto (correggiAlboSmoco). Qui si dice.
+  const alboSmoco = alboSmocoNelleRighe(righe);
+  for (const o of alboSmoco) {
+    const k = `${o.parte}|${o.riga}`;
+    if (!occupato.has(k)) occupato.set(k, []);
+    occupato.get(k).push([o.da, o.a]);
+  }
+  const giorno = (iso) => scriviData(iso);
+  const daCorreggere = alboSmoco.filter(o => o.correggi);
+  if (daCorreggere.length) {
+    avvisi.push(`La data dell'iscrizione di SMOCO all'Albo (cat. ${ALBO_SMOCO.categoria} ${ALBO_SMOCO.numero}) nel format è ${[...new Set(daCorreggere.map(o => `«${o.testo}»`))].join(', ')}: quella in vigore è del ${giorno(ALBO_SMOCO.data)}, valida fino al ${giorno(ALBO_SMOCO.scadenza)}. Nel modello e nei contratti generati la scrivo così; gli altri dati di SMOCO restano come nel format.`);
+  }
+  const senzaCategoria = alboSmoco.filter(o => !o.categoria && o.data !== ALBO_SMOCO.data);
+  if (senzaCategoria.length) {
+    avvisi.push(`Nel format c'è il numero dell'Albo di SMOCO (${ALBO_SMOCO.numero}) con la data ${[...new Set(senzaCategoria.map(o => `«${o.testo}»`))].join(', ')}, ma la riga non dice la categoria: non so se è l'iscrizione in categoria ${ALBO_SMOCO.categoria} (del ${giorno(ALBO_SMOCO.data)}) e la lascio com'è. Controllala nel Word.`);
+  }
+  if (alboSmoco.some(o => o.categoria === ALBO_SMOCO.categoria) && alboSmocoScaduto(oggi)) {
+    avvisi.push(`L'iscrizione di SMOCO all'Albo del ${giorno(ALBO_SMOCO.data)} valeva fino al ${giorno(ALBO_SMOCO.scadenza)}: la data del rinnovo va aggiornata nel gestionale prima di generare i contratti.`);
+  }
   const punto = (segnaposto, extra = {}) => {
     if (!punti.has(segnaposto)) {
       const p = puntoDi(segnaposto);
@@ -1175,7 +1273,9 @@ export function proponiPunti(letto, { tipo = 'raccolta', fornitori = [] } = {}) 
     delete p.dubbi;
   }
   for (const p of elenco) if (p.categoria === 'fornitore' && p.occorrenze.length && !p.occorrenze.some(o => o.attiva)) p.attivo = false;
-  return { punti: elenco, fornitore, anno: annoFormat, avvisi, da_controllare: elenco.filter(p => p.da_controllare).map(p => p.segnaposto) };
+  // albo_smoco: le date dell'iscrizione di SMOCO all'Albo trovate nel format, con
+  // quelle da correggere (correggi, nuovo); non sono punti (13/10/2026).
+  return { punti: elenco, fornitore, anno: annoFormat, avvisi, da_controllare: elenco.filter(p => p.da_controllare).map(p => p.segnaposto), albo_smoco: alboSmoco };
 }
 
 /**
@@ -1205,6 +1305,8 @@ export function cercaNelFormat(letto, testo) {
  * segnaposto. Un valore spezzato fra piu' pezzi di testo: il segnaposto va nel
  * primo, il resto si toglie dagli altri, e la formattazione di ciascuno resta.
  * Un'occorrenza che attraversa una tabulazione o un a capo non si tocca e si dice.
+ * Un'occorrenza con con (un testo) prende quel testo invece del segnaposto: e'
+ * la data dell'Albo di SMOCO corretta (correggiAlboSmoco, 13/10/2026).
  * @returns { parti, saltate: [{ segnaposto, testo, motivo }] }
  */
 export function applicaPunti(parti, punti) {
@@ -1239,7 +1341,7 @@ export function applicaPunti(parti, punti) {
         const da = Math.max(o.da, z.da) - z.da;
         const a = Math.min(o.a, z.a) - z.da;
         if (!modifiche.has(z)) modifiche.set(z, []);
-        modifiche.get(z).push({ da, a, con: k === 0 ? `{{${o.segnaposto}}}` : '' });
+        modifiche.get(z).push({ da, a, con: k === 0 ? (typeof o.con === 'string' ? o.con : `{{${o.segnaposto}}}`) : '' });
       });
     }
     // Si riscrive dal fondo, cosi' le posizioni prima restano buone.
@@ -1260,10 +1362,17 @@ export function applicaPunti(parti, punti) {
 /**
  * Il modello pronto da salvare: il .docx coi segnaposto e i punti da scrivere in
  * ModelloContratto.punti_json. Il valore di partenza dei prezzi non si conserva:
- * il modello lo legge chiunque sia collegato, i costi solo l'amministratore.
+ * e' un costo dei fornitori e resta solo nel contratto (dal 13/10/2026 anche il
+ * modello lo legge solo l'amministratore, ma i suoi punti arrivano a chi apre la
+ * scheda Contratti, da contrattiAnno).
+ * La data dell'iscrizione di SMOCO all'Albo si corregge gia' nel modello
+ * (albo_smoco: le correzioni fatte, 13/10/2026).
  */
 export function costruisciModello(letto, punti) {
-  const { parti, saltate } = applicaPunti(letto.parti, punti);
+  const conPunti = applicaPunti(letto.parti, punti);
+  const albo = correggiAlboSmoco(conPunti.parti);
+  const parti = albo.parti;
+  const saltate = [...conPunti.saltate, ...albo.saltate];
   const voci = { ...letto.voci };
   for (const [nome, xml] of Object.entries(parti)) voci[nome] = strToU8(xml);
   const zip = zipSync(voci, { level: 6 });
@@ -1275,7 +1384,7 @@ export function costruisciModello(letto, punti) {
   }));
   const segnaposti = [];
   for (const xml of Object.values(parti)) for (const m of xml.matchAll(/\{\{\s*([A-Z0-9_]+)\s*\}\}/g)) if (!segnaposti.includes(m[1])) segnaposti.push(m[1]);
-  return { voci, parti, saltate, punti: daSalvare, segnaposti, blob: new Blob([zip], { type: TIPO_DOCX }) };
+  return { voci, parti, saltate, albo_smoco: albo.correzioni, punti: daSalvare, segnaposti, blob: new Blob([zip], { type: TIPO_DOCX }) };
 }
 
 // ─── il contratto: i segnaposto diventano valori ───
@@ -1285,10 +1394,14 @@ export function costruisciModello(letto, punti) {
  * (date aaaa-mm-gg, numeri, testi): ogni valore si scrive come vuole il modello
  * (lo stile delle date, i prezzi con due decimali). Un segnaposto senza valore
  * resta visibile nel documento e torna in segnaposti_vuoti.
+ * La data dell'iscrizione di SMOCO all'Albo si corregge anche qui, per i modelli
+ * salvati prima del 13/10/2026 che hanno ancora quella del format: albo_smoco
+ * dice le correzioni fatte, per la nota del contratto.
  */
 export function compilaContratto(modelloLetto, valori, punti = []) {
   const perIlDocumento = valoriPerIlDocumento(valori, (punti || []).map(p => ({ ...p, tipo: p.tipo || puntoDi(p.segnaposto).tipo })));
-  return generaDocx(modelloLetto, perIlDocumento);
+  const albo = correggiAlboSmoco(modelloLetto.parti);
+  return { ...generaDocx({ ...modelloLetto, parti: albo.parti }, perIlDocumento), albo_smoco: albo.correzioni };
 }
 
 /** I punti salvati in un modello (punti_json), o un elenco vuoto per i modelli di prima. */

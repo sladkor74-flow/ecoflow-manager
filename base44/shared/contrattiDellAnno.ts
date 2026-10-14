@@ -20,6 +20,19 @@
 // - riaprendo un contratto tornavano i valori dell'anno prima: la funzione non
 //   mandava i valori del contratto dell'anno.
 //
+// Decisione dell'utente del 13/10/2026: chi nell'ACI raccoglie e stocca (oggi
+// Nappi Sud, Ecorecuperi negli anni in cui lo fa) ha UN contratto ACI «raccolta e
+// stoccaggio» coi due prezzi, come il contratto vero di Nappi Sud 2026 (quello
+// di Ecorecuperi del 2024 ha un prezzo solo, «Trasporto+Stoccaggio»). Prima ne
+// aspettavamo due, raccolta ACI e stoccaggio ACI, e il contratto di Nappi Sud
+// contava doppio. Ora la raccolta ACI e' «raccolta e stoccaggio»
+// (raccolta_e_stoccaggio), col modello ACI che ha anche il prezzo dello
+// stoccaggio, e lo stoccaggio ACI e' «non dovuto: sta nel contratto di raccolta
+// e stoccaggio», come il trattamento compreso nel prezzo unico di Green Tyre.
+// Quando il contratto di raccolta ACI dell'anno c'e' gia', lo dice lui, non i
+// movimenti (revisione del 14/10/2026): coi due prezzi lo stoccaggio sta dentro
+// anche nei mesi senza viaggi, di sola raccolta lo stoccaggio resta da fare.
+//
 // Qui la regola, senza letture: la funzione legge gli archivi e la chiama. Cosi'
 // si prova anche senza piattaforma (prove/contrattiCanali.mjs).
 
@@ -31,7 +44,7 @@ import { impiantiTargetDellAnno } from "./targetImpianti.ts";
 import { annoDelRecord, daConfermare } from "./annoTarget.ts";
 import { chiaveTariffa } from "./inizializzazioneAnno.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
-import { valoriDelContratto, doveVale } from "./segnapostiContratto.ts";
+import { valoriDelContratto, doveVale, eModelloRaccoltaEStoccaggio, eContrattoRaccoltaEStoccaggio } from "./segnapostiContratto.ts";
 
 export const TIPI_CONTRATTO = [
   { chiave: 'raccolta', ruolo: 'raccolta', prestazione: 'RACCOLTA' },
@@ -260,10 +273,17 @@ export function situazioneContratti({
     if (daConfermare(t)) targetCopiatoPer.add(k);
   }
 
-  const modelloPer = (tipo, canale) => (modelli || [])
-    .filter(m => m.tipo_contratto === tipo && (m.canale || 'RETE') === canale && (m.stato || 'attivo') === 'attivo')
+  // Sulla raccolta ACI i modelli sono due (13/10/2026): quello della sola
+  // raccolta e quello della raccolta e stoccaggio, che ha anche il prezzo dello
+  // stoccaggio. Ogni contratto prende il suo.
+  const modelloPer = (tipo, canale, conStoccaggio = false) => (modelli || [])
+    .filter(m => m.tipo_contratto === tipo && (m.canale || 'RETE') === canale && (m.stato || 'attivo') === 'attivo'
+      && (tipo !== 'raccolta' || canale !== 'ACI' || eModelloRaccoltaEStoccaggio(m) === conStoccaggio))
     .sort((a, b) => Number(b.anno_riferimento || 0) - Number(a.anno_riferimento || 0)
       || String(b.created_date || '').localeCompare(String(a.created_date || '')))[0] || null;
+  // Il modello da cui e' stato fatto un contratto, anche se poi e' stato
+  // sostituito da un format nuovo: dice com'e' fatto quel contratto (14/10/2026).
+  const modelloDelContratto = (c) => (c && c.modello_id ? (modelli || []).find(m => m.id === c.modello_id) || null : null);
 
   // Il prezzo unico di raccolta e trattamento (comprensiva_trattamento) si legge
   // sulle tariffe dell'anno; per un anno che non ha ancora le sue tariffe (i
@@ -279,7 +299,13 @@ export function situazioneContratti({
   let attesi = 0, fatti = 0;
   for (const s of soggetti.values()) {
     const f = fornitorePer.get(s.chiave) || null;
-    const suoi = [];
+    const fornitoreDi = { chiave: s.chiave, fornitoreId: f ? f.id : null };
+    const contrattoDi = (tipoChiave, canale) => contrattiAnno.find(c => c.soggetto_chiave === s.chiave && c.tipo_contratto === tipoChiave
+      && (c.canale || 'RETE') === canale) || null;
+    // Prima le prove di ogni prestazione, canale per canale; poi le righe. Il
+    // contratto ACI di raccolta e stoccaggio (13/10/2026) guarda due prestazioni
+    // insieme: la riga della raccolta deve sapere dello stoccaggio, e viceversa.
+    const prove = new Map();
     for (const tipo of TIPI_CONTRATTO) {
       // canale -> da dove si sa che serve: 'anno' (movimenti o inclusione
       // dell'anno), 'contratto' (c'e' gia' un contratto dell'anno), 'anno_prima'.
@@ -307,39 +333,102 @@ export function situazioneContratti({
       // gennaio a marzo): il trasporto e' un contratto solo, registrato RETE.
       const canaliFinePrima = new Set(canaliDi(ruoliFinePrima, s.chiave, tipo.ruolo)
         .map(c => (tipo.chiave === 'trasporto_secondaria' ? CANALE_DEL_TRASPORTO : c)));
+      prove.set(tipo.chiave, { evidenze, canaliFinePrima });
+    }
+    const daUltimoTrimestreDi = (tipoChiave, canale) => {
+      const p = prove.get(tipoChiave);
+      return p.evidenze.get(canale) === 'anno_prima' && primoTrimestre && p.canaliFinePrima.has(canale);
+    };
+    const daDecidereDi = (tipoChiave, canale) => !contrattoDi(tipoChiave, canale) && prove.get(tipoChiave).evidenze.get(canale) === 'anno_prima'
+      && !attesoDallAnnoPrima && !daUltimoTrimestreDi(tipoChiave, canale);
+    // RACCOLTA E STOCCAGGIO ACI, UN CONTRATTO SOLO (decisione dell'utente del
+    // 13/10/2026). Dai movimenti vale quando il fornitore ha tutte e due le righe
+    // sull'ACI, nello stesso stato (tutte e due attese, o tutte e due da
+    // decidere), e non ha gia' un contratto di stoccaggio ACI a parte per l'anno.
+    // Se una delle due c'e' solo per l'anno prima (ha smesso di stoccare, o di
+    // raccogliere) le righe restano due: il contratto unico non si propone a chi
+    // fa una cosa sola.
+    const unicoDaiMovimenti = prove.get('raccolta').evidenze.has('ACI') && prove.get('stoccaggio').evidenze.has('ACI')
+      && !contrattoDi('stoccaggio', 'ACI') && daDecidereDi('raccolta', 'ACI') === daDecidereDi('stoccaggio', 'ACI');
+    // Ma quando il contratto di raccolta ACI dell'anno c'e' gia', com'e' fatto lo
+    // dice lui (revisione del 14/10/2026). Prima lo dicevano sempre i movimenti:
+    // - il contratto 2027 di Nappi Sud coi due prezzi, firmato a dicembre, il
+    //   15/04/2027 senza ancora un viaggio ACI dell'anno (nel 2026 l'ACI di Nappi
+    //   Sud non ha viaggiato a gennaio, febbraio e aprile) tornava «sola
+    //   raccolta», lo stoccaggio ACI diventava da decidere a parte e la pagina,
+    //   riaprendolo, proponeva il modello senza il prezzo dello stoccaggio;
+    // - un contratto di sola raccolta firmato prima che il fornitore cominciasse a
+    //   stoccare sull'ACI diventava «raccolta e stoccaggio», e lo stoccaggio ACI
+    //   «non dovuto»: nessun contratto lo copriva e i conti lo nascondevano.
+    // Ora un contratto coi due prezzi copre lo stoccaggio ACI anche nei mesi
+    // senza viaggi; uno di sola raccolta no, e lo stoccaggio ACI e' un contratto
+    // da fare. Si puo' fare a parte, o rigenerando quello di raccolta col modello
+    // della raccolta e stoccaggio (si_puo_unire_lo_stoccaggio), come vuole la
+    // decisione: un contratto solo.
+    const raccoltaAci = contrattoDi('raccolta', 'ACI');
+    const raccoltaEStoccaggio = raccoltaAci ? eContrattoRaccoltaEStoccaggio(raccoltaAci, modelloDelContratto(raccoltaAci)) : unicoDaiMovimenti;
+    const stoccaggioDaUnire = !!raccoltaAci && !raccoltaEStoccaggio && unicoDaiMovimenti;
 
+    // Le tariffe di un contratto: quelle dell'anno, divise fra confermate, copie
+    // di «Prepara l'anno» ancora col prezzo dell'anno prima e copie riscritte
+    // col prezzo nuovo, e quelle dell'anno prima come riferimento.
+    // Le tariffe dell'anno copiate da «Prepara l'anno» e non ancora confermate
+    // portano il prezzo dell'anno prima: non sono il prezzo del contratto, che
+    // e' proprio il posto dove si confermano (revisione del 13/10/2026).
+    // Ma una copia riscritta col prezzo nuovo e non ancora confermata e' il
+    // prezzo dell'anno, da confermare: si propone, e si dice (eAncoraLaCopia).
+    const tariffeDi = (tipoChiave, canale) => {
+      const sueTariffe = tariffeDelContratto(tariffe, fornitoreDi, tipoChiave, canale, annoNum);
+      const tariffePrima = tariffeDelContratto(tariffe, fornitoreDi, tipoChiave, canale, prima);
+      const tariffeCopiate = sueTariffe.filter(t => daConfermare(t) && eAncoraLaCopia(t, tariffe, tariffePrima, prima));
+      return {
+        tariffe: sueTariffe.filter(t => !daConfermare(t)),
+        tariffeCopiate,
+        tariffeRiscritte: sueTariffe.filter(t => daConfermare(t) && !tariffeCopiate.includes(t)),
+        tariffePrima,
+      };
+    };
+
+    const suoi = [];
+    for (const tipo of TIPI_CONTRATTO) {
+      const { evidenze } = prove.get(tipo.chiave);
       for (const canale of CANALI_CONTRATTO) {
         if (!evidenze.has(canale)) continue;
         const evidenza = evidenze.get(canale);
-        const contratto = contrattiAnno.find(c => c.soggetto_chiave === s.chiave && c.tipo_contratto === tipo.chiave
-          && (c.canale || 'RETE') === canale) || null;
-        // Due trattamenti che non sono un contratto a parte, e non si contano:
-        // - quello di rete di un impianto che Ecotyre paga da se'
+        const contratto = contrattoDi(tipo.chiave, canale);
+        // Il contratto ACI di raccolta e stoccaggio: la riga della raccolta lo
+        // porta, quella dello stoccaggio sta dentro (se non ha gia' un contratto suo).
+        const conStoccaggio = raccoltaEStoccaggio && canale === 'ACI' && tipo.chiave === 'raccolta';
+        const nelContrattoDiRaccolta = raccoltaEStoccaggio && canale === 'ACI' && tipo.chiave === 'stoccaggio' && !contratto;
+        // Il contratto di sola raccolta ACI gia' fatto, e quest'anno anche lo
+        // stoccaggio ACI: la raccolta si puo' rigenerare coi due prezzi (14/10/2026).
+        const daUnire = stoccaggioDaUnire && canale === 'ACI' && (tipo.chiave === 'raccolta' || (tipo.chiave === 'stoccaggio' && !contratto));
+        // Tre prestazioni che non sono un contratto a parte, e non si contano:
+        // - il trattamento di rete di un impianto che Ecotyre paga da se'
         //   (trattamento_fatturato_da_ecotyre: Tecnogum nel 2026, «non ci fattura
         //   il trattamento e se le gestisce per se'», memoria «Tecnogum solo ACI»);
-        // - quello compreso nel prezzo unico della raccolta dello stesso fornitore
-        //   e canale (comprensiva_trattamento: Green Tyre sull'ACI, un contratto
-        //   solo di raccolta e trattamento).
-        const fornitoreDi = { chiave: s.chiave, fornitoreId: f ? f.id : null };
-        const sueTariffe = tariffeDelContratto(tariffe, fornitoreDi, tipo.chiave, canale, annoNum);
-        // Le tariffe dell'anno copiate da «Prepara l'anno» e non ancora confermate
-        // portano il prezzo dell'anno prima: non sono il prezzo del contratto, che
-        // e' proprio il posto dove si confermano (revisione del 13/10/2026).
-        // Ma una copia riscritta col prezzo nuovo e non ancora confermata e' il
-        // prezzo dell'anno, da confermare: si propone, e si dice (eAncoraLaCopia).
-        const tariffePrima = tariffeDelContratto(tariffe, fornitoreDi, tipo.chiave, canale, prima);
-        const tariffeConfermate = sueTariffe.filter(t => !daConfermare(t));
-        const tariffeCopiate = sueTariffe.filter(t => daConfermare(t) && eAncoraLaCopia(t, tariffe, tariffePrima, prima));
-        const tariffeRiscritte = sueTariffe.filter(t => daConfermare(t) && !tariffeCopiate.includes(t));
+        // - il trattamento compreso nel prezzo unico della raccolta dello stesso
+        //   fornitore e canale (comprensiva_trattamento: Green Tyre sull'ACI, un
+        //   contratto solo di raccolta e trattamento);
+        // - lo stoccaggio ACI di chi sull'ACI raccoglie e stocca: sta nel
+        //   contratto di raccolta e stoccaggio (13/10/2026).
+        const divise = tariffeDi(tipo.chiave, canale);
+        const { tariffeCopiate, tariffeRiscritte, tariffePrima } = divise;
+        const tariffeConfermate = divise.tariffe;
         let motivoNonDovuto = '';
         if (!contratto && tipo.chiave === 'trattamento' && canale === 'RETE' && f && f.trattamento_fatturato_da_ecotyre) {
           motivoNonDovuto = 'Il trattamento della rete di questo impianto lo paga Ecotyre: non è un contratto di SMOCO.';
         } else if (!contratto && tipo.chiave === 'trattamento' && prezzoUnico(fornitoreDi, canale)) {
           motivoNonDovuto = 'Il trattamento è compreso nel prezzo unico della raccolta: sta nel contratto di raccolta.';
+        } else if (nelContrattoDiRaccolta) {
+          motivoNonDovuto = 'Lo stoccaggio ACI sta nel contratto di raccolta e stoccaggio: un contratto solo, con i due prezzi.';
         }
         const nonDovuto = !!motivoNonDovuto;
-        const daUltimoTrimestre = evidenza === 'anno_prima' && primoTrimestre && canaliFinePrima.has(canale);
-        const decidere = !contratto && evidenza === 'anno_prima' && !attesoDallAnnoPrima && !daUltimoTrimestre;
+        const daUltimoTrimestre = daUltimoTrimestreDi(tipo.chiave, canale);
+        // Lo stoccaggio che sta nel contratto di raccolta e stoccaggio non si
+        // decide a parte: si decide il contratto, sulla riga della raccolta, e
+        // conta una volta sola anche fra i «da decidere».
+        const decidere = daDecidereDi(tipo.chiave, canale) && !nelContrattoDiRaccolta;
 
         const precedente = (contratti || [])
           .filter(c => c.soggetto_chiave === s.chiave && c.tipo_contratto === tipo.chiave
@@ -347,7 +436,7 @@ export function situazioneContratti({
           .sort((a, b) => Number(b.anno) - Number(a.anno)
             || String(b.data_inizio || '').localeCompare(String(a.data_inizio || ''))
             || String(b.created_date || '').localeCompare(String(a.created_date || '')))[0] || null;
-        const modello = modelloPer(tipo.chiave, canale);
+        const modello = modelloPer(tipo.chiave, canale, conStoccaggio);
 
         // La quantita' annua: il target e' della rete. Sull'ACI il gestionale
         // non ne ha uno, e il valore resta da scrivere: mai zero.
@@ -367,6 +456,11 @@ export function situazioneContratti({
         const riga = {
           tipo: tipo.chiave,
           canale,
+          // il contratto ACI di raccolta e stoccaggio, coi due prezzi (13/10/2026)
+          raccolta_e_stoccaggio: conStoccaggio,
+          // la raccolta ACI fatta di sola raccolta, che rigenerata col modello
+          // della raccolta e stoccaggio comprende anche lo stoccaggio (14/10/2026)
+          si_puo_unire_lo_stoccaggio: daUnire && tipo.chiave === 'raccolta',
           evidenza,
           da_ultimo_trimestre: daUltimoTrimestre,
           da_decidere: decidere,
@@ -400,6 +494,11 @@ export function situazioneContratti({
         };
         if (admin && !nonDovuto) {
           const sue = tariffeConfermate;
+          // Nel contratto ACI di raccolta e stoccaggio anche le tariffe dello
+          // stoccaggio ACI dello stesso fornitore: il secondo prezzo del contratto.
+          // Anche nella raccolta di sola raccolta che si puo' rigenerare coi due
+          // prezzi: il modello lo sceglie l'amministratore, e il prezzo c'e'.
+          const stoccaggio = conStoccaggio || (daUnire && tipo.chiave === 'raccolta') ? tariffeDi('stoccaggio', 'ACI') : null;
           const proposta = valoriDelContratto({
             anno: annoNum, tipo: tipo.chiave, canale, fornitore: f,
             precedente: precedente ? { anno: precedente.anno, data_inizio: precedente.data_inizio, valori: oggettoDa(precedente.valori_json) } : null,
@@ -411,25 +510,35 @@ export function situazioneContratti({
             // sulle copie e sull'anno prima: se il trattamento dice «sta nel
             // contratto di raccolta», la raccolta lo dice (revisione del 13/10/2026).
             prezzoUnico: tipo.chiave === 'raccolta' && prezzoUnico(fornitoreDi, canale),
+            stoccaggio,
           });
           // Chi lavora sotto un altro fornitore che gli fattura le prestazioni
           // (fattura_tramite: Torres sotto Green Tyre nel 2026) forse non ha un
           // contratto suo con SMOCO: lo si dice, la decisione e' dell'amministratore.
           if (f && f.fattura_tramite_nome) proposta.avvisi.push(`Lavora sotto ${f.fattura_tramite_nome}, che gli fattura le prestazioni: controlla se il contratto è suo o di ${f.fattura_tramite_nome}.`);
-          const comeTariffa = (t) => ({ valore: t.valore, unita_misura: t.unita_misura || '€/t', dove: doveVale(t), dal: t.data_inizio_validita || null, al: t.data_fine_validita || null });
+          // Il contratto di raccolta ACI fatto e' di sola raccolta, e quest'anno il
+          // fornitore stocca anche sull'ACI (revisione del 14/10/2026): lo si dice
+          // sulle due righe, perche' la decisione e' un contratto solo.
+          if (daUnire && tipo.chiave === 'raccolta') proposta.avvisi.push('Il contratto di raccolta ACI fatto è di sola raccolta, e quest\'anno sull\'ACI stocca anche: rigeneralo col modello della raccolta e stoccaggio e i due prezzi stanno in un contratto solo, senza lo stoccaggio ACI a parte.');
+          if (daUnire && tipo.chiave === 'stoccaggio') proposta.avvisi.push('Il contratto di raccolta ACI di questo fornitore è di sola raccolta: lo stoccaggio ACI non ce l\'ha. Rigenera quello col modello della raccolta e stoccaggio, coi due prezzi, oppure fai qui un contratto di stoccaggio a parte.');
+          // servizio: di quale prezzo del contratto e' la tariffa, solo quando i
+          // prezzi sono due (raccolta e stoccaggio)
+          const comeTariffa = (t, servizio = null) => ({ valore: t.valore, unita_misura: t.unita_misura || '€/t', dove: doveVale(t), dal: t.data_inizio_validita || null, al: t.data_fine_validita || null, ...(servizio ? { servizio } : {}) });
+          const qui = stoccaggio ? 'raccolta' : null;
           riga.proposta = {
             ...proposta,
             // le confermate e le copie riscritte col prezzo nuovo, segnate da_confermare
-            tariffe: [...sue.map(comeTariffa), ...tariffeRiscritte.map(t => ({ ...comeTariffa(t), da_confermare: true }))],
+            tariffe: [...sue.map(t => comeTariffa(t, qui)), ...tariffeRiscritte.map(t => ({ ...comeTariffa(t, qui), da_confermare: true })),
+              ...(stoccaggio ? [...stoccaggio.tariffe.map(t => comeTariffa(t, 'stoccaggio')), ...stoccaggio.tariffeRiscritte.map(t => ({ ...comeTariffa(t, 'stoccaggio'), da_confermare: true }))] : [])],
             // Le copie di «Prepara l'anno» ancora da confermare: un riferimento,
             // come le tariffe dell'anno prima, mai il valore.
-            tariffe_copiate: tariffeCopiate.map(comeTariffa),
+            tariffe_copiate: [...tariffeCopiate.map(t => comeTariffa(t, qui)), ...(stoccaggio ? stoccaggio.tariffeCopiate.map(t => comeTariffa(t, 'stoccaggio')) : [])],
             // Le tariffe dell'anno prima si mostrano accanto al prezzo, come
             // riferimento, e non diventano mai il valore: i contratti chiudono al
             // 31/12 senza tacito rinnovo, e il prezzo del 2027 non e' quello del
             // 2026 finche' qualcuno non lo conferma (memoria «Contratti annuali
             // senza tacito rinnovo»).
-            tariffe_anno_prima: tariffePrima.map(comeTariffa),
+            tariffe_anno_prima: [...tariffePrima.map(t => comeTariffa(t, qui)), ...(stoccaggio ? stoccaggio.tariffePrima.map(t => comeTariffa(t, 'stoccaggio')) : [])],
           };
         }
         if (decidere) { daDecidere.push({ ...riga, soggetto: s.chiave }); }
@@ -471,6 +580,8 @@ export function situazioneContratti({
       id: m.id, nome: m.nome, tipo_contratto: m.tipo_contratto, canale: m.canale || 'RETE',
       anno_riferimento: m.anno_riferimento, file_nome: m.file_nome, ha_file: !!m.file_uri,
       segnaposti_json: m.segnaposti_json, punti_json: m.punti_json || null,
+      // il modello ACI della raccolta e stoccaggio (13/10/2026)
+      raccolta_e_stoccaggio: eModelloRaccoltaEStoccaggio(m),
       fornitore_origine: m.fornitore_origine || null, created_date: m.created_date || null,
     })),
     totali: { attesi, controfirmati: fatti, da_fare: attesi - fatti },

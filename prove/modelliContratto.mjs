@@ -15,9 +15,9 @@
 // un'intestazione), e i format veri della cartella dei contratti, se su questo
 // computer ci sono (sola lettura).
 // node prove/modelliContratto.mjs
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
-import { leggiFormat, proponiPunti, costruisciModello, compilaContratto, testoDelDocumento, puntiDelModello } from '../src/lib/modelliContratto.js';
+import { leggiFormat, proponiPunti, costruisciModello, compilaContratto, testoDelDocumento, puntiDelModello, applicaPunti } from '../src/lib/modelliContratto.js';
 import { leggiModello } from '../src/lib/docxModello.js';
 import { leggiData, leggiNumeroItaliano, valoriPerIlDocumento } from '../src/lib/segnapostiContratto.js';
 
@@ -26,6 +26,16 @@ const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; cons
 const comeFile = (u8) => ({ name: 'format.docx', arrayBuffer: async () => u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) });
 const blobInFile = async (blob) => comeFile(new Uint8Array(await blob.arrayBuffer()));
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// L'ISCRIZIONE DI SMOCO ALL'ALBO (decisione dell'utente del 13/10/2026): in
+// categoria 8 la data e' sempre il 16/05/2025, fino al rinnovo del 2030, e il
+// lettore corregge quella del format nel modello e nel contratto. Regola della
+// prova, scritta qui e non presa dal lettore: ogni pezzo di riga che comincia
+// col numero BA-11513 e non parla della categoria 4 (l'altra iscrizione, Eco
+// Faso) ha la data del 16/05/2025, con lo stesso separatore.
+const alboGiusto = (t) => String(t).split(/(?=BA-?\s?11513)/).map(p => (/^BA-?\s?11513/.test(p) && !/categoria\s*4|cat\.?\s*4(?!\d)/i.test(p)
+  ? p.replace(/^(BA-?\s?11513\s+del\s+)\d{1,2}([./])\d{1,2}\2\d{4}/, (_m, a, s) => `${a}16${s}05${s}2025`) : p)).join('');
+const conAlboGiusto = (righe) => righe.map(alboGiusto);
 
 /** Ogni riga diversa fra l'originale e il modello si spiega coi segnaposto: il resto e' identico. */
 function soloNeiPunti(originale, conSegnaposto) {
@@ -52,7 +62,11 @@ const documento = `<?xml version="1.0"?><w:document xmlns:w="w"><w:body>${[
   P(R('Il quantitativo previsto è pari a circa 300 ton/anno, nel rispetto del D.M. 182/2019 e del D.Lgs. 152/2006.')),
   // una revisione aperta: si accetta, «VECCHIO» sparisce e «nuovo» resta
   P(R('Il testo '), `<w:del w:id="1"><w:r><w:delText>VECCHIO </w:delText></w:r></w:del><w:ins w:id="2"><w:r><w:t xml:space="preserve">nuovo </w:t></w:r></w:ins>`, R('vale per le Parti.')),
+  // l'Albo di SMOCO con l'anno cambiato come se fosse quello del contratto
+  // (Green Tyre e Nappi Sud rete 2026): si corregge in 16/05/2025 (13/10/2026)
   P(R('Intermediario: SMOCO Srl - Iscrizione Albo cat.8 BA-11513 del 16/05/2026')),
+  // la data di un altro atto: resta com'e'
+  P(R('Autorizzazione unica dell\'impianto n. 45 del 16/05/2026.')),
   P(R('Le fatture saranno pagate entro sessanta giorni data fattura mediante bonifico bancario.')),
   P(R('Il FORNITORE stipula una polizza di responsabilità civile pari a 1.500.000,00 Euro (unmilionecinquecentomila Euro).')),
   P(R('Note: {{NOTE_AGGIUNTIVE}}')),
@@ -95,13 +109,25 @@ const diNorma = (o) => o.attiva && ['182/2019', '152/2006', '182', '152', '2019'
 verifica('la data di un altro atto («del 16/05/2026») e le norme no', anni.some(o => !o.attiva && /altro atto/.test(o.motivo)) && !proposta.punti.some(p => p.occorrenze.some(diNorma)),
   JSON.stringify([anni.map(o => [o.contesto, o.attiva, o.motivo]), proposta.punti.flatMap(p => p.occorrenze.filter(diNorma).map(o => p.segnaposto + ' ' + o.contesto))]));
 verifica('il segnaposto gia\' scritto nel format si tiene', P_('NOTE_AGGIUNTIVE')?.gia_segnaposto === true);
+// L'Albo di SMOCO (13/10/2026): la data «16/05/2026» non e' l'anno del contratto
+// ne' un altro atto qualunque: si corregge, e la proposta lo dice.
+const alboF = proposta.albo_smoco || [];
+verifica('la data dell\'Albo di SMOCO e\' riconosciuta: categoria 8, da correggere in 16/05/2025', alboF.length === 1 && alboF[0].testo === '16/05/2026' && alboF[0].categoria === '8'
+  && alboF[0].correggi === true && alboF[0].nuovo === '16/05/2025', JSON.stringify(alboF));
+verifica('la proposta lo dice, con la scadenza del 15/05/2030', proposta.avvisi.some(a => /iscrizione di SMOCO all'Albo \(cat\. 8 BA-11513\) nel format è «16\/05\/2026»: quella in vigore è del 16\/05\/2025, valida fino al 15\/05\/2030/.test(a)),
+  JSON.stringify(proposta.avvisi));
+verifica('l\'anno nella data dell\'Albo di SMOCO non e\' mai un punto, nemmeno spento', !anni.some(o => /BA-11513/.test(o.contesto)) && !proposta.punti.some(p => p.occorrenze.some(o => /BA-11513 del «/.test(o.contesto))),
+  JSON.stringify(anni.map(o => o.contesto)));
 
 console.log('IL MODELLO');
 const modello = costruisciModello(letto, proposta.punti);
 const testoOriginale = testoDelDocumento(letto.parti);
 const testoModello = testoDelDocumento(modello.parti);
 verifica('nessuna occorrenza saltata', modello.saltate.length === 0, JSON.stringify(modello.saltate));
-verifica('il modello differisce dal format solo nei punti', soloNeiPunti(testoOriginale, testoModello).ok, soloNeiPunti(testoOriginale, testoModello).motivo);
+// Il modello differisce dal format solo nei punti e nella data dell'Albo di SMOCO.
+verifica('il modello differisce dal format solo nei punti', soloNeiPunti(conAlboGiusto(testoOriginale), testoModello).ok, soloNeiPunti(conAlboGiusto(testoOriginale), testoModello).motivo);
+verifica('nel modello la data dell\'Albo di SMOCO e\' gia\' quella giusta, e il resto della riga resta', testoModello.includes('Intermediario: SMOCO Srl - Iscrizione Albo cat.8 BA-11513 del 16/05/2025')
+  && (modello.albo_smoco || []).length === 1, JSON.stringify(modello.albo_smoco));
 verifica('del fornitore di partenza nel modello non resta niente', !/GATIM|02015210798|Azzarito|70,00/.test(testoModello.join('\n')), testoModello.filter(r => /GATIM|02015210798|Azzarito|70,00/.test(r)).join(' | '));
 verifica('la formattazione resta: il segnaposto sta nel pezzo in grassetto', /<w:rPr><w:b\/><\/w:rPr><w:t[^>]*>\{\{FORNITORE_RAGIONE_SOCIALE\}\}<\/w:t>/.test(modello.parti['word/document.xml']));
 const salvati = new Map(modello.punti.map(p => [p.segnaposto, p]));
@@ -123,9 +149,10 @@ const tutto = testoGen.join('\n');
 verifica('nessun segnaposto vuoto', gen.segnaposti_vuoti.length === 0, JSON.stringify(gen.segnaposti_vuoti));
 verifica('le date nello stile del format', tutto.includes('valido dal 02 Gennaio 2027 e sino al 31 dicembre 2027') && tutto.includes('Massafra, 02 Gennaio 2027'), tutto.slice(0, 600));
 verifica('quantita\' e prezzo all\'italiana', tutto.includes('circa 1.250 ton/anno') && tutto.includes('Raccolta PFU: 75,00 € a tonnellata'));
-verifica('il resto del documento non cambia: la penale, l\'altro atto, le norme', tutto.includes('Penale: 500,00 €') && tutto.includes('del 16/05/2026') && tutto.includes('D.M. 182/2019'));
+verifica('il resto del documento non cambia: la penale, l\'altro atto, le norme', tutto.includes('Penale: 500,00 €') && tutto.includes('impianto n. 45 del 16/05/2026') && tutto.includes('D.M. 182/2019'));
+verifica('la data dell\'Albo di SMOCO nel contratto e\' il 16/05/2025, mai l\'anno del contratto', tutto.includes('Iscrizione Albo cat.8 BA-11513 del 16/05/2025') && !/BA-11513 del 16\/05\/202[67]/.test(tutto));
 verifica('anche l\'intestazione', tutto.includes('Contratto di raccolta anno 2027 - ECOLOGICAL SYSTEMS S.R.L.'));
-const cambiate = testoOriginale.map((r, i) => (r === testoGen[i] ? null : i)).filter(i => i !== null);
+const cambiate = conAlboGiusto(testoOriginale).map((r, i) => (r === testoGen[i] ? null : i)).filter(i => i !== null);
 const conPunti = testoModello.map((r, i) => (/\{\{[A-Z0-9_]+\}\}/.test(r) && !/NOTE_AGGIUNTIVE/.test(r) ? i : null)).filter(i => i !== null);
 verifica('il contratto generato differisce dall\'originale solo nelle righe dei punti', cambiate.every(i => conPunti.includes(i) || /NOTE_AGGIUNTIVE/.test(testoModello[i])) && testoGen.length === testoOriginale.length,
   JSON.stringify(cambiate.filter(i => !conPunti.includes(i)).map(i => [testoOriginale[i], testoGen[i]])));
@@ -198,12 +225,13 @@ if (!existsSync(CARTELLA)) {
     const orig = testoDelDocumento(l.parti);
     const mod = testoDelDocumento(m.parti);
     verifica(`${nomeBreve}: nessuna occorrenza saltata`, m.saltate.length === 0, JSON.stringify(m.saltate));
-    const spiegato = soloNeiPunti(orig, mod);
+    // Fuori dai punti cambia solo la data dell'Albo di SMOCO (13/10/2026).
+    const spiegato = soloNeiPunti(conAlboGiusto(orig), mod);
     verifica(`${nomeBreve}: il modello differisce dal format solo nei punti`, spiegato.ok, spiegato.motivo);
     const g2 = compilaContratto(await leggiModello(await blobInFile(m.blob)), altro, m.punti);
     const tg = testoDelDocumento((await leggiModello(await blobInFile(g2.blob))).parti);
     verifica(`${nomeBreve}: generato coi valori di un altro fornitore, nessun segnaposto vuoto`, g2.segnaposti_vuoti.length === 0, g2.segnaposti_vuoti.join(','));
-    const cambiate2 = orig.map((r, i) => (r === tg[i] ? null : i)).filter(i => i !== null);
+    const cambiate2 = conAlboGiusto(orig).map((r, i) => (r === tg[i] ? null : i)).filter(i => i !== null);
     const coi = new Set(mod.map((r, i) => (/\{\{[A-Z0-9_]+\}\}/.test(r) ? i : null)).filter(i => i !== null));
     verifica(`${nomeBreve}: il contratto generato differisce solo nelle righe dei punti (${cambiate2.length} su ${orig.length})`, tg.length === orig.length && cambiate2.every(i => coi.has(i)),
       JSON.stringify(cambiate2.filter(i => !coi.has(i)).map(i => [orig[i], tg[i]])).slice(0, 400));
@@ -234,6 +262,110 @@ if (!existsSync(CARTELLA)) {
       && ['ECOLOGICAL SYSTEMS', valori.FORNITORE_PIVA, '75,00', '300 ton/anno'].every(v => v && tge.join('\n').includes(v)), JSON.stringify(valori).slice(0, 300));
     verifica(`Ecological Systems rifatto dal format: differisce dal contratto vero in poche righe scritte a mano (${diverse.length})`, diverse.length <= 6,
       JSON.stringify(diverse.map(i => [vero[i], tge[i]])).slice(0, 800));
+  }
+}
+
+// ─── l'iscrizione di SMOCO all'Albo: sempre il 16/05/2025 (13/10/2026) ───
+// Decisione dell'utente del 13/10/2026: «ogni 5 anni c'è il rinnovo delle
+// autorizzazioni sull'albo, quindi devi sempre considerare come data il
+// «16/05/2025» (fino al 2030 quando verrà rinnovata)». E' l'iscrizione di SMOCO
+// in categoria 8, n. BA-11513: un dato fisso, scritto in un posto solo
+// (ALBO_SMOCO in segnapostiContratto). Il lettore corregge la data che trova
+// nella riga dell'Albo di SMOCO, nel modello e nel contratto, e lo dice; nessun
+// altro dato di SMOCO cambia.
+console.log('L\'ISCRIZIONE DI SMOCO ALL\'ALBO: SEMPRE IL 16/05/2025');
+const catalogoF = await import('../base44/shared/segnapostiContratto.ts');
+const catalogoP = await import('../src/lib/segnapostiContratto.js');
+for (const [nome, c] of [['funzione', catalogoF], ['pagina', catalogoP]]) {
+  verifica(`${nome}: ALBO_SMOCO e' l'iscrizione in categoria 8 BA-11513 del 16/05/2025, valida fino al 15/05/2030`, c.ALBO_SMOCO?.numero === 'BA-11513' && c.ALBO_SMOCO.categoria === '8'
+    && c.ALBO_SMOCO.data === '2025-05-16' && c.ALBO_SMOCO.scadenza === '2030-05-15' && Object.isFrozen(c.ALBO_SMOCO), JSON.stringify(c.ALBO_SMOCO));
+  verifica(`${nome}: scaduta solo dopo il 15/05/2030`, !c.alboSmocoScaduto('2030-05-15') && c.alboSmocoScaduto('2030-05-16'));
+}
+// In un posto solo: nel codice (non nei commenti) di src e base44 la data
+// compare solo nel catalogo e nel suo specchio.
+const fileDi = (dir) => readdirSync(new URL(dir, import.meta.url)).flatMap(n => {
+  const p = `${dir}/${n}`;
+  return statSync(new URL(p, import.meta.url)).isDirectory() ? fileDi(p) : (/\.(js|jsx|ts)$/.test(n) ? [p] : []);
+});
+const dataScritta = [...fileDi('../src'), ...fileDi('../base44')].filter(p => !/segnapostiContratto\.(ts|js)$/.test(p)).filter(p => readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r/g, '')
+  .split('\n').some(r => !/^\s*(\/\/|\*|\/\*)/.test(r) && /2025-05-16|16[/.]05[/.]2025/.test(r.replace(/\/\/.*$/, ''))));
+verifica('la data dell\'Albo di SMOCO e\' scritta nel codice solo in segnapostiContratto (e nel suo specchio)', !dataScritta.length, dataScritta.join(', '));
+
+const formatAlbo = (righe) => zipSync({ 'word/document.xml': strToU8(`<?xml version="1.0"?><w:document xmlns:w="w"><w:body>${righe.map(t => P(R(t))).join('')}</w:body></w:document>`), '[Content_Types].xml': strToU8('<Types/>') });
+const RIGHE_ALBO = [
+  'SMOCO è iscritta all’Albo Nazionale Gestori Ambientali con Autorizzazione n. BA11513 del 15.05.2020 per l’attività di intermediazione e/o commercio di rifiuti speciali non pericolosi in categoria 8 classe “A” e con Autorizzazione n. BA11513 del 01.04.2022 per raccolta e trasporto di rifiuti speciali non pericolosi in categoria 4 classe “C”.',
+  'Intermediario: SMOCO Srl - Iscrizione Albo cat. 8 BA 11513 del 15 maggio 2020',
+  'Riferimento: BA-11513 del 03/03/2021',
+  'Il presente contratto è valido dal 02 Gennaio 2026 e sino al 31 dicembre 2026.',
+];
+const lettoAlbo = await leggiFormat(comeFile(formatAlbo(RIGHE_ALBO)));
+const pAlbo = proponiPunti(lettoAlbo, { tipo: 'raccolta', oggi: '2026-10-13' });
+const dataAlbo = (testo) => (pAlbo.albo_smoco || []).find(o => o.testo === testo);
+verifica('categoria 8 scritta coi punti: diventa «16.05.2025»', dataAlbo('15.05.2020')?.categoria === '8' && dataAlbo('15.05.2020')?.nuovo === '16.05.2025', JSON.stringify(pAlbo.albo_smoco));
+verifica('lo stesso numero in categoria 4 (01.04.2022) e\' un\'altra iscrizione: non si tocca', dataAlbo('01.04.2022')?.categoria === '4' && dataAlbo('01.04.2022')?.correggi === false);
+verifica('la data scritta in lettere: «16 maggio 2025»', dataAlbo('15 maggio 2020')?.nuovo === '16 maggio 2025');
+verifica('senza la categoria scritta non si sceglie, e si dice', dataAlbo('03/03/2021')?.categoria === null && dataAlbo('03/03/2021')?.correggi === false
+  && pAlbo.avvisi.some(a => /non dice la categoria/.test(a) && a.includes('«03/03/2021»')), JSON.stringify(pAlbo.avvisi));
+verifica('prima della scadenza nessun avviso di rinnovo', !pAlbo.avvisi.some(a => /rinnovo/.test(a)));
+verifica('dopo il 15/05/2030 il lettore dice che la data va rinnovata', proponiPunti(lettoAlbo, { tipo: 'raccolta', oggi: '2030-05-16' }).avvisi.some(a => /valeva fino al 15\/05\/2030: la data del rinnovo va aggiornata/.test(a)));
+const mAlbo = costruisciModello(lettoAlbo, pAlbo.punti);
+const tAlbo = testoDelDocumento(mAlbo.parti);
+verifica('nel modello si correggono solo le due date di categoria 8: il resto delle righe, e la categoria 4, restano',
+  tAlbo[0] === RIGHE_ALBO[0].replace('del 15.05.2020', 'del 16.05.2025') && tAlbo[1] === 'Intermediario: SMOCO Srl - Iscrizione Albo cat. 8 BA 11513 del 16 maggio 2025'
+  && tAlbo[2] === RIGHE_ALBO[2] && (mAlbo.albo_smoco || []).length === 2 && !mAlbo.saltate.length, JSON.stringify(tAlbo.slice(0, 3)));
+// Un modello salvato prima del 13/10/2026 ha ancora la data del format: si
+// corregge quando si genera il contratto, e il contratto lo dice.
+const vecchioModello = applicaPunti(lettoAlbo.parti, pAlbo.punti);
+const gVecchio = compilaContratto({ ...lettoAlbo, parti: vecchioModello.parti }, { DATA_INIZIO: '2027-01-02', DATA_FINE: '2027-12-31', ANNO: '2027' }, pAlbo.punti);
+const tVecchio = testoDelDocumento((await leggiModello(await blobInFile(gVecchio.blob))).parti);
+verifica('da un modello di prima il contratto esce con la data giusta, e lo dice', tVecchio[0] === tAlbo[0] && tVecchio[1] === tAlbo[1] && (gVecchio.albo_smoco || []).length === 2,
+  JSON.stringify([tVecchio.slice(0, 2), gVecchio.albo_smoco]));
+const gNuovo = compilaContratto(await leggiModello(await blobInFile(mAlbo.blob)), { DATA_INIZIO: '2027-01-02', DATA_FINE: '2027-12-31', ANNO: '2027' }, mAlbo.punti);
+verifica('da un modello gia\' corretto non c\'e\' niente da correggere', (gNuovo.albo_smoco || []).length === 0, JSON.stringify(gNuovo.albo_smoco));
+
+if (existsSync(CARTELLA)) {
+  // Il format dell'utente: «Contratto Raccolta 2026_RETE MODIFICATO», «del 15/05/2020».
+  const l = await leggiFormat(comeFile(new Uint8Array(readFileSync(CARTELLA + 'Contratto Raccolta 2026_RETE MODIFICATO.docx'))));
+  const p = proponiPunti(l, { tipo: 'raccolta' });
+  verifica('«Contratto Raccolta 2026_RETE MODIFICATO»: la proposta dice che «15/05/2020» diventa 16/05/2025', (p.albo_smoco || []).filter(o => o.correggi).map(o => o.testo).join() === '15/05/2020'
+    && p.avvisi.some(a => a.includes('«15/05/2020»: quella in vigore è del 16/05/2025, valida fino al 15/05/2030')), JSON.stringify(p.avvisi));
+  const m = costruisciModello(l, p.punti);
+  const g = compilaContratto(await leggiModello(await blobInFile(m.blob)), altro, m.punti);
+  const orig = testoDelDocumento(l.parti);
+  const tg = testoDelDocumento((await leggiModello(await blobInFile(g.blob))).parti);
+  const k = orig.findIndex(r => /BA-11513 del 15\/05\/2020/.test(r));
+  verifica('...e nel contratto generato la riga dell\'Albo di SMOCO cambia solo nella data', k >= 0 && tg[k] === 'Intermediario: SMOCO Srl - CF nr 02971520735 – Iscrizione Albo cat.8 BA-11513 del 16/05/2025'
+    && tg[k] === orig[k].replace('del 15/05/2020', 'del 16/05/2025'), JSON.stringify([orig[k], tg[k]]));
+  verifica('...e nessun altro dato di SMOCO cambia (le righe col suo codice fiscale)', orig.every((r, i) => i === k || !r.includes('02971520735') || tg[i] === r),
+    JSON.stringify(orig.map((r, i) => [r, tg[i]]).filter(([r, t], i) => i !== k && r.includes('02971520735') && t !== r).slice(0, 2)));
+  // Tutti i contratti e i format delle due cartelle: il lettore corregge le date
+  // dell'Albo di SMOCO esattamente come la regola della prova, e non altro.
+  const radici = [CARTELLA, CARTELLA.replace('CONTRATTI SUBFORNITORI/', 'CONTRATTI (FORMAT)/')];
+  const tutti = (d) => readdirSync(d).flatMap(n => (statSync(d + n).isDirectory() ? tutti(d + n + '/') : (/\.docx$/i.test(n) && !n.startsWith('~$') ? [d + n] : [])));
+  const { correggiAlboSmoco } = await import('../src/lib/modelliContratto.js');
+  let conAlbo = 0;
+  const corrette = new Map();
+  const diversi = [];
+  for (const file of radici.filter(existsSync).flatMap(tutti)) {
+    const lf = await leggiFormat(comeFile(new Uint8Array(readFileSync(file))));
+    const prima = testoDelDocumento(lf.parti);
+    if (!prima.some(r => /BA-?\s?11513/.test(r))) continue;
+    conAlbo++;
+    const c = correggiAlboSmoco(lf.parti);
+    for (const o of c.correzioni) corrette.set(o.testo, (corrette.get(o.testo) || 0) + 1);
+    const dopo = testoDelDocumento(c.parti);
+    if (dopo.length !== prima.length || dopo.some((r, i) => r !== alboGiusto(prima[i]))) diversi.push(file.split('/').slice(-2).join('/'));
+  }
+  console.log(`  ${conAlbo} documenti con l'Albo di SMOCO; date corrette: ${[...corrette].map(([d, n]) => `${d} (${n})`).join(', ')}`);
+  verifica('su tutti i contratti veri il lettore corregge come la regola della prova, e non tocca altro', conAlbo >= 60 && !diversi.length, diversi.slice(0, 5).join(' | '));
+  verifica('si correggono il 15/05/2020, il 16/05/2026 e il 15/05/2025; il 16/05/2025 e il 01.04.2022 (categoria 4) mai',
+    ['15/05/2020', '16/05/2026', '15/05/2025'].every(d => corrette.has(d)) && !corrette.has('16/05/2025') && !corrette.has('16.05.2025') && !corrette.has('01.04.2022'), JSON.stringify([...corrette]));
+  const ECO_FASO = 'ECO FASO/Contratto_SMOCO_ECO FASO - 2026 (16.01.03. verso IRIGOM).docx';
+  if (existsSync(CARTELLA + ECO_FASO)) {
+    const le = await leggiFormat(comeFile(new Uint8Array(readFileSync(CARTELLA + ECO_FASO))));
+    const pe = proponiPunti(le, { tipo: 'raccolta' });
+    verifica('Eco Faso: categoria 8 gia\' del 16.05.2025 e categoria 4 del 01.04.2022, nessuna correzione e nessun avviso',
+      (pe.albo_smoco || []).map(o => `${o.categoria}:${o.testo}:${o.correggi}`).join() === '8:16.05.2025:false,4:01.04.2022:false' && !pe.avvisi.some(a => /Albo/.test(a)), JSON.stringify(pe.albo_smoco));
   }
 }
 

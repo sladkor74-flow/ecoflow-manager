@@ -154,6 +154,18 @@ export const CAMPI_TRACCIATI = {
     criterio_json: { nome: 'criterio dei movimenti', unita: 'json' },
     attiva: { nome: 'attiva nel foglio', unita: 'si_no', predefinito: true },
   },
+  // I recapiti del fornitore che i contratti leggono dall'anagrafica (decisioni
+  // dell'utente del 13/10/2026): il cellulare (FORNITORE_TEL_2), la pec
+  // (FORNITORE_EMAIL_2) e il referente (FORNITORE_REFERENTE). Non fanno un
+  // conto, ma finiscono in un contratto firmato: chi li ha cambiati e da quale
+  // valore si deve sapere. Non sono costi, e l'anagrafica la legge chiunque.
+  // Gli altri campi del fornitore (nome, stato, ruoli) non si tracciano ancora:
+  // una loro modifica non costa nessuna lettura in piu'.
+  Fornitore: {
+    cellulare: { nome: 'cellulare', unita: 'testo' },
+    pec: { nome: 'pec', unita: 'testo' },
+    referente: { nome: 'referente', unita: 'testo' },
+  },
 };
 
 /** Gli archivi i cui record sono tutti costi: il foglio della passiva. */
@@ -316,6 +328,8 @@ export function etichettaDi(entita, record) {
     case 'DichiarazioneSito': return unisci(r.sito, [parte(r.canale) || 'RETE', parte(r.provenienza)].filter(Boolean).join(' '), [parte(r.mese), anno].filter(Boolean).join(' '));
     case 'ExtraRaccolta': return unisci(r.id_ordine || r.numero_fir, r.produttore || r.ragione_sociale || r.punto_di_raccolta, anno);
     case 'VocePassivaAmministrazione': return unisci(r.soggetto, r.voce, r.canale, anno);
+    // Un fornitore si riconosce dal nome: senza, la riga diceva il suo id.
+    case 'Fornitore': return unisci(r.ragione_sociale || r.id);
     default: return unisci(r.nome || r.id, anno);
   }
 }

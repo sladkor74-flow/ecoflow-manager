@@ -6,7 +6,10 @@ import { controlliTariffaAttiva, controlliUnitaTariffa } from "../../shared/ecot
 import { conflittiTariffa, periodoTariffa } from "../../shared/conflittiTariffa.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { traccia, eliminaConTraccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
-import { riferimentiFornitore, riferimentiTariffa, testoRiferimenti, ARCHIVI_MOVIMENTI } from "../../shared/riferimentiAnagrafica.ts";
+import {
+  riferimentiFornitore, riferimentiTariffa, testoRiferimenti, ARCHIVI_MOVIMENTI, ARCHIVI_CON_TARIFFA,
+  cambiaLaChiave, siRinomina, testoRinomina,
+} from "../../shared/riferimentiAnagrafica.ts";
 import { oggiRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import {
   controlliSurplus, conflittiSurplus, giornoPrimaDi, mesiDelSurplus, euroTDi, valePerFornitore, fornitoriDelSurplus,
@@ -55,10 +58,11 @@ function norm(v) {
 // doppione c'e', rifiutarla vorrebbe dire non poter piu' toccare nessuno dei due.
 const CAMPO_NOME = { Fornitore: 'ragione_sociale', Servizio: 'nome' };
 const chiaveNome = (nome) => normalizzaRagioneSociale(String(nome || ''));
-async function nomeGiaPresente(base44, entita, nome, idEscluso = null) {
+// tutti: l'archivio gia' letto (14/10/2026: la rinomina di un fornitore lo usa
+// anche per i riferimenti, e non lo rilegge).
+function nomeGiaPresente(tutti, entita, nome, idEscluso = null) {
   const chiave = chiaveNome(nome);
   if (!chiave) return null;
-  const tutti = await fetchAll(base44.asServiceRole.entities[entita]);
   return tutti.find(x => x && x.id !== idEscluso && chiaveNome(x[CAMPO_NOME[entita]]) === chiave) || null;
 }
 
@@ -69,7 +73,9 @@ async function nomeGiaPresente(base44, entita, nome, idEscluso = null) {
 // fermarla. Ora, se qualcosa li usa, si risponde 409 con l'elenco
 // (shared/riferimentiAnagrafica.ts) e la proposta che non rompe niente -
 // disattivare il fornitore, chiudere il periodo della tariffa -; si elimina lo
-// stesso solo con conferma_eliminazione, e il motivo nello storico lo dice.
+// stesso solo con conferma_eliminazione, e il motivo nello storico lo dice. Un
+// fornitore con movimenti terminati non si elimina nemmeno con la conferma
+// (decisioni dell'utente del 13/10/2026): si disattiva.
 // Se un archivio non si legge, l'errore sale: un controllo a meta' direbbe
 // «nessuno lo usa» quando non lo sa.
 //
@@ -77,6 +83,11 @@ async function nomeGiaPresente(base44, entita, nome, idEscluso = null) {
 // lettura finiva in un catch che dava null, e con null il controllo si saltava,
 // cosi' un errore passeggero bastava a eliminare senza domande un fornitore
 // usato. Se non si legge, si risponde errore e non si elimina niente.
+//
+// Restituisce { record, riferimenti }: il record letto qui e' anche il «prima»
+// dello storico dell'eliminazione (13/10/2026). Da quando il fornitore ha campi
+// tracciati (i recapiti dei contratti), eliminaConTraccia lo avrebbe riletto:
+// una lettura in piu' per niente, contro il limite di richieste.
 async function riferimentiPrimaDiEliminare(base44, entita, id) {
   const svc = base44.asServiceRole.entities;
   const [cosa, eliminato] = entita === 'Tariffa' ? ['la tariffa', 'eliminata'] : ['il fornitore', 'eliminato'];
@@ -87,9 +98,20 @@ async function riferimentiPrimaDiEliminare(base44, entita, id) {
     throw new Error(`Non riesco a leggere ${cosa} da eliminare (${e && e.message ? e.message : e}): non l'ho ${eliminato}, riprova.`);
   }
   if (!record) throw new Error(`Non trovo ${cosa} da eliminare: non l'ho ${eliminato}, ricarica la pagina.`);
+  return { record, riferimenti: await riferimentiDi(base44, entita, record) };
+}
+
+/**
+ * I riferimenti di un record gia' letto: per eliminarlo, e per un fornitore
+ * anche per rinominarlo (14/10/2026). fornitori: l'anagrafica gia' letta, se
+ * c'e'. Le terziarie si leggono solo per un fornitore: le tariffe non danno
+ * loro il prezzo (ARCHIVI_CON_TARIFFA).
+ */
+async function riferimentiDi(base44, entita, record, fornitoriLetti = null) {
+  const svc = base44.asServiceRole.entities;
   const movimenti = {};
-  for (const archivio of ARCHIVI_MOVIMENTI) movimenti[archivio] = await fetchAll(svc[archivio]);
-  const fornitori = await fetchAll(svc.Fornitore);
+  for (const archivio of entita === 'Tariffa' ? ARCHIVI_CON_TARIFFA : ARCHIVI_MOVIMENTI) movimenti[archivio] = await fetchAll(svc[archivio]);
+  const fornitori = fornitoriLetti || await fetchAll(svc.Fornitore);
   // «Chiudi periodo» solo a una tariffa ancora aperta (revisione del
   // 13/10/2026): a una gia' chiusa - dal 01/01/2027 tutte quelle del 2026 - la
   // proposta portava a chiuderla a oggi, cioe' ad allungarla, contro i contratti
@@ -844,17 +866,31 @@ export default async function(req) {
     if ((entita === 'Fornitore' || entita === 'Servizio') && (operazione === 'create' || operazione === 'update')) {
       const campo = CAMPO_NOME[entita];
       const nome = dati && dati[campo];
-      if (operazione === 'create' && !String(nome || '').trim()) {
+      // Anche una modifica che svuota il nome si ferma (13/10/2026): dalla scheda
+      // Fornitori il nome ora si cambia, e un nome vuoto passava il controllo
+      // dei doppioni (un nome vuoto non ha chiave) e restava scritto.
+      if ((operazione === 'create' || nome !== undefined) && !String(nome || '').trim()) {
         return Response.json({ error: `Il ${entita === 'Fornitore' ? 'fornitore' : 'servizio'} ha bisogno di un nome.` }, { status: 400 });
       }
-      // Su una modifica si controlla solo se il nome cambia davvero.
+      // Su una modifica si controlla solo se il nome cambia davvero. Il record
+      // che non si legge non si modifica (14/10/2026): la lettura finiva in un
+      // catch che dava null, e con null il controllo della rinomina qui sotto
+      // si sarebbe saltato, come succedeva all'eliminazione.
       let cambiaNome = nome !== undefined;
+      let prima = null;
       if (cambiaNome && operazione === 'update') {
-        const prima = await base44.asServiceRole.entities[entita].get(id).catch(() => null);
-        cambiaNome = !prima || chiaveNome(prima[campo]) !== chiaveNome(nome);
+        const cosa = entita === 'Fornitore' ? 'il fornitore' : 'il servizio';
+        try {
+          prima = await base44.asServiceRole.entities[entita].get(id);
+        } catch (e) {
+          throw new Error(`Non riesco a leggere ${cosa} da modificare (${e && e.message ? e.message : e}): non l'ho modificato, riprova.`);
+        }
+        if (!prima) throw new Error(`Non trovo ${cosa} da modificare: non l'ho modificato, ricarica la pagina.`);
+        cambiaNome = cambiaLaChiave(prima[campo], nome);
       }
       if (cambiaNome) {
-        const gia = await nomeGiaPresente(base44, entita, nome, operazione === 'update' ? id : null);
+        const tutti = await fetchAll(base44.asServiceRole.entities[entita]);
+        const gia = nomeGiaPresente(tutti, entita, nome, operazione === 'update' ? id : null);
         if (gia) {
           const chi = String(gia[campo] || '').trim();
           return Response.json({
@@ -862,11 +898,25 @@ export default async function(req) {
             doppione: { id: gia.id, nome: chi, stato: gia.stato || '' },
           }, { status: 409 });
         }
+        // UN FORNITORE GIA' USATO NON CAMBIA RAGIONE SOCIALE (revisione del
+        // 14/10/2026): rinominato, perdeva i suoi movimenti, la catena dei
+        // subfornitori e i contratti, e poi si eliminava senza domande. La
+        // regola e il testo stanno in riferimentiAnagrafica (siRinomina,
+        // testoRinomina); le letture sono quelle dell'eliminazione, e si fanno
+        // solo quando la chiave del nome cambia davvero.
+        if (entita === 'Fornitore' && operazione === 'update') {
+          const riferimenti = await riferimentiDi(base44, 'Fornitore', prima, tutti);
+          if (!siRinomina(riferimenti)) {
+            return Response.json({ error: testoRinomina(riferimenti, nome), riferimenti, rinominabile: false }, { status: 409 });
+          }
+        }
       }
     }
 
-    // Fornitori e servizi non hanno campi tracciati: passano di qui lo stesso,
-    // e si scrivono senza una lettura in piu'.
+    // I servizi non hanno campi tracciati, i fornitori solo i recapiti dei
+    // contratti (cellulare, pec e referente, 13/10/2026): passano di qui lo
+    // stesso, e una scrittura che non tocca quei campi (lo stato, i ruoli) si
+    // fa senza una lettura in piu'.
     let result;
     if (operazione === 'create' || operazione === 'update') {
       const scritta = await traccia(svc, entita, operazione === 'update' ? id : null, dati || {}, comeScrive);
@@ -875,16 +925,28 @@ export default async function(req) {
     } else if (operazione === 'delete') {
       // Chi usa il fornitore o la tariffa (A88, 12/10/2026): vedi
       // riferimentiPrimaDiEliminare qui sopra.
+      let letto = null;
       if (entita === 'Fornitore' || entita === 'Tariffa') {
-        const riferimenti = await riferimentiPrimaDiEliminare(base44, entita, id);
+        letto = await riferimentiPrimaDiEliminare(base44, entita, id);
+        const riferimenti = letto.riferimenti;
         if (riferimenti && riferimenti.totale > 0) {
+          // UN FORNITORE CON MOVIMENTI TERMINATI NON SI ELIMINA (decisioni
+          // dell'utente del 13/10/2026): i suoi movimenti sono gia' nei conti,
+          // fatturati o da fatturare, e resterebbero senza soggetto. Nemmeno con
+          // la conferma: si risponde 409 con la sola proposta di disattivarlo
+          // (eliminabile: false, in riferimentiFornitore). Senza movimenti si
+          // elimina come prima, con la conferma.
+          if (riferimenti.eliminabile === false) {
+            return Response.json({ error: testoRiferimenti(riferimenti), riferimenti, eliminabile: false, proposta: riferimenti.proposta }, { status: 409 });
+          }
           if (conferma_eliminazione !== true) {
             return Response.json({ error: testoRiferimenti(riferimenti), riferimenti, richiede_conferma: true, conferma: 'eliminazione' }, { status: 409 });
           }
           comeScrive.motivo = [comeScrive.motivo, `eliminazione confermata nonostante: ${riferimenti.elenco.join("; ")}`].filter(Boolean).join(' — ');
         }
       }
-      const tolta = await eliminaConTraccia(svc, entita, id, comeScrive);
+      // Il record gia' letto e' il «prima» dello storico: niente seconda lettura.
+      const tolta = await eliminaConTraccia(svc, entita, id, letto ? { ...comeScrive, prima: letto.record } : comeScrive);
       tracce.push(tolta.traccia);
       result = { id, deleted: true };
     }

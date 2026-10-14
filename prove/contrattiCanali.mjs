@@ -51,6 +51,10 @@ import { situazioneContratti } from '../base44/shared/contrattiDellAnno.ts';
 import { individuaSoggetti } from '../base44/shared/qualificaFornitori.ts';
 import { copiaTariffa, pianoCopiaTariffe } from '../base44/shared/inizializzazioneAnno.ts';
 import { conNotaCopia, notaCopia } from '../base44/shared/annoTarget.ts';
+// Tutto il modulo, non i nomi: col codice di prima (controprova) un nome che non
+// c'e' fa fallire le verifiche, non fermare la prova.
+import * as segnapostiPagina from '../src/lib/segnapostiContratto.js';
+import * as segnapostiFunzione from '../base44/shared/segnapostiContratto.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -378,6 +382,275 @@ for (const [nome, f] of [['funzione', valoriDelContratto], ['pagina', valoriDelC
     && doppi.valori.FORNITORE_EMAIL_2 === 'logistica@pec.example', JSON.stringify(doppi.valori));
 }
 
+// ─── decisioni dell'utente del 13/10/2026 ───
+
+// RACCOLTA E STOCCAGGIO ACI, UN CONTRATTO SOLO. Decisione dell'utente del
+// 13/10/2026: chi nell'ACI raccoglie e stocca (Nappi Sud; Ecorecuperi negli anni in
+// cui lo fa) ha un contratto ACI «raccolta e stoccaggio» coi due prezzi
+// (CORRISPETTIVO_RACCOLTA e CORRISPETTIVO_STOCCAGGIO), come il contratto vero di
+// Nappi Sud 2026 (quello di Ecorecuperi del 2024 ha un prezzo solo,
+// «Trasporto+Stoccaggio»); il modello e' quello ACI della raccolta e stoccaggio;
+// gli attesi contano un contratto. Lo stoccaggio ACI a parte e' «non dovuto: sta
+// nel contratto di raccolta e stoccaggio». Prima erano due contratti.
+console.log('RACCOLTA E STOCCAGGIO ACI: UN CONTRATTO SOLO, COI DUE PREZZI');
+const segnaposti = (...s) => JSON.stringify(s.map(x => ({ segnaposto: x })));
+const dbRS = base({
+  PrimariaRete: [mov('NAPPI SUD SRL', 'NAPPI SUD SRL', 'stoc', g)],                                   // rete: raccoglie e stocca
+  PrimariaAci: [mov('NAPPI SUD SRL', 'IRIGOM SRL', 'imp', g), mov('EMMESSE SRLS', 'NAPPI SUD SRL', 'stoc', g)], // ACI: raccoglie e stocca
+  Fornitore: [{ id: 'f-nappi', ragione_sociale: 'NAPPI SUD SRL', piva: '02556750657' }],
+  Tariffa: [
+    tariffa('NAPPI SUD SRL', 'RACCOLTA', 'RETE', 58, `${A}-01-01`, `${A}-12-31`),
+    tariffa('NAPPI SUD SRL', 'CONFERIMENTO_STOCCAGGIO', 'RETE', 15, `${A}-01-01`, `${A}-12-31`),
+    tariffa('NAPPI SUD SRL', 'RACCOLTA', 'ACI', 92, `${A}-01-01`, `${A}-12-31`),
+    tariffa('NAPPI SUD SRL', 'CONFERIMENTO_STOCCAGGIO', 'ACI', 16, `${A}-01-01`, `${A}-12-31`),
+    tariffa('NAPPI SUD SRL', 'CONFERIMENTO_STOCCAGGIO', 'ACI', 14, `${A - 1}-01-01`, `${A - 1}-12-31`),
+  ],
+  ModelloContratto: [
+    { id: 'mod-r-aci', nome: 'Raccolta ACI', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'attivo', punti_json: segnaposti('FORNITORE_RAGIONE_SOCIALE', 'CORRISPETTIVO_RACCOLTA'), created_date: `${A}-10-02` },
+    { id: 'mod-rs-aci', nome: 'Raccolta e stoccaggio ACI', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'attivo', punti_json: segnaposti('FORNITORE_RAGIONE_SOCIALE', 'CORRISPETTIVO_RACCOLTA', 'CORRISPETTIVO_STOCCAGGIO'), created_date: `${A}-10-01` },
+    { id: 'mod-r-rete', nome: 'Raccolta rete', tipo_contratto: 'raccolta', canale: 'RETE', stato: 'attivo', punti_json: segnaposti('CORRISPETTIVO_RACCOLTA', 'CORRISPETTIVO_STOCCAGGIO') },
+  ],
+});
+const cRS = await chiama(modulo, { db: dbRS, corpo: { anno: A } });
+const rsA = riga(cRS.j, 'nappi sud', 'raccolta', 'ACI');
+const ssA = riga(cRS.j, 'nappi sud', 'stoccaggio', 'ACI');
+verifica('Nappi Sud, raccolta ACI: e\' il contratto di raccolta e stoccaggio, col modello ACI che ha il prezzo dello stoccaggio', rsA?.raccolta_e_stoccaggio === true && rsA.modello_id === 'mod-rs-aci',
+  JSON.stringify(rsA && [rsA.raccolta_e_stoccaggio, rsA.modello_id]));
+verifica('...coi due prezzi, dalle tariffe ACI dell\'anno: raccolta 92, stoccaggio 16 (non il 14 dell\'anno prima)', rsA?.proposta?.valori?.CORRISPETTIVO_RACCOLTA === 92 && rsA.proposta.valori.CORRISPETTIVO_STOCCAGGIO === 16
+  && rsA.proposta.fonti.CORRISPETTIVO_STOCCAGGIO === 'tariffa', JSON.stringify(rsA?.proposta?.valori));
+verifica('...e le tariffe dicono di quale prezzo sono', (rsA?.proposta?.tariffe || []).some(t => t.servizio === 'stoccaggio' && t.valore === 16) && (rsA?.proposta?.tariffe || []).some(t => t.servizio === 'raccolta' && t.valore === 92)
+  && (rsA?.proposta?.tariffe_anno_prima || []).some(t => t.servizio === 'stoccaggio' && t.valore === 14), JSON.stringify(rsA?.proposta?.tariffe));
+verifica('Nappi Sud, stoccaggio ACI: non dovuto, sta nel contratto di raccolta e stoccaggio, senza proposta', ssA?.non_dovuto === true && ssA.stato === 'non_dovuto' && !ssA.proposta
+  && /sta nel contratto di raccolta e stoccaggio/.test(ssA.motivo_non_dovuto || ''), JSON.stringify(ssA));
+verifica('sulla rete i contratti restano due, raccolta e stoccaggio: la decisione e\' dell\'ACI', !!riga(cRS.j, 'nappi sud', 'raccolta', 'RETE') && riga(cRS.j, 'nappi sud', 'raccolta', 'RETE').raccolta_e_stoccaggio === false
+  && riga(cRS.j, 'nappi sud', 'stoccaggio', 'RETE')?.non_dovuto === false && riga(cRS.j, 'nappi sud', 'stoccaggio', 'RETE')?.proposta?.valori?.CORRISPETTIVO_STOCCAGGIO === 15);
+verifica('chi sull\'ACI raccoglie e basta (EMMESSE) ha il modello della sola raccolta ACI', riga(cRS.j, 'emmesse', 'raccolta', 'ACI')?.raccolta_e_stoccaggio === false
+  && riga(cRS.j, 'emmesse', 'raccolta', 'ACI')?.modello_id === 'mod-r-aci' && !('CORRISPETTIVO_STOCCAGGIO' in (riga(cRS.j, 'emmesse', 'raccolta', 'ACI')?.proposta?.valori || {})));
+// Nappi Sud: raccolta rete, stoccaggio rete, raccolta e stoccaggio ACI (3); EMMESSE
+// raccolta ACI; IRIGOM trattamento ACI: cinque. Prima erano sei.
+verifica('i contratti attesi contano un contratto solo per la raccolta e stoccaggio ACI (5, non 6)', cRS.j.totali?.attesi === 5, JSON.stringify(cRS.j.totali));
+verifica('la funzione dice quale modello e\' di raccolta e stoccaggio', (cRS.j.modelli || []).find(m => m.id === 'mod-rs-aci')?.raccolta_e_stoccaggio === true
+  && (cRS.j.modelli || []).find(m => m.id === 'mod-r-aci')?.raccolta_e_stoccaggio === false && (cRS.j.modelli || []).find(m => m.id === 'mod-r-rete')?.raccolta_e_stoccaggio === false);
+const senzaStocc = await chiama(modulo, { db: { ...dbRS, Tariffa: dbRS.Tariffa.filter(t => !(t.prestazione === 'CONFERIMENTO_STOCCAGGIO' && t.tipologia === 'ACI')) }, corpo: { anno: A } });
+verifica('senza tariffa dello stoccaggio ACI: il prezzo dello stoccaggio resta da scrivere, e l\'avviso dice di quale prezzo parla',
+  riga(senzaStocc.j, 'nappi sud', 'raccolta', 'ACI')?.proposta?.valori?.CORRISPETTIVO_STOCCAGGIO === undefined
+  && (riga(senzaStocc.j, 'nappi sud', 'raccolta', 'ACI')?.proposta?.avvisi || []).some(a => /^Per lo stoccaggio, in anagrafica non c'è una tariffa passiva ACI valida nel/.test(a)),
+  JSON.stringify(riga(senzaStocc.j, 'nappi sud', 'raccolta', 'ACI')?.proposta?.avvisi));
+// Un contratto di stoccaggio ACI gia' fatto a parte per l'anno resta: le righe tornano due.
+const conStoccAParte = await chiama(modulo, { db: { ...dbRS, ContrattoFornitore: [{ id: 'k-st', anno: A, soggetto_chiave: 'nappi sud', soggetto_nome: 'NAPPI SUD SRL', tipo_contratto: 'stoccaggio', canale: 'ACI', stato: 'controfirmato' }] }, corpo: { anno: A } });
+verifica('con un contratto di stoccaggio ACI gia\' fatto a parte i contratti restano due, e si contano tutti e due',
+  riga(conStoccAParte.j, 'nappi sud', 'stoccaggio', 'ACI')?.stato === 'controfirmato' && riga(conStoccAParte.j, 'nappi sud', 'raccolta', 'ACI')?.raccolta_e_stoccaggio === false
+  && conStoccAParte.j.totali.attesi === 6, JSON.stringify(conStoccAParte.j.totali));
+// Chi l'anno prima raccoglieva e stoccava sull'ACI e quest'anno solo raccoglie:
+// niente contratto unico, lo stoccaggio resta da decidere.
+const smesso = await situazione(base({
+  PrimariaAci: [mov('NAPPI SUD SRL', 'IRIGOM SRL', 'imp', `${A}-03-10`), mov('EMMESSE SRLS', 'NAPPI SUD SRL', 'stoc', `${A - 1}-06-10`)],
+}), A, `${A}-10-13`);
+verifica('chi quest\'anno sull\'ACI raccoglie soltanto non ha il contratto unico: lo stoccaggio dell\'anno prima resta da decidere',
+  riga(smesso, 'nappi sud', 'raccolta', 'ACI')?.raccolta_e_stoccaggio === false && riga(smesso, 'nappi sud', 'stoccaggio', 'ACI')?.da_decidere === true
+  && riga(smesso, 'nappi sud', 'stoccaggio', 'ACI')?.non_dovuto === false);
+// Tutti e due solo l'anno prima: un contratto unico da decidere, contato una volta.
+const fermo = await situazione(base({
+  PrimariaAci: [mov('NAPPI SUD SRL', 'IRIGOM SRL', 'imp', `${A - 1}-03-10`), mov('EMMESSE SRLS', 'NAPPI SUD SRL', 'stoc', `${A - 1}-06-10`)],
+}), A, `${A}-10-13`);
+verifica('fermo da un anno su tutte e due: un contratto unico da decidere, contato una volta sola',
+  riga(fermo, 'nappi sud', 'raccolta', 'ACI')?.raccolta_e_stoccaggio === true && riga(fermo, 'nappi sud', 'raccolta', 'ACI')?.da_decidere === true
+  && riga(fermo, 'nappi sud', 'stoccaggio', 'ACI')?.non_dovuto === true && riga(fermo, 'nappi sud', 'stoccaggio', 'ACI')?.da_decidere === false
+  && fermo.da_decidere === 3, JSON.stringify([fermo.da_decidere, soggetto(fermo, 'nappi sud')?.contratti?.map(c => `${c.tipo}/${c.canale}/${c.da_decidere}`)]));
+// A gennaio: tutte e due nell'ultimo trimestre dell'anno prima, un contratto atteso.
+const gennaioRS = await situazione(base({
+  PrimariaAci: [mov('NAPPI SUD SRL', 'IRIGOM SRL', 'imp', `${A}-11-10`), mov('EMMESSE SRLS', 'NAPPI SUD SRL', 'stoc', `${A}-12-02`)],
+}), B, `${B}-01-08`);
+verifica('l\'08/01: raccolta e stoccaggio ACI dell\'ultimo trimestre, un contratto unico atteso',
+  riga(gennaioRS, 'nappi sud', 'raccolta', 'ACI')?.raccolta_e_stoccaggio === true && riga(gennaioRS, 'nappi sud', 'raccolta', 'ACI')?.da_decidere === false
+  && riga(gennaioRS, 'nappi sud', 'stoccaggio', 'ACI')?.non_dovuto === true);
+for (const [nome, f] of [['funzione', valoriDelContratto], ['pagina', valoriDelContrattoPagina]]) {
+  const v = f({ anno: A, tipo: 'raccolta', canale: 'ACI', tariffe: [tariffa('X', 'RACCOLTA', 'ACI', 92, `${A}-01-01`, `${A}-12-31`)],
+    stoccaggio: { tariffe: [tariffa('X', 'CONFERIMENTO_STOCCAGGIO', 'ACI', 16, `${A}-01-01`, `${A}-12-31`), tariffa('X', 'CONFERIMENTO_STOCCAGGIO', 'ACI', 18, `${A}-07-01`, `${A}-12-31`)] } });
+  verifica(`${nome}: due prezzi di stoccaggio nell'anno non si scelgono a caso, e l'avviso lo dice per lo stoccaggio`, v.valori.CORRISPETTIVO_RACCOLTA === 92 && v.valori.CORRISPETTIVO_STOCCAGGIO === undefined
+    && v.avvisi.some(a => /^Per lo stoccaggio, più prezzi nell'anno: 16,00 €\/t; 18,00 €\/t \(dal 01\/07\//.test(a)), JSON.stringify(v));
+  const solo = f({ anno: A, tipo: 'raccolta', canale: 'ACI', tariffe: [] });
+  verifica(`${nome}: senza lo stoccaggio gli avvisi della raccolta restano quelli di sempre`, solo.avvisi.some(a => /^In anagrafica non c'è una tariffa passiva ACI valida nel/.test(a)) && !solo.avvisi.some(a => /^Per la raccolta/.test(a)));
+}
+// La scheda: il contratto unico ha il suo nome, e il modello si sceglie fra quelli giusti.
+verifica('la scheda chiama «Raccolta e stoccaggio ACI» il contratto unico e sceglie il modello col prezzo dello stoccaggio',
+  /const nomeContratto = \(r\) => \(r\.raccolta_e_stoccaggio \? `Raccolta e stoccaggio \$\{nomeCanale\(r\.canale\)\}`/.test(pagina)
+  && /eModelloRaccoltaEStoccaggio\(m\) === !!r\.raccolta_e_stoccaggio/.test(pagina) && /modelli\.filter\(m => modelloAdatto\(m, riga\)\)/.test(pagina));
+const sezioneModelli = readFileSync(new URL('../src/components/qualifica/ModelliContratti.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
+verifica('«Modelli dei contratti» ha la riga «Raccolta e stoccaggio ACI», e non salva un format nella riga sbagliata',
+  /\{ tipo: 'raccolta', canale: 'ACI', stoccaggio: true \}/.test(sezioneModelli) && /stoccaggio && !conPrezzoStoccaggio\(punti\)/.test(sezioneModelli) && /!stoccaggio && conPrezzoStoccaggio\(punti\)/.test(sezioneModelli));
+
+// ─── revisione del 14/10/2026 ───
+
+// COM'E' FATTO UN CONTRATTO GIA' FATTO LO DICE IL CONTRATTO. Due rilievi con la
+// stessa causa: per una raccolta ACI che aveva gia' il suo contratto, «raccolta
+// e stoccaggio» veniva dai movimenti dell'anno.
+// - Il contratto 2027 di Nappi Sud coi due prezzi, firmato a dicembre: il
+//   15/04/2027, senza ancora un viaggio ACI del 2027 (nel 2026 l'ACI di Nappi Sud
+//   non ha viaggiato a gennaio, febbraio e aprile), tornava «sola raccolta», lo
+//   stoccaggio ACI diventava «da decidere» a parte e la pagina, riaprendolo,
+//   proponeva il modello senza il prezzo dello stoccaggio;
+// - un contratto di sola raccolta ACI firmato prima che il fornitore
+//   cominciasse a stoccare sull'ACI (Ecorecuperi, «negli anni in cui lo fa»): lo
+//   stoccaggio ACI diventava «non dovuto», nessun contratto lo copriva e i conti
+//   dicevano tutto fatto.
+console.log('IL CONTRATTO GIA\' FATTO DICE SE E\' DI RACCOLTA E STOCCAGGIO');
+const modR = { id: 'mod-r-aci', nome: 'Raccolta ACI', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'attivo', punti_json: segnaposti('FORNITORE_RAGIONE_SOCIALE', 'CORRISPETTIVO_RACCOLTA') };
+const modRS = { id: 'mod-rs-aci', nome: 'Raccolta e stoccaggio ACI', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'attivo', punti_json: segnaposti('FORNITORE_RAGIONE_SOCIALE', 'CORRISPETTIVO_RACCOLTA', 'CORRISPETTIVO_STOCCAGGIO') };
+const modS = { id: 'mod-s-aci', nome: 'Stoccaggio ACI', tipo_contratto: 'stoccaggio', canale: 'ACI', stato: 'attivo', punti_json: segnaposti('FORNITORE_RAGIONE_SOCIALE', 'CORRISPETTIVO_STOCCAGGIO') };
+// La scelta del modello della scheda, presa dal sorgente: modelloAdatto e la
+// scelta iniziale di ProceduraContratto (il modello del contratto, se e' fra
+// quelli adatti; altrimenti quello della riga; altrimenti il primo).
+const defAdatto = (pagina.match(/const modelloAdatto = \(m, r\) => [\s\S]*?;\n/) || [''])[0];
+const modelloAdatto = new Function('eModelloRaccoltaEStoccaggio', defAdatto + 'return modelloAdatto;')(segnapostiPagina.eModelloRaccoltaEStoccaggio);
+verifica('la scelta iniziale della scheda e\' quella che la prova rifa\'', /useState\(\(riga\.contratto && riga\.contratto\.modello_id && modelliBuoni\.some\(m => m\.id === riga\.contratto\.modello_id\) && riga\.contratto\.modello_id\)\s*\|\| riga\.modello_id \|\| \(modelliBuoni\[0\] && modelliBuoni\[0\]\.id\) \|\| ''\)/.test(pagina));
+const sceltaDellaScheda = (j, r) => {
+  const buoni = (j.modelli || []).filter(m => modelloAdatto(m, r));
+  const scelto = (r.contratto && r.contratto.modello_id && buoni.some(m => m.id === r.contratto.modello_id) && r.contratto.modello_id) || r.modello_id || (buoni[0] && buoni[0].id) || '';
+  return { buoni: buoni.map(m => m.id).sort(), scelto };
+};
+
+// 1. Il contratto coi due prezzi, firmato, e un'ACI che non ha ancora viaggiato
+//    nell'anno: nel A l'ACI di Nappi Sud a settembre (raccolta e stoccaggio).
+const dbFermoAci = (contratti, modelli = [modR, modRS, modS]) => base({
+  PrimariaAci: [mov('NAPPI SUD SRL', 'IRIGOM SRL', 'imp', `${A}-09-10`), mov('EMMESSE SRLS', 'NAPPI SUD SRL', 'stoc', `${A}-09-12`)],
+  Fornitore: [{ id: 'f-nappi', ragione_sociale: 'NAPPI SUD SRL', piva: '02556750657' }],
+  ContrattoFornitore: contratti, ModelloContratto: modelli,
+});
+const unicoNappi = { id: 'k-nappi-aci', anno: B, soggetto_chiave: 'nappi sud', soggetto_nome: 'NAPPI SUD SRL', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'controfirmato',
+  controfirmato_il: `${A}-12-20`, modello_id: 'mod-rs-aci', valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 92, CORRISPETTIVO_STOCCAGGIO: 16 }), data_inizio: `${B}-01-02`, data_fine: `${B}-12-31` };
+for (const [quando, oggiC] of [['a dicembre', `${A}-12-15`], ['il 15/04, senza ancora un viaggio ACI dell\'anno', `${B}-04-15`]]) {
+  const j = await situazione(dbFermoAci([unicoNappi]), B, oggiC);
+  const r = riga(j, 'nappi sud', 'raccolta', 'ACI');
+  const s = riga(j, 'nappi sud', 'stoccaggio', 'ACI');
+  verifica(`contratto ${B} di Nappi Sud coi due prezzi, firmato, guardato ${quando}: resta di raccolta e stoccaggio, col suo modello`,
+    r?.stato === 'controfirmato' && r.raccolta_e_stoccaggio === true && r.modello_id === 'mod-rs-aci' && r.si_puo_unire_lo_stoccaggio === false, JSON.stringify(r && [r.stato, r.raccolta_e_stoccaggio, r.modello_id, r.si_puo_unire_lo_stoccaggio]));
+  verifica(`...e lo stoccaggio ACI sta dentro: non dovuto, non da decidere (${quando})`, s?.non_dovuto === true && s.da_decidere === false
+    && !(j.soggetti || []).some(x => x.contratti.some(c => c.da_decidere && x.chiave === 'nappi sud' && c.tipo === 'stoccaggio')), JSON.stringify(s && [s.stato, s.non_dovuto, s.da_decidere]));
+  const sc = sceltaDellaScheda(j, r || {});
+  verifica(`...e la scheda, riaprendolo, propone il suo modello coi due prezzi (${quando})`, sc.scelto === 'mod-rs-aci' && sc.buoni.join() === 'mod-rs-aci', JSON.stringify(sc));
+  verifica(`...con la proposta dei due prezzi (${quando})`, r?.proposta && 'CORRISPETTIVO_STOCCAGGIO' in valoriDiPartenza(r).valori && valoriDiPartenza(r).valori.CORRISPETTIVO_STOCCAGGIO === 16,
+    JSON.stringify(r && valoriDiPartenza(r)));
+}
+
+// 2. Il modello del contratto e' stato poi sostituito da un format nuovo, e nei
+//    valori salvati il prezzo dello stoccaggio non c'e' (era vuoto). Lo dice il
+//    modello, e la funzione deve leggere anche i modelli sostituiti. Funzione
+//    intera, nell'anno in corso: la raccolta ACI c'e' quest'anno, lo stoccaggio
+//    ACI solo l'anno prima (i movimenti da soli non direbbero «un contratto solo»).
+const modRSVecchio = { ...modRS, id: 'mod-rs-vecchio', stato: 'sostituito' };
+const dbSostituito = base({
+  PrimariaAci: [mov('NAPPI SUD SRL', 'IRIGOM SRL', 'imp', `${A}-03-10`), mov('EMMESSE SRLS', 'NAPPI SUD SRL', 'stoc', `${A - 1}-06-12`)],
+  Fornitore: [{ id: 'f-nappi', ragione_sociale: 'NAPPI SUD SRL' }],
+  ModelloContratto: [modR, { ...modRS, created_date: `${A}-06-01` }, modRSVecchio, modS],
+  ContrattoFornitore: [{ ...unicoNappi, id: 'k-sost', anno: A, modello_id: 'mod-rs-vecchio', valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 92 }) }],
+});
+const cSost = await chiama(modulo, { db: dbSostituito, corpo: { anno: A } });
+const rSost = riga(cSost.j, 'nappi sud', 'raccolta', 'ACI');
+verifica('un contratto fatto col modello coi due prezzi poi sostituito resta di raccolta e stoccaggio (la funzione legge anche i modelli sostituiti)',
+  rSost?.raccolta_e_stoccaggio === true && riga(cSost.j, 'nappi sud', 'stoccaggio', 'ACI')?.non_dovuto === true,
+  JSON.stringify([rSost?.raccolta_e_stoccaggio, riga(cSost.j, 'nappi sud', 'stoccaggio', 'ACI')?.stato]));
+verifica('...ma da proporre e da scegliere restano solo i modelli attivi', !(cSost.j.modelli || []).some(m => m.id === 'mod-rs-vecchio') && rSost?.modello_id === 'mod-rs-aci'
+  && sceltaDellaScheda(cSost.j, rSost || {}).scelto === 'mod-rs-aci', JSON.stringify([(cSost.j.modelli || []).map(m => m.id), rSost?.modello_id]));
+
+// 3. Il contratto di sola raccolta ACI firmato a febbraio, e lo stoccaggio ACI
+//    che comincia a settembre: il caso del revisore (Ecorecuperi). Funzione intera.
+const dbEco = (contratti) => base({
+  PrimariaAci: [mov('ECORECUPERI SRL', 'IRIGOM SRL', 'imp', `${A}-02-10`), mov('EMMESSE SRLS', 'ECORECUPERI SRL', 'stoc', `${A}-09-10`)],
+  Fornitore: [{ id: 'f-eco', ragione_sociale: 'ECORECUPERI SRL', piva: '00377110945' }],
+  Tariffa: [
+    tariffa('ECORECUPERI SRL', 'RACCOLTA', 'ACI', 105, `${A}-01-01`, `${A}-12-31`),
+    tariffa('ECORECUPERI SRL', 'CONFERIMENTO_STOCCAGGIO', 'ACI', 12, `${A}-09-01`, `${A}-12-31`),
+  ],
+  ModelloContratto: [modR, modRS, modS],
+  ContrattoFornitore: contratti,
+});
+const soloRaccolta = { id: 'k-eco', anno: A, soggetto_chiave: 'ecorecuperi', soggetto_nome: 'ECORECUPERI SRL', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'controfirmato',
+  controfirmato_il: `${A}-02-01`, modello_id: 'mod-r-aci', valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 105 }), data_inizio: `${A}-02-01`, data_fine: `${A}-12-31` };
+const cEco = await chiama(modulo, { db: dbEco([soloRaccolta]), corpo: { anno: A } });
+const rEco = riga(cEco.j, 'ecorecuperi', 'raccolta', 'ACI');
+const sEco = riga(cEco.j, 'ecorecuperi', 'stoccaggio', 'ACI');
+verifica('contratto di sola raccolta ACI firmato, e poi lo stoccaggio ACI: la raccolta resta di sola raccolta', rEco?.stato === 'controfirmato' && rEco.raccolta_e_stoccaggio === false
+  && rEco.modello_id === 'mod-r-aci', JSON.stringify(rEco && [rEco.stato, rEco.raccolta_e_stoccaggio, rEco.modello_id]));
+verifica('...e lo stoccaggio ACI e\' un contratto da fare: mancante, atteso, contato (4 attesi, 3 da fare)', sEco?.stato === 'mancante' && sEco.non_dovuto === false && sEco.da_decidere === false
+  && cEco.j.totali.attesi === 4 && cEco.j.totali.da_fare === 3, JSON.stringify([sEco && [sEco.stato, sEco.non_dovuto, sEco.motivo_non_dovuto], cEco.j.totali]));
+verifica('...la raccolta si puo\' rigenerare coi due prezzi: la scheda offre tutti e due i modelli e parte da quello del contratto',
+  rEco?.si_puo_unire_lo_stoccaggio === true && JSON.stringify(sceltaDellaScheda(cEco.j, rEco || {})) === JSON.stringify({ buoni: ['mod-r-aci', 'mod-rs-aci'], scelto: 'mod-r-aci' }),
+  JSON.stringify([rEco?.si_puo_unire_lo_stoccaggio, sceltaDellaScheda(cEco.j, rEco || {})]));
+verifica('...con il prezzo dello stoccaggio ACI pronto (12) e gli avvisi sulle due righe', rEco?.proposta?.valori?.CORRISPETTIVO_STOCCAGGIO === 12
+  && (rEco.proposta.avvisi || []).some(a => /^Il contratto di raccolta ACI fatto è di sola raccolta.*rigeneralo col modello della raccolta e stoccaggio/.test(a))
+  && (sEco?.proposta?.avvisi || []).some(a => /^Il contratto di raccolta ACI di questo fornitore è di sola raccolta: lo stoccaggio ACI non ce l'ha/.test(a)),
+  JSON.stringify([rEco?.proposta?.valori, rEco?.proposta?.avvisi, sEco?.proposta?.avvisi]));
+// Rigenerato col modello della raccolta e stoccaggio: un contratto solo.
+const cEco2 = await chiama(modulo, { db: dbEco([{ ...soloRaccolta, stato: 'generato', modello_id: 'mod-rs-aci', valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 105, CORRISPETTIVO_STOCCAGGIO: 12 }) }]), corpo: { anno: A } });
+verifica('rigenerato col modello coi due prezzi: un contratto solo, lo stoccaggio ACI sta dentro (3 attesi)',
+  riga(cEco2.j, 'ecorecuperi', 'raccolta', 'ACI')?.raccolta_e_stoccaggio === true && riga(cEco2.j, 'ecorecuperi', 'raccolta', 'ACI')?.si_puo_unire_lo_stoccaggio === false
+  && riga(cEco2.j, 'ecorecuperi', 'stoccaggio', 'ACI')?.non_dovuto === true && cEco2.j.totali.attesi === 3, JSON.stringify(cEco2.j.totali));
+// Rigenerato ancora col modello della sola raccolta: i valori della proposta
+// portano il prezzo dello stoccaggio, ma il modello no. Decide il modello.
+const cEco3 = await chiama(modulo, { db: dbEco([{ ...soloRaccolta, valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 105, CORRISPETTIVO_STOCCAGGIO: 12 }) }]), corpo: { anno: A } });
+verifica('un contratto col modello della sola raccolta resta di sola raccolta anche se fra i valori salvati c\'e\' il prezzo dello stoccaggio',
+  riga(cEco3.j, 'ecorecuperi', 'raccolta', 'ACI')?.raccolta_e_stoccaggio === false && riga(cEco3.j, 'ecorecuperi', 'stoccaggio', 'ACI')?.stato === 'mancante', JSON.stringify(cEco3.j.totali));
+// Il contratto coi due prezzi e anche uno di stoccaggio ACI a parte: quello a
+// parte c'e', resta suo e si conta.
+const cEco4 = await chiama(modulo, { db: dbEco([{ ...soloRaccolta, modello_id: 'mod-rs-aci' },
+  { id: 'k-eco-st', anno: A, soggetto_chiave: 'ecorecuperi', soggetto_nome: 'ECORECUPERI SRL', tipo_contratto: 'stoccaggio', canale: 'ACI', stato: 'generato', modello_id: 'mod-s-aci' }]), corpo: { anno: A } });
+verifica('con anche un contratto di stoccaggio ACI a parte, quello resta suo e si conta', riga(cEco4.j, 'ecorecuperi', 'stoccaggio', 'ACI')?.stato === 'generato'
+  && riga(cEco4.j, 'ecorecuperi', 'stoccaggio', 'ACI')?.non_dovuto === false && cEco4.j.totali.attesi === 4, JSON.stringify(cEco4.j.totali));
+
+// 4. La regola, nei due specchi.
+for (const [nome, mod] of [['funzione', segnapostiFunzione], ['pagina', segnapostiPagina]]) {
+  const f = mod.eContrattoRaccoltaEStoccaggio;
+  const c = (extra) => ({ tipo_contratto: 'raccolta', canale: 'ACI', ...extra });
+  verifica(`${nome}: eContrattoRaccoltaEStoccaggio, decide il modello del contratto; senza modello i valori salvati`, typeof f === 'function'
+    && f(c({ valori_json: '{}' }), modRS) === true && f(c({ valori_json: JSON.stringify({ CORRISPETTIVO_STOCCAGGIO: 16 }) }), modR) === false
+    && f(c({ valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 92, CORRISPETTIVO_STOCCAGGIO: 16 }) })) === true && f(c({ valori: { CORRISPETTIVO_STOCCAGGIO_2: '' } })) === true
+    && f(c({ valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 92 }) })) === false && f(c({ valori_json: 'non e\' json' })) === false
+    && f({ tipo_contratto: 'raccolta', canale: 'RETE', valori_json: JSON.stringify({ CORRISPETTIVO_STOCCAGGIO: 15 }) }) === false
+    && f({ tipo_contratto: 'stoccaggio', canale: 'ACI', valori_json: JSON.stringify({ CORRISPETTIVO_STOCCAGGIO: 15 }) }) === false && f(null) === false);
+}
+
+// 5. La scheda: il nome del file lo dice il modello scelto, e la riga che si puo'
+//    unire ha la sua spiegazione.
+verifica('la scheda: il file si chiama «Raccolta e stoccaggio ACI» quando il modello scelto ha i due prezzi',
+  /const nomeFile = eModelloRaccoltaEStoccaggio\(modello\) \? nomeBase\.replace/.test(pagina), (pagina.match(/const nomeFile = [^\n]*/) || [''])[0]);
+verifica('la scheda: la raccolta di sola raccolta che si puo\' unire allo stoccaggio lo spiega', /\{riga\.si_puo_unire_lo_stoccaggio && \(/.test(pagina));
+
+// IL CONTRATTO DI ECORECUPERI DEL 2024 HA UN PREZZO SOLO (revisione del
+// 14/10/2026). I commenti dicevano che i contratti veri di Nappi Sud 2026 ed
+// Ecorecuperi 2024 hanno i due prezzi: quello di Ecorecuperi ha «Prezzo
+// Trasporto+Stoccaggio» 105,00, uno solo. Caricato nella riga «Raccolta e
+// stoccaggio ACI» si rifiuta, giustamente, ma il messaggio chiedeva di
+// aggiungere un prezzo che nel documento non c'e'.
+console.log('IL CONTRATTO DI ECORECUPERI DEL 2024 HA UN PREZZO SOLO');
+const sorgente = (p) => readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r/g, '');
+const dueEco = new RegExp(['Nappi Sud 2026 ed', 'Ecorecuperi 2024'].join(String.raw`\s*(?:\/\/\s*)?`));
+const conDueEco = ['../base44/shared/segnapostiContratto.ts', '../src/lib/segnapostiContratto.js', '../base44/shared/contrattiDellAnno.ts'].filter(p => dueEco.test(sorgente(p)));
+verifica('nessun commento dice piu\' che Ecorecuperi 2024 ha i due prezzi', conDueEco.length === 0, conDueEco.join(', '));
+verifica('«Modelli dei contratti»: a un format col prezzo solo dice che serve un format coi due prezzi, non di aggiungere un prezzo che non c\'e\'',
+  /Se il format ha un prezzo solo per raccolta e stoccaggio insieme \(come quello di Ecorecuperi del 2024\), non è questo modello: serve un format coi due prezzi/.test(sezioneModelli));
+const CARTELLA_CONTRATTI = 'C:/Users/HOME/Desktop/ECOTYRE/ECOTYRE - repository/2026/CONTRATTI SUBFORNITORI/';
+const NAPPI_ACI = 'NAPPI SUD/2026/Contratto ACI 2026 - Nappi Sud - Raccolta e stoccaggio - (dal 1 aprile 2026).docx';
+const ECO_ACI = 'ECORECUPERI/2024/Ecorecuperi_ACI 2024 Raccolta&stoccaggio.docx';
+if (!existsSync(CARTELLA_CONTRATTI + NAPPI_ACI) || !existsSync(CARTELLA_CONTRATTI + ECO_ACI)) {
+  console.log('  i format veri non ci sono su questo computer, salto');
+} else {
+  const { leggiFormat, proponiPunti } = await import('../src/lib/modelliContratto.js');
+  const comeFile = (u8) => ({ name: 'format.docx', arrayBuffer: async () => u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) });
+  const prezziDel = async (file) => {
+    const p = proponiPunti(await leggiFormat(comeFile(new Uint8Array(readFileSync(CARTELLA_CONTRATTI + file)))), { tipo: 'raccolta', oggi: `${A}-10-14` });
+    return p.punti.filter(x => x.tipo === 'prezzo' && (x.attivo || x.gia_segnaposto)).map(x => `${x.segnaposto}=${x.originale}`).sort();
+  };
+  // la regola di «Modelli dei contratti» (conPrezzoStoccaggio)
+  const conStoccaggio = (prezzi) => prezzi.some(x => x.split('=')[0].replace(/_\d+$/, '') === 'CORRISPETTIVO_STOCCAGGIO');
+  const nappiPrezzi = await prezziDel(NAPPI_ACI);
+  const ecoPrezzi = await prezziDel(ECO_ACI);
+  verifica('format veri: il contratto ACI 2026 di Nappi Sud ha i due prezzi (raccolta 92,00 e 82,00, stoccaggio 16,00) e va nella riga «Raccolta e stoccaggio ACI»',
+    nappiPrezzi.join() === 'CORRISPETTIVO_RACCOLTA=92,00,CORRISPETTIVO_RACCOLTA_2=82,00,CORRISPETTIVO_STOCCAGGIO=16,00' && conStoccaggio(nappiPrezzi), nappiPrezzi.join('; '));
+  verifica('format veri: quello di Ecorecuperi del 2024 ha un prezzo solo (105,00, trasporto e stoccaggio insieme) e in quella riga non va',
+    ecoPrezzi.join() === 'CORRISPETTIVO_RACCOLTA=105,00' && !conStoccaggio(ecoPrezzi), ecoPrezzi.join('; '));
+}
+
 // I DATI VERI DELL'11/10/2026, se la copia c'e' (memoria «dati-veri»): i due casi
 // del revisore. Fuori dal repository, quindi senza la copia si salta.
 const COPIA = new URL('../../dati-veri/treadrider-dati-veri-2026-10-11.json.gz', import.meta.url);
@@ -403,10 +676,37 @@ if (!existsSync(COPIA)) {
   // La copia arriva all'11/10/2026: dell'ultimo trimestre ci sono undici giorni, e
   // gli attesi di gennaio sono quelli che hanno lavorato in quei giorni (13). Prima
   // della revisione erano 3, cioe' solo chi aveva gia' viaggiato a gennaio.
-  verifica('dati veri, 08/01/2027: chi ha lavorato a ottobre e\' atteso (13 attesi, non 3)', vGen.totali.attesi === 13 && vGen.da_decidere === 21, JSON.stringify(vGen.totali));
-  verifica('dati veri, 15/12/2026: invariato (33 attesi, nessuno da decidere)', vDic.totali.attesi === 33 && vDic.da_decidere === 0, JSON.stringify(vDic.totali));
-  verifica('dati veri, 02/04/2027: come prima (3 attesi)', vApr.totali.attesi === 3, JSON.stringify(vApr.totali));
-  verifica('dati veri, ottobre 2026: invariato (33 attesi, 19 da decidere)', vOtt.totali.attesi === 33 && vOtt.da_decidere === 19, JSON.stringify(vOtt.totali));
+  // Dal 13/10/2026 la raccolta e lo stoccaggio ACI di Nappi Sud sono un contratto
+  // solo: un atteso in meno a ottobre e a dicembre (33 -> 32), un «da decidere»
+  // in meno a gennaio (21 -> 20) e ad aprile (32 -> 31).
+  verifica('dati veri, 08/01/2027: chi ha lavorato a ottobre e\' atteso (13 attesi, non 3)', vGen.totali.attesi === 13 && vGen.da_decidere === 20, `${JSON.stringify(vGen.totali)} ${vGen.da_decidere}`);
+  verifica('dati veri, 15/12/2026: 32 attesi (33 prima del contratto unico di Nappi Sud), nessuno da decidere', vDic.totali.attesi === 32 && vDic.da_decidere === 0, JSON.stringify(vDic.totali));
+  verifica('dati veri, 02/04/2027: come prima (3 attesi)', vApr.totali.attesi === 3 && vApr.da_decidere === 31, `${JSON.stringify(vApr.totali)} ${vApr.da_decidere}`);
+  verifica('dati veri, ottobre 2026: 32 attesi (33 prima), 19 da decidere', vOtt.totali.attesi === 32 && vOtt.da_decidere === 19, JSON.stringify(vOtt.totali));
+  const nappi = (j, tipo, canale) => ((j.soggetti.find(s => /nappi sud/i.test(s.nome)) || {}).contratti || []).find(c => c.tipo === tipo && c.canale === canale);
+  verifica('dati veri, ottobre 2026: Nappi Sud ha la raccolta e stoccaggio ACI col prezzo dello stoccaggio (16), e lo stoccaggio ACI non dovuto',
+    nappi(vOtt, 'raccolta', 'ACI')?.raccolta_e_stoccaggio === true && nappi(vOtt, 'raccolta', 'ACI')?.proposta?.valori?.CORRISPETTIVO_STOCCAGGIO === 16
+    && nappi(vOtt, 'stoccaggio', 'ACI')?.non_dovuto === true && nappi(vOtt, 'raccolta', 'RETE')?.raccolta_e_stoccaggio === false && nappi(vOtt, 'stoccaggio', 'RETE')?.non_dovuto === false,
+    JSON.stringify(['raccolta', 'stoccaggio'].flatMap(t => ['RETE', 'ACI'].map(c => [t, c, nappi(vOtt, t, c)?.raccolta_e_stoccaggio, nappi(vOtt, t, c)?.non_dovuto]))));
+  const unite = (j) => j.soggetti.filter(s => s.contratti.some(c => c.raccolta_e_stoccaggio)).map(s => s.nome);
+  verifica('dati veri: nel 2026 e nel 2027 il contratto unico ce l\'ha solo Nappi Sud (Ecorecuperi nel 2026 sull\'ACI non raccoglie ne\' stocca)',
+    unite(vOtt).length === 1 && /nappi/i.test(unite(vOtt)[0]) && unite(vDic).length === 1, JSON.stringify([unite(vOtt), unite(vDic)]));
+  // Revisione del 14/10/2026, il caso del revisore: il contratto 2027 di Nappi Sud
+  // coi due prezzi generato a dicembre e controfirmato. Il 15/04/2027 Nappi Sud
+  // non ha ancora un viaggio ACI del 2027: prima il contratto si spezzava (lo
+  // stoccaggio ACI da decidere a parte, 34 da decidere), ora resta uno (33).
+  const chiaveNappi = (vOtt.soggetti.find(s => /nappi sud/i.test(s.nome)) || {}).chiave;
+  const unico2027 = { id: 'k-nappi-aci-2027', anno: 2027, soggetto_chiave: chiaveNappi, soggetto_nome: 'NAPPI SUD SRL', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'controfirmato',
+    modello_id: 'mod-rs-aci', valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 92, CORRISPETTIVO_STOCCAGGIO: 16 }), data_inizio: '2027-01-02', data_fine: '2027-12-31' };
+  const vNappi = { ...V, QualificaInclusione: [], ContrattoFornitore: [unico2027], ModelloContratto: [modR, modRS] };
+  for (const oggiC of ['2026-12-15', '2027-04-15']) {
+    const j = await situazione(vNappi, 2027, oggiC);
+    console.log(`  2027 col contratto unico di Nappi Sud firmato, guardati il ${oggiC.split('-').reverse().join('/')}: ${JSON.stringify(j.totali)}, da decidere ${j.da_decidere}`);
+    const r = nappi(j, 'raccolta', 'ACI');
+    verifica(`dati veri, il ${oggiC.split('-').reverse().join('/')}: il contratto 2027 di Nappi Sud coi due prezzi resta uno, e la scheda ripropone il suo modello`,
+      r?.raccolta_e_stoccaggio === true && r.modello_id === 'mod-rs-aci' && nappi(j, 'stoccaggio', 'ACI')?.non_dovuto === true && sceltaDellaScheda(j, r).scelto === 'mod-rs-aci'
+      && j.da_decidere === (oggiC === '2027-04-15' ? 33 : 0), JSON.stringify([r && [r.raccolta_e_stoccaggio, r.modello_id], nappi(j, 'stoccaggio', 'ACI')?.stato, j.da_decidere]));
+  }
 
   // «Prepara l'anno» sulle 65 tariffe vere: nessun contratto 2027 propone un prezzo copiato.
   const piano = pianoCopiaTariffe(V.Tariffa, 2027, ['PASSIVA']);
@@ -419,7 +719,13 @@ if (!existsSync(COPIA)) {
     if ((c.proposta.tariffe_copiate || []).length && c.proposta.avvisi.some(a => /da confermare: il prezzo lo decide il contratto/.test(a))) conAvviso++;
   }
   console.log(`  dopo «Prepara l'anno» (${copie.length} copie): ${conPrezzoCopiato} contratti 2027 con un prezzo proposto, ${conAvviso} con le copie fra i riferimenti`);
-  verifica('dati veri: dopo la copia nessun contratto 2027 propone il prezzo del 2026 (erano 23), e le copie sono fra i riferimenti di 32', copie.length === 58 && conPrezzoCopiato === 0 && conAvviso === 32, `${copie.length} ${conPrezzoCopiato} ${conAvviso}`);
+  // 31 e non piu' 32 (13/10/2026): lo stoccaggio ACI di Nappi Sud sta nel suo
+  // contratto di raccolta e stoccaggio, che porta le copie di tutti e due i prezzi.
+  verifica('dati veri: dopo la copia nessun contratto 2027 propone il prezzo del 2026 (erano 23), e le copie sono fra i riferimenti di 31', copie.length === 58 && conPrezzoCopiato === 0 && conAvviso === 31, `${copie.length} ${conPrezzoCopiato} ${conAvviso}`);
+  const rsCop = riga(vCop, 'nappi sud', 'raccolta', 'ACI');
+  verifica('dati veri: la raccolta e stoccaggio ACI 2027 di Nappi Sud ha fra i riferimenti le copie della raccolta e dello stoccaggio, senza prezzo proposto',
+    (rsCop?.proposta?.tariffe_copiate || []).some(t => t.servizio === 'stoccaggio') && (rsCop?.proposta?.tariffe_copiate || []).some(t => t.servizio === 'raccolta')
+    && rsCop.proposta.valori.CORRISPETTIVO_STOCCAGGIO === undefined && rsCop.proposta.avvisi.some(a => /^Per lo stoccaggio, tariffa .* copiata dal 2026/.test(a)), JSON.stringify(rsCop?.proposta?.tariffe_copiate));
 
   // R3a: il prezzo unico di Green Tyre ACI si dice sulla raccolta con la copia e senza.
   const senzaUnico = (j) => {

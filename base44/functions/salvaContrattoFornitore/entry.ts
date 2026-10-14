@@ -4,6 +4,7 @@ import { riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { richiestoA } from "../../shared/qualificaFornitori.ts";
 import { CANALI_CONTRATTO, TIPI_CONTRATTO } from "../../shared/contrattiDellAnno.ts";
+import { eContrattoRaccoltaEStoccaggio } from "../../shared/segnapostiContratto.ts";
 
 // IL SALVATAGGIO DI UN CONTRATTO A UN FORNITORE: generato, rigenerato,
 // controfirmato (giro K3 delle segnalazioni del 20/09, corretto il 12/10/2026).
@@ -138,29 +139,45 @@ export default async function(req) {
       // Il legame con la qualifica: la voce del catalogo della famiglia
       // «contratto» che vale per il ruolo di questo contratto. Se non ce n'e'
       // una sola non si sceglie a caso: il firmato resta sul contratto e si dice.
+      //
+      // IL CONTRATTO ACI UNICO DI RACCOLTA E STOCCAGGIO (decisione dell'utente del
+      // 13/10/2026; chiusura del giro, 14/10/2026). Copre due ruoli, raccolta e
+      // stoccaggio ACI: la voce si cerca per ciascuno, e se il catalogo ne ha una
+      // per la raccolta e un'altra per lo stoccaggio il firmato diventa il
+      // documento di tutte e due. Prima si cercava solo per la raccolta, e la voce
+      // dello stoccaggio restava scoperta con un contratto firmato che la copre.
+      // Che sia il contratto unico lo dice il suo modello, anche sostituito
+      // (eContrattoRaccoltaEStoccaggio): una lettura sola, e solo per una
+      // raccolta ACI.
       const ruolo = (TIPI_CONTRATTO.find(t => t.chiave === contratto.tipo_contratto) || {}).ruolo;
+      let ruoli = [ruolo || ''];
+      if (contratto.tipo_contratto === 'raccolta' && (contratto.canale || 'RETE') === 'ACI') {
+        const modello = testo(contratto.modello_id) ? await svc.ModelloContratto.get(testo(contratto.modello_id)).catch(() => null) : null;
+        if (eContrattoRaccoltaEStoccaggio(contratto, modello)) ruoli = ['raccolta', 'stoccaggio'];
+      }
       const catalogo = await svc.TipoDocumentoQualifica.list('ordine', 500).catch(() => []);
-      const voci = catalogo.filter(t => t && t.categoria === 'contratto' && richiestoA(t, { chiave: contratto.soggetto_chiave, ruoli: ruolo ? [ruolo] : [] }));
-      let documento = null;
-      let motivo = '';
-      if (voci.length === 1) {
-        const voce = voci[0];
-        // Nasce «in_attesa»: la lettura (analizzaDocumentoQualifica) la chiama la
-        // scheda Contratti appena riceve documento_qualifica_id, come fa la scheda
-        // del fornitore dopo un caricamento a mano. Senza, dopo dieci minuti la
-        // qualifica lo dava «da verificare» per un'analisi interrotta che non era
-        // mai partita (revisione del 13/10/2026, prove/contrattoFirmato.mjs).
-        documento = await svc.DocumentoQualifica.create({
-          soggetto_chiave: contratto.soggetto_chiave, soggetto_nome: contratto.soggetto_nome || contratto.soggetto_chiave,
-          tipo_documento_id: voce.id, tipo_documento_nome: voce.nome,
-          file_uri: rif.file_uri, file_nome: fileNome, stato: 'attivo', analisi_stato: 'in_attesa',
-          data_emissione: giorno,
-          note: `Contratto ${contratto.tipo_contratto} ${contratto.canale || 'RETE'} ${contratto.anno} controfirmato, caricato dalla scheda Contratti.`,
-        });
-        aggiornamento.documento_qualifica_id = documento.id;
+      const PER_IL_RUOLO = { raccolta: 'Per la raccolta', stoccaggio: 'Per lo stoccaggio' };
+      const scelte = [];
+      const motivi = [];
+      for (const r of ruoli) {
+        const voci = catalogo.filter(t => t && t.categoria === 'contratto' && richiestoA(t, { chiave: contratto.soggetto_chiave, ruoli: r ? [r] : [] }));
+        if (voci.length === 1) {
+          if (!scelte.some(v => v.id === voci[0].id)) scelte.push(voci[0]);
+          continue;
+        }
+        const frase = voci.length === 0
+          ? 'Nel catalogo della qualifica non c\'è una voce «contratto» per questo ruolo: il firmato resta sul contratto.'
+          : `Nel catalogo della qualifica ci sono ${voci.length} voci «contratto» per questo ruolo (${voci.map(v => v.nome).join(', ')}): non ne scelgo una a caso, caricalo tu dalla scheda del fornitore.`;
+        motivi.push(ruoli.length > 1 ? `${PER_IL_RUOLO[r]}: ${frase.charAt(0).toLowerCase()}${frase.slice(1)}` : frase);
+      }
+      const documenti = [];
+      if (scelte.length) {
         // Il documento di prima di quella voce passa fra i sostituiti, come in un
         // caricamento a mano; non quelli degli altri contratti dello stesso anno
-        // (la raccolta di rete e quella ACI sono due contratti veri, tutti e due validi).
+        // (la raccolta di rete e quella ACI sono due contratti veri, tutti e due
+        // validi). Un contratto unico ha un documento per voce, tutti col suo
+        // file firmato: per questo gli altri contratti si riconoscono anche dal
+        // file, non solo da documento_qualifica_id.
         //
         // NE' IL CONTRATTO IN CORSO, SE IL NUOVO DECORRE PIU' AVANTI (revisione del
         // 13/10/2026). Il 2027 si controfirma a dicembre: mandare subito fra i
@@ -180,25 +197,43 @@ export default async function(req) {
           : Number(contratto.anno) ? `${Number(contratto.anno)}-01-01` : null;
         const decorrePiuAvanti = !!decorrenza && decorrenza > oggi;
         const scadenzaDi = (p) => [p.data_scadenza_manuale, p.data_scadenza].map(v => String(v || '').slice(0, 10)).find(giornoValido) || null;
-        const altriDellAnno = new Set((await svc.ContrattoFornitore.filter({ anno: contratto.anno, soggetto_chiave: contratto.soggetto_chiave }))
-          .filter(c => c.id !== contratto.id && c.documento_qualifica_id).map(c => c.documento_qualifica_id));
-        const precedenti = await svc.DocumentoQualifica.filter({ soggetto_chiave: contratto.soggetto_chiave, tipo_documento_id: voce.id, stato: 'attivo' });
-        for (const p of precedenti) {
-          if (p.id === documento.id || altriDellAnno.has(p.id)) continue;
-          const ancoraInVigore = decorrePiuAvanti && p.id !== contratto.documento_qualifica_id && (scadenzaDi(p) || '') >= oggi;
-          if (ancoraInVigore) continue;
-          await svc.DocumentoQualifica.update(p.id, { stato: 'sostituito' });
+        const altri = (await svc.ContrattoFornitore.filter({ anno: contratto.anno, soggetto_chiave: contratto.soggetto_chiave })).filter(c => c.id !== contratto.id);
+        const altriDellAnno = new Set(altri.filter(c => c.documento_qualifica_id).map(c => c.documento_qualifica_id));
+        const fileDegliAltri = new Set(altri.filter(c => c.documento_firmato && c.file_uri).map(c => c.file_uri));
+        for (const voce of scelte) {
+          // Nasce «in_attesa»: la lettura (analizzaDocumentoQualifica) la chiama la
+          // scheda Contratti appena riceve i documenti, come fa la scheda del
+          // fornitore dopo un caricamento a mano. Senza, dopo dieci minuti la
+          // qualifica lo dava «da verificare» per un'analisi interrotta che non era
+          // mai partita (revisione del 13/10/2026, prove/contrattoFirmato.mjs).
+          const nuovoDoc = await svc.DocumentoQualifica.create({
+            soggetto_chiave: contratto.soggetto_chiave, soggetto_nome: contratto.soggetto_nome || contratto.soggetto_chiave,
+            tipo_documento_id: voce.id, tipo_documento_nome: voce.nome,
+            file_uri: rif.file_uri, file_nome: fileNome, stato: 'attivo', analisi_stato: 'in_attesa',
+            data_emissione: giorno,
+            note: `Contratto ${ruoli.length > 1 ? 'raccolta e stoccaggio' : contratto.tipo_contratto} ${contratto.canale || 'RETE'} ${contratto.anno} controfirmato, caricato dalla scheda Contratti.`,
+          });
+          documenti.push(nuovoDoc);
+          const precedenti = await svc.DocumentoQualifica.filter({ soggetto_chiave: contratto.soggetto_chiave, tipo_documento_id: voce.id, stato: 'attivo' });
+          for (const p of precedenti) {
+            if (documenti.some(d => d.id === p.id) || altriDellAnno.has(p.id) || (p.file_uri && fileDegliAltri.has(p.file_uri))) continue;
+            const ancoraInVigore = decorrePiuAvanti && p.id !== contratto.documento_qualifica_id && (scadenzaDi(p) || '') >= oggi;
+            if (ancoraInVigore) continue;
+            await svc.DocumentoQualifica.update(p.id, { stato: 'sostituito' });
+          }
         }
-      } else {
-        motivo = voci.length === 0
-          ? 'Nel catalogo della qualifica non c\'è una voce «contratto» per questo ruolo: il firmato resta sul contratto.'
-          : `Nel catalogo della qualifica ci sono ${voci.length} voci «contratto» per questo ruolo (${voci.map(v => v.nome).join(', ')}): non ne scelgo una a caso, caricalo tu dalla scheda del fornitore.`;
+        aggiornamento.documento_qualifica_id = documenti[0].id;
       }
+      const documento = documenti[0] || null;
+      const motivo = motivi.join(' ');
       await svc.ContrattoFornitore.update(contratto.id, aggiornamento);
       return Response.json({
         ok: true, contratto_id: contratto.id, versioni: versioni.length,
         documento_qualifica_id: documento ? documento.id : null,
         tipo_documento_nome: documento ? documento.tipo_documento_nome : null,
+        // Tutti i documenti di qualifica nati dal firmato: due per il contratto ACI
+        // unico, se il catalogo ha una voce per ruolo (14/10/2026).
+        documenti_qualifica: documenti.map(d => ({ id: d.id, tipo_documento_nome: d.tipo_documento_nome })),
         motivo_senza_qualifica: motivo || null,
       });
     }

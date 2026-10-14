@@ -7,7 +7,7 @@ import { formatTonnellate } from '@/lib/utils';
 import { TIPI_CONTRATTO, STATI_CONTRATTO, nomeTipo, nomeCanale, nomeFileContratto, dataIt } from '@/lib/contrattiFornitori';
 import { leggiModello, scarica } from '@/lib/docxModello';
 import { compilaContratto, puntiDelModello } from '@/lib/modelliContratto';
-import { puntoDi, valoriDiPartenza, valoreNelDocumento, leggiNumeroItaliano, scriviPrezzo, campoDellaQuantita } from '@/lib/segnapostiContratto';
+import { puntoDi, valoriDiPartenza, valoreNelDocumento, leggiNumeroItaliano, scriviPrezzo, campoDellaQuantita, eModelloRaccoltaEStoccaggio } from '@/lib/segnapostiContratto';
 import { linkFile, motivoApertura } from '@/lib/apriFile';
 import ModelliContratti from '@/components/qualifica/ModelliContratti';
 
@@ -34,6 +34,12 @@ import ModelliContratti from '@/components/qualifica/ModelliContratti';
 //   nel Word il segnaposto si vede: mai uno zero al posto di un numero che non c'e'.
 //
 // I modelli si caricano nella sezione «Modelli dei contratti» (ModelliContratti.jsx).
+//
+// RACCOLTA E STOCCAGGIO ACI (decisione dell'utente del 13/10/2026): chi sull'ACI
+// raccoglie e stocca (Nappi Sud) ha un contratto solo, coi due prezzi. La sua
+// riga della raccolta ACI e' «raccolta e stoccaggio» (raccolta_e_stoccaggio), col
+// modello ACI che ha anche il prezzo dello stoccaggio; quella dello stoccaggio ACI
+// e' «non dovuto» col motivo, e non si conta.
 
 function Pastiglia({ stato }) {
   const s = STATI_CONTRATTO[stato] || (stato === 'non_dovuto'
@@ -45,7 +51,19 @@ function Pastiglia({ stato }) {
 const erroreDi = (e) => e?.response?.data?.error || e?.data?.error || e?.message || String(e);
 const datiErrore = (e) => e?.response?.data || e?.data || {};
 const oggiRoma = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
-const nomeCanaleRiga = (r) => (r.tipo === 'trasporto_secondaria' ? 'rete e ACI' : nomeCanale(r.canale));
+const nomeCanaleRiga = (r) => (r.tipo === 'trasporto_secondaria' ? 'rete e ACI' : r.raccolta_e_stoccaggio ? `${nomeCanale(r.canale)}, raccolta e stoccaggio` : nomeCanale(r.canale));
+// Il nome del contratto: «Raccolta ACI», «Trasporto di secondaria rete e ACI»,
+// e per chi sull'ACI raccoglie e stocca «Raccolta e stoccaggio ACI» (13/10/2026).
+const nomeContratto = (r) => (r.raccolta_e_stoccaggio ? `Raccolta e stoccaggio ${nomeCanale(r.canale)}` : `${nomeTipo(r.tipo)} ${nomeCanaleRiga(r)}`);
+// Sulla raccolta ACI i modelli sono due, quello della sola raccolta e quello
+// della raccolta e stoccaggio: ogni contratto si genera dal suo. Com'e' fatto un
+// contratto gia' generato lo dice il contratto stesso (raccolta_e_stoccaggio
+// viene dal suo modello, revisione del 14/10/2026), e riaprendolo si propone il
+// suo. Un contratto di sola raccolta di chi quest'anno stocca anche sull'ACI
+// (si_puo_unire_lo_stoccaggio) puo' prendere tutti e due: rigenerato col modello
+// della raccolta e stoccaggio diventa il contratto unico.
+const modelloAdatto = (m, r) => m.tipo_contratto === r.tipo && (m.canale || 'RETE') === (r.canale || 'RETE')
+  && (r.tipo !== 'raccolta' || (r.canale || 'RETE') !== 'ACI' || !!r.si_puo_unire_lo_stoccaggio || eModelloRaccoltaEStoccaggio(m) === !!r.raccolta_e_stoccaggio);
 
 export default function ContrattiAnno({ anno, isAdmin }) {
   const [dati, setDati] = useState(null);
@@ -106,7 +124,8 @@ export default function ContrattiAnno({ anno, isAdmin }) {
         <span>
           I fornitori da contrattualizzare sono gli stessi della qualifica, con il ruolo e il canale che hanno nei movimenti: chi raccoglie sulla rete
           vuole un contratto di raccolta di rete, chi raccoglie anche sull&apos;ACI ne vuole un secondo, distinto, col suo modello e i suoi valori. Rete e
-          ACI non si sommano mai; l&apos;extra raccolta non ha contratti annuali. Il contratto si genera dal modello cambiando solo i punti che variano:
+          ACI non si sommano mai; l&apos;extra raccolta non ha contratti annuali. Chi sull&apos;ACI raccoglie e stocca ha un contratto solo di raccolta e
+          stoccaggio, coi due prezzi. Il contratto si genera dal modello cambiando solo i punti che variano:
           dati del fornitore dall&apos;anagrafica, quantità dal target, prezzo dalla tariffa passiva valida nell&apos;anno, date di validità. Quello che il
           gestionale non ha resta da scrivere, mai uno zero.
           {dati && dati.anno_prima && (dati.anno_prima_atteso
@@ -259,7 +278,7 @@ const FONTI = {
 
 function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato, setOccupato }) {
   const canaleModello = riga.canale || 'RETE';
-  const modelliBuoni = modelli.filter(m => m.tipo_contratto === riga.tipo && (m.canale || 'RETE') === canaleModello);
+  const modelliBuoni = modelli.filter(m => modelloAdatto(m, riga));
   const [modelloId, setModelloId] = useState((riga.contratto && riga.contratto.modello_id && modelliBuoni.some(m => m.id === riga.contratto.modello_id) && riga.contratto.modello_id)
     || riga.modello_id || (modelliBuoni[0] && modelliBuoni[0].id) || '');
   const proposta = riga.proposta || { valori: {}, fonti: {}, avvisi: [], tariffe: [], tariffe_anno_prima: [] };
@@ -303,8 +322,14 @@ function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato
       const letto = await leggiModello(await risposta.blob());
 
       const completi = { ...valori, ANNO: String(anno) };
-      const { blob, segnaposti_vuoti } = compilaContratto(letto, completi, punti);
-      const nomeFile = nomeFileContratto({ anno, soggetto: soggetto.nome, tipo: riga.tipo, canale: riga.tipo === 'trasporto_secondaria' ? 'RETE' : riga.canale });
+      // albo_smoco: le date dell'iscrizione di SMOCO all'Albo che il modello
+      // aveva diverse dal 16/05/2025, corrette nel contratto (13/10/2026).
+      const { blob, segnaposti_vuoti, albo_smoco: alboCorretto = [] } = compilaContratto(letto, completi, punti);
+      const nomeBase = nomeFileContratto({ anno, soggetto: soggetto.nome, tipo: riga.tipo, canale: riga.tipo === 'trasporto_secondaria' ? 'RETE' : riga.canale });
+      // «Contratto Raccolta e stoccaggio ACI 2026 - …» per il contratto unico
+      // (13/10/2026): lo dice il modello scelto, anche quando un contratto di
+      // sola raccolta si rigenera coi due prezzi (14/10/2026).
+      const nomeFile = eModelloRaccoltaEStoccaggio(modello) ? nomeBase.replace(/^Contratto Raccolta ACI /, 'Contratto Raccolta e stoccaggio ACI ') : nomeBase;
       const file = new File([blob], nomeFile, { type: blob.type });
       const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
 
@@ -330,7 +355,10 @@ function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato
         quantitativo_previsto_t: quantita === null ? undefined : quantita,
         condizioni_pagamento: valori.PAGAMENTO || undefined,
         valori_json: JSON.stringify(valori),
-        note: segnaposti_vuoti.length ? `Segnaposto senza valore, rimasti nel documento: ${segnaposti_vuoti.join(', ')}` : '',
+        note: [
+          segnaposti_vuoti.length ? `Segnaposto senza valore, rimasti nel documento: ${segnaposti_vuoti.join(', ')}` : '',
+          alboCorretto.length ? `Nel modello la data dell'iscrizione di SMOCO all'Albo era ${[...new Set(alboCorretto.map(c => `«${c.testo}»`))].join(', ')}: nel contratto è ${alboCorretto[0].nuovo}.` : '',
+        ].filter(Boolean).join(' '),
       };
       try {
         await base44.functions.invoke('salvaContrattoFornitore', {
@@ -361,13 +389,14 @@ function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato
     setOccupato(false);
   };
 
-  const tariffeTesto = (elenco) => (elenco || []).map(t => `${scriviPrezzo(t.valore)} ${t.unita_misura}${t.dove ? ` (${t.dove})` : ''}${t.da_confermare ? ', ancora da confermare' : ''}`).join('; ');
+  // t.servizio: nel contratto di raccolta e stoccaggio, di quale dei due prezzi e' la tariffa
+  const tariffeTesto = (elenco) => (elenco || []).map(t => `${t.servizio ? `${t.servizio} ` : ''}${scriviPrezzo(t.valore)} ${t.unita_misura}${t.dove ? ` (${t.dove})` : ''}${t.da_confermare ? ', ancora da confermare' : ''}`).join('; ');
 
   return (
     <Dialog open onOpenChange={(x) => { if (!x) onChiudi(); }}>
       <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{nomeTipo(riga.tipo)} {nomeCanaleRiga(riga)} {anno} · {soggetto.nome}</DialogTitle>
+          <DialogTitle>{nomeContratto(riga)} {anno} · {soggetto.nome}</DialogTitle>
           <DialogDescription>
             {partenza.da === 'contratto'
               ? 'Il contratto è già stato generato: i valori sono quelli salvati con lui.'
@@ -381,6 +410,18 @@ function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato
           {riga.da_decidere && (
             <div className="text-xs text-amber-800">Nel {anno} questo fornitore non ha ancora movimenti per questa prestazione su questo canale: c&apos;era nel {riga.precedente ? riga.precedente.anno : anno - 1}. Decidi tu se il contratto serve.</div>
           )}
+          {riga.raccolta_e_stoccaggio && (
+            <div className="text-xs text-blue-800">
+              Sull&apos;ACI questo fornitore raccoglie e stocca: un contratto solo, col prezzo della raccolta e quello dello stoccaggio. Lo stoccaggio ACI non ha un
+              contratto a parte. Il modello è quello ACI della raccolta e stoccaggio.
+            </div>
+          )}
+          {riga.si_puo_unire_lo_stoccaggio && (
+            <div className="text-xs text-blue-800">
+              Il contratto fatto è di sola raccolta, e quest&apos;anno sull&apos;ACI questo fornitore stocca anche. Rigeneralo col modello della raccolta e
+              stoccaggio: un contratto solo coi due prezzi, e lo stoccaggio ACI non serve a parte. Col modello della sola raccolta lo stoccaggio ACI resta da fare.
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Modello</label>
@@ -389,7 +430,7 @@ function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato
               {modelliBuoni.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.file_nome})</option>)}
             </select>
             {modelliBuoni.length === 0 && (
-              <p className="text-xs text-amber-800">Per {nomeTipo(riga.tipo).toLowerCase()} {nomeCanaleRiga(riga)} non c&apos;è ancora un modello: caricalo in «Modelli dei contratti».</p>
+              <p className="text-xs text-amber-800">Per il contratto «{nomeContratto(riga)}» non c&apos;è ancora un modello: caricalo in «Modelli dei contratti».</p>
             )}
           </div>
 
@@ -515,6 +556,16 @@ function ProceduraContratto({ anno, soggetto, riga, modelli, onChiudi, onSalvato
 
 // ─── il contratto controfirmato ───
 
+// I documenti di qualifica nati dal firmato, dalla risposta di
+// salvaContrattoFornitore: documenti_qualifica (due per il contratto ACI unico di
+// raccolta e stoccaggio, se il catalogo ha una voce per ruolo, 14/10/2026),
+// oppure il solo documento_qualifica_id di una risposta di prima.
+export function documentiDelFirmato(esito) {
+  if (!esito) return [];
+  if (Array.isArray(esito.documenti_qualifica) && esito.documenti_qualifica.length) return esito.documenti_qualifica.filter(d => d && d.id);
+  return esito.documento_qualifica_id ? [{ id: esito.documento_qualifica_id, tipo_documento_nome: esito.tipo_documento_nome }] : [];
+}
+
 function CaricaControfirmato({ soggetto, riga, anno, onChiudi, onSalvato }) {
   const input = useRef(null);
   const [file, setFile] = useState(null);
@@ -532,13 +583,18 @@ function CaricaControfirmato({ soggetto, riga, anno, onChiudi, onSalvato }) {
   // mai partita, fino al presidio del mattino dopo (revisione del 13/10/2026).
   // Stessa chiamata e stesso contesto di SoggettoDettaglio. La lettura puo'
   // durare un minuto: se il browser smette di aspettare la funzione continua.
-  const leggiDocumento = async (documentoId) => {
+  // Il contratto ACI unico di raccolta e stoccaggio (decisione dell'utente del
+  // 13/10/2026) puo' fare due documenti, uno per voce: si leggono uno dopo
+  // l'altro (chiusura del giro, 14/10/2026).
+  const leggiDocumenti = async (documenti) => {
     setLettura('in_corso');
     try {
-      await base44.functions.invoke('analizzaDocumentoQualifica', {
-        documento_id: documentoId,
-        contesto: { nome: soggetto.nome, piva: soggetto.piva, codice_fiscale: soggetto.fornitore ? soggetto.fornitore.codice_fiscale : undefined },
-      });
+      for (const documentoId of documenti) {
+        await base44.functions.invoke('analizzaDocumentoQualifica', {
+          documento_id: documentoId,
+          contesto: { nome: soggetto.nome, piva: soggetto.piva, codice_fiscale: soggetto.fornitore ? soggetto.fornitore.codice_fiscale : undefined },
+        });
+      }
       setLettura('fatta');
     } catch (e) {
       setLettura(erroreDi(e) || 'la lettura non è riuscita');
@@ -558,7 +614,8 @@ function CaricaControfirmato({ soggetto, riga, anno, onChiudi, onSalvato }) {
       });
       const fatto = res.data || res;
       setEsito(fatto);
-      if (fatto && fatto.documento_qualifica_id) leggiDocumento(fatto.documento_qualifica_id);
+      const daLeggere = documentiDelFirmato(fatto).map(d => d.id);
+      if (daLeggere.length) leggiDocumenti(daLeggere);
     } catch (e) {
       setErrore(erroreDi(e));
     }
@@ -571,7 +628,7 @@ function CaricaControfirmato({ soggetto, riga, anno, onChiudi, onSalvato }) {
         <DialogHeader>
           <DialogTitle>Contratto controfirmato · {soggetto.nome}</DialogTitle>
           <DialogDescription>
-            {nomeTipo(riga.tipo)} {nomeCanaleRiga(riga)} {anno}. Il firmato diventa il documento del contratto; quello generato resta nello storico.
+            {nomeContratto(riga)} {anno}. Il firmato diventa il documento del contratto; quello generato resta nello storico.
             Se il catalogo della qualifica ha la voce del contratto per questo ruolo, il firmato diventa anche il documento di qualifica del fornitore.
           </DialogDescription>
         </DialogHeader>
@@ -589,9 +646,10 @@ function CaricaControfirmato({ soggetto, riga, anno, onChiudi, onSalvato }) {
         ) : (
           <div className="text-sm space-y-1">
             <div className="text-emerald-800">Contratto segnato controfirmato il {dataIt(giorno)}, col file firmato.</div>
-            {esito.documento_qualifica_id
-              ? <div>Caricato anche nella qualifica come «{esito.tipo_documento_nome}».</div>
-              : esito.motivo_senza_qualifica && <div className="text-amber-800">{esito.motivo_senza_qualifica}</div>}
+            {documentiDelFirmato(esito).length > 0 && (
+              <div>Caricato anche nella qualifica come {documentiDelFirmato(esito).map(d => `«${d.tipo_documento_nome}»`).join(' e ')}.</div>
+            )}
+            {esito.motivo_senza_qualifica && <div className="text-amber-800">{esito.motivo_senza_qualifica}</div>}
             {lettura === 'in_corso' && (
               <div className="text-muted-foreground flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" />Leggo il documento per la qualifica: puoi chiudere, la lettura va avanti da sola.</div>
             )}

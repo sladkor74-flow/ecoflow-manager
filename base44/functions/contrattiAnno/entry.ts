@@ -12,7 +12,9 @@ import { situazioneContratti } from "../../shared/contrattiDellAnno.ts";
 // I soggetti sono gli stessi della qualifica documentale (individuaSoggetti),
 // con il ruolo e il canale che hanno nei movimenti: chi raccoglie sulla rete
 // vuole un contratto di raccolta di rete, chi raccoglie anche sull'ACI ne vuole
-// un secondo, distinto, col suo modello e i suoi valori. Le regole stanno in
+// un secondo, distinto, col suo modello e i suoi valori. Chi sull'ACI raccoglie e
+// stocca ne ha uno solo, di raccolta e stoccaggio coi due prezzi (decisione
+// dell'utente del 13/10/2026). Le regole stanno in
 // base44/shared/contrattiDellAnno.ts (giro K3 delle segnalazioni del 20/09,
 // corretto il 12/10/2026): qui solo le letture.
 //
@@ -78,7 +80,11 @@ export default async function(req) {
       fetchAll(svc.ExtraRaccolta),
       fetchAll(svc.Secondaria),
       fetchAll(base44.asServiceRole.entities.ContrattoFornitore),
-      base44.asServiceRole.entities.ModelloContratto.filter({ stato: 'attivo' }, 'tipo_contratto', 200),
+      // Tutti i modelli, anche i sostituiti: un contratto fatto col modello della
+      // raccolta e stoccaggio resta coi due prezzi anche dopo che quel format e'
+      // stato sostituito (revisione del 14/10/2026). Da proporre e da mostrare
+      // restano solo gli attivi: li sceglie situazioneContratti.
+      fetchAll(base44.asServiceRole.entities.ModelloContratto),
       fetchAll(svc.Fornitore),
       base44.asServiceRole.entities.TargetRaccoglitore.filter({ anno: annoNum }, 'raccoglitore', 1000),
       fetchAll(base44.asServiceRole.entities.ImpiantoTargetSecondaria, { stato: 'attivo' }),

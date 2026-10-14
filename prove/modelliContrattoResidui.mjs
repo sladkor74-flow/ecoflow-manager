@@ -106,6 +106,13 @@ function postiDelleRighe(parti) {
 // La riga dell'iscrizione di SMOCO agli albi, nei contratti di trasporto: non
 // si tocca e non si segna.
 const RIGA_ISCRIZIONE_SMOCO = /^\W*Il\s+Committente\b[^.]{0,80}?\biscritt[oa]\b/i;
+// L'unico dato di SMOCO che cambia (decisione dell'utente del 13/10/2026): la
+// data della sua iscrizione all'Albo in categoria 8 (BA-11513) e' sempre il
+// 16/05/2025, fino al rinnovo del 2030. Regola della prova, non del lettore: il
+// pezzo di riga che comincia col numero e non parla della categoria 4 prende
+// quella data, con lo stesso separatore.
+const alboGiusto = (t) => String(t).split(/(?=BA-?\s?11513)/).map(p => (/^BA-?\s?11513/.test(p) && !/categoria\s*4|cat\.?\s*4(?!\d)/i.test(p)
+  ? p.replace(/^(BA-?\s?11513\s+del\s+)\d{1,2}([./])\d{1,2}\2\d{4}/, (_m, a, s) => `${a}16${s}05${s}2025`) : p)).join('');
 // Le occorrenze di qualunque punto, accese o spente, che cadono nella riga i del
 // testo (la sua parte e il suo indice nel documento).
 const occorrenzeNellaRiga = (g, i) => {
@@ -478,9 +485,16 @@ if (!existsSync(CARTELLA)) {
       }
     });
     verifica(`${nome}: l'anno ${anno} resta solo dove la proposta lo spiega`, !nonSpiegati.length, nonSpiegati.slice(0, 3).join(' || '));
-    // I dati di SMOCO non cambiano: le sue righe, le sue persone, la sua carica sotto la firma.
-    const diverse = originale.map((r, i) => [i, r]).filter(([i, r]) => rigaSmoco(r) && generato[i] !== r);
-    verifica(`${nome}: le righe di SMOCO restano identiche`, !diverse.length, diverse.slice(0, 2).map(([i, r]) => `[${i}] ${r.slice(0, 120)} => ${generato[i].slice(0, 120)}`).join(' || '));
+    // I dati di SMOCO non cambiano: le sue righe, le sue persone, la sua carica
+    // sotto la firma. Tranne la data dell'Albo in categoria 8, che e' sempre il
+    // 16/05/2025 (13/10/2026): la riga resta identica a meno di quella.
+    const diverse = originale.map((r, i) => [i, r]).filter(([i, r]) => rigaSmoco(r) && generato[i] !== alboGiusto(r));
+    verifica(`${nome}: le righe di SMOCO restano identiche, a meno della data dell'Albo`, !diverse.length, diverse.slice(0, 2).map(([i, r]) => `[${i}] ${r.slice(0, 120)} => ${generato[i].slice(0, 120)}`).join(' || '));
+    const dateAlbo = originale.filter(r => alboGiusto(r) !== r).length;
+    const corrette = (proposta.albo_smoco || []).filter(o => o.correggi).length;
+    const avvisoAlbo = proposta.avvisi.some(a => /iscrizione di SMOCO all'Albo \(cat\. 8 BA-11513\) nel format è .*: quella in vigore è del 16\/05\/2025/.test(a));
+    verifica(`${nome}: la data dell'Albo di SMOCO si corregge dove e' diversa dal 16/05/2025 (${dateAlbo} righe), e la proposta lo dice solo allora`,
+      corrette >= dateAlbo && (dateAlbo ? avvisoAlbo : !avvisoAlbo) && generato.every(r => alboGiusto(r) === r), `${corrette} ${avvisoAlbo}`);
     // La riga dell'iscrizione di SMOCO agli albi (contratti di trasporto):
     // nessuna occorrenza nella riga, ne' accesa ne' spenta, e la riga identica.
     originale.forEach((t, i) => {

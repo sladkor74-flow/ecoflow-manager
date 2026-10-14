@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Loader2, AlertTriangle, FileText, Upload, Plus, ChevronDown, ChevronRight, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { nomeTipo, nomeCanale } from '@/lib/contrattiFornitori';
 import { leggiFormat, proponiPunti, cercaNelFormat, costruisciModello, puntiDelModello } from '@/lib/modelliContratto';
-import { PUNTI_CONTRATTO, CATEGORIE_PUNTI, puntoDi } from '@/lib/segnapostiContratto';
+import { PUNTI_CONTRATTO, CATEGORIE_PUNTI, puntoDi, eModelloRaccoltaEStoccaggio } from '@/lib/segnapostiContratto';
 import { linkFile, motivoApertura } from '@/lib/apriFile';
 
 // IL POSTO DEI MODELLI DEI CONTRATTI (giro K3 delle segnalazioni del 20/09,
@@ -30,14 +30,25 @@ import { linkFile, motivoApertura } from '@/lib/apriFile';
 
 // Le combinazioni che hanno un contratto annuale: il trasporto delle secondarie e'
 // uno solo per vettore, per rete e ACI insieme (contrattiDellAnno.ts).
+// Sulla raccolta ACI i modelli sono due (decisione dell'utente del 13/10/2026):
+// quello della sola raccolta (EMMESSE, Minervini) e quello della raccolta e
+// stoccaggio, il contratto unico di chi sull'ACI raccoglie e stocca (Nappi Sud),
+// coi due prezzi. Tutti e due si registrano come raccolta ACI: li distingue il
+// prezzo dello stoccaggio fra i punti (eModelloRaccoltaEStoccaggio).
 const COMBINAZIONI = [
-  { tipo: 'raccolta', canale: 'RETE' }, { tipo: 'raccolta', canale: 'ACI' },
+  { tipo: 'raccolta', canale: 'RETE' }, { tipo: 'raccolta', canale: 'ACI' }, { tipo: 'raccolta', canale: 'ACI', stoccaggio: true },
   { tipo: 'stoccaggio', canale: 'RETE' }, { tipo: 'stoccaggio', canale: 'ACI' },
   { tipo: 'trattamento', canale: 'RETE' }, { tipo: 'trattamento', canale: 'ACI' },
   { tipo: 'trasporto_secondaria', canale: 'RETE' },
 ];
 
-const nomeCombinazione = (tipo, canale) => `${nomeTipo(tipo)} ${tipo === 'trasporto_secondaria' ? 'rete e ACI' : nomeCanale(canale)}`;
+const nomeCombinazione = (tipo, canale, stoccaggio = false) => (stoccaggio ? `Raccolta e stoccaggio ${nomeCanale(canale)}`
+  : `${nomeTipo(tipo)} ${tipo === 'trasporto_secondaria' ? 'rete e ACI' : nomeCanale(canale)}`);
+// Il modello di una combinazione: sulla raccolta ACI, quello con o senza il prezzo dello stoccaggio.
+const diQuesta = (m, tipo, canale, stoccaggio = false) => m.tipo_contratto === tipo && (m.canale || 'RETE') === canale
+  && (tipo !== 'raccolta' || canale !== 'ACI' || eModelloRaccoltaEStoccaggio(m) === !!stoccaggio);
+// Il prezzo dello stoccaggio fra i punti che diventano segnaposto.
+const conPrezzoStoccaggio = (punti) => punti.some(p => (p.attivo || p.gia_segnaposto) && p.segnaposto.replace(/_\d+$/, '') === 'CORRISPETTIVO_STOCCAGGIO');
 const giorno = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : '');
 const erroreDi = (e) => e?.response?.data?.error || e?.data?.error || e?.message || String(e);
 
@@ -51,11 +62,11 @@ export default function ModelliContratti({ modelli, onCambiati }) {
     try { window.open(await linkFile('ModelloContratto', m.id), '_blank', 'noopener'); } catch (e) { setErrore(motivoApertura(e)); }
   };
 
-  const modelloDi = (tipo, canale) => (modelli || [])
-    .filter(m => m.tipo_contratto === tipo && (m.canale || 'RETE') === canale)
+  const modelloDi = (c) => (modelli || [])
+    .filter(m => diQuesta(m, c.tipo, c.canale, c.stoccaggio))
     .sort((a, b) => Number(b.anno_riferimento || 0) - Number(a.anno_riferimento || 0) || String(b.created_date || '').localeCompare(String(a.created_date || '')))[0] || null;
 
-  const mancano = COMBINAZIONI.filter(c => !modelloDi(c.tipo, c.canale)).length;
+  const mancano = COMBINAZIONI.filter(c => !modelloDi(c)).length;
 
   return (
     <div className="border rounded-lg bg-card">
@@ -72,6 +83,8 @@ export default function ModelliContratti({ modelli, onCambiati }) {
             Carica il format Word di un tipo e di un canale, anche un contratto già compilato per un fornitore: il gestionale trova da solo i punti che
             cambiano (dati del fornitore, quantità annua, prezzi, date di validità, data della firma, pagamento, polizza, anno) e te li fa confermare.
             I contratti poi si generano cambiando solo quei punti; il resto del documento resta com&apos;è. Rete e ACI hanno modelli distinti.
+            Sull&apos;ACI chi raccoglie e stocca ha un contratto solo, coi due prezzi: il suo format va nella riga «Raccolta e stoccaggio ACI».
+            La data dell&apos;iscrizione di SMOCO all&apos;Albo (cat. 8 BA-11513) è sempre quella in vigore: se il format ne ha un&apos;altra, la correggo io.
           </p>
           {errore && <div className="text-xs text-red-700">{errore}</div>}
           <div className="border rounded-md overflow-x-auto">
@@ -86,12 +99,12 @@ export default function ModelliContratti({ modelli, onCambiati }) {
               </thead>
               <tbody>
                 {COMBINAZIONI.map(c => {
-                  const m = modelloDi(c.tipo, c.canale);
+                  const m = modelloDi(c);
                   const punti = m ? puntiDelModello(m) : [];
                   const quanti = punti.length || (m && m.segnaposti_json ? (() => { try { return JSON.parse(m.segnaposti_json).length; } catch { return 0; } })() : 0);
                   return (
-                    <tr key={`${c.tipo}|${c.canale}`} className="border-t align-top">
-                      <td className="px-3 py-2 font-medium whitespace-nowrap">{nomeCombinazione(c.tipo, c.canale)}</td>
+                    <tr key={`${c.tipo}|${c.canale}|${c.stoccaggio ? 'stoccaggio' : ''}`} className="border-t align-top">
+                      <td className="px-3 py-2 font-medium whitespace-nowrap">{nomeCombinazione(c.tipo, c.canale, c.stoccaggio)}</td>
                       <td className="px-3 py-2">
                         {m ? (
                           <>
@@ -121,7 +134,8 @@ export default function ModelliContratti({ modelli, onCambiati }) {
         <CaricaFormat
           tipo={carica.tipo}
           canale={carica.canale}
-          vecchio={modelloDi(carica.tipo, carica.canale)}
+          stoccaggio={!!carica.stoccaggio}
+          vecchio={modelloDi(carica)}
           onChiudi={() => setCarica(null)}
           onSalvato={() => { setCarica(null); onCambiati(); }}
         />
@@ -132,7 +146,8 @@ export default function ModelliContratti({ modelli, onCambiati }) {
 
 // ─── il format: la proposta dei punti e la conferma ───
 
-function CaricaFormat({ tipo, canale, vecchio, onChiudi, onSalvato }) {
+function CaricaFormat({ tipo, canale, stoccaggio = false, vecchio, onChiudi, onSalvato }) {
+  const nomeQui = nomeCombinazione(tipo, canale, stoccaggio);
   const input = useRef(null);
   const [file, setFile] = useState(null);
   const [letto, setLetto] = useState(null);
@@ -166,7 +181,7 @@ function CaricaFormat({ tipo, canale, vecchio, onChiudi, onSalvato }) {
       setPunti(p.punti.map(x => ({ ...x, occorrenze: x.occorrenze.map(o => ({ ...o })) })));
       setAperti(Object.fromEntries(p.punti.filter(x => x.da_controllare).map(x => [x.segnaposto, true])));
       setAnnoRif(p.anno ? String(p.anno) : '');
-      setNome(`${nomeCombinazione(tipo, canale)}${p.fornitore ? ` (dal contratto ${p.anno || ''} di ${p.fornitore.ragione_sociale})` : ''}`.replace(/\s+\)/, ')'));
+      setNome(`${nomeQui}${p.fornitore ? ` (dal contratto ${p.anno || ''} di ${p.fornitore.ragione_sociale})` : ''}`.replace(/\s+\)/, ')'));
     } catch (e) {
       setErrore(erroreDi(e));
     }
@@ -206,6 +221,21 @@ function CaricaFormat({ tipo, canale, vecchio, onChiudi, onSalvato }) {
     if (!letto || !file) { setErrore('Carica prima il format.'); return; }
     const attivi = punti.filter(p => p.attivo || p.gia_segnaposto);
     if (!attivi.length) { setErrore('Nessun punto acceso: così il modello non cambierebbe niente.'); return; }
+    // Sulla raccolta ACI il prezzo dello stoccaggio decide di quale modello si
+    // tratta (13/10/2026): nella riga sbagliata il modello finirebbe nell'altra.
+    // Un format con un prezzo solo per raccolta e stoccaggio insieme (quello di
+    // Ecorecuperi del 2024, «Trasporto+Stoccaggio» 105,00) non e' il contratto
+    // coi due prezzi della decisione del 13/10/2026: il prezzo dello stoccaggio
+    // nel documento non c'e', e chiedere di aggiungerlo era fuorviante
+    // (revisione del 14/10/2026).
+    if (tipo === 'raccolta' && canale === 'ACI' && stoccaggio && !conPrezzoStoccaggio(punti)) {
+      setErrore('Il contratto di raccolta e stoccaggio ha i due prezzi, della raccolta e dello stoccaggio: in questo format non trovo acceso quello dello stoccaggio. Se nel documento c\'è, accendilo o aggiungilo con «Aggiungi un punto», scegliendo «Prezzo dello stoccaggio (€/t)». Se il format ha un prezzo solo per raccolta e stoccaggio insieme (come quello di Ecorecuperi del 2024), non è questo modello: serve un format coi due prezzi, come il contratto ACI 2026 di Nappi Sud.');
+      return;
+    }
+    if (tipo === 'raccolta' && canale === 'ACI' && !stoccaggio && conPrezzoStoccaggio(punti)) {
+      setErrore('Questo format ha anche il prezzo dello stoccaggio: è un contratto di raccolta e stoccaggio. Caricalo nella riga «Raccolta e stoccaggio ACI», o spegni il prezzo dello stoccaggio.');
+      return;
+    }
     const nonControllati = punti.filter(p => p.da_controllare && !p.controllato);
     if (nonControllati.length && !avvisoControllo) { setAvvisoControllo(nonControllati.map(p => p.nome)); return; }
     setLavoro(true);
@@ -216,11 +246,11 @@ function CaricaFormat({ tipo, canale, vecchio, onChiudi, onSalvato }) {
       // documento: si dice, e si salva solo con un secondo clic.
       if (costruito.saltate.length && !saltate) { setSaltate(costruito.saltate); setLavoro(false); return; }
       if (!costruito.segnaposti.length) throw new Error('Nel modello non è rimasto nessun segnaposto.');
-      const nomeFile = `Modello ${nomeCombinazione(tipo, canale)} - ${file.name}`.replace(/[\\/:*?"<>|]+/g, '-');
+      const nomeFile = `Modello ${nomeQui} - ${file.name}`.replace(/[\\/:*?"<>|]+/g, '-');
       const doc = new File([costruito.blob], nomeFile, { type: costruito.blob.type });
       const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file: doc });
       const creato = await base44.entities.ModelloContratto.create({
-        nome: nome.trim() || nomeCombinazione(tipo, canale), tipo_contratto: tipo, canale,
+        nome: nome.trim() || nomeQui, tipo_contratto: tipo, canale,
         anno_riferimento: Number(annoRif) || undefined,
         file_uri, file_nome: nomeFile,
         segnaposti_json: JSON.stringify(costruito.segnaposti),
@@ -231,6 +261,8 @@ function CaricaFormat({ tipo, canale, vecchio, onChiudi, onSalvato }) {
           letto.revisioni_accettate ? `Il format aveva ${letto.revisioni} revisioni aperte: sono state accettate prima di leggerlo.` : '',
           costruito.saltate.length ? `${costruito.saltate.length} occorrenze non sostituite: ${costruito.saltate.map(s => `${s.segnaposto} «${s.testo}» (${s.motivo})`).join('; ')}.` : '',
           nonControllati.length ? `Punti lasciati da controllare: ${nonControllati.map(p => `${p.nome} (${p.da_controllare.join('; ')})`).join('; ')}.` : '',
+          // la data dell'Albo di SMOCO corretta nel modello (13/10/2026)
+          (costruito.albo_smoco || []).length ? `Data dell'iscrizione di SMOCO all'Albo corretta: ${[...new Set(costruito.albo_smoco.map(c => `«${c.testo}» → ${c.nuovo}`))].join(', ')}.` : '',
         ].filter(Boolean).join(' ') || undefined,
       });
       if (vecchio) {
@@ -263,7 +295,7 @@ function CaricaFormat({ tipo, canale, vecchio, onChiudi, onSalvato }) {
     <Dialog open onOpenChange={(x) => { if (!x) onChiudi(); }}>
       <DialogContent className="max-w-4xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Modello: {nomeCombinazione(tipo, canale)}</DialogTitle>
+          <DialogTitle>Modello: {nomeQui}</DialogTitle>
           <DialogDescription>
             Il format resta com&apos;è, parola per parola: cambiano solo i punti accesi qui sotto, che diventano segnaposto.
             {vecchio ? ` Il modello di adesso («${vecchio.nome}») resta nello storico come sostituito.` : ''}

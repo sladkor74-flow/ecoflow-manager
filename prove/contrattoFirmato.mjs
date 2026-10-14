@@ -62,9 +62,11 @@ console.log('IL FIRMATO DIVENTATO DOCUMENTO DI QUALIFICA SI LEGGE SUBITO');
   // Il pezzo della pagina che carica il controfirmato, fino alla fine del file.
   const carica = pagina.slice(pagina.indexOf('function CaricaControfirmato'));
   const dopoSalva = carica.slice(carica.indexOf("azione: 'controfirmato'"));
-  verifica('dopo «carica il controfirmato» la pagina chiama analizzaDocumentoQualifica col documento appena creato',
-    carica.length > 0 && /functions\.invoke\('analizzaDocumentoQualifica',\s*\{\s*documento_id: documentoId/.test(carica)
-    && /if \(fatto && fatto\.documento_qualifica_id\) leggiDocumento\(fatto\.documento_qualifica_id\)/.test(dopoSalva));
+  // Dal 14/10/2026 i documenti possono essere due (il contratto ACI unico di
+  // raccolta e stoccaggio, una voce per ruolo): la pagina li legge tutti.
+  verifica('dopo «carica il controfirmato» la pagina chiama analizzaDocumentoQualifica coi documenti appena creati',
+    carica.length > 0 && /for \(const documentoId of documenti\) \{\s*await base44\.functions\.invoke\('analizzaDocumentoQualifica',\s*\{\s*documento_id: documentoId/.test(carica)
+    && /const daLeggere = documentiDelFirmato\(fatto\)\.map\(d => d\.id\);\s*if \(daLeggere\.length\) leggiDocumenti\(daLeggere\)/.test(dopoSalva));
   // Lo stesso contesto della scheda del fornitore: nome, partita IVA, codice fiscale.
   const dettaglio = readFileSync(new URL('../src/components/qualifica/SoggettoDettaglio.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
   verifica('con lo stesso contesto della scheda del fornitore (nome, partita IVA, codice fiscale)',
@@ -206,6 +208,55 @@ console.log('IL CONTRATTO IN CORSO RESTA FINO ALLA DECORRENZA DEL NUOVO (revisio
   // Il contratto dell'anno in corso (gia' decorso): tutto come prima.
   const stessoAnno = await chiama(modulo, { db: dbAnnoDopo({ anno: A, data_inizio: `${A}-01-02` }), corpo: corpoFirma({}) });
   verifica('un contratto gia\' decorso sostituisce anche il documento ancora valido, come prima', statoDi(stessoAnno, 'dq-in-corso') === 'sostituito' && statoDi(stessoAnno, 'dq-corretta-a-mano') === 'sostituito');
+}
+
+console.log('IL CONTRATTO ACI UNICO DI RACCOLTA E STOCCAGGIO DIVENTA IL DOCUMENTO DELLE DUE VOCI (14/10/2026)');
+{
+  // Decisione dell'utente del 13/10/2026: Nappi Sud ha un contratto ACI solo, coi
+  // due prezzi. Si registra come raccolta ACI, ma copre anche lo stoccaggio ACI:
+  // se il catalogo ha una voce «contratto» per la raccolta e una per lo
+  // stoccaggio, il firmato e' il documento di tutte e due (prima solo della
+  // raccolta: la voce dello stoccaggio restava scoperta). Lo dice il modello del
+  // contratto (eContrattoRaccoltaEStoccaggio).
+  const punti = (...s) => JSON.stringify(s.map(segnaposto => ({ segnaposto })));
+  const MODELLI = [
+    { id: 'mod-rs', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'attivo', punti_json: punti('CORRISPETTIVO_RACCOLTA', 'CORRISPETTIVO_STOCCAGGIO') },
+    { id: 'mod-r', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'attivo', punti_json: punti('CORRISPETTIVO_RACCOLTA') },
+  ];
+  const nappi = (extra) => contratto({ soggetto_chiave: 'nappi sud', soggetto_nome: 'NAPPI SUD SRL', canale: 'ACI', modello_id: 'mod-rs', valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 92, CORRISPETTIVO_STOCCAGGIO: 16 }), ...extra });
+  const dbNappi = (catalogo, extraContratto = {}) => ({
+    ContrattoFornitore: [nappi(extraContratto),
+      // lo stoccaggio di rete e' un contratto suo, gia' firmato, col suo file
+      { id: 'k-stoc', anno: A, soggetto_chiave: 'nappi sud', tipo_contratto: 'stoccaggio', canale: 'RETE', stato: 'controfirmato', documento_firmato: true, file_uri: 'privato://firmato-stoc-rete' }],
+    ModelloContratto: MODELLI,
+    TipoDocumentoQualifica: catalogo,
+    DocumentoQualifica: [
+      { id: 'dq-r-vecchio', soggetto_chiave: 'nappi sud', tipo_documento_id: 'v-racc', stato: 'attivo', file_uri: 'privato://raccolta-2025' },
+      { id: 'dq-s-vecchio', soggetto_chiave: 'nappi sud', tipo_documento_id: 'v-stoc', stato: 'attivo', file_uri: 'privato://stoccaggio-2025' },
+      { id: 'dq-s-rete', soggetto_chiave: 'nappi sud', tipo_documento_id: 'v-stoc', stato: 'attivo', file_uri: 'privato://firmato-stoc-rete' },
+    ],
+  });
+  const statoDi = (r, id) => (r.db.DocumentoQualifica.find(d => d.id === id) || {}).stato;
+  const r = await chiama(modulo, { db: dbNappi([voce('v-racc', 'raccolta'), voce('v-stoc', 'stoccaggio')]), corpo: corpoFirma({}) });
+  const nuovi = r.db.DocumentoQualifica.filter(d => d.file_uri === 'privato://firmato-1');
+  verifica('il firmato diventa il documento della voce della raccolta e di quella dello stoccaggio', r.stato === 200 && nuovi.length === 2
+    && JSON.stringify(nuovi.map(d => d.tipo_documento_id).sort()) === JSON.stringify(['v-racc', 'v-stoc']) && nuovi.every(d => d.stato === 'attivo' && d.analisi_stato === 'in_attesa'), JSON.stringify(r.j));
+  verifica('la risposta li dice tutti e due, e il contratto tiene il primo', (r.j.documenti_qualifica || []).length === 2 && r.j.documento_qualifica_id === r.j.documenti_qualifica[0].id
+    && r.db.ContrattoFornitore.find(c => c.id === 'k1').documento_qualifica_id === r.j.documento_qualifica_id && !r.j.motivo_senza_qualifica, JSON.stringify(r.j));
+  verifica('i documenti di prima delle due voci passano fra i sostituiti', statoDi(r, 'dq-r-vecchio') === 'sostituito' && statoDi(r, 'dq-s-vecchio') === 'sostituito');
+  verifica('non quello del contratto di stoccaggio di rete dello stesso anno, riconosciuto dal suo file', statoDi(r, 'dq-s-rete') === 'attivo');
+  verifica('la nota del documento dice raccolta e stoccaggio', nuovi.every(d => /^Contratto raccolta e stoccaggio ACI /.test(d.note)), JSON.stringify(nuovi.map(d => d.note)));
+  const soloRaccolta = await chiama(modulo, { db: dbNappi([voce('v-racc', 'raccolta'), voce('v-stoc', 'stoccaggio')], { modello_id: 'mod-r' }), corpo: corpoFirma({}) });
+  verifica('col modello di sola raccolta il firmato resta il documento della sola raccolta, come prima', soloRaccolta.stato === 200
+    && soloRaccolta.db.DocumentoQualifica.filter(d => d.file_uri === 'privato://firmato-1').map(d => d.tipo_documento_id).join() === 'v-racc' && statoDi(soloRaccolta, 'dq-s-vecchio') === 'attivo');
+  const unaVoce = await chiama(modulo, { db: dbNappi([voce('v-racc', 'raccolta')]), corpo: corpoFirma({}) });
+  verifica('senza la voce dello stoccaggio: il documento della raccolta, e la frase per lo stoccaggio', unaVoce.stato === 200 && (unaVoce.j.documenti_qualifica || []).length === 1
+    && /^Per lo stoccaggio: nel catalogo della qualifica non c'è una voce «contratto» per questo ruolo/.test(unaVoce.j.motivo_senza_qualifica || ''), JSON.stringify(unaVoce.j));
+  const comune = await chiama(modulo, { db: dbNappi([voce('v-unica', 'raccolta, stoccaggio')]), corpo: corpoFirma({}) });
+  verifica('una voce sola per i due ruoli: un documento solo', comune.stato === 200 && comune.db.DocumentoQualifica.filter(d => d.file_uri === 'privato://firmato-1').length === 1 && !comune.j.motivo_senza_qualifica, JSON.stringify(comune.j));
+  const senzaModello = await chiama(modulo, { db: dbNappi([voce('v-racc', 'raccolta'), voce('v-stoc', 'stoccaggio')], { modello_id: undefined }), corpo: corpoFirma({}) });
+  verifica('senza il modello decidono i valori salvati, coi due prezzi', (senzaModello.j.documenti_qualifica || []).length === 2, JSON.stringify(senzaModello.j));
+  verifica('la risposta non rimanda nessun riferimento ai file', !JSON.stringify(r.j).includes('privato://'));
 }
 
 console.log('LE VERSIONI SOSTITUITE NELL\'INVENTARIO DEI FILE');

@@ -77,6 +77,18 @@
     "telefono": {
       "type": "string"
     },
+    "cellulare": {
+      "type": "string",
+      "description": "Il cellulare del fornitore (13/10/2026). Nei contratti e' FORNITORE_TEL_2, il secondo telefono dei format: si scrive qui, mai dedotto dal telefono."
+    },
+    "pec": {
+      "type": "string",
+      "description": "La PEC del fornitore (13/10/2026). Nei contratti e' FORNITORE_EMAIL_2, la seconda email dei format."
+    },
+    "referente": {
+      "type": "string",
+      "description": "Il referente del fornitore per SMOCO, nome e cognome (13/10/2026). Nei contratti e' FORNITORE_REFERENTE («per il Vettore: sig. ...»)."
+    },
     "stato": {
       "type": "string",
       "enum": [
