@@ -3,7 +3,8 @@ import { base44 } from '@/api/base44Client';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2, Clock, AlertTriangle, Download, ShieldOff, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UploadResultDialog, { extractUploadError, extractUploadWarnings } from '@/components/shared/UploadResultDialog';
-import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER, dopoCaricamento, testoRicalcoli, testoVerificaArchivio, testoEseguiti, ricalcoliDaRecuperare, recuperiDaFare, moduliDaRicalcolare, ricalcoliFermi, confermeAccumulate } from '@/lib/importGrandeFile';
+import { importaGrandeFile, importaPrimarie, TIPI_LETTURA_BROWSER, dopoCaricamento, testoRicalcoli, testoVerificaArchivio, ricalcoliDaRecuperare, recuperiDaFare, moduliDaRicalcolare, ricalcoliFermi, confermeAccumulate } from '@/lib/importGrandeFile';
+import EsitoEseguiti from '@/components/shared/OrdiniInEseguito';
 import { formatIntero, dataServer } from '@/lib/utils';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
@@ -489,11 +490,14 @@ export default function CaricamentoDati() {
               {/* Gli ordini che a portale sono in stato "eseguito": hanno tutti
                   i dati ma nessuno ha premuto Chiudi, e finche' restano cosi'
                   non entrano in nessun conto. Contati a parte, rete e ACI
-                  separati, e non sommati ai terminati. */}
-              {(() => {
-                const t = res && res.ok ? testoEseguiti(res.data.avviso_eseguiti) : null;
-                return t ? <p className="mt-1 text-xs text-amber-700">{t}</p> : null;
-              })()}
+                  separati, e non sommati ai terminati.
+                  Dal 14/10/2026 a ogni caricamento di primarie, secondarie e
+                  terziarie, con gli ID da copiare o scaricare (richiesta
+                  dell'utente: «devono essere sempre segnalati indicando l'id
+                  ordine»): un riquadro piccolo, nessuna finestra, e niente se
+                  non ce n'e' nessuno. La regola e' quella della dashboard
+                  (src/lib/ordiniEseguiti.js). */}
+              {res && res.ok && <EsitoEseguiti avviso={res.data.avviso_eseguiti} />}
 
               {/* Il report delle dichiarazioni riconosce da solo i nostri mesi
                   caricati a portale. Quando quel passo non riesce il rimedio sta

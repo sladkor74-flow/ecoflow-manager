@@ -153,8 +153,16 @@ export function createClientFromRequest() {
   const prim = ((j.caricamenti && j.caricamenti.archivi) || []).find(a => a.tipo_file === 'primarie') || {};
   verifica('le primarie: caricate il 05/10, dati fino al 07/10, e la riscrittura del 09/10 non riuscita', prim.il === '2026-10-05' && prim.fino_al === '2026-10-07' && prim.stato === 'non_riuscito', JSON.stringify(prim));
   verifica('e la voce rossa in testa', (j.da_gestire || []).some(v => v.gravita === 'critico' && /^Caricamento non riuscito: ricarica il file \(Primarie e assegnati\)/.test(v.titolo)), (j.da_gestire || []).map(v => v.titolo).join(' | '));
-  const nomiFinoAl = globalThis.__LETTURE.filter(l => ['PrimariaRete', 'PrimariaAci', 'Secondaria', 'Terziaria', 'OrdineNonDichiarato', 'DichiarazioneTrattamento'].includes(l.nome));
+  // Dal 14/10/2026 la dashboard legge anche gli ordini rimasti «eseguito» (la
+  // voce unica di «Da gestire», shared/ordiniEseguiti.ts): una lettura per
+  // archivio, FILTRATA PER STATO, che restituisce poche righe o nessuna. Non e'
+  // il «fino al» e si conta a parte: mai un archivio intero.
+  const eseguito = (l) => l.modo === 'filter' && JSON.parse(l.f || '{}').stato === 'eseguito';
+  const nomiFinoAl = globalThis.__LETTURE.filter(l => ['PrimariaRete', 'PrimariaAci', 'Secondaria', 'Terziaria', 'OrdineNonDichiarato', 'DichiarazioneTrattamento'].includes(l.nome) && !eseguito(l));
   verifica('il «fino al» con letture di poche righe', nomiFinoAl.length === 6 && nomiFinoAl.every(l => l.lim <= 50), JSON.stringify(nomiFinoAl));
+  const degliEseguiti = globalThis.__LETTURE.filter(eseguito);
+  verifica('gli «eseguito»: una lettura per archivio, filtrata per stato, e nient\'altro di quegli archivi', JSON.stringify(degliEseguiti.map(l => l.nome).sort()) === JSON.stringify(['PrimariaAci', 'PrimariaRete', 'Secondaria', 'Terziaria'])
+    && globalThis.__LETTURE.filter(l => ['PrimariaRete', 'PrimariaAci', 'Secondaria', 'Terziaria'].includes(l.nome)).every(l => l.lim <= 50 || eseguito(l)), JSON.stringify(degliEseguiti));
 
   // I MESI DELL'ANNO PRIMA ANCORA APERTI (revisione della chiusura,
   // 11/10/2026): restano finche' non si chiudono, in qualunque mese. I

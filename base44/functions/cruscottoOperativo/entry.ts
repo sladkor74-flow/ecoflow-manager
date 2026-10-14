@@ -9,6 +9,7 @@ import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.
 import { annoNuovoDaMostrare } from "../../shared/inizializzazioneAnno.ts";
 import { leggiFotografia } from "../../shared/indicatoriGiorno.ts";
 import { vociPresidi } from "../../shared/presidi.ts";
+import { leggiEseguiti } from "../../shared/ordiniEseguitiLettura.ts";
 
 // Il cruscotto della dashboard: l'elenco unico delle cose da gestire, l'arretrato
 // per canale, la freschezza dei dati, gli alert aperti, lo stato dei mesi della
@@ -50,7 +51,7 @@ export default async function(req) {
     const svc = base44.asServiceRole.entities;
     const anniAttiva = anniMesiAttiva(anno, oggi);
     const [alertAperti, uploadLogs, assegnatiRete, assegnatiAci, documenti, prefatture, riepiloghi, richiesteEct, verificheSedi,
-      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, esecuzioni, finoAl, surplus] = await Promise.all([
+      tariffe, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, rilevazioni, ultimaFoto, esecuzioni, finoAl, surplus, eseguiti] = await Promise.all([
       fetchAll(svc.Alert, { stato: 'aperto' }),
       // Le ultime righe di ogni file, come le leggono i motori: una lettura sola.
       leggiRegistro(svc.UploadLog, TIPI_FILE).then(perTipo => [...perTipo.values()].flat()),
@@ -86,6 +87,12 @@ export default async function(req) {
       // poche righe, letto intero e senza filtro sullo stato, come lo leggono i
       // calcoli. Una lettura che cade toglie solo il promemoria.
       fetchAll(svc.SurplusTariffa).catch(() => []),
+      // Gli ordini rimasti «eseguito» a portale (richiesta dell'utente del
+      // 14/10/2026): una lettura per archivio - primarie rete e ACI, secondarie,
+      // terziarie - filtrata per stato, quindi poche righe, di solito nessuna.
+      // Un archivio che non risponde vale null e la voce dice che non e' letto
+      // (leggiEseguiti, ordiniEseguitiLettura.ts): mai un «nessuno» falso.
+      leggiEseguiti(svc),
     ]);
     // Le prefatture dell'anno prima, solo se un suo mese le puo' ancora chiedere.
     const prefattureAnnoPrima = servonoPrefattureAnnoPrima(documenti, anno, oggi)
@@ -137,6 +144,8 @@ export default async function(req) {
       // dicono se i raccoglitori fanno il contratto (vociContrattoRaccoglitori,
       // 14/10/2026).
       commesse, targetRaccoglitori,
+      // Le righe in «eseguito» di ogni archivio, per la voce unica (14/10/2026).
+      eseguiti,
     }));
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

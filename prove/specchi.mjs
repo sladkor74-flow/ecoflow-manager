@@ -53,6 +53,10 @@ const SPECCHI = [
   // Dal 13/10/2026 (decisioni dell'utente): il giorno della configurazione di una
   // regola alert, uguale per la pagina Alert Engine e per il motore.
   ['base44/shared/configurazioneRegolaAlert.ts', 'src/lib/configurazioneRegolaAlert.js'],
+  // Dal 14/10/2026 (richiesta dell'utente: gli ordini rimasti «eseguito» si
+  // segnalano a ogni caricamento con l'ID): gli stessi gruppi e le stesse frasi
+  // per l'esito del caricamento, la dashboard, le pagine e il foglio Excel.
+  ['base44/shared/ordiniEseguiti.ts', 'src/lib/ordiniEseguiti.js'],
 ];
 
 // il corpo: via i ritorni a capo di Windows, le righe di import e il commento di testa

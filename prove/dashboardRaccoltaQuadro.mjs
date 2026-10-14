@@ -38,7 +38,9 @@ const ordina = (righe, s) => { const c = String(s || 'id').replace(/^-/, ''), gi
 const conta = (nome) => { globalThis.__LETTURE[nome] = (globalThis.__LETTURE[nome] || 0) + 1; };
 const entita = (nome) => ({
   list: async (s, l = 5000, k = 0) => { conta(nome); return ordina(globalThis.__ARCHIVIO[nome] || [], s).slice(k, k + l); },
-  filter: async (f, s, l = 5000, k = 0) => { conta(nome); return ordina((globalThis.__ARCHIVIO[nome] || []).filter(r => soddisfa(r, f)), s).slice(k, k + l); },
+  // Le letture filtrate sugli ordini rimasti «eseguito» (la voce di «Da gestire»
+  // dal 14/10/2026) si contano a parte: sono poche righe, non un archivio intero.
+  filter: async (f, s, l = 5000, k = 0) => { conta(f && f.stato === 'eseguito' ? nome + ':eseguito' : nome); return ordina((globalThis.__ARCHIVIO[nome] || []).filter(r => soddisfa(r, f)), s).slice(k, k + l); },
   get: async (id) => (globalThis.__ARCHIVIO[nome] || []).find(r => r.id === id) || null,
   create: async (r) => { globalThis.__SCRITTE.push(nome); return r; }, update: async (_i, r) => { globalThis.__SCRITTE.push(nome); return r; },
   bulkCreate: async (r) => { globalThis.__SCRITTE.push(nome); return r; }, delete: async () => { globalThis.__SCRITTE.push(nome); return {}; },
@@ -167,6 +169,9 @@ const totale = (l) => Object.values(l).reduce((s, v) => s + v, 0);
     // In tutte e due c'e' anche la lettura breve del «fino al» del cruscotto.
     verifica('le primarie di rete intere: una volta (3 pagine) invece di tre (9)', pagine(letteDopo, 'PrimariaRete') === 3 + 1 && pagine(lettePrima, 'PrimariaRete') === 9 + 1, `${pagine(lettePrima, 'PrimariaRete')} / ${pagine(letteDopo, 'PrimariaRete')}`);
     verifica('secondarie e terziarie intere non si leggono piu\': resta la lettura breve del «fino al»', letteDopo.Secondaria === 1 && letteDopo.Terziaria === 1 && lettePrima.Secondaria === 2 && lettePrima.Terziaria === 2, `${J(lettePrima)} / ${J(letteDopo)}`);
+    // Gli ordini rimasti «eseguito» (14/10/2026): una lettura filtrata per stato
+    // per archivio, una pagina sola ciascuna.
+    verifica('gli «eseguito»: una pagina filtrata per archivio, nient\'altro', ['PrimariaRete', 'PrimariaAci', 'Secondaria', 'Terziaria'].every(a => letteDopo[a + ':eseguito'] === 1), J(letteDopo));
     verifica('il battito dei lavori: una lettura in piu\', una pagina', letteDopo.EsecuzioneLavoro === 1, J(letteDopo));
   } else {
     console.log('  (git non disponibile: il bilancio col codice di prima si salta)');

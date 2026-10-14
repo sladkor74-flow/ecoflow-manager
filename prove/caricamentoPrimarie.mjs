@@ -1278,7 +1278,10 @@ const righeConEseguiti = [
   { ...riga(902, { classe: '9', stato: 'eseguito' }), Prodotto: '9 - PFU Autodemolizione', Peso_effettivo: 500 },
 ];
 const esitoEseguiti = await caricamento(null, righeConEseguiti);
-verifica('si contano dal file, senza nessuna lettura in piu' + "'", !!esitoEseguiti.avviso_eseguiti, JSON.stringify(esitoEseguiti.avviso_eseguiti));
+// Dal 14/10/2026 il registro li rilegge dall'archivio con due letture filtrate
+// per stato (poche righe); il conto sul file resta per quando quella lettura
+// non riesce. Mai una lettura dell'archivio intero.
+verifica('si dicono senza rileggere l\'archivio intero', !!esitoEseguiti.avviso_eseguiti, JSON.stringify(esitoEseguiti.avviso_eseguiti));
 verifica('rete e ACI restano separati', ((esitoEseguiti.avviso_eseguiti || {}).rete || {}).ordini === 2 && ((esitoEseguiti.avviso_eseguiti || {}).aci || {}).ordini === 1, JSON.stringify(esitoEseguiti.avviso_eseguiti));
 verifica('coi kg della rete, interi', ((esitoEseguiti.avviso_eseguiti || {}).rete || {}).kg === 4620, JSON.stringify(esitoEseguiti.avviso_eseguiti));
 verifica('e quelli ACI non si sommano alla rete', ((esitoEseguiti.avviso_eseguiti || {}).aci || {}).kg === 500, JSON.stringify(esitoEseguiti.avviso_eseguiti));
@@ -1286,6 +1289,19 @@ const fraseEseguiti = testoEseguiti(esitoEseguiti.avviso_eseguiti);
 verifica('la frase e' + "' in parole semplici", !!fraseEseguiti && fraseEseguiti.includes("non e' stato premuto Chiudi") && fraseEseguiti.includes('non entrano in nessun conto'), fraseEseguiti);
 verifica('e nomina i due canali a parte', !!fraseEseguiti && fraseEseguiti.includes('Rete: 2 ordini') && fraseEseguiti.includes('ACI: 1 ordine'), fraseEseguiti);
 verifica('il registro se li segna', String(ultimoLog().messaggio || '').includes("non e' stato premuto Chiudi") && String(ultimoLog().messaggio).includes('rete 2, ACI 1'), ultimoLog().messaggio);
+// CON GLI ID, DALL'ARCHIVIO DOPO IL CARICAMENTO (richiesta dell'utente del
+// 14/10/2026: «devono essere sempre segnalati indicando l'id ordine»). Il
+// registro li rilegge a scrittura finita e li restituisce con la regola unica
+// (shared/ordiniEseguiti.ts): l'esito ha i gruppi, un canale per gruppo.
+{
+  const gruppi = (esitoEseguiti.avviso_eseguiti || {}).gruppi || [];
+  const idDi = (k) => ((gruppi.find(g => g.chiave === k) || {}).elenco || []).map(o => o.id_ordine).sort().join(',');
+  verifica("l'esito ha gli ID, rete e ACI in due gruppi", idDi('primarie_rete') === 'ORD-00900,ORD-00901' && idDi('primarie_aci') === 'ORD-00902' && gruppi.length === 2, JSON.stringify(gruppi.map(g => [g.chiave, g.elenco.map(o => o.id_ordine)])));
+  const r900 = ((gruppi[0] || {}).elenco || []).find(o => o.id_ordine === 'ORD-00900') || {};
+  verifica("e per ciascuno chi l'ha raccolto, i chili e che cosa manca", r900.soggetto === 'Raccoglitore Uno' && r900.kg === 3620 && r900.manca === 'Manca il clic su Chiudi a portale' && !!r900.fine_trasporto, JSON.stringify(r900));
+  verifica('il registro scrive gli ID', /ORD-00900/.test(ultimoLog().messaggio) && /ORD-00902/.test(ultimoLog().messaggio), ultimoLog().messaggio);
+  verifica('la frase di settembre resta la stessa', testoEseguiti(esitoEseguiti.avviso_eseguiti) === fraseEseguiti);
+}
 // Nessun conto cambia: gli "eseguito" non diventano terminati.
 verifica('non si sommano ai terminati: il caricamento resta riuscito', esitoEseguiti.esito === 'successo', `${esitoEseguiti.esito} — ${ultimoLog().messaggio}`);
 verifica('e restano in archivio con il loro stato', archivio('PrimariaRete').filter(r => r.stato === 'eseguito').length === 2, String(archivio('PrimariaRete').filter(r => r.stato === 'eseguito').length));
@@ -2889,6 +2905,15 @@ verifica('nel registro resta scritto quante righe di storico', String(ultimoLog(
 // numero resterebbe in archivio senza comparire da nessuna parte.
 verifica('quanti eseguiti si sono conservati si dice', !!esitoStorico.storico_conservato.eseguiti && esitoStorico.storico_conservato.eseguiti.righe === 1 && esitoStorico.storico_conservato.eseguiti.ordini === 1, JSON.stringify(esitoStorico.storico_conservato.eseguiti));
 verifica('e resta scritto anche nel registro, con la parola giusta', String(ultimoLog().messaggio || '').includes('ordini terminati o eseguiti') && String(ultimoLog().messaggio || '').includes('1 di ordini in stato "eseguito"'), ultimoLog().messaggio);
+// E DAL 14/10/2026 SI DICE COL SUO ID, anche se il file non lo porta: l'esito
+// rilegge l'archivio dopo il caricamento. Immesso prima dell'anno da cui parte
+// l'export, la frase dice che cosa gli manca davvero: lo stato definitivo.
+{
+  const sto = (((esitoStorico.avviso_eseguiti || {}).gruppi || []).find(g => g.chiave === 'primarie_rete') || { elenco: [] }).elenco.find(o => o.id_ordine === 'STO-00003');
+  verifica("l'eseguito conservato compare nell'esito, col suo ID", !!sto, JSON.stringify(esitoStorico.avviso_eseguiti));
+  verifica('fuori dall\'export, e la frase lo dice', !!sto && sto.fuori_export === true && /stato definitivo/.test(sto.manca) && /immesso nel 2024/.test(sto.manca), JSON.stringify(sto));
+  verifica('e il registro lo nomina', /STO-00003/.test(ultimoLog().messaggio), ultimoLog().messaggio);
+}
 
 // (3) UN BLOCCO RITENTATO SI RICONOSCE SOPRA LA BASE. La scrittura entra e la
 // risposta si perde: il conteggio deve dire "era passato" contando anche le

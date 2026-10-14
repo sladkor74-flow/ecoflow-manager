@@ -10,7 +10,7 @@
 // Funzioni pure: ricevono gli elenchi gia' letti. Rete, ACI ed extra raccolta
 // restano separati anche qui.
 import { giornoRoma } from "./giornoItaliano.ts";
-import { statoRichiesta } from "./richiesteEct.ts";
+import { statoRichiesta, evasaInParte } from "./richiesteEct.ts";
 import { giorniFa, chiSiScosta, notaDelGiorno, scostamentiAci, notaAci } from "./indicatoriGiorno.ts";
 import { surplusNonDisattivati, NOMI_ORIGINE } from "./surplus.ts";
 import { campoRiservato } from "./campiTracciati.ts";
@@ -18,6 +18,7 @@ import { formatoKg, formatoTonnellate } from "./formato.ts";
 import { commessaDellAnno } from "./annoTarget.ts";
 import { regioniDellAnno, scartiDalContratto } from "./attesoContratto.ts";
 import { statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE_REGISTRO } from "./registroCaricamenti.ts";
+import { ordiniEseguiti, voceEseguiti } from "./ordiniEseguiti.ts";
 
 export const MESI_CRUSCOTTO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 // I tre documenti di un mese della fatturazione attiva, uno per canale.
@@ -495,7 +496,7 @@ export function vociContrattoRaccoglitori(commesse, targetRaccoglitori, anno) {
  * dettaglio, link }. dati: { oggi, adessoMs, anno, alertAperti, uploadLogs,
  * tipiFile, assegnatiRete, assegnatiAci, documenti, prefatture, riepilogoQualifica,
  * richiesteEct, verificheSedi, annoNuovo, fotografiaGiorno, surplus, commesse,
- * targetRaccoglitori }.
+ * targetRaccoglitori, eseguiti }.
  *
  * annoNuovo e' il risultato di listaAnno per l'anno dopo: decide da se' se
  * valga la pena dirlo (avvicinandosi), e qui si scrive soltanto.
@@ -585,6 +586,20 @@ export function cruscotto(dati) {
       { chiave: `arretrato:${canale}`, sezione: canale === 'RETE' ? 'rete' : 'aci', firma: canale, misure: [e.oltre_60] });
   }
 
+  // GLI ORDINI RIMASTI «ESEGUITO» A PORTALE (richiesta dell'utente del
+  // 14/10/2026): UNA voce sola per primarie, secondarie e terziarie, con gli ID
+  // nel dettaglio e il collegamento al modulo. La regola e le parole sono quelle
+  // dell'esito del caricamento e delle pagine (ordiniEseguiti.ts). dati.eseguiti
+  // sono le righe in «eseguito» lette da chi chiama, una lettura filtrata per
+  // stato per archivio; un archivio non letto vale null e la voce lo dice.
+  // Sparisce da sola quando il caricamento dopo li risolve (quelli fuori
+  // dall'export, con un export che parte dal loro anno: fraseFuoriExport): la
+  // dashboard rilegge l'archivio. Senza dati.eseguiti la voce non c'e'.
+  if (dati.eseguiti) {
+    const v = voceEseguiti(ordiniEseguiti(dati.eseguiti, { oggi }));
+    if (v) voci.push(v);
+  }
+
   // Fatturazione attiva: mesi finiti e non ancora elaborati, o senza prefattura
   const mesiAttiva = statoMesiAttiva(dati.documenti, dati.prefatture, anno, oggi);
   const daElaborare = mesiAttiva.filter(m => !m.elaborato).map(m => m.etichetta);
@@ -619,15 +634,23 @@ export function cruscotto(dati) {
   // perdere una cosa vera: a quelle richieste bisogna ancora RISPONDERE al
   // consorzio, che scrive per email. Cambia il significato della spunta - non piu'
   // "ho verificato" ma "ho risposto" - e la voce resta.
-  let ectScadute = 0, ectDaRispondere = 0;
+  // Dal 14/10/2026 una richiesta si chiude da sola anche EVASA IN PARTE: un
+  // ordine terminato e gli altri cancellati a portale (evasaInParte). Di lei
+  // «gli ordini risultano tutti ritirati» non e' vero, e la voce lo dice.
+  let ectScadute = 0, ectDaRispondere = 0, ectInParte = 0;
   for (const r of dati.richiesteEct || []) {
     const esito = r.esito || statoRichiesta(r);
     // 'da_confermare' resta per le richieste salvate prima di quella data.
-    if (esito === 'da_confermare' || (esito === 'evasa' && !r.evasione_confermata)) ectDaRispondere++;
+    if (esito === 'da_confermare' || (esito === 'evasa' && !r.evasione_confermata)) { ectDaRispondere++; if (evasaInParte(r)) ectInParte++; }
     else if (esito === 'aperta' && r.scadenza && String(r.scadenza).slice(0, 10) < oggi) ectScadute++;
   }
+  const dettaglioDaRispondere = !ectInParte
+    ? 'Gli ordini risultano tutti ritirati: la richiesta e\' evasa, resta da rispondere alla mail e spuntarla.'
+    : ectDaRispondere === 1
+      ? 'Nessun suo ordine e\' piu\' da ritirare: e\' evasa in parte, un ordine risulta cancellato a portale. Resta da rispondere alla mail e spuntarla.'
+      : `Nessun loro ordine e' piu' da ritirare: ${ectInParte === ectDaRispondere ? 'sono tutte evase in parte' : ectInParte === 1 ? 'una e\' evasa in parte' : `${ectInParte} sono evase in parte`} (qualche ordine risulta cancellato a portale)${ectInParte === ectDaRispondere ? '' : ', le altre hanno gli ordini tutti ritirati'}. Resta da rispondere alla mail e spuntarle.`;
   if (ectScadute) voce('Richieste ECT', 'critico', `${ectScadute} richieste del consorzio oltre il termine`, 'Ritiri chiesti per email da Ecotyre e non ancora evasi alla data indicata.', '/todo', { chiave: 'ect:scadute' });
-  if (ectDaRispondere) voce('Richieste ECT', 'info', `${ectDaRispondere} richieste si sono chiuse da sole e aspettano la risposta al consorzio`, 'Gli ordini risultano tutti ritirati: la richiesta e\' evasa, resta da rispondere alla mail e spuntarla.', '/todo', { chiave: 'ect:da-rispondere' });
+  if (ectDaRispondere) voce('Richieste ECT', 'info', `${ectDaRispondere} richieste si sono chiuse da sole e aspettano la risposta al consorzio`, dettaglioDaRispondere, '/todo', { chiave: 'ect:da-rispondere' });
 
   // LE SEDI OPERATIVE DA DECIDERE. Sul formulario va la sede operativa, non la
   // sede legale: quando il controllo in rete trova una sede diversa da quella

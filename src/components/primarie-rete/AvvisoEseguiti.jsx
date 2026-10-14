@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Clock } from 'lucide-react';
-import { riepilogoEseguiti } from '@/lib/movimenti';
+import { ordiniEseguiti, fraseFuoriExport } from '@/lib/ordiniEseguiti';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import { formatIntero } from '@/lib/utils';
+import { ElencoEseguiti } from '@/components/shared/OrdiniInEseguito';
 
 // Gli ordini che a portale sono in stato "eseguito": hanno tutti i dati
 // inseriti - peso, date, formulario - ma nessuno ha premuto il pulsante
@@ -16,18 +18,22 @@ import { formatIntero } from '@/lib/utils';
 // Non si sommano ai terminati, che sarebbe inventarsi un movimento, e non
 // cambiano nessun conto: si contano a parte e si dicono, un canale per volta
 // (regola 3). Spariscono da soli quando a portale l'ordine viene chiuso e il
-// file si ricarica.
+// file si ricarica; quelli immessi prima dell'anno da cui parte l'export solo
+// con un file che parte dal loro anno (fraseFuoriExport).
 //
-// La regola di chi e' "eseguito" e di quanti sono sta in src/lib/movimenti.js
-// (eEseguito, chiaveOrdine, riepilogoEseguiti): qui c'e' solo come si mostra.
-// La stessa regola la usa la finestra del caricamento
-// (ordiniEseguitiDelFile in src/lib/importGrandeFile.js, che gira le righe del
-// file nella forma dell'archivio e passa di li'), cosi' questa pagina e quella
-// finestra non possono dire due numeri diversi. Le funzioni lato server non la
-// usano: la copia in base44/shared/movimenti.ts esiste perche' gli specchi
-// restino identici e le prove li confrontino.
+// LA REGOLA E' UNA SOLA (14/10/2026): src/lib/ordiniEseguiti.js, la stessa
+// dell'esito del caricamento e della voce della dashboard. Qui si passano le
+// righe dell'archivio della pagina e si mostra lo stesso elenco - ID,
+// formulario, raccoglitore o trasportatore, punto di raccolta o stoccaggio,
+// fine trasporto e da quanti giorni, chili, che cosa manca - con gli stessi
+// pulsanti per copiare gli ID e scaricarli. Prima la pagina diceva ID, righe e
+// chili, la finestra del caricamento solo i conti e la dashboard niente: tre
+// posti, tre versioni.
 
-const MOSTRATI = 50;
+// La pagina dice il suo tipo di file con la frase del file da ricaricare
+// (08/10/2026): da li' si sa quale archivio sta guardando.
+const TIPO_DEL_FILE = { 'delle primarie': 'primarie', 'delle secondarie': 'secondarie', 'delle terziarie': 'terziarie' };
+const archivioDi = (tipo, canale) => (tipo === 'secondarie' ? 'Secondaria' : tipo === 'terziarie' ? 'Terziaria' : canale === 'ACI' ? 'PrimariaAci' : 'PrimariaRete');
 
 /**
  * L'avviso in testa a un elenco di terminati. righe: le righe dell'archivio di
@@ -38,8 +44,20 @@ const MOSTRATI = 50;
  * a ricaricare il file sbagliato e' un giro a vuoto (08/10/2026).
  */
 export default function AvvisoEseguiti({ righe, canale, file = 'delle primarie', className = '' }) {
-  const { ordini: n, kg, esempi } = riepilogoEseguiti(righe);
+  const gruppi = useMemo(() => {
+    const tipo = TIPO_DEL_FILE[file] || 'primarie';
+    const voluto = String(canale || '').toUpperCase() === 'ACI' ? 'ACI' : 'RETE';
+    // Le righe sono gia' di un canale solo; il filtro sul canale e' una
+    // cintura: se arrivassero insieme, rete e ACI resterebbero separati.
+    return ordiniEseguiti({ [archivioDi(tipo, voluto)]: righe || [] }, { oggi: oggiRoma() }).gruppi.filter(g => g.canale === voluto);
+  }, [righe, canale, file]);
+  const n = gruppi.reduce((s, g) => s + g.ordini, 0);
   if (!n) return null;
+  const kg = gruppi.reduce((s, g) => s + (g.kg || 0), 0);
+  // Quelli immessi prima dell'anno da cui parte l'export il file di sempre non
+  // li riscrive: ricaricarlo non basta, e la frase lo dice con gli anni, con la
+  // stessa regola della dashboard e dell'esito (revisione del 14/10/2026).
+  const fuori = fraseFuoriExport(gruppi);
   return (
     <div className={`border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 text-sm space-y-1 ${className}`}>
       <div className="flex items-start gap-2">
@@ -49,21 +67,10 @@ export default function AvvisoEseguiti({ righe, canale, file = 'delle primarie',
           {kg ? ` (${formatIntero(kg)} kg)` : ''}: finché resta così non {n === 1 ? 'entra' : 'entrano'} in nessun conto —
           {' '}raccolto, giacenze, report, copertura del target e fatturazione.
           {' '}Vanno chiusi a portale, poi si ricarica il file {file}.
+          {fuori ? ` ${fuori}` : ''}
         </p>
       </div>
-      <details className="pl-6 text-xs">
-        <summary className="cursor-pointer select-none">Quali sono{n > MOSTRATI ? ` (i primi ${MOSTRATI})` : ''}</summary>
-        <ul className="mt-1 space-y-0.5">
-          {esempi.slice(0, MOSTRATI).map((o, i) => (
-            <li key={`${o.id_ordine || o.numero_fir}|${i}`}>
-              <span className="font-mono">{o.id_ordine || o.numero_fir || 'senza ID'}</span>
-              {o.id_ordine && o.numero_fir ? <> · FIR <span className="font-mono">{o.numero_fir}</span></> : null}
-              {o.righe > 1 ? ` · ${formatIntero(o.righe)} righe` : ''}
-              {o.kg ? ` · ${formatIntero(o.kg)} kg` : ''}
-            </li>
-          ))}
-        </ul>
-      </details>
+      <div className="pl-6"><ElencoEseguiti gruppi={gruppi} conNome={false} /></div>
     </div>
   );
 }

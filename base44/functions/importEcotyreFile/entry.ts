@@ -12,6 +12,8 @@ import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/
 import { annoRoma } from "../../shared/giornoItaliano.ts";
 import { urlScaricabile, riferimentoDaSalvare, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
+import { ordiniEseguiti, avvisoDelCaricamento, testoRegistro } from "../../shared/ordiniEseguiti.ts";
+import { leggiEseguiti } from "../../shared/ordiniEseguitiLettura.ts";
 
 // Le dichiarazioni riconosciute, un canale per volta: nel registro non si sommano.
 const perCanale = (righe) => [['RETE', 'rete'], ['ACI', 'ACI'], ['EXTRA_RACCOLTA', 'extra raccolta']]
@@ -79,6 +81,18 @@ async function apriCaricamento(base44, user, tipo_file, nome_file, rif, prima) {
     messaggio: 'Caricamento in corso: archivio in riscrittura.',
   });
   return { id: riga.id };
+}
+
+// L'avviso degli «eseguito» per la risposta (14/10/2026): null se non ce n'e'
+// nessuno. Quando l'archivio non si e' potuto rileggere l'elenco e' quello del
+// file, e non_riletti lo dice anche se nel file non ce n'e' nessuno: quelli
+// conservati dagli anni prima non si sono visti, e «nessuno» sarebbe falso.
+const QUOTA_VUOTA = { ordini: 0, righe: 0, kg: 0, esempi: [] };
+function avvisoEseguitiDi(eseguiti) {
+  if (!eseguiti) return null;
+  const avviso = avvisoDelCaricamento(eseguiti);
+  if (!eseguiti.dal_file) return avviso;
+  return { ...(avviso || { rete: QUOTA_VUOTA, aci: QUOTA_VUOTA, gruppi: [] }), non_riletti: eseguiti.non_riletti };
 }
 
 // Campi data per le nuove entita' (dichiarazioni/ordini): accettano sia seriale Excel che testo AAAA-MM-GG
@@ -658,6 +672,30 @@ export default async function(req) {
       }
     }
 
+    // === 7c. Gli ordini rimasti «eseguito» a portale ===
+    // Richiesta dell'utente del 14/10/2026: a ogni caricamento di primarie,
+    // secondarie e terziarie gli ordini in «eseguito» si segnalano sempre, con
+    // l'ID. Fino a oggi questo caricamento li conservava e ne diceva solo quanti
+    // fra quelli degli anni prima (storico_conservato.eseguiti): quelli del file
+    // non li diceva nessuno, se non la pagina. Si rilegge l'archivio a scrittura
+    // finita, una lettura filtrata per stato, cosi' si vedono quelli del file e
+    // quelli conservati, con la regola della dashboard e delle pagine
+    // (shared/ordiniEseguiti.ts). Se la lettura non riesce valgono quelli del
+    // file, e si dice che i conservati non si sono riletti.
+    let eseguitiDopo = null;
+    if (antiRegressionTypes.includes(tipo_file) && imported > 0) {
+      fase = 'lettura degli ordini in «eseguito»';
+      const entitaEseguiti = config.splitByStatoClasse ? ['PrimariaRete', 'PrimariaAci'] : [config.entity];
+      const opzioni = { oggi: oggiRoma(), annoInizio: annoDelloStorico() };
+      const riletti = ordiniEseguiti(await leggiEseguiti(base44.asServiceRole.entities, entitaEseguiti), opzioni);
+      if (riletti.non_letti.length) {
+        const dalFile = config.splitByStatoClasse
+          ? Object.fromEntries(entitaEseguiti.map(e => [e, enriched.filter(r => archivioPrimaria(r) === e)]))
+          : { [config.entity]: enriched };
+        eseguitiDopo = { ...ordiniEseguiti(dalFile, opzioni), dal_file: true, non_riletti: riletti.non_letti };
+      } else eseguitiDopo = riletti;
+    }
+
     // === 8. Log ===
     const esito = failed === 0 ? 'successo' : (imported > 0 ? 'parziale' : 'errore');
     const totaleDaImportare = config.splitByStatoClasse
@@ -671,6 +709,8 @@ export default async function(req) {
     const notaAllineamento = allineamento && allineamento.aggiornate
       ? ` | dichiarazioni riconosciute a portale: ${perCanale(allineamento.aggiornate)}`
       : (allineamento && allineamento.errore ? ` | allineamento non riuscito: ${allineamento.errore}` : '');
+    // Gli «eseguito» restano scritti nel registro con gli ID, come per le primarie.
+    const notaEseguiti = eseguitiDopo && eseguitiDopo.gruppi.length ? ` | ${testoRegistro(eseguitiDopo)}` : '';
     // La riga aperta prima di svuotare prende l'esito: e' questo aggiornamento a
     // far partire gli alert (workflow AlertEngineAutoRun, su create e update).
     // Se dopo lo svuotamento non e' entrata nessuna riga l'archivio e' vuoto: la
@@ -679,7 +719,7 @@ export default async function(req) {
       utente: chi(user),
       tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }),
       righe_importate: imported, righe_fallite: failed, esito,
-      messaggio: messaggio + notaAllineamento, periodo_riferimento: periodo_riferimento || '',
+      messaggio: messaggio + notaAllineamento + notaEseguiti, periodo_riferimento: periodo_riferimento || '',
       foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura,
       modalita
     };
@@ -726,6 +766,11 @@ export default async function(req) {
       storico_conservato: storico && storico.righe
         ? { dal_anno: storico.anno_inizio, righe: storico.righe, eseguiti: storico.eseguiti }
         : null,
+      // Gli ordini in «eseguito» dopo il caricamento, con gli ID: la stessa
+      // forma dell'esito delle primarie (avvisoDelCaricamento). null se non ce
+      // n'e' nessuno. non_riletti: gli archivi che non si sono potuti rileggere,
+      // e allora l'elenco e' quello del file.
+      avviso_eseguiti: avvisoEseguitiDi(eseguitiDopo),
       forzato: !!conferma_forzatura,
       modalita,
       file_sostituiti: fileSostituiti,

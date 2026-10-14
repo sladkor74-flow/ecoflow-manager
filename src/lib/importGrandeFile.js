@@ -6,6 +6,7 @@ import { formatIntero } from '@/lib/utils';
 import { leggiRegistro, statoDelRegistro, avvisoCaricamento } from '@/lib/registroCaricamenti';
 import { eLimiteRichieste } from '@/lib/limiteRichieste';
 import { eEseguito, riepilogoEseguiti } from '@/lib/movimenti';
+import { avvisoDelCaricamento } from '@/lib/ordiniEseguiti';
 
 // Importazione dei report di grandi dimensioni del portale Ecotyre.
 //
@@ -956,6 +957,24 @@ function ordiniEseguitiDelFile(righe) {
   const rete = quota(perCanale.rete);
   const aci = quota(perCanale.aci);
   return rete.ordini || aci.ordini ? { rete, aci } : null;
+}
+
+/**
+ * L'avviso degli «eseguito» a caricamento finito (richiesta dell'utente del
+ * 14/10/2026: segnalati sempre, con l'ID dell'ordine). registrato e' la
+ * risposta del registro, che li ha riletti dall'archivio a scrittura finita
+ * (importaBlocco, azione registra): quelli del file e quelli conservati dagli
+ * anni prima, con la regola unica (src/lib/ordiniEseguiti.js). Se quella
+ * lettura manca o non ha letto tutti e due gli archivi vale il conto fatto qui
+ * sul file (dalFile), come prima: meglio i soli ordini del file che un
+ * «nessuno» falso.
+ */
+export function eseguitiDopoIlCaricamento(registrato, dalFile) {
+  const dallArchivio = registrato && registrato.eseguiti;
+  if (dallArchivio && Array.isArray(dallArchivio.gruppi) && !(dallArchivio.non_letti || []).length) {
+    return avvisoDelCaricamento(dallArchivio);
+  }
+  return dalFile || null;
 }
 
 /**
@@ -2196,7 +2215,7 @@ async function caricaPrimarie({ file, onProgress, confermaForzatura = false }, b
       // dice il numero, invece di prendersi tutto il buco.
       tolte_dal_gestionale: x.tolte_dal_gestionale,
     }]));
-  await invocaConRitentativi({
+  const registrato = await invocaConRitentativi({
     azione: 'registra', tipo_file: tipoFile, nome_file: file.name, archivi: perIlRegistro,
     ultimo_errore: ultimoErrore, righe_archivio_prima: prep.righe_archivio_prima,
     // Quanti ordini distinti restano in archivio: e' il numero con cui si sa se
@@ -2365,7 +2384,13 @@ async function caricaPrimarie({ file, onProgress, confermaForzatura = false }, b
     // Gli ordini in stato "eseguito" a portale: tutti i dati inseriti ma nessuno
     // ha premuto Chiudi. Non entrano in nessun conto e non si sommano ai
     // terminati: si dicono e basta, rete e ACI separati.
-    avviso_eseguiti: eseguiti,
+    //
+    // Dal 14/10/2026 con gli ID: il registro li rilegge dall'archivio a
+    // scrittura finita (importaBlocco, azione registra) e li restituisce con la
+    // regola della dashboard e delle pagine (src/lib/ordiniEseguiti.js), quelli
+    // conservati dagli anni prima compresi. Se quella lettura non e' riuscita
+    // vale il conto fatto qui sul file, come prima.
+    avviso_eseguiti: eseguitiDopoIlCaricamento(registrato, eseguiti),
     ultimo_errore: ultimoErrore,
     forzato: !!confermaForzatura,
     durata_secondi: durata,
