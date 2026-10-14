@@ -42,8 +42,22 @@ const giornoIt = (g) => (g ? String(g).slice(0, 10).split('-').reverse().join('/
 // falso. Ora l'apertura ha la sua casella in testa alla riga, prima di gennaio:
 // il portale aggancia dal carico più vecchio, quindi è la prima a svuotarsi. Gli
 // stessi colori dei mesi: verde quello che ne è uscito, ambra quello che resta.
-function CasellaAnnoPrima({ prima, anno }) {
+function CasellaAnnoPrima({ prima, anno, perche }) {
   if (!prima) return <span className="block text-center text-muted-foreground/50 text-[11px]">—</span>;
+  // UN ANNO PRIMA DEL GESTIONALE (decisioni dell'utente del 13/10/2026): la
+  // giacenza da cui riparte non c'e', e il riepilogo manda null quello che ne
+  // resta. Qui diventava 0: «giacenza da cui il 2025 riparte, 0 kg · niente piu'
+  // in giacenza dell'anno prima», due cose non vere. Si dice «—» col perche';
+  // quello che il portale ha agganciato agli anni prima, se c'e', resta un dato.
+  if (prima.resta_kg === null) {
+    const uscitoNoto = prima.uscito_kg || 0;
+    return (
+      <span title={[`Dall'anno prima: ${perche || 'la giacenza da cui l\'anno riparte non c\'e\''}`, uscitoNoto > 0 ? `usciti ${formatKg(uscitoNoto)} kg` : ''].filter(Boolean).join(' · ')}
+        className="block w-full rounded-md border px-1.5 py-1 text-center text-[11px] leading-tight tabular-nums font-medium cursor-help text-muted-foreground">
+        {uscitoNoto > 0 ? `${prima.uscito_stimato ? '~' : ''}${formatKg(uscitoNoto)}` : '—'}
+      </span>
+    );
+  }
   const uscito = prima.uscito_kg || 0;
   const resta = prima.resta_kg || 0;
   const circa = prima.uscito_stimato ? '~' : '';
@@ -88,9 +102,19 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
   // (uscito_oltre_kg: e' il caso delle dichiarazioni che il portale ha e il
   // gestionale no, 01/10/2026), oppure un pezzo di dichiarazione non trova
   // nessun mese che lo assorba (uscito_non_allocato_kg).
-  const nonChiuse = righe
+  //
+  // UN ANNO PRIMA DEL GESTIONALE NON E' UN CONTO CHE NON SI CHIUDE (giro del
+  // 14/10/2026 sulle decisioni dell'utente del 13/10/2026). Le sue dichiarazioni
+  // non sono scritte qui, quindi tutto quello che il portale ha agganciato
+  // risultava «dichiarato in piu'» con «c'e' un caricamento che qui non e' stato
+  // registrato», un impianto per riga: sul 2025 dei dati veri sette righe, Irigom
+  // 4.439.080 kg. Non c'e' niente da registrare: si dice una volta perche'.
+  const primaDelGestionale = !!dati.prima_del_gestionale;
+  const nonChiuse = primaDelGestionale ? [] : righe
     .map(({ sito, flusso }) => ({ sito, flusso, oltre: flusso.uscito_oltre_kg || 0, fuori: flusso.uscito_non_allocato_kg || 0 }))
     .filter(x => x.oltre > 0 || x.fuori > 0);
+  // Il perche' di un «—» della riga: quello dell'anno, detto dal riepilogo.
+  const percheDi = (sito) => sito.perche_prima_del_gestionale || dati.perche_prima_del_gestionale || '';
   const nascoste = tutte.length - righe.length;
   // I formulari arrivati agli impianti senza fine trasporto non sono in nessuna
   // casella: si dice quanti e quanto pesano, canale per canale, mai sommati
@@ -145,7 +169,13 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
           {fuoriDaiMesi.map(c => `${c.nome} ${c.n} (${formatKg(c.kg)} kg)`).join(' · ')}. Quali sono, nella scheda Impianti.
         </p>
       )}
-      {nonChiuse.length > 0 && (
+      {/* Al posto dei conti che non si chiudono, sullo stesso posto della pagina. */}
+      {primaDelGestionale ? (
+        <p className="text-xs text-muted-foreground cursor-help" title={dati.perche_prima_del_gestionale || undefined}>
+          Il {dati.anno} è prima del gestionale: le sue dichiarazioni non sono scritte qui. In verde quello che il report del portale ha
+          agganciato ai carichi di ogni mese; il caricato, quello che resta e la giacenza non si ricostruiscono, e non sono zero.
+        </p>
+      ) : nonChiuse.length > 0 && (
         <div className="text-xs text-amber-800 space-y-0.5">
           {nonChiuse.map(({ sito, flusso, oltre, fuori }) => (
             <p key={`${sito.chiave}-${flusso.canale}-${flusso.provenienza}-chiusura`}>
@@ -200,7 +230,7 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                   </span>
                 </td>
                 <td className="px-0.5 py-1">
-                  <CasellaAnnoPrima prima={flusso.dall_anno_prima} anno={dati.anno} />
+                  <CasellaAnnoPrima prima={flusso.dall_anno_prima} anno={dati.anno} perche={percheDi(sito)} />
                 </td>
                 {flusso.mesi.map(m => (
                   <td key={m.mese} className="px-0.5 py-1">
@@ -213,7 +243,9 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                     </div>
                   </td>
                 ))}
-                <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatTonnellate(flusso.dichiarato_caricato_t)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums font-medium">{flusso.prima_del_gestionale
+                  ? <span className="text-muted-foreground cursor-help" title={percheDi(sito)}>—</span>
+                  : formatTonnellate(flusso.dichiarato_caricato_t)}</td>
                 {/* QUANTO RESTA DA DICHIARARE, SU TUTTA LA RIGA.
 
                     E LA GIACENZA, non la somma dei mesi non dichiarati. Le due cose
@@ -259,6 +291,8 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                     const g = (sito.giacenze_canale || []).find(x => x.canale === flusso.canale);
                     if (g && g.giacenza_t < 0) return <span className="text-red-600" title="Giacenza sotto zero: da correggere. Il dichiarato supera quello che risulta arrivato.">{formatTonnellate(g.giacenza_t)}</span>;
                     const resta = flusso.resta_t;
+                    // null non e' zero: un anno prima del gestionale, col perche' (13/10/2026).
+                    if (resta === null) return <span className="text-muted-foreground cursor-help" title={percheDi(sito)}>—</span>;
                     return resta > 0
                       ? <span className="text-amber-700" title="La somma della riga «resta in giacenza» qui sotto">{formatTonnellate(resta)}</span>
                       : <span className="text-muted-foreground">—</span>;
@@ -329,7 +363,10 @@ export default function Riepilogo({ dati, onApri, soloLettura }) {
                         title={nonDovuta
                           ? 'La somma dei mesi: quello che è in impianto. Non è un arretrato: di questo canale non ci deve dichiarazione, per accordo'
                           : "La somma della riga, casella dall'anno prima compresa: è la giacenza del canale, lo stesso numero della colonna «Da dichiarare»"}>
-                        {nonDovuta ? <span className="cursor-help" title={"Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nella riga del conferito."}>—</span> : formatTonnellate(flusso.resta_t)}
+                        {nonDovuta ? <span className="cursor-help" title={"Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nella riga del conferito."}>—</span>
+                          /* La somma della riga di un anno prima del gestionale non c'e': formatTonnellate(null) scriveva 0,00 (13/10/2026). */
+                          : flusso.resta_t === null ? <span className="cursor-help" title={percheDi(sito)}>—</span>
+                            : formatTonnellate(flusso.resta_t)}
                       </td>
                       <td className="px-3 pb-1.5" />
                     </>

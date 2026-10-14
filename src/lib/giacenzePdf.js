@@ -29,18 +29,93 @@ const nomeMese = (m) => {
 };
 const giornoItaliano = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : '');
 
+// --- I perche' dei numeri che non ci sono, per i file (giro del 14/10/2026) ---
+//
+// Le decisioni dell'utente del 13/10/2026: un anno prima del gestionale non ha
+// giacenze, un anno chiuso senza la lettura del 31/12 non ha il numero a portale,
+// e una riga senza numero non vale zero nel totale. calcolaGiacenze lo dice con
+// null e il perche' (totali.prima_del_gestionale e perche_prima_del_gestionale,
+// totali.perche_totali per canale, perche_senza_giacenza e perche_canali sulle
+// righe). La pagina lo scrive sopra la tabella; il PDF e il foglio Excel
+// scrivevano celle vuote senza dire niente, e il foglio 0 nel TOTALE di ACI ed
+// extra raccolta. Qui le note che lo dicono, le stesse per i due file.
+// L'anno in corso coi numeri tutti presenti non ha note: i file restano quelli.
+
+/** Le righe senza numero di un canale: le stesse che calcolaGiacenze lascia fuori dal totale. */
+const CANALI_GIACENZA = [
+  { chiave: 'RETE', nome: 'rete', campo: 'giacenza_portale_t', perche: (r) => r.perche_senza_giacenza },
+  { chiave: 'ACI', nome: 'ACI', campo: 'giacenza_aci_t', perche: (r) => (r.perche_canali && r.perche_canali.ACI) || (r.tipo_destinazione === 'stoc' ? r.perche_senza_giacenza : null) },
+  { chiave: 'EXTRA_RACCOLTA', nome: 'extra raccolta', campo: 'giacenza_extra_t', perche: (r) => r.perche_canali && r.perche_canali.EXTRA_RACCOLTA },
+];
+const manca = (v) => v === null || v === undefined;
+
+/** Il perche' di una riga senza la giacenza di rete, o null se il numero c'e' o il perche' no. */
+export const percheRigaSenzaRete = (r) => (manca(r.giacenza_portale_t) && r.perche_senza_giacenza ? r.perche_senza_giacenza : null);
+
+/**
+ * Le note che dicono perche' un numero della Situazione e' «—», e che cosa e'
+ * l'attesa per noi chiusa. Nell'ordine: l'anno prima del gestionale (una volta
+ * per tutto l'anno), i totali che non si fanno, canale per canale, le righe senza
+ * numero raggruppate per perche', l'attesa per noi chiusa riga per riga.
+ */
+export function notePercheGiacenze(righe = [], totali = {}) {
+  const note = [];
+  const percheAnno = totali.prima_del_gestionale ? (totali.perche_prima_del_gestionale || '') : '';
+  if (percheAnno) note.push(`Totali delle giacenze: —. ${percheAnno}`);
+  for (const c of CANALI_GIACENZA) {
+    const perche = !percheAnno && manca(totali[c.campo]) && totali.perche_totali && totali.perche_totali[c.chiave];
+    if (perche) note.push(`Totale ${c.nome}: —. ${perche}`);
+  }
+  // Le righe: un perche' per gruppo, coi siti e i canali che non hanno il numero.
+  const gruppi = new Map();
+  for (const r of righe) {
+    for (const c of CANALI_GIACENZA) {
+      const perche = manca(r[c.campo]) ? c.perche(r) : null;
+      if (!perche) continue;
+      if (!gruppi.has(perche)) gruppi.set(perche, new Map());
+      const chi = `${r.sito} (${r.tipo_destinazione === 'stoc' ? 'piazzale' : 'impianto'})`;
+      const g = gruppi.get(perche);
+      if (!g.has(chi)) g.set(chi, []);
+      g.get(chi).push(c.nome);
+    }
+  }
+  // Un perche' gia' scritto in una nota sopra (l'anno, o il totale che lo ha in
+  // comune con le sue righe) non si ripete: si dice solo dove vale.
+  for (const [perche, siti] of gruppi) {
+    const elenco = [...siti].map(([chi, canali]) => `${chi}: ${canali.join(', ')}`).join('; ');
+    note.push(note.some(n => n.includes(perche)) ? `«—» per lo stesso motivo: ${elenco}.` : `«—» su ${elenco}. ${perche}`);
+  }
+  // L'attesa che per noi e' un giro chiuso (decisioni dell'utente del 13/10/2026).
+  for (const r of righe) {
+    if (!(Number(r.in_attesa_chiusa_t) > 0) || !r.in_attesa_chiusa_perche) continue;
+    note.push(`In attesa di dichiarazione, ${r.sito} (${r.tipo_destinazione === 'stoc' ? 'piazzale' : 'impianto'}): le tonnellate della colonna «Attesa per noi chiusa» sono ${r.in_attesa_chiusa_perche}. Nessuna dichiarazione le chiudera’ e non c’e’ niente da fare: il numero resta quello del portale, e serve alla quadratura.`);
+  }
+  return note;
+}
+
 /** Scheda Situazione: giacenza a portale, per classe, e che cosa resta da dichiarare. */
 export function situazionePdf(anno, righe, totali) {
   // Su un anno che non e' quello in corso l'attesa conta solo i carichi di
   // quell'anno (calcolaGiacenze, revisione finale del 13/10/2026): lo dice
   // l'etichetta, come la pagina e la Quadratura delle Dichiarazioni.
   const attesaDel = (totali && totali.in_attesa_dei_carichi_del) || null;
+  // Un totale senza numero si scrive «—»: esportaTabella lascia vuota una cella
+  // numerica null, e nel riepilogo non scriveva niente (14/10/2026).
+  const oManca = (v) => (manca(v) ? '—' : v);
+  // Una riga senza la giacenza di rete, col suo perche': «—» nella giacenza e
+  // nelle classi, invece delle celle vuote. Le altre righe restano com'erano.
+  const classeDi = (r, c) => (percheRigaSenzaRete(r) && !r.giacenza_classi_kg ? '—' : (r.giacenza_classi_kg || {})[c]);
+  const chiusa = Number(totali && totali.in_attesa_chiusa_t) || 0;
   return {
     ...comune(anno, 'Situazione'),
+    // Un anno prima del gestionale si dice in testa; il perche' intero e' la prima nota.
+    ...(totali && totali.prima_del_gestionale ? { sottotitolo: `Anno ${anno} · prima del gestionale: la giacenza non si ricostruisce` } : {}),
     riepilogo: [
-      { etichetta: 'Giacenza rete a portale', valore: totali.giacenza_portale_t, tipo: 't' },
-      { etichetta: 'Giacenza ACI', valore: totali.giacenza_aci_t, tipo: 't' },
+      { etichetta: 'Giacenza rete a portale', valore: oManca(totali.giacenza_portale_t), tipo: 't' },
+      { etichetta: 'Giacenza ACI', valore: oManca(totali.giacenza_aci_t), tipo: 't' },
       { etichetta: attesaDel ? `In attesa di dichiarazione, dei carichi del ${attesaDel}` : 'In attesa di dichiarazione', valore: totali.in_attesa_dichiarazione_t, tipo: 't' },
+      // La parte per noi chiusa, accanto all'attesa (decisioni dell'utente del 13/10/2026).
+      ...(chiusa > 0 ? [{ etichetta: 'di cui per noi chiuse', valore: chiusa, tipo: 't' }] : []),
       { etichetta: 'Dichiarato nell’anno', valore: totali.dichiarato_t, tipo: 't' },
     ],
     sezioni: [{
@@ -55,19 +130,22 @@ export function situazionePdf(anno, righe, totali) {
         { titolo: 'G2 (kg)', tipo: 'intero', peso: 0.8 },
         { titolo: 'ACI (kg)', tipo: 'intero', peso: 0.8 },
         { titolo: attesaDel ? `In attesa dich., dei carichi del ${attesaDel}` : 'In attesa dich.', tipo: 't', peso: 1 },
+        { titolo: 'Attesa per noi chiusa', tipo: 't', peso: 0.9 },
         { titolo: 'Ordini da dich.', tipo: 'intero', peso: 0.8 },
         { titolo: 'Dichiarato', tipo: 't', peso: 1 },
       ],
       righe: righe.map(r => ({
         celle: [
-          r.sito, ruolo(r), r.giacenza_portale_t,
-          (r.giacenza_classi_kg || {}).P, (r.giacenza_classi_kg || {}).M,
-          (r.giacenza_classi_kg || {}).G1, (r.giacenza_classi_kg || {}).G2, (r.giacenza_classi_kg || {}).ACI,
-          r.in_attesa_dichiarazione_t, r.ordini_da_dichiarare, r.dichiarato_t,
+          r.sito, ruolo(r), percheRigaSenzaRete(r) ? '—' : r.giacenza_portale_t,
+          classeDi(r, 'P'), classeDi(r, 'M'), classeDi(r, 'G1'), classeDi(r, 'G2'), classeDi(r, 'ACI'),
+          r.in_attesa_dichiarazione_t, Number(r.in_attesa_chiusa_t) > 0 ? r.in_attesa_chiusa_t : null, r.ordini_da_dichiarare, r.dichiarato_t,
         ],
       })),
     }],
-    note: ['La giacenza di un impianto e’ la fotografia del portale; quella di un piazzale e’ l’ancora dell’anno piu’ tutti i movimenti finiti dopo. Rete, ACI ed extra raccolta non si sommano mai.'],
+    note: [
+      ...notePercheGiacenze(righe, totali),
+      'La giacenza di un impianto e’ la fotografia del portale; quella di un piazzale e’ l’ancora dell’anno piu’ tutti i movimenti finiti dopo. Rete, ACI ed extra raccolta non si sommano mai.',
+    ],
   };
 }
 
@@ -153,6 +231,9 @@ export function daDichiararePdf(anno, dati, filtri = {}) {
       'Il peso e’ quello che il portale aspetta ancora per quell’ordine, non il peso del formulario: un ordine dichiarato a meta’ porta solo la parte che resta.',
       'Tutto per fine del trasporto, mai per la data di chiusura a portale. Un carico senza fine trasporto non si colloca in nessun mese e sta nel gruppo a parte.',
       date.n > 0 ? `${date.n} ordini hanno, nel gestionale, un formulario terminato senza tutte le date obbligatorie (${date.kg} kg): l’ultima colonna dice quali.` : '',
+      // Dal pulsante di uno stoccaggio la cui attesa e' per noi tutta chiusa
+      // (decisioni dell'utente del 13/10/2026): il PDF lo dice come la scheda.
+      filtri.per_noi_chiusi ? `Per noi chiusi: ${filtri.per_noi_chiusi}. Il portale li attribuisce ancora allo stoccaggio, ma nessuna dichiarazione li chiudera’ e non c’e’ niente da fare: il numero resta quello del portale, e serve alla quadratura.` : '',
     ].filter(Boolean),
   };
 }
@@ -176,7 +257,17 @@ export function stoccaggiPdf(anno, righe, esitoDi = () => '') {
   const kgDi = (r, campi) => campi.reduce((s, c) => s + (Number(r[c]) || 0), 0);
   const reteDi = (r) => kgDi(r, ['class1_kg', 'class2_kg', 'class3_kg', 'class4_kg']) / 1000;
   const aciDi = (r) => (Number(r.class9_kg) || 0) / 1000;
-  const sommaOggi = (campo) => righe.reduce((s, r) => s + (Number(r[campo]) || 0), 0);
+  // Una riga senza la giacenza di oggi non vale zero nel totale (revisione del
+  // 14/10/2026, la regola di totaleDellaColonna): il totale e' «—», e una nota
+  // dice quali piazzali non hanno il numero. Il perche' lo dice la Situazione.
+  const senzaOggi = (campo) => righe.filter(r => manca(r[campo])).map(r => r.sito);
+  const sommaOggi = (campo) => (senzaOggi(campo).length ? '—' : righe.reduce((s, r) => s + (Number(r[campo]) || 0), 0));
+  const notaSenzaOggi = [['giacenza_rete_t', 'rete'], ['giacenza_aci_t', 'ACI']]
+    .filter(([campo]) => senzaOggi(campo).length)
+    .map(([campo, nome]) => {
+      const siti = senzaOggi(campo);
+      return `Giacenza di oggi, ${nome}: —. Il totale non si fa: ${siti.length === 1 ? `la riga di ${siti[0]} non ha il numero` : `${siti.length} righe non hanno il numero (${siti.join(', ')})`}, e una riga senza numero non vale zero. Il perche’ lo dice la scheda Situazione.`;
+    });
   return {
     ...comune(anno, 'Stoccaggi'),
     riepilogo: [
@@ -214,6 +305,7 @@ export function stoccaggiPdf(anno, righe, esitoDi = () => '') {
       })),
     }],
     note: [
+      ...notaSenzaOggi,
       ...righe.map(r => ({ r, e: esito(r) })).filter(x => x.e.lungo).map(x => `${x.r.sito}: ${x.e.lungo}`),
       'La lettura e’ la fotografia del portale di quel giorno; la giacenza di oggi e’ l’ancora dell’anno piu’ tutti i movimenti finiti dopo. Se la seconda e’ piu’ bassa, nel frattempo il materiale e’ uscito in secondaria.',
       'Rete (classi 1-4) e ACI (classe 9) non si sommano mai: sono due commesse diverse.',

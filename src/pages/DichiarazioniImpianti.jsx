@@ -26,16 +26,31 @@ import { esportaDichiarazioni } from '@/lib/dichiarazioniExport';
 
 const ANNI = anniDaScegliere({ dal: 2025 }).reverse();
 
-function Kpi({ titolo, valore, nota, tono }) {
+// perche e percheNota: il perche' di un «—», al passaggio del mouse sul numero o
+// sulla nota (giro del 14/10/2026). Senza, la casella resta quella di prima.
+function Kpi({ titolo, valore, nota, tono, perche, percheNota }) {
   const colore = tono === 'buono' ? 'text-emerald-700' : tono === 'attenzione' ? 'text-amber-700' : tono === 'male' ? 'text-red-700' : '';
   return (
     <div className="border rounded-xl bg-card px-4 py-3">
       <p className="text-xs text-muted-foreground">{titolo}</p>
-      <p className={`text-xl font-semibold tabular-nums ${colore}`}>{valore}</p>
-      {nota && <p className="text-xs text-muted-foreground mt-0.5">{nota}</p>}
+      <p className={`text-xl font-semibold tabular-nums ${colore}${perche ? ' cursor-help' : ''}`} title={perche || undefined}>{valore}</p>
+      {nota && <p className={`text-xs text-muted-foreground mt-0.5${percheNota ? ' cursor-help' : ''}`} title={percheNota || undefined}>{nota}</p>}
     </div>
   );
 }
+
+// IL NUMERO CHE NON C'E' NON E' ZERO, NEMMENO IN TESTA ALLA PAGINA (giro del
+// 14/10/2026 sulle decisioni dell'utente del 13/10/2026). Il riepilogo dice null
+// col perche' in due casi: un anno prima del gestionale non ha la giacenza degli
+// impianti (Il 2025 dei dati veri), e un anno chiuso senza la lettura del 31/12,
+// o senza il file degli ordini non dichiarati, non ha il totale a portale
+// (perche_totali.RETE). formatTonnellate(null) scrive «0,00»: qui la casella
+// diceva «0,00 t» e «salvata dalla chiusura: 0,00 t» sul 2025, e prima della
+// correzione delle risposte 12.072,41 t che non erano di nessuno.
+const tonnellateOManca = (v) => (v === null || v === undefined ? '—' : `${formatTonnellate(v)} t`);
+const percheDelPortale = (dati) => (dati.prima_del_gestionale
+  ? dati.perche_prima_del_gestionale
+  : (dati.totali && dati.totali.perche_totali && dati.totali.perche_totali.RETE)) || '';
 
 // I formulari terminati senza tutte le date obbligatorie (regola dell'utente,
 // 22/09/2026: immissione, inizio e fine trasporto vanno sempre segnalate dove
@@ -295,10 +310,15 @@ export default function DichiarazioniImpianti() {
           <AvvisoCaricamenti aggiorna={dati} />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {/* La rete: e' la rete che fa la giacenza a portale. ACI ed extra raccolta si scrivono a parte e non si sommano. */}
+            {/* Un anno prima del gestionale non ha dichiarazioni scritte qui
+                (13/10/2026): «0,00 t caricate» era falso, il portale ne ha. Si
+                scrive «—» e quanto ne riporta il report, per fine trasporto: lo
+                stesso numero del «Dichiarato nell'anno» delle Giacenze. */}
             <Kpi
               titolo="Rete: dichiarato e caricato a portale"
-              valore={`${formatTonnellate(totali.dichiarato_caricato_rete_t)} t`}
-              nota={[
+              valore={dati.prima_del_gestionale ? '—' : `${formatTonnellate(totali.dichiarato_caricato_rete_t)} t`}
+              perche={dati.prima_del_gestionale ? (dati.perche_prima_del_gestionale || '') : ''}
+              nota={dati.prima_del_gestionale ? `prima del gestionale: qui non sono scritte; il report del portale ne riporta ${formatTonnellate(totali.dichiarato_portale_t)} t, per fine trasporto` : [
                 `su ${formatTonnellate(totali.dichiarato_totale_rete_t)} t dichiarate`,
                 totali.dichiarato_caricato_aci_t > 0 ? `ACI a parte: ${formatTonnellate(totali.dichiarato_caricato_aci_t)} t` : '',
                 totali.dichiarato_caricato_extra_t > 0 ? `extra raccolta a parte: ${formatTonnellate(totali.dichiarato_caricato_extra_t)} t` : '',
@@ -307,29 +327,54 @@ export default function DichiarazioniImpianti() {
             <Kpi titolo="Rete: conferito nell'anno" valore={`${formatTonnellate(totali.conferito_t)} t`} nota="primarie a impianti e stoccaggi, per fine trasporto" />
             <Kpi
               titolo="Rete: giacenza degli impianti"
-              valore={`${formatTonnellate(totali.giacenza_calcolata_t)} t`}
+              valore={tonnellateOManca(totali.giacenza_calcolata_t)}
+              perche={totali.giacenza_calcolata_t === null ? (dati.perche_prima_del_gestionale || '') : ''}
               // Un anno chiuso si confronta con la lettura del 31/12, non col portale di oggi (11/10/2026).
-              nota={dati.anno_chiuso
-                ? `a portale, lettura del 31/12/${dati.anno} salvata dalla chiusura: ${formatTonnellate(totali.giacenza_portale_t)} t`
-                : totali.giacenza_calcolata_confrontabile_t === totali.giacenza_calcolata_t
-                  ? `a portale, aggiornata ai caricamenti: ${formatTonnellate(totali.giacenza_portale_t)} t`
-                  : `di cui ${formatTonnellate(totali.giacenza_calcolata_confrontabile_t)} t confrontabili col portale, che aggiornato ne segna ${formatTonnellate(totali.giacenza_portale_t)} t`}
+              // Un anno prima del gestionale non ha ne' l'una ne' l'altra (13/10/2026).
+              nota={dati.prima_del_gestionale
+                ? 'prima del gestionale: non si ricostruisce, in nessuno dei due moduli'
+                : dati.anno_chiuso
+                  ? `a portale, lettura del 31/12/${dati.anno} salvata dalla chiusura: ${tonnellateOManca(totali.giacenza_portale_t)}`
+                  : totali.giacenza_portale_t === null
+                    ? 'a portale: —'
+                    : totali.giacenza_calcolata_confrontabile_t === totali.giacenza_calcolata_t
+                      ? `a portale, aggiornata ai caricamenti: ${formatTonnellate(totali.giacenza_portale_t)} t`
+                      : `di cui ${formatTonnellate(totali.giacenza_calcolata_confrontabile_t)} t confrontabili col portale, che aggiornato ne segna ${formatTonnellate(totali.giacenza_portale_t)} t`}
+              percheNota={totali.giacenza_portale_t === null ? percheDelPortale(dati) : ''}
             />
+            {/* Un anno prima del gestionale non ha niente da confrontare: «0 su 0»
+                in verde diceva «tutti in linea» di un confronto mai fatto. */}
             <Kpi
               titolo={dati.anno_chiuso ? 'Rete: quadratura con la lettura del 31/12' : 'Rete: quadratura con il portale'}
-              valore={`${totali.siti_che_quadrano} su ${totali.siti_che_quadrano + totali.siti_da_quadrare}`}
+              valore={dati.prima_del_gestionale ? '—' : `${totali.siti_che_quadrano} su ${totali.siti_che_quadrano + totali.siti_da_quadrare}`}
+              perche={dati.prima_del_gestionale ? (dati.perche_prima_del_gestionale || '') : ''}
               nota={[
-                dati.anno_chiuso && !(totali.siti_che_quadrano + totali.siti_da_quadrare)
-                  ? `anno chiuso: senza la lettura del 31/12 salvata dalla chiusura la quadratura vale per l'anno in corso`
-                  : totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea',
+                dati.prima_del_gestionale
+                  ? 'prima del gestionale: il confronto col portale non si fa'
+                  : dati.anno_chiuso && !(totali.siti_che_quadrano + totali.siti_da_quadrare)
+                    ? `anno chiuso: senza la lettura del 31/12 salvata dalla chiusura la quadratura vale per l'anno in corso`
+                    : totali.siti_da_quadrare ? `${totali.siti_da_quadrare} da verificare` : 'tutti in linea',
                 (totali.aci_che_quadrano || 0) + (totali.aci_da_quadrare || 0) > 0
                   ? `ACI negli stoccaggi, a parte: ${totali.aci_che_quadrano} su ${totali.aci_che_quadrano + totali.aci_da_quadrare}` : '',
               ].filter(Boolean).join(' · ')}
-              tono={totali.siti_da_quadrare ? 'male' : 'buono'}
+              tono={dati.prima_del_gestionale ? undefined : totali.siti_da_quadrare ? 'male' : 'buono'}
             />
           </div>
 
           <DateInBreve conti={totali.date_da_sistemare} />
+
+          {/* IL PERCHE' DEL «—», SOPRA LE SCHEDE (giro del 14/10/2026). Un anno
+              prima del gestionale, o un totale a portale che non si fa: la
+              casella in testa dice «—», qui si dice perche', con le parole delle
+              Giacenze. La Quadratura lo dice gia' in cima alla sua scheda: li'
+              non si ripete. */}
+          {scheda !== 'quadratura' && percheDelPortale(dati) && (dati.prima_del_gestionale || totali.giacenza_portale_t === null) && (
+            <p className="text-xs border rounded-lg bg-muted/40 px-3 py-2 text-muted-foreground">
+              {dati.prima_del_gestionale
+                ? dati.perche_prima_del_gestionale
+                : <><span className="font-semibold">Totale Rete a portale: —. </span>{totali.perche_totali.RETE}</>}
+            </p>
+          )}
 
           <Tabs value={scheda} onValueChange={setScheda}>
             <TabsList>

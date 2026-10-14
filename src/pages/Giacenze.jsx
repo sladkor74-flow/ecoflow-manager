@@ -136,7 +136,18 @@ export default function Giacenze() {
             </TabsContent>
 
             <TabsContent value="dichiarare">
-              <DaDichiarareTable filtroSitoEsterno={filtroSito} filtroRuoloEsterno={filtroRuolo} onPulisciFiltroSito={() => { setFiltroSito(''); setFiltroRuolo(''); }} />
+              {/* Le righe che la pagina ha gia', perche' l'elenco aperto dallo
+                  stoccaggio di T-Cycle dica «per noi chiusi» (decisioni del
+                  13/10/2026, chiusura del giro del 14/10/2026): senza, la scritta
+                  non compariva mai. Solo sull'anno in corso: l'elenco e' il file
+                  degli ordini non dichiarati di oggi, e su un altro anno l'attesa
+                  della riga conta i soli carichi di quell'anno (nellAttesaDellAnno).
+                  Nessuna lettura in piu'. */}
+              <DaDichiarareTable
+                filtroSitoEsterno={filtroSito} filtroRuoloEsterno={filtroRuolo}
+                onPulisciFiltroSito={() => { setFiltroSito(''); setFiltroRuolo(''); }}
+                righeGiacenze={Number(anno) === annoDiOggi() ? data.righe : null}
+              />
             </TabsContent>
 
             <TabsContent value="derivati">

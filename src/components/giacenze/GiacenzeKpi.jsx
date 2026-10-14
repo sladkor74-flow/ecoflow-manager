@@ -18,13 +18,42 @@ export default function GiacenzeKpi({ totali }) {
     ? (totali.conferito_primarie_t / totali.target_totale_t * 100)
     : null;
 
+  // IL TOTALE CHE NON SI FA DICE PERCHE' (giro del 14/10/2026 sulle decisioni
+  // dell'utente del 13/10/2026). Il valore era gia' «—», ma sotto c'era scritto
+  // «aggiornata a ogni caricamento», come se il numero ci fosse: sul 2025 (prima
+  // del gestionale) e sul 2026 guardato a gennaio prima della chiusura. Ora il
+  // sottotitolo dice in breve perche', e il perche' intero sta al passaggio del
+  // mouse, con le parole che la tabella scrive sopra i numeri.
+  const manca = (v) => v === null || v === undefined;
+  const percheTotale = (canale) => (totali.prima_del_gestionale
+    ? totali.perche_prima_del_gestionale
+    : totali.perche_totali && totali.perche_totali[canale]) || '';
+  // L'ACI RESTA IN TESTA ANCHE QUANDO LA RETE NON C'E' (revisione del
+  // 14/10/2026). Col totale di rete «—» il sottotitolo diceva solo «il totale non
+  // si fa», e l'ACI che invece c'e' spariva dalle caselle: ogni gennaio, finche'
+  // la chiusura non salva la lettura del 31/12, e nell'anno in corso quando un
+  // impianto non ha il file degli ordini non dichiarati (il 04/10/2026 erano
+  // 26,81 t). Si scrive a parte, accanto al perche' della rete: e' un altro
+  // canale e non si somma. Su un anno prima del gestionale l'ACI non c'e' e il
+  // perche' e' lo stesso dell'anno, quindi non si ripete.
+  const aciSenzaTotale = manca(totali.giacenza_aci_t) && !totali.prima_del_gestionale && percheTotale('ACI');
+  const aciAParte = totali.giacenza_aci_t ? `ACI ${fmt(totali.giacenza_aci_t)} t, a parte` : aciSenzaTotale ? 'ACI —, a parte' : '';
+  const sottotitoloRete = manca(totali.giacenza_portale_t)
+    ? (totali.prima_del_gestionale ? 'prima del gestionale: non si ricostruisce, e non vuol dire zero' : 'il totale non si fa: una riga senza numero non vale zero') + (aciAParte ? ` · ${aciAParte}` : '')
+    : aciSenzaTotale
+      ? "ACI —, a parte: il totale non si fa"
+      : totali.giacenza_aci_t ? `ACI ${fmt(totali.giacenza_aci_t)} t, a parte: e' un altro canale` : 'aggiornata a ogni caricamento';
+  const percheRete = manca(totali.giacenza_portale_t)
+    ? [percheTotale('RETE'), aciSenzaTotale ? `ACI: ${percheTotale('ACI')}` : ''].filter(Boolean).join(' ')
+    : aciSenzaTotale ? percheTotale('ACI') : '';
+
   const cards = [
     // Un canale per volta: la giacenza a portale e' della rete, l'ACI si scrive a parte.
     // L'ACI NON STA SOLO NEGLI STOCCAGGI. Il sottotitolo diceva «ACI negli
     // stoccaggi»: e' il totale ACI di tutti i siti, e il 04/10/2026 quei 26,81 t
     // stavano per intero su due IMPIANTI (Gatim 25,17 e Tecnogum 1,64). Chi lo
     // leggeva andava a cercarli nei piazzali. Il numero era giusto, la parola no.
-    { label: 'Giacenza rete a portale', value: fmt(totali.giacenza_portale_t), unit: 't', icon: Warehouse, color: 'text-primary', subtitle: totali.giacenza_aci_t ? `ACI ${fmt(totali.giacenza_aci_t)} t, a parte: e' un altro canale` : 'aggiornata a ogni caricamento' },
+    { label: 'Giacenza rete a portale', value: fmt(totali.giacenza_portale_t), unit: 't', icon: Warehouse, color: 'text-primary', subtitle: sottotitoloRete, perche: percheRete },
     { label: 'Ordini da dichiarare', value: fmt(totali.ordini_da_dichiarare, 0), unit: '', icon: ClipboardList, color: 'text-amber-600' },
     { label: 'Dichiarato nell\'anno', value: fmt(totali.dichiarato_t), unit: 't', icon: FileCheck, color: 'text-success', subtitle: 'rete, per fine trasporto' },
     { label: 'Raccolto RETE nell\'anno', value: fmt(totali.conferito_primarie_t), unit: 't', icon: PackageOpen, color: 'text-accent', subtitle: `ACI ${fmt(totali.conferito_aci_t)} t · Extra ${fmt(totali.conferito_extra_t)} t, fuori target` },
@@ -62,10 +91,11 @@ export default function GiacenzeKpi({ totali }) {
               {c.label}
             </div>
             <div className={`text-xl font-bold ${c.color}`}>
-              {c.value} {c.unit && <span className="text-xs font-normal text-muted-foreground">{c.unit}</span>}
+              {/* «— t» diceva un'unita' di un numero che non c'e' (14/10/2026). */}
+              {c.value} {c.unit && c.value !== '—' && <span className="text-xs font-normal text-muted-foreground">{c.unit}</span>}
             </div>
             {c.subtitle && (
-              <div className="text-[10px] leading-tight text-muted-foreground">{c.subtitle}</div>
+              <div className={`text-[10px] leading-tight text-muted-foreground${c.perche ? ' cursor-help' : ''}`} title={c.perche || undefined}>{c.subtitle}</div>
             )}
           </div>
         );

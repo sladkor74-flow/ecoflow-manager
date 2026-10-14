@@ -105,7 +105,27 @@ function Riconciliazione({ r, sito }) {
   );
 }
 
-export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEsterno, onPulisciFiltroSito }) {
+// GLI ORDINI DI UN'ATTESA CHE PER NOI E' CHIUSA (decisioni dell'utente del
+// 13/10/2026, giro del 14/10/2026). Il file degli ordini non dichiarati
+// attribuisce ancora allo stoccaggio di T-Cycle 72 ordini, 181,299 t, partiti
+// tutti verso Tecnogum, che sulla rete non dichiara a SMOCO. La riga della
+// Situazione lo dice; aperto dal pulsante, l'elenco li presentava come carichi
+// «gia' ripartiti in secondaria» che «li dichiara» l'impianto che li ha
+// ricevuti, cioe' come un'attesa da risolvere. Ora si intesta «per noi chiusi»,
+// col perche' della riga. Nessuna lettura in piu': la riga e' quella che la
+// pagina delle Giacenze ha gia' (righeGiacenze), e senza la riga l'elenco resta
+// quello di prima. Tutta l'attesa chiusa, non una parte: con una parte gli
+// ordini dell'elenco restano un'attesa, e quali siano chiusi il file non lo dice.
+const motivoChiusi = (perche) => String(perche || '').replace(/^.*per noi chiuse:\s*/, '');
+export function attesaTuttaChiusa(righeGiacenze, sito, ruolo) {
+  if (ruolo !== 'stoc' || !sito) return null;
+  const r = (righeGiacenze || []).find(x => x.tipo_destinazione === 'stoc' && x.sito === sito);
+  if (!r || !(Number(r.in_attesa_chiusa_t) > 0) || !r.in_attesa_chiusa_perche) return null;
+  if (Number(r.in_attesa_chiusa_t) < (Number(r.in_attesa_dichiarazione_t) || 0) - 0.0005) return null;
+  return { t: Number(r.in_attesa_chiusa_t), perche: r.in_attesa_chiusa_perche, motivo: motivoChiusi(r.in_attesa_chiusa_perche) };
+}
+
+export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEsterno, onPulisciFiltroSito, righeGiacenze = null }) {
   // Si nasce gia' col filtro che ci hanno passato: arrivando dal pulsante di un
   // impianto nella scheda Situazione, la prima lettura deve essere la sua e non
   // quella di tutti gli ordini.
@@ -225,10 +245,12 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   // quello dell'orologio del dispositivo: un dispositivo con un altro fuso, a
   // cavallo della mezzanotte del 31/12, scriveva un altro anno (revisione della
   // chiusura dell'audit, 11/10/2026, la regola di src/lib/periodoPagine.js).
+  const chiusi = attesaTuttaChiusa(righeGiacenze, sito, ruolo);
   const sezioniPdf = async () => {
     const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
     return daDichiararePdf(annoChiusura || annoDiOggi(), res.data, {
       sito, ruolo, provincia, anno: annoChiusura, ricerca, solo_date: soloDate,
+      ...(chiusi ? { per_noi_chiusi: chiusi.motivo } : {}),
     });
   };
 
@@ -307,11 +329,20 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
           che li mette insieme e arriva alla giacenza (11/10/2026). Prima questo
           commento lo affermava e basta, ed era falso appena un carico arrivava
           dopo l'ultimo file, cioe' quasi ogni settimana. */}
+      {chiusi && (
+        <p className="text-sm border rounded-lg bg-muted/40 px-3 py-2 text-muted-foreground cursor-help" title={chiusi.perche}>
+          <strong className="text-foreground">Per noi chiusi: {chiusi.motivo}.</strong>{' '}
+          Il portale li attribuisce ancora allo stoccaggio, ma nessuna dichiarazione li chiuderà e non c&apos;è niente da fare:
+          il numero resta quello del portale, e serve alla quadratura.
+        </p>
+      )}
       {ruolo && (
         <div className="text-xs text-muted-foreground">
           {ruolo === 'imp'
             ? <>Si vedono solo i carichi che <strong className="text-foreground">{sito}</strong> deve ancora dichiarare come impianto.</>
-            : <>Si vedono solo i carichi passati dal piazzale di <strong className="text-foreground">{sito}</strong> e già ripartiti in secondaria: stanno come giacenza sull&apos;impianto che li ha ricevuti, e li dichiara lui.</>}
+            : chiusi
+              ? <>Si vedono solo i carichi passati dal piazzale di <strong className="text-foreground">{sito}</strong> e già ripartiti in secondaria.</>
+              : <>Si vedono solo i carichi passati dal piazzale di <strong className="text-foreground">{sito}</strong> e già ripartiti in secondaria: stanno come giacenza sull&apos;impianto che li ha ricevuti, e li dichiara lui.</>}
           {' '}
           <button type="button" className="text-primary underline" onClick={() => setRuolo('')}>mostra tutti e due</button>
         </div>

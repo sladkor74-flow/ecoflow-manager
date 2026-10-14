@@ -18,9 +18,22 @@ import DateDaSistemare from '@/components/giacenze/DateDaSistemare';
 const kg = (v) => (Number(v) ? formatKg(v) : '—');
 const t = (v) => formatTonnellate(Number(v) || 0);
 
+// UN NUMERO CHE NON C'E' NON E' ZERO (giro del 14/10/2026 sulle decisioni
+// dell'utente del 13/10/2026). Di un anno prima del gestionale il riepilogo manda
+// null la giacenza, quello che resta di ogni mese e la giacenza di rete che ne
+// risulta, col perche'; t() li faceva 0,00 («in giacenza 0,00 t», «Giacenza di
+// rete che ne risulta: 0,00 t» sul 2025 di Irigom, che ne aveva ricevute 4.439,08).
+// Qui si scrive «—», e il perche' sta al passaggio del mouse.
+function Manca({ perche, testo = '—' }) {
+  return <span className="cursor-help" title={perche || undefined}>{testo}</span>;
+}
+
 export default function SezioneImpianto({ sito, onApri, soloLettura }) {
   const materiali = materialiDi(sito.operazione);
   const operazione = OPERAZIONI[sito.operazione];
+  // Il perche' di un «—» di questo impianto: l'anno prima del gestionale, o
+  // quello che dice la quadratura dell'anno chiuso.
+  const perche = sito.perche_prima_del_gestionale || (sito.quadratura_anno_chiuso && sito.quadratura_anno_chiuso.perche) || '';
   return (
     <div className="border rounded-xl bg-card overflow-hidden">
       <div className="px-4 py-3 border-b bg-muted/30 flex flex-wrap items-start justify-between gap-3">
@@ -49,9 +62,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
           {/* Un anno chiuso si confronta con la lettura del 31/12 salvata dalla
               chiusura, non col portale di oggi; senza quella lettura la
               quadratura non si fa, e si dice perche' (11/10/2026). */}
-          {sito.quadra === null && (sito.quadratura_anno_chiuso && !sito.quadratura_anno_chiuso.lettura
-            ? <span className="text-muted-foreground text-xs cursor-help" title={sito.quadratura_anno_chiuso.perche}>anno chiuso: la quadratura col portale vale per l&apos;anno in corso</span>
-            : <span className="text-muted-foreground text-xs">giacenza a portale non disponibile</span>)}
+          {/* Un anno prima del gestionale lo dice com'e', come la Quadratura (13/10/2026). */}
+          {sito.quadra === null && (sito.prima_del_gestionale
+            ? <span className="text-muted-foreground text-xs cursor-help" title={perche}>prima del gestionale: la giacenza non si ricostruisce</span>
+            : sito.quadratura_anno_chiuso && !sito.quadratura_anno_chiuso.lettura
+              ? <span className="text-muted-foreground text-xs cursor-help" title={sito.quadratura_anno_chiuso.perche}>anno chiuso: la quadratura col portale vale per l&apos;anno in corso</span>
+              : <span className="text-muted-foreground text-xs">giacenza a portale non disponibile</span>)}
         </div>
       </div>
 
@@ -80,7 +96,9 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
             <p className="px-4 pt-3 pb-1 text-sm font-medium">
               {canale ? canale.nome : flusso.canale}{flusso.provenienza ? ` · ${flusso.provenienza}` : ''}
               <span className="text-xs text-muted-foreground font-normal">
-                {' '}— {prima ? `dall'anno prima ${t(flusso.apertura_t)} t, ` : ''}arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {t(flusso.dichiarato_caricato_t)} t, {flusso.non_dovuta ? 'giacenza: non dovuta per accordo' : `in giacenza ${t(flusso.resta_t)} t`}
+                {/* Di un anno prima del gestionale non ci sono l'apertura e le
+                    dichiarazioni scritte qui: «—», non 0,00 (13/10/2026). */}
+                {' '}— {prima ? (flusso.prima_del_gestionale ? <>dall&apos;anno prima <Manca perche={perche} />, </> : `dall'anno prima ${t(flusso.apertura_t)} t, `) : ''}arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {flusso.prima_del_gestionale ? <><Manca perche={perche} />, </> : <>{t(flusso.dichiarato_caricato_t)} t, </>}{flusso.non_dovuta ? 'giacenza: non dovuta per accordo' : flusso.resta_t === null ? <Manca perche={flusso.perche || perche} testo="in giacenza —" /> : `in giacenza ${t(flusso.resta_t)} t`}
               </span>
             </p>
             <div data-scorre-lato>
@@ -117,9 +135,10 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                         title={prima.uscito_stimato ? 'Ripartito dal gestionale: il report del portale non ha ancora questa dichiarazione' : 'Agganciato dal portale a carichi degli anni prima, dopo la lettura del 31/12'}>
                         {prima.uscito_kg > 0 ? `${prima.uscito_stimato ? '~' : ''}${kg(prima.uscito_kg)}` : '—'}
                       </td>
-                      <td className={`px-2 py-1.5 text-right tabular-nums ${prima.da_dichiarare_kg > 0 ? 'text-amber-800 font-medium' : 'text-muted-foreground'}`}>{prima.da_dichiarare_kg > 0 ? kg(prima.da_dichiarare_kg) : '—'}</td>
+                      <td className={`px-2 py-1.5 text-right tabular-nums ${prima.da_dichiarare_kg > 0 ? 'text-amber-800 font-medium' : 'text-muted-foreground'}`}>{prima.da_dichiarare_kg > 0 ? kg(prima.da_dichiarare_kg) : prima.da_dichiarare_kg === null ? <Manca perche={perche} /> : '—'}</td>
                       {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5" />)}
-                      <td className="px-2 py-1.5 text-muted-foreground">{prima.resta_kg > 0 ? 'in giacenza' : 'uscito tutto'}</td>
+                      {/* null non e' «uscito tutto»: di un anno prima del gestionale non si sa (13/10/2026). */}
+                      <td className="px-2 py-1.5 text-muted-foreground">{prima.resta_kg === null ? <Manca perche={perche} testo="non si ricostruisce" /> : prima.resta_kg > 0 ? 'in giacenza' : 'uscito tutto'}</td>
                       <td className="px-2 py-1.5" />
                     </tr>
                   )}
@@ -143,7 +162,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                             : (m.uscito_stimato ? 'Ripartito dal gestionale: il report del portale non ha ancora questa dichiarazione' : '')}>
                           {m.uscito_kg > 0 ? `${m.uscito_stimato ? '~' : ''}${kg(m.uscito_kg)}` : '—'}
                         </td>
-                        <td className={`px-2 py-1.5 text-right tabular-nums ${m.da_dichiarare_kg > 0 ? "text-amber-800 font-medium" : "text-muted-foreground"}`}>{m.da_dichiarare_kg > 0 ? kg(m.da_dichiarare_kg) : "—"}</td>
+                        <td className={`px-2 py-1.5 text-right tabular-nums ${m.da_dichiarare_kg > 0 ? "text-amber-800 font-medium" : "text-muted-foreground"}`}>{m.da_dichiarare_kg > 0 ? kg(m.da_dichiarare_kg) : m.da_dichiarare_kg === null ? <Manca perche={perche} /> : "—"}</td>
                         {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{kg(d && d[x.chiave])}</td>)}
                         <td className="px-2 py-1.5">
                           {stato === 'caricata' ? <span className="text-emerald-700">caricata a portale</span>
@@ -151,8 +170,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                               : stato === 'inserita' ? <span className="text-slate-600">inserita</span>
                                 : stato === 'solo_metalli' ? <span className="text-sky-800">solo metalli ferrosi</span>
                                   : stato === 'non_dovuta' ? <span className="text-slate-500">non dovuta</span>
-                                    : <span className="text-amber-700">da chiedere</span>}
-                          {avvisi.length > 0 && <span className="block text-[11px] text-amber-700">{avvisi[0].testo}</span>}
+                                    /* Un mese di un anno prima del gestionale senza
+                                       dichiarazione scritta qui non e' da chiedere: quell'anno
+                                       le dichiarazioni le ha il portale (13/10/2026). */
+                                    : flusso.prima_del_gestionale && !d ? <Manca perche={perche} testo="prima del gestionale" />
+                                      : <span className="text-amber-700">da chiedere</span>}
+                          {avvisi.length > 0 && !(flusso.prima_del_gestionale && !d) && <span className="block text-[11px] text-amber-700">{avvisi[0].testo}</span>}
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           {!soloLettura && (
@@ -179,7 +202,8 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
             Apertura {c.canale === 'ACI' ? 'ACI' : 'di rete'} letta al 31/12: {t(c.apertura_letta_t)} t, di cui dichiarate dopo {t(c.dichiarato_dopo_apertura_t)} t: <strong>{t(c.apertura_t)} t</strong>
           </span>
         ))}
-        <span>Giacenza al 31/12 dell'anno prima: <strong>{t(sito.giacenza_iniziale_t)} t</strong></span>
+        {/* Di un anno prima del gestionale l'apertura non c'e': non e' 0,00 (13/10/2026). */}
+        <span>Giacenza al 31/12 dell'anno prima: <strong>{sito.prima_del_gestionale ? <Manca perche={perche} /> : <>{t(sito.giacenza_iniziale_t)} t</>}</strong></span>
         <span>Primarie di rete arrivate: <strong>{t(sito.conferito_t)} t</strong></span>
         {sito.secondarie_in_t > 0 && <span>Secondarie di rete dagli stoccaggi: <strong>{t(sito.secondarie_in_t)} t</strong></span>}
         {sito.conferito_aci_t > 0 && <span>Primarie ACI: <strong>{t(sito.conferito_aci_t)} t</strong></span>}
@@ -188,16 +212,19 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         {sito.secondarie_extra_in_t > 0 && <span>Extra raccolta dagli stoccaggi: <strong>{t(sito.secondarie_extra_in_t)} t</strong></span>}
         {sito.terziarie_out_t > 0 && <span>Terziarie in uscita: <strong>{t(sito.terziarie_out_t)} t</strong></span>}
         {/* Un canale per volta: rete, ACI ed extra raccolta non si sommano mai. */}
-        <span>Dichiarato e caricato, rete: <strong>{t(sito.dichiarato_caricato_rete_t)} t</strong></span>
+        <span>Dichiarato e caricato, rete: <strong>{sito.prima_del_gestionale ? <Manca perche={perche} /> : <>{t(sito.dichiarato_caricato_rete_t)} t</>}</strong></span>
+        {/* Quello che di quell'anno il portale ha agganciato si vede: e' un dato (13/10/2026). */}
+        {sito.prima_del_gestionale && sito.dichiarato_portale_t > 0 && <span>Dichiarato a portale, dal report, rete: <strong>{t(sito.dichiarato_portale_t)} t</strong></span>}
         {sito.dichiarato_caricato_aci_t > 0 && <span>Dichiarato e caricato, ACI: <strong>{t(sito.dichiarato_caricato_aci_t)} t</strong></span>}
         {sito.dichiarato_caricato_extra_t > 0 && <span>Dichiarato, extra raccolta: <strong>{t(sito.dichiarato_caricato_extra_t)} t</strong></span>}
         <span>Giacenza di rete che ne risulta: <strong>{sito.dichiara_rete === false
           ? <span className="cursor-help" title={"Per accordo questo impianto non ci dichiara la rete: il trattamento non e' a nostro carico, il portale non tiene per noi una giacenza di rete e niente resta da dichiarare. Quello che e' arrivato si vede nelle primarie qui sopra."}>—</span>
-          : `${t(sito.giacenza_calcolata_t)} t`}</strong></span>
+          : sito.giacenza_calcolata_t === null ? <Manca perche={perche} /> : `${t(sito.giacenza_calcolata_t)} t`}</strong></span>
         {/* Per un anno chiuso il numero a portale e' la lettura del 31/12 salvata
-            dalla chiusura, non il portale di oggi (11/10/2026). */}
+            dalla chiusura, non il portale di oggi (11/10/2026). Di un anno prima
+            del gestionale non c'e' niente da salvare: si dice quello (13/10/2026). */}
         {sito.quadratura_anno_chiuso
-          ? <span title={sito.quadratura_anno_chiuso.perche}>Giacenza di rete a portale, lettura del 31/12: <strong>{sito.giacenza_portale_t === null ? '— (non salvata dalla chiusura)' : `${t(sito.giacenza_portale_t)} t`}</strong></span>
+          ? <span title={sito.quadratura_anno_chiuso.perche}>Giacenza di rete a portale, lettura del 31/12: <strong>{sito.giacenza_portale_t === null ? (sito.prima_del_gestionale ? '— (prima del gestionale)' : '— (non salvata dalla chiusura)') : `${t(sito.giacenza_portale_t)} t`}</strong></span>
           : <span>Giacenza di rete a portale, aggiornata: <strong>{sito.giacenza_portale_t === null ? '—' : `${t(sito.giacenza_portale_t)} t`}</strong></span>}
       </div>
     </div>

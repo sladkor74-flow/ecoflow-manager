@@ -2,6 +2,7 @@ import { giornoRoma } from '@/lib/giornoItaliano';
 import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella, FORMATI } from '@/lib/fogliProfessionali';
 import { testoFormulario, testoCollocato } from '@/lib/giacenzeDaDichiarareExport';
 import { INTESTAZIONE_DATE, righeExcelDate } from '@/components/giacenze/DateDaSistemare';
+import { notePercheGiacenze } from '@/lib/giacenzePdf';
 
 // I formulari con le date da sistemare di una riga, a parole e per canale (mai
 // sommati): "rete 3 (2 senza fine trasporto) · ACI 1".
@@ -54,10 +55,17 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno, opzioni = {
   // quell'anno (calcolaGiacenze, revisione finale del 13/10/2026): lo dice
   // l'intestazione, come la pagina, il PDF e la Quadratura delle Dichiarazioni.
   const attesaDel = (data.totali && data.totali.in_attesa_dei_carichi_del) || null;
-  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza rete a portale (t)', 'Giacenza ACI (t)', 'Extra raccolta in piazzale, fuori portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', attesaDel ? `In attesa di dichiarazione, dei carichi del ${attesaDel} (t)` : 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Dichiarato (t)', 'Tipologia trattamento', 'Formulari con le date da sistemare'];
+  // LA PARTE DELL'ATTESA CHE PER NOI E' CHIUSA (decisioni dell'utente del
+  // 13/10/2026, giro del 14/10/2026): le 181,299 t che il portale attribuisce
+  // ancora allo stoccaggio di T-Cycle sono partite tutte verso Tecnogum, che sulla
+  // rete non dichiara a SMOCO. La pagina lo dice, il foglio no: ora ha la sua
+  // colonna, e il perche' in una nota sotto la tabella. Sta dopo gli ordini da
+  // dichiarare, che seguono l'attesa (prove/attesaDellAnno.mjs).
+  const sitHeaders = ['Sito', 'Ruolo', 'Giacenza rete a portale (t)', 'Giacenza ACI (t)', 'Extra raccolta in piazzale, fuori portale (t)', ...CLASSI.map(c => `${c} (kg)`), 'Rilevazione stoccaggio', 'Dati aggiornati al', attesaDel ? `In attesa di dichiarazione, dei carichi del ${attesaDel} (t)` : 'In attesa di dichiarazione (t)', 'Ordini da dichiarare', 'Attesa per noi chiusa (t)', 'Dichiarato (t)', 'Tipologia trattamento', 'Formulari con le date da sistemare'];
   const senzaFile = (r) => r.tipo_destinazione === 'imp' && !(r.fotografia && r.fotografia.del);
   const classi = (r) => CLASSI.map(c => (r.giacenza_classi_kg && !senzaFile(r) ? r.giacenza_classi_kg[c] || 0 : null));
   const vuotaSeManca = (v) => (v === null || v === undefined ? '' : v);
+  const chiusaSeCe = (v) => (Number(v) > 0 ? v : '');
   const sitRows = data.righe.map(r => [
     r.sito,
     r.tipo_destinazione === 'imp' ? 'Impianto' : 'Stoccaggio',
@@ -69,6 +77,7 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno, opzioni = {
     fmtData(r.aggiornata_al),
     r.in_attesa_dichiarazione_t,
     r.ordini_da_dichiarare || 0,
+    chiusaSeCe(r.in_attesa_chiusa_t),
     r.dichiarato_t,
     r.tipologia_trattamento || '',
     testoDateRiga(r),
@@ -77,11 +86,29 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno, opzioni = {
   // Anche i formulari da sistemare: un conteggio per canale, ciascuno una volta.
   const dt = data.totali.date_da_sistemare || {};
   const testoDateTotali = Object.entries(dt).filter(([, v]) => v && v.n).map(([c, v]) => `${NOMI_CANALE[c] || c} ${v.n}${v.senza_fine ? ` (${v.senza_fine} senza fine trasporto)` : ''}`).join(' · ');
-  sitRows.push(['TOTALE', '', data.totali.giacenza_portale_t, data.totali.giacenza_aci_t || 0, data.totali.giacenza_extra_t || 0, ...classi(data.totali), '', '', data.totali.in_attesa_dichiarazione_t, data.totali.ordini_da_dichiarare, data.totali.dichiarato_t, '', testoDateTotali]);
+  // UN TOTALE CHE NON SI FA RESTA VUOTO, NON 0 (giro del 14/10/2026 sulle
+  // decisioni dell'utente del 13/10/2026). Qui `giacenza_aci_t || 0` e
+  // `giacenza_extra_t || 0` scrivevano 0 nel TOTALE di un anno prima del
+  // gestionale, dove le Giacenze dicono null; e le classi del totale, sommate
+  // su righe senza numero, facevano 0 kg. Ora la cella resta vuota come quella
+  // delle righe, e il perche' sta nelle note sotto la tabella. Ogni classe segue
+  // il totale del suo canale: P, M, G1 e G2 la rete, la classe ACI l'ACI. Col
+  // 2026 guardato a gennaio prima della chiusura il totale di rete non si fa ma
+  // quello ACI si', e le classi della rete sommate sulle sole righe col numero
+  // (11.400 kg di P sui dati veri) sembravano il totale.
+  const tot = data.totali;
+  const classiTotale = classi(tot).map((v, i) => (vuotaSeManca(CLASSI[i] === 'ACI' ? tot.giacenza_aci_t : tot.giacenza_portale_t) === '' ? null : v));
+  sitRows.push(['TOTALE', '', vuotaSeManca(tot.giacenza_portale_t), vuotaSeManca(tot.giacenza_aci_t), vuotaSeManca(tot.giacenza_extra_t), ...classiTotale, '', '', tot.in_attesa_dichiarazione_t, tot.ordini_da_dichiarare, chiusaSeCe(tot.in_attesa_chiusa_t), tot.dichiarato_t, '', testoDateTotali]);
+  // Le note: perche' un numero e' «—» (l'anno, i totali, le righe) e che cosa
+  // e' l'attesa per noi chiusa. Le stesse del PDF (giacenzePdf.js). Sull'anno in
+  // corso con tutti i numeri non ce ne sono, se non quella dell'attesa chiusa.
+  const note = notePercheGiacenze(data.righe, tot);
+  const righeSituazione = [sitHeaders, ...sitRows, ...(note.length ? [[], ...note.map(n => [n])] : [])];
+  const stiliSituazione = Object.fromEntries(note.map((_n, i) => [sitRows.length + 2 + i, 'nota']));
   foglioDaRighe(wb, 'Situazione', {
-    doc, righe: [sitHeaders, ...sitRows],
+    doc, righe: righeSituazione, stili: stiliSituazione,
     formati: { [CLASSI.length + 8]: FORMATI.intero },
-    larghezze: [28, 12, 22, 16, 24, ...CLASSI.map(() => 11), 20, 18, 24, 18, 16, 20, 40],
+    larghezze: [28, 12, 22, 16, 24, ...CLASSI.map(() => 11), 20, 18, 24, 18, 18, 16, 20, 40],
   });
 
   // --- Foglio 2: Da dichiarare ---

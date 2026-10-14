@@ -195,7 +195,12 @@ export default function DialogoMese({ sito, flusso, mese, anno, onChiudi, onSalv
               <span className="block mt-1">
                 di quel materiale sono usciti <strong>{kg(mese.uscito_kg || 0)} kg</strong>
                 {mese.uscito_stimato ? ' (in parte ripartiti dal gestionale: il report del portale non ha ancora quella dichiarazione)' : ''}
-                {' '}e restano in giacenza <strong>{kg(mese.resta_kg || 0)} kg</strong>.
+                {/* Di un anno prima del gestionale quello che resta non si
+                    ricostruisce e il riepilogo lo manda null: qui diventava «0 kg»
+                    (giro del 14/10/2026, decisioni dell'utente del 13/10/2026). */}
+                {' '}e restano in giacenza {mese.resta_kg === null
+                  ? <><strong className="cursor-help" title={sito.perche_prima_del_gestionale || undefined}>—</strong>{flusso.prima_del_gestionale ? ' (prima del gestionale: non si ricostruisce, e non vuol dire zero)' : ''}</>
+                  : <strong>{kg(mese.resta_kg || 0)} kg</strong>}.
               </span>
             )}
             {/* Le stesse parole della «i» della casella, dallo stesso aggancio
