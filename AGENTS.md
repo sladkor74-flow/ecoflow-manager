@@ -169,7 +169,11 @@ dell'evasione), altrimenti la prova vede un record vecchio che la piattaforma
 non darebbe. `caricaPagina('lib/x')` impacchetta anche una libreria di
 `src/lib` senza componente, con le sue esportazioni in `modulo` (revisione del
 13/10/2026): e' il modo di provare in node una libreria che importa con l'alias
-`@/` (`prove/ascoltoCaricamenti.mjs`).
+`@/` (`prove/ascoltoCaricamenti.mjs`). Una pagina che chiede chi e' collegato
+(`useAuth` o `usePermessi`, un contesto che la pagina finta non ha) si carica
+da una copia del sorgente in cui e' sostituito solo quell'import
+(`caricaPagina(..., { file })`, 14/10/2026): `prove/pagineAnniPassati.mjs`,
+`prove/perNoiChiusiDallaPagina.mjs`.
 
 ### Lo stile dei commenti
 
@@ -1517,6 +1521,78 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
     «ottobre»: 80 + 50 = 130 t dove la pagina dice 80. Ora una riga con un mese
     scritto in un altro modo non vale in nessun modulo. Prova:
     `prove/targetMeseComeScritto.mjs`.
+
+23. **Il «—» arriva fino alle pagine e ai file** (giro del 14/10/2026 sulle
+    decisioni del 13/10/2026). Le risposte dicevano gia' null col perche'
+    (punti 20 e 21), ma pagine e file scrivevano 0,00: `formatTonnellate(null)`
+    da' «0,00», `|| 0` scrive 0, e `esportaTabella` lascia vuota una cella
+    numerica null. Ora:
+    - la testata delle Dichiarazioni dice «—» col perche' (title) e un riquadro
+      sopra le schede (`tonnellateOManca`, `percheDelPortale` in
+      `DichiarazioniImpianti.jsx`). Su un anno prima del gestionale anche il
+      dichiarato e la quadratura dicono «—»: niente piu' «0 su 0» in verde;
+    - la scheda Impianti usa il componente `Manca` (`SezioneImpianto.jsx`), il
+      Riepilogo e il dialogo del mese dicono «—» col title. Su un anno prima del
+      gestionale niente «c'e' un caricamento che qui non e' stato registrato»:
+      sul 2025 erano 7 righe, Irigom 4.439.080 kg;
+    - la casella «Giacenza rete a portale» delle Giacenze (`GiacenzeKpi.jsx`)
+      dice in breve perche' il totale non si fa, col perche' intero nel title.
+      Se l'ACI c'e', la scrive a parte nella stessa casella: «il totale non si
+      fa ... · ACI 26,81 t, a parte»;
+    - il PDF e il foglio Excel della Situazione scrivono «—» o una cella vuota,
+      mai 0. Le note sotto la tabella le scrive una funzione sola,
+      `notePercheGiacenze` in `src/lib/giacenzePdf.js`, per tutti e due i file.
+      Nel TOTALE del foglio ogni classe segue il totale del suo canale (P, M,
+      G1, G2 la rete; ACI l'ACI): il 05/01/2027 uscivano 11.400 kg di P sommati
+      sulle sole righe col numero;
+    - l'attesa per noi chiusa ha una colonna nel PDF e nel foglio, e «di cui per
+      noi chiuse» nel riepilogo del PDF. Sui dati veri sono 181,299 t, T-Cycle
+      verso Tecnogum. L'elenco «Da dichiarare» aperto dallo stoccaggio si
+      intesta «Per noi chiusi» e non dice piu' «li dichiara lui»
+      (`attesaTuttaChiusa` in `DaDichiarareTable.jsx`, prop `righeGiacenze`).
+      La pagina delle Giacenze gli passa le righe che ha gia' **solo sull'anno
+      in corso** (chiusura del giro): l'elenco e' il file degli ordini non
+      dichiarati di oggi, e su un altro anno l'attesa della riga conta i soli
+      carichi di quell'anno (punto 18). Prima la prop non arrivava mai e la
+      scritta sul sito non c'era.
+
+    Un valore nuovo nelle risposte si scrive con un controllo esplicito di null,
+    mai con `|| 0` o con un formato che lo trasforma in 0. L'anno in corso coi
+    numeri non cambia una parola. Prove: `prove/pagineAnniPassati.mjs`, che gira
+    sulle pagine e sui file veri, con un archivio costruito (2025 prima del
+    gestionale, 2026 di oggi, 2026 guardato il 05/01/2027) e coi dati veri (2025
+    e 2024 con «—», 2026 a 1.617,22 t come prima);
+    `prove/perNoiChiusiDallaPagina.mjs`, la pagina delle Giacenze vera fino
+    all'elenco, anche sui dati veri.
+
+24. **EcoTyna e le giacenze che non hanno un numero** (giro del 14/10/2026).
+    - Il riepilogo della commessa (`assistente.ts`) dice «RETE: — (non e' zero:
+      <perche'>)», mai «RETE 0,00 t».
+    - L'impianto senza il file si riconosce dal suo perche'
+      (`senzaFileDelPortale`: `perche_senza_giacenza ===
+      PERCHE_SENZA_FOTOGRAFIA`), non da una fotografia senza giorno. Un anno
+      chiuso senza lettura, un anno prima del gestionale e Tecnogum per accordo
+      non sono «senza il file».
+    - I totali per canale si fanno con `totaleGiacenze`, la regola del modulo
+      (`totaleDellaColonna`).
+    - Lo strumento `giacenze` passa `in_attesa_chiusa_t` e
+      `in_attesa_chiusa_perche`, e nei totali della rete la parte chiusa
+      (`in_attesa_chiusa_t`) e quella da risolvere (`in_attesa_da_risolvere_t`);
+      il totale dell'attesa resta il numero del portale. Le 181,299 t di T-Cycle
+      non sono un'attesa da risolvere.
+    - **Il perche' si dice una volta.** Su un anno prima del gestionale c'e'
+      `avviso_anno`, e righe e totali ci rimandano. Anche `perche_canali` di ACI
+      ed extra raccolta e' un rimando (`percheCanali`): all'avviso dell'anno, o a
+      `calcolo.avviso` quando e' lo stesso della rete della riga (il piazzale
+      senza la lettura che apra l'anno). I totali si rifanno sulle righe di
+      `calcolaGiacenze`, non su quelle riscritte. Ripetuto per esteso, sui dati
+      veri dell'11/10 il 2025 passava il limite di 24.000 caratteri di
+      `serializza` (`pianoAssistente.ts`), e l'elenco arrivava al modello
+      tagliato a 8 siti su 15 (nel 2024, su 18). Ora 18.349 e 21.873 caratteri,
+      elenchi interi.
+    - Chi aggiunge un campo a ogni riga di uno strumento misuri il blocco con
+      `testoDati` sugli anni piu' lunghi (il 2024).
+    - Prova: `prove/variazioniAParole.mjs`, parte 3.
 
 **La prova confronta tutto.** Oltre alle trappole, `confrontaTutto` (in
 `prove/dueModuliStessiNumeri.mjs`) mette a fianco ogni impianto e ogni piazzale,
@@ -4532,6 +4608,35 @@ nella scheda dei raccoglitori.
   La usano l'Andamento di Target & Status, la tabella delle regioni della
   dashboard (`getDashboardRaccolta`) ed EcoTyna (`assistente.ts`): queste due
   dalla chiusura del giro del 14/10/2026.
+- **Le variazioni a parole** (giro del 14/10/2026). I numeri si muovono da se',
+  ma EcoTyna, la dashboard e la card dell'Andamento dicevano solo 11.650 t. Ora
+  dicono anche da dove vengono, solo per le variazioni in vigore
+  (`variazioniDelContratto(...).filter(v => v.in_vigore)`), e senza nessuna
+  lettura in piu'.
+  - EcoTyna: `testoVariazioni` (`assistente.ts`) scrive la riga sotto
+    «Contratto Ecotyre», per esempio «Il contratto 2026 comprende una variazione
+    del consorzio, …: ottobre, Puglia +100,00 t (…). Per questo il target annuo
+    e' 11.650,00 t: senza, sarebbe 11.550,00 t». La regione dice «di cui
+    +100,00 t di variazioni del consorzio». Una variazione superata va su una
+    riga a parte e non si dice mai in vigore. Il target mensile rivisto si
+    nomina solo per le variazioni che ci sono scritte (`nel_mese`): su un
+    contratto senza profilo la variazione e' solo nel target annuo e nella
+    regione (revisione del 14/10/2026).
+  - Dashboard: `quadroRete` porta `variazioni`, senza chi le ha registrate,
+    perche' il quadro lo vede chiunque. `fraseVariazioni` e `sottoVariazioni`
+    (`righeQuadro.js`) danno la riga sotto la cifra «Target annuo del
+    contratto», che va anche nel PDF, e la frase del suo perche'. La stessa
+    frase, con l'anno, sta nel perche' della sezione Rete (`SezioneRete.jsx`,
+    chiusura del giro), dopo «Target: il contratto Ecotyre ... il modificato
+    per ultimo.».
+  - Andamento: `kpis.variazioni` (`TargetStatus.jsx`, solo col target dal
+    contratto) e `notaVariazioni` (`KpiCards.jsx`).
+  - Senza variazioni i testi sono quelli di prima, carattere per carattere.
+  Prove: `prove/variazioniAParole.mjs` e
+  `prove/variazioniNelPercheDellaRete.mjs` (la sezione disegnata col riquadro
+  del perche' aperto: lato server il
+  popover del pulsante «i» non si disegna, e la prova sostituisce `Perche` con
+  un contenitore che mostra quello che avrebbe dentro).
 
 Sulla copia dei dati veri dell'11/10/2026, con la variazione di ottobre (+100 t
 in Puglia, IRIGOM): target annuo 11.550 → 11.650; Puglia 2.500 → 2.600; ottobre
@@ -5045,7 +5150,10 @@ istruita, e sono state misurate sul codice:
     siti mentre lo strumento sommava i soli stoccaggi, 10 t contro 3 sulla
     stessa domanda. Ora tutti e due scrivono «impianti X t, stoccaggi Y t»,
     rifatti sulle righe. Prova: `prove/assistenteGiacenzeCanali.mjs`, sulla
-    funzione vera.
+    funzione vera. Dal 14/10/2026 passa anche l'attesa per noi chiusa e i
+    totali con `totaleGiacenze` («—» col perche' quando una riga non ha il
+    numero), e il perche' di un anno prima del gestionale una volta sola, in
+    `avviso_anno`: punto 24 di «Giacenze e Dichiarazioni: lo stesso numero».
   - `riepilogo_dichiarazioni`: **quanto resta da dichiarare lo dice la pagina
     Dichiarazioni**. Lo strumento chiama `riepilogoDichiarazioni` col client di
     chi chiede, una volta per domanda (`ctx.leggi`), e per ogni impianto passa i
@@ -5075,7 +5183,13 @@ istruita, e sono state misurate sul codice:
   Dashboard diceva 11.550 t e 79,7%. Senza il giorno dei dati l'atteso non si
   inventa: «non calcolabile», col motivo. La frase resta «quota attesa a oggi
   N%», seguita da «fino al gg/mm/aaaa». Prova:
-  `prove/assistenteAttesoContratto.mjs`, contro la Dashboard vera.
+  `prove/assistenteAttesoContratto.mjs`, contro la Dashboard vera. Dal
+  14/10/2026 l'atteso di una regione e' `attesoDellaRegione`, e sotto la riga
+  del contratto c'e' quella delle variazioni del consorzio in vigore
+  (`testoVariazioni`): vedi «Le variazioni del contratto in corso d'anno».
+  Le giacenze senza un numero («RETE: —» col perche', mai 0,00) e lo strumento
+  `giacenze` che dice il perche' dell'anno una volta sola: punto 24 di
+  «Giacenze e Dichiarazioni: lo stesso numero».
 - **Un nome solo, EcoTyna**, nel menu, nel titolo della pagina e in tutti i
   testi a video (prima «Assistente» e «Chiedi all'Assistente»). Nell'elenco dei
   moduli di una richiesta 'Assistente' e' il valore che si salva, e resta:
