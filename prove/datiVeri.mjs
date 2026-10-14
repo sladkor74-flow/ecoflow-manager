@@ -18,7 +18,10 @@
 // dal computer dell'utente): un file treadrider-dati-veri-AAAA-MM-GG.json.gz con
 // gli archivi, il momento della lettura e le risposte del sito di quel momento
 // (attesi). Si scarica dal browser, in sola lettura: vedi AGENTS.md, «I quattro
-// controlli», e la memoria «dati-veri». Senza la copia la prova si salta e lo
+// controlli», e la memoria «dati-veri». Dal 14/10/2026 la scarica anche
+// l'amministratore da Caricamento Dati, «Copia di sicurezza»: rinominata
+// treadrider-dati-veri-AAAA-MM-GG.json.gz vale, se e' completa (sotto, «la copia
+// deve avere tutto quello che serve»). Senza la copia la prova si salta e lo
 // dice. L'orologio si ferma al momento della lettura, cosi' «oggi» e' quello di
 // allora. npm run prove
 import { build } from 'esbuild';
@@ -39,6 +42,29 @@ console.log(`Copia: ${copia}, letta il ${DATI.meta.letto_fino_al} (commit pubbli
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
+const ANNO = Number(String(DATI.meta.letto_fino_al).slice(0, 4));
+
+// LA COPIA DEVE AVERE TUTTO QUELLO CHE SERVE AI TRE CONTROLLI (15/10/2026).
+// Dal 14/10/2026 la copia si scarica anche da Caricamento Dati (la copia di
+// sicurezza, src/lib/copiaSicurezza.js), nello stesso formato. Se durante la
+// copia Giacenze o Dichiarazioni non hanno risposto, o un archivio non si e'
+// letto, il file vale come copia di sicurezza ma non come copia di questo
+// controllo: senza le risposte del sito il terzo controllo saltava in silenzio
+// (99 verifiche su 158, tutte verdi, senza una parola), e senza un archivio i
+// primi due tornano su dati monchi. Qui si dice e si fallisce. Su una copia
+// completa non si aggiunge nessuna verifica: 158 restano 158.
+const ATTESI = [`riepilogoDichiarazioni_${ANNO}`, `calcolaGiacenze_${ANNO}`];
+const mancanze = [
+  ...new Set([
+    ...ATTESI.filter(k => !(DATI.attesi && DATI.attesi[k] && DATI.attesi[k].risposta)),
+    ...(Array.isArray(DATI.meta.attesi_mancanti) ? DATI.meta.attesi_mancanti : []),
+  ]),
+].map(k => `manca la risposta del sito ${k}${DATI.attesi && DATI.attesi[k] && DATI.attesi[k].errore ? ` (${DATI.attesi[k].errore})` : ''}`)
+  .concat((Array.isArray(DATI.meta.non_letti) ? DATI.meta.non_letti : []).map(n => `l'archivio ${n.archivio || n} non si e' letto${n.motivo ? ` (${n.motivo})` : ''}`));
+if (mancanze.length) {
+  console.log(`ATTENZIONE: la copia ${copia} non e' completa e non vale per questo controllo: si scarica di nuovo.`);
+  for (const m of mancanze) verifica('la copia ha tutto quello che serve ai tre controlli', false, m);
+}
 
 // L'SDK finto legge dalla copia, come la piattaforma: uguaglianza, $in, $gte,
 // $lte, null per il campo vuoto, ordinamento e pagine. Le scritture non vanno da
@@ -107,7 +133,6 @@ const conOra = async (iso, f) => {
   try { return await f(); } finally { globalThis.Date = OraVera; }
 };
 
-const ANNO = Number(String(DATI.meta.letto_fino_al).slice(0, 4));
 const riepilogo = await funzione('riepilogoDichiarazioni');
 const giacenze = await funzione('calcolaGiacenze');
 const R = await conOra(DATI.meta.letto_fino_al, () => riepilogo({ anno: ANNO }));
@@ -139,9 +164,11 @@ for (const s of R.j.siti || []) {
 verifica('ci sono stati dei confronti', confronti > 0, String(confronti));
 
 console.log('3. GLI STESSI NUMERI CHE IL SITO DICEVA QUANDO LA COPIA E\' STATA LETTA');
-const attR = DATI.attesi.riepilogoDichiarazioni_2026 && DATI.attesi.riepilogoDichiarazioni_2026.risposta;
-const attG = DATI.attesi.calcolaGiacenze_2026 && DATI.attesi.calcolaGiacenze_2026.risposta;
-if (attR && ANNO === 2026) {
+// Le risposte dell'anno della copia: se mancano, la copia e' gia' fallita sopra.
+const att = (k) => DATI.attesi && DATI.attesi[k] && DATI.attesi[k].risposta;
+const attR = att(`riepilogoDichiarazioni_${ANNO}`);
+const attG = att(`calcolaGiacenze_${ANNO}`);
+if (attR) {
   for (const k of ['conferito_t', 'giacenza_calcolata_t', 'giacenza_portale_t', 'siti_che_quadrano', 'siti_da_quadrare', 'aci_che_quadrano', 'aci_da_quadrare', 'dichiarato_caricato_rete_t', 'dichiarato_caricato_aci_t', 'dichiarato_caricato_extra_t']) {
     verifica(`Dichiarazioni, totale ${k}`, t2(R.j.totali[k]) === t2(attR.totali[k]), `${R.j.totali[k]} contro ${attR.totali[k]} del sito`);
   }
@@ -158,7 +185,7 @@ if (attR && ANNO === 2026) {
     }
   }
 }
-if (attG && ANNO === 2026) {
+if (attG) {
   for (const k of ['conferito_t', 'giacenza_portale_t', 'conferito_extra_t', 'terziarie_t']) {
     verifica(`Giacenze, totale ${k}`, t2(G.j.totali[k]) === t2(attG.totali[k]), `${G.j.totali[k]} contro ${attG.totali[k]} del sito`);
   }

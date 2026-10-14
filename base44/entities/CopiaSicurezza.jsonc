@@ -1,0 +1,106 @@
+{
+  "name": "CopiaSicurezza",
+  "type": "object",
+  // IL REGISTRO DELLE COPIE DI SICUREZZA (14/10/2026).
+  //
+  // Migliorie approvate dall'utente il 14/10/2026 («per me ok ... su quanto da
+  // creare, procedi pure»): una copia di sicurezza periodica di tutti gli
+  // archivi, scaricata dall'amministratore. Fino a quel giorno la copia dei dati
+  // veri si faceva a mano, dagli strumenti del browser.
+  //
+  // La copia la prepara il browser (src/lib/copiaSicurezza.js) e finisce nei
+  // Download del PC: i dati non salgono da nessuna parte. Qui resta una riga per
+  // copia, SENZA I DATI: il giorno, chi, quanti archivi e quante righe, quanto
+  // pesa il file. Serve al promemoria della dashboard (shared/promemoriaCopia.ts:
+  // nessuna copia negli ultimi sette giorni) e a sapere quando e' stata fatta
+  // l'ultima. Prova: prove/copiaSicurezza.mjs.
+  "properties": {
+    "giorno": {
+      "type": "string",
+      "description": "Il giorno italiano della copia, aaaa-mm-gg: e' anche quello del nome del file"
+    },
+    "il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando la lettura degli archivi e' finita: i dati della copia sono quelli di questo momento"
+    },
+    "dal": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quando la lettura degli archivi e' cominciata"
+    },
+    "utente": {
+      "type": "string",
+      "description": "Chi l'ha scaricata: nome, o l'email se il nome non c'e'"
+    },
+    "nome_file": {
+      "type": "string",
+      "description": "Il nome del file scaricato, treadrider-copia-aaaa-mm-gg.json.gz"
+    },
+    "archivi": {
+      "type": "number",
+      "description": "Quanti archivi sono nella copia"
+    },
+    "righe": {
+      "type": "number",
+      "description": "Quanti record ci sono in tutto, doppioni delle pagine tolti"
+    },
+    "kb": {
+      "type": "number",
+      "description": "Quanto pesa il file compresso, in kB"
+    },
+    "non_letti": {
+      "type": "number",
+      "default": 0,
+      "description": "Quanti archivi non si sono letti: con piu' di zero la copia non e' completa, e la dashboard lo dice"
+    },
+    // Che cosa manca, per nome: una copia senza un archivio o senza le risposte
+    // di Giacenze e Dichiarazioni si riconosce dal registro, non solo dal file
+    // (revisione del 15/10/2026).
+    "archivi_non_letti": {
+      "type": "string",
+      "default": "",
+      "description": "Gli archivi che non si sono letti, separati da virgola: non sono nel file"
+    },
+    "attesi_mancanti": {
+      "type": "string",
+      "default": "",
+      "description": "Le risposte di Giacenze e Dichiarazioni che mancano (per esempio calcolaGiacenze_2026): la copia vale come copia di sicurezza, non come copia dei dati veri per i controlli"
+    },
+    "righe_json": {
+      "type": "string",
+      "description": "Quante righe per archivio, come JSON { archivio: righe }: i conteggi, mai i dati"
+    }
+  },
+  // La legge e la scrive solo l'amministratore: e' l'unico che scarica la copia,
+  // e la dashboard dice il promemoria solo a lui (la funzione della dashboard
+  // legge col servizio). Modificarla o cancellarla non e' di nessuno, come lo
+  // storico delle modifiche: un registro che si corregge non e' un registro. La
+  // regola non si scrive mai come null (prove/scrittureDegliUtenti.mjs).
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "nessuno"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "nessuno"
+      }
+    }
+  },
+  "required": [
+    "giorno",
+    "il"
+  ]
+}

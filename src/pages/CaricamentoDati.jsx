@@ -8,6 +8,7 @@ import EsitoEseguiti from '@/components/shared/OrdiniInEseguito';
 import { formatIntero, dataServer } from '@/lib/utils';
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
+import CopiaSicurezza from '@/components/caricamento/CopiaSicurezza';
 
 const TIPI_FILE = [
   { key: 'primarie', label: 'Primarie', desc: 'File unico delle primarie (un solo foglio con tutto). Suddivide automaticamente le righe in Primarie Rete, Primarie ACI, Assegnati Rete e Assegnati ACI in base a stato e classe.', colore: 'bg-green-50 border-green-200' },
@@ -530,6 +531,15 @@ export default function CaricamentoDati() {
           );
         })}
       </div>
+
+      {/* LA COPIA DI SICUREZZA (14/10/2026, migliorie approvate dall'utente):
+          tutti gli archivi in un file che resta sul PC. Solo all'amministratore,
+          come l'elenco dei file: legge anche gli archivi riservati, e a un altro
+          utente arriverebbero vuoti. La dashboard porta qui (#copia-sicurezza)
+          quando l'ultima copia ha piu' di sette giorni. Mentre questa pagina
+          carica un file o rifa' i ricalcoli (anche quelli rimasti appesi, che
+          ripartono da soli all'apertura) gli archivi cambiano: la copia aspetta. */}
+      {isAdmin && <CopiaSicurezza fermo={!!uploading || Object.values(ricalcoli).some(r => r && r.in_corso)} />}
 
       {/* Log upload */}
       <div>

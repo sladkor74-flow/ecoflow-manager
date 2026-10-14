@@ -41,7 +41,7 @@
 //
 // node prove/tariffeRiservate.mjs
 import { build } from 'esbuild';
-import { existsSync, readdirSync, readFileSync, statSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -143,11 +143,28 @@ await sezione('2. LE PAGINE: TARIFFA DAL BROWSER SOLO NELLE SCHEDE DELL\'AMMINIS
     const chi = SRC.filter(x => x !== p && new RegExp(`import\\s+${nome}\\s+from`).test(sorgente(x)));
     verifica(`${nome} lo usa solo la Fatturazione`, J(chi) === J(['src/pages/Fatturazione.jsx']), J(chi));
   }
-  // Un lettore generico (entities[nome]) non deve ricevere 'Tariffa': l'unico
-  // nelle pagine e' l'elenco degli assegnati, con due archivi suoi.
+  // Un lettore generico (entities[nome]) non deve ricevere 'Tariffa': nelle
+  // pagine c'e' l'elenco degli assegnati, con due archivi suoi, e dal 14/10/2026
+  // la copia di sicurezza (src/lib/copiaSicurezza.js), che legge per nome TUTTI
+  // gli archivi, Tariffa compresa, perche' e' una copia di tutto. E' del solo
+  // amministratore, che Tariffa la legge comunque (sezione 1): la libreria chiede
+  // al server chi e' collegato prima di qualunque lettura, e Caricamento Dati la
+  // disegna solo a lui. Le due guardie si verificano qui, con le loro
+  // controprove: senza, la copia sarebbe un lettore come gli altri (chiusura del
+  // 15/10/2026).
+  const COPIA = 'src/lib/copiaSicurezza.js';
   const generici = SRC.filter(p => /entities\s*\[\s*[A-Za-z_$]/.test(codice(sorgente(p))));
-  verifica('l\'unica lettura per nome nelle pagine e\' quella degli assegnati, che non legge Tariffa', J(generici) === J(['src/pages/Assegnati.jsx'])
+  verifica('le sole letture per nome nelle pagine sono quella degli assegnati, che non legge Tariffa, e la copia di sicurezza dell\'amministratore', J(generici) === J([COPIA, 'src/pages/Assegnati.jsx'])
     && /entity = 'Assegnato'/.test(sorgente('src/pages/Assegnati.jsx')) && /entity="AssegnatoAci"/.test(sorgente('src/pages/AssegnatiAci.jsx')), J(generici));
+  const RUOLO = /if \(!io \|\| io\.role !== 'admin'\) throw errore\('non_amministratore'[^\n]*\n/;
+  const guardiaLibreria = (t) => { const c = codice(t); const r = c.search(RUOLO); return r >= 0 && c.indexOf('client.entities') > r; };
+  const guardiaPagina = (t) => /\{isAdmin && <CopiaSicurezza\b/.test(codice(t)) && (codice(t).match(/<CopiaSicurezza\b/g) || []).length === 1;
+  const libCopia = sorgente(COPIA), carCopia = sorgente('src/pages/CaricamentoDati.jsx');
+  verifica('la copia di sicurezza legge Tariffa solo dopo aver chiesto al server se chi e\' collegato e\' l\'amministratore', /'Tariffa'/.test(libCopia) && guardiaLibreria(libCopia));
+  verifica('e Caricamento Dati la disegna solo all\'amministratore', guardiaPagina(carCopia) && J(SRC.filter(p => /from '@\/lib\/copiaSicurezza'/.test(sorgente(p)))) === J(['src/components/caricamento/CopiaSicurezza.jsx'])
+    && J(SRC.filter(p => /from '@\/components\/caricamento\/CopiaSicurezza'/.test(sorgente(p)))) === J(['src/pages/CaricamentoDati.jsx']));
+  verifica('controprova: senza il controllo del ruolo, o con la sezione disegnata a tutti, le guardie cadono',
+    !guardiaLibreria(libCopia.replace(RUOLO, '')) && !guardiaPagina(carCopia.replace(/\{isAdmin && <CopiaSicurezza\b/, '{<CopiaSicurezza')));
 
   // L'Extra Raccolta la apre anche chi non e' amministratore: chiede alla funzione.
   const extra = sorgente('src/pages/ExtraRaccolta.jsx');
@@ -400,6 +417,11 @@ await sezione('7. LA LIBRERIA DELLE PAGINE: src/lib/leggiTariffe.js', async () =
 const IMPORT_PERMESSI = "import { usePermessi } from '@/lib/permessi';";
 const IMPORT_FILE = "import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF } from '@/lib/extraRaccoltaExport';";
 const cartella = mkdtempSync(join(tmpdir(), 'tariffe-riservate-'));
+// La cartella delle copie delle pagine si toglie alla fine, anche se la prova
+// cade a meta' (l'evento exit arriva anche dopo un errore non preso): prima
+// ne restava una nella cartella temporanea a ogni giro (chiusura del 15/10/2026).
+const togliCartella = () => rmSync(cartella, { recursive: true, force: true });
+process.on('exit', togliCartella);
 const riquadro = (r, titolo) => trova(r.albero, el => el.type === 'div' && /border rounded-lg p-3 bg-card/.test(el.props.className || '') && testo(el).startsWith(titolo))[0];
 
 await sezione('8. L\'EXTRA RACCOLTA CON L\'ARCHIVIO CHIUSO: I RICAVI DELLA FATTURA PER TUTTI, I COSTI SOLO ALL\'AMMINISTRATORE', async () => {
@@ -611,6 +633,9 @@ await sezione('10. SUI DATI VERI: LE TARIFFE DELLA PAGINA E I NUMERI SONO QUELLI
   console.log(`  Copia ${copia}: ${archivio.length} tariffe (${utente.attive.length} attive dell'extra raccolta), ${mesiConInterventi} mesi dell'extra raccolta confrontati`);
   for (const x of righe) console.log(`    ${x}`);
 });
+
+togliCartella();
+verifica('la cartella temporanea delle copie delle pagine non resta', !existsSync(cartella), cartella);
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
