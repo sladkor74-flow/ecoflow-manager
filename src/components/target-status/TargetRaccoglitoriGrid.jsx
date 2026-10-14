@@ -15,7 +15,7 @@ import ImportaReportGenerale from '@/components/target-status/ImportaReportGener
 import { annoDelRecord, daConfermare } from '@/lib/annoTarget';
 import EsportaPdf from '@/components/shared/EsportaPdf';
 import { targetRaccoglitoriPdf } from '@/lib/giacenzePdf';
-import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
+import { scriviConTraccia, registraConferma, avvisoTraccia } from '@/lib/scriviConTraccia';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
 import VariazioneContratto, { AvvisiScarti, inizialeDaScarto } from '@/components/target-status/VariazioneContratto';
 import { scartiDalContratto } from '@/lib/attesoContratto';
@@ -649,33 +649,51 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
 
   // Confermare una riga copiata dall'anno prima: una voce nello storico di ogni
   // suo record, e la nota "da confermare" sparisce.
+  //
+  // Dal 14/10/2026 la conferma lascia anche la riga nello storico delle
+  // modifiche (registraConferma; decisioni dell'utente del 13/10/2026), come le
+  // tariffe confermate con «Prepara l'anno»: chi ha confermato, quando, il
+  // raccoglitore con regione, impianto e mese, e il valore confermato. Prima
+  // la conferma scriveva solo lo storico_json, che non e' un campo tracciato, e
+  // nello storico delle modifiche e in EcoTyna non restava niente. Le righe di
+  // tutti i record confermati si scrivono alla fine con una scrittura sola nel
+  // registro (a blocchi di cento), anche se la conferma si ferma a meta': quelle
+  // fatte sono confermate davvero. Il valore e' quello del record in mano unito
+  // alla risposta della scrittura: nessuna lettura in piu'.
   const confermaRighe = async (daFare) => {
     const utente = nomeUtente(user);
     setConfermando(daFare.length === 1 ? `${daFare[0].chiave}|${daFare[0].regione}|${daFare[0].impiantoChiave}` : 'tutte');
     // Un target confermato smette di essere «da confermare» e torna nei conti
     // (dashboard, alert): si annuncia, anche se la conferma si ferma a meta'.
     const confermati = new Set();
+    const fatti = [];
+    let errore = null;
     try {
       for (const riga of daFare) {
         const a = riga.annuo;
         if (a && daConfermare(a)) {
           const storico_json = conModifica(a.storico_json, { utente, nota: 'confermato', prima: { target_tonnellate: a.target_tonnellate ?? null, attivo_dal: a.attivo_dal || '' } });
-          await scriviConTraccia('TargetRaccoglitore', a.id, { storico_json }, { origine: ORIGINE });
+          const esito = await scriviConTraccia('TargetRaccoglitore', a.id, { storico_json }, { origine: ORIGINE });
+          fatti.push({ entita: 'TargetRaccoglitore', record: { ...a, ...((esito && esito.record) || {}), storico_json } });
           confermati.add('annui');
           setAnnui(prev => prev.map(x => (x.id === a.id ? { ...x, storico_json } : x)));
         }
         for (const m of Object.values(riga.mesi)) {
           if (!m || !daConfermare(m)) continue;
           const storico_json = conModifica(m.storico_json, { utente, nota: 'confermato', prima: { target: m.target ?? null, non_raccoglie: !!m.non_raccoglie } });
-          await scriviConTraccia('TargetMensile', m.id, { storico_json }, { origine: ORIGINE });
+          const esito = await scriviConTraccia('TargetMensile', m.id, { storico_json }, { origine: ORIGINE });
+          fatti.push({ entita: 'TargetMensile', record: { ...m, ...((esito && esito.record) || {}), storico_json } });
           confermati.add('mensili');
           setMensili(prev => prev.map(x => (x.id === m.id ? { ...x, storico_json } : x)));
         }
       }
-      toast({ title: daFare.length === 1 ? 'Riga confermata' : `${daFare.length} righe confermate` });
     } catch (e) {
-      toast({ title: 'Conferma non riuscita', description: e.message || String(e), variant: 'destructive' });
+      errore = e;
     }
+    const avviso = avvisoTraccia(await registraConferma(fatti, { origine: ORIGINE }));
+    const titolo = daFare.length === 1 ? 'Riga confermata' : `${daFare.length} righe confermate`;
+    if (errore) toast({ title: 'Conferma non riuscita', description: [errore.message || String(errore), avviso ? avviso.description : ''].filter(Boolean).join(' '), variant: 'destructive' });
+    else toast(avviso ? { ...avviso, title: `${titolo}, ma fuori dallo storico` } : { title: titolo });
     if (confermati.size) annuncia([...confermati]);
     setConfermando(null);
   };

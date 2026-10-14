@@ -379,6 +379,73 @@ export function righeDiModifica(entita, { record_id = '', prima = null, dopo = n
   }));
 }
 
+// LA CONFERMA DI UN VALORE COPIATO DALL'ANNO PRIMA (decisioni dell'utente del
+// 13/10/2026; una regola sola per tutti dal 14/10/2026). Confermare toglie il
+// segno «da confermare» (la nota del record, o la voce della copia in fondo
+// allo storico_json) e non cambia nessun campo tracciato: il motore, che
+// registra solo i campi che cambiano, non scriveva niente. Le tariffe
+// confermate con «Prepara l'anno» lasciavano gia' la loro riga (preparaAnno);
+// gli impianti, i target dei raccoglitori e il contratto confermati in Target &
+// Status no, e alla domanda «chi ha confermato il target del 2027, e quando»
+// rispondeva solo la voce dello storico_json della riga. Qui quale valore dice
+// la riga della conferma, archivio per archivio: una riga per record, come le
+// tariffe, sul primo campo dell'elenco che ha un valore. Un mese che non
+// raccoglie dice quello e non il suo target a zero (sui dati veri dell'11/10
+// erano 22 mesi su 147: due righe per mese dicevano due volte la stessa cosa);
+// un sito che non dichiara la rete dice quello, gli altri il loro ruolo. Se
+// nessun campo ha un valore la riga e' sull'ultimo, il valore che fa i conti,
+// senza prima e dopo. Un archivio fuori da questo elenco (i collegamenti di
+// raccoglitori e stoccaggi agli impianti, che non si tracciano) non lascia
+// righe.
+export const CAMPI_DELLA_CONFERMA = {
+  Tariffa: ['valore'],
+  ImpiantoTargetSecondaria: ['target'],
+  TargetRaccoglitore: ['target_tonnellate'],
+  TargetMensile: ['non_raccoglie', 'target'],
+  CommessaEcotyre: ['target_annuo_t'],
+  GiacenzaSito: ['dichiara_rete', 'tipo_destinazione'],
+};
+
+/** Il motivo delle righe di una conferma, uguale per tutti: e' quello che si legge nello storico e che EcoTyna trova. */
+export const MOTIVO_CONFERMA = "confermato il valore copiato dall'anno prima";
+
+/** Il motivo completo: «confermato il valore copiato dall'anno prima (2026), sul contratto 2027». */
+export function motivoDellaConferma(anno) {
+  const a = Number(anno);
+  return Number.isInteger(a) && a > 2000 ? `${MOTIVO_CONFERMA} (${a - 1}), sul contratto ${a}` : MOTIVO_CONFERMA;
+}
+
+/**
+ * Le righe dello storico della conferma di uno o piu' record di un archivio,
+ * com'erano dopo la conferma: una per record, col valore confermato
+ * (CAMPI_DELLA_CONFERMA), uguale prima e dopo: non e' cambiato, e' stato
+ * controllato. Operazione update, chi, quando, da dove, il motivo
+ * (motivoDellaConferma dell'anno del record, se chi conferma non ne da' uno),
+ * l'anno e il segno dei costi come una modifica dello stesso campo: il prezzo
+ * di un fornitore lo vede solo l'amministratore. Un record senza valore ha la
+ * sua riga senza prima e dopo: un valore che manca resta mancante, non diventa
+ * zero (lo zero invece e' un valore).
+ */
+export function righeDiConferma(entita, records, { utente = '', origine = '', motivo = '', il = '', anno = null } = {}) {
+  const campi = CAMPI_DELLA_CONFERMA[entita];
+  if (!campi || !entitaTracciata(entita)) return [];
+  const quando = il || new Date().toISOString();
+  return (records || []).filter(Boolean).map((r) => {
+    const conValore = campi.find(c => !vuoto(r[c]) && !stessoValore(entita, c, null, r[c]));
+    const campo = conValore || campi[campi.length - 1];
+    const valore = conValore ? testoDelValore(r[campo]) : null;
+    const annoRecord = annoDi(entita, r);
+    return {
+      entita, record_id: parte(r.id), etichetta: etichettaDi(entita, r), campo,
+      ...(valore !== null ? { prima: valore, dopo: valore } : {}),
+      unita: unitaDelCampo(entita, campo, r), operazione: 'update', utente: parte(utente), il: quando,
+      origine: parte(origine), motivo: parte(motivo) || motivoDellaConferma(anno || annoRecord),
+      riservato: !!campoRiservato(entita, campo, r),
+      ...(annoRecord ? { anno: annoRecord } : {}),
+    };
+  });
+}
+
 const NOMI_MESI = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
 const CHIAVI_RIGA = ['regione', 'classe', 'destinazione', 'soggetto'];
 const leggiJson = (testo) => { if (testo === null || testo === undefined || testo === '') return null; try { return JSON.parse(testo); } catch { return testo; } };
@@ -495,6 +562,20 @@ export async function registraModifiche(archivi, righe) {
   } catch (e) {
     return { scritta: false, righe: righe.length, motivo: motivoDi(e) };
   }
+}
+
+/**
+ * Registra la conferma di piu' record, anche di archivi diversi (il target
+ * annuo di un raccoglitore e i suoi mesi), con una scrittura sola nel registro,
+ * a blocchi di cento. confermati e' [{ entita, record }], col record com'e'
+ * dopo la conferma, che chi conferma ha gia' in mano: niente letture in piu'.
+ * Tutte le righe hanno lo stesso istante. Come registraModifiche non lancia:
+ * le conferme sono gia' scritte, e una traccia che non riesce si dice.
+ */
+export async function registraConferme(archivi, confermati, opzioni = {}) {
+  const il = opzioni.il || new Date().toISOString();
+  const righe = (confermati || []).filter(x => x && x.record).flatMap(x => righeDiConferma(x.entita, [x.record], { ...opzioni, il }));
+  return registraModifiche(archivi, righe);
 }
 
 /**

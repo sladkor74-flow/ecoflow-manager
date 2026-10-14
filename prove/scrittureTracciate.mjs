@@ -134,9 +134,11 @@ verifica('gli archivi tracciati sono quelli dei numeri che fanno i conti',
 
 console.log('LE PAGINE E LE FUNZIONI CHE DOVEVANO PASSARE DALLO STORICO CI PASSANO');
 const DEVONO = {
-  'src/components/target-status/ConfigurazioneImpianti.jsx': ['scriviConTraccia(', 'eliminaConTraccia(', '<StoricoModifiche'],
-  'src/components/target-status/TargetRaccoglitoriGrid.jsx': ['scriviConTraccia(', '<StoricoModifiche'],
-  'src/components/target-status/CommessaEcotyreForm.jsx': ['scriviConTraccia(', '<StoricoModifiche'],
+  // Le conferme dei valori copiati lasciano la loro riga (registraConferma,
+  // 14/10/2026): impianti, target dei raccoglitori e contratto.
+  'src/components/target-status/ConfigurazioneImpianti.jsx': ['scriviConTraccia(', 'eliminaConTraccia(', '<StoricoModifiche', 'registraConferma(['],
+  'src/components/target-status/TargetRaccoglitoriGrid.jsx': ['scriviConTraccia(', '<StoricoModifiche', 'registraConferma(fatti'],
+  'src/components/target-status/CommessaEcotyreForm.jsx': ['scriviConTraccia(', '<StoricoModifiche', "registraConferma([{ entita: 'CommessaEcotyre'"],
   'src/components/giacenze/TargetManager.jsx': ['scriviConTraccia(', 'eliminaConTraccia(', '<StoricoModifiche'],
   'src/components/dichiarazioni/DialogoMese.jsx': ['scriviConTraccia(', '<StoricoModifiche'],
   'src/components/dichiarazioni/PraticaIrigom.jsx': ['scriviConTraccia('],
@@ -157,7 +159,7 @@ for (const [p, attesi] of Object.entries(DEVONO)) {
 // salvato senza storico non deve passare in silenzio.
 for (const p of file.filter(f => f.startsWith('src/') && !INVOLUCRO.includes(f))) {
   const t = leggi(p);
-  if (!/from '@\/lib\/scriviConTraccia'/.test(t) || !/(scriviConTraccia|eliminaConTraccia|creaMoltiConTraccia|eliminaMoltiConTraccia)\(/.test(t)) continue;
+  if (!/from '@\/lib\/scriviConTraccia'/.test(t) || !/(scriviConTraccia|eliminaConTraccia|creaMoltiConTraccia|eliminaMoltiConTraccia|registraConferma)\(/.test(t)) continue;
   verifica(`${p} dice quando la traccia non riesce (avvisoTraccia o notaTraccia)`, /avvisoTraccia\(|notaTraccia\(/.test(t));
 }
 

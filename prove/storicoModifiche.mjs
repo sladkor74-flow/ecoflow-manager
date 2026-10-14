@@ -43,6 +43,11 @@
 //     vuote di una commessa nuova fatta dalla scheda) si diceva come JSON
 //     grezzo, a video e a EcoTyna.
 //
+// Dal 14/10/2026 anche le conferme di Target & Status lasciano la riga
+// (registraConferma, la regola righeDiConferma): la sezione 6 prova che EcoTyna
+// la riceve e che la nota non la smentisce. Le pagine vere che confermano sono
+// in prove/confermeNelloStorico.mjs.
+//
 // node prove/storicoModifiche.mjs
 import { build } from 'esbuild';
 import { existsSync } from 'node:fs';
@@ -53,7 +58,7 @@ import {
   modificheDelRecord, righeDiModifica, etichettaDi, campoRiservato, unitaDelCampo, differenzeJson,
   scriviTracciato, eliminaTracciato, creaTracciati, eliminaTracciati, notaTraccia, toccaCampiTracciati,
 } from '../base44/shared/campiTracciati.ts';
-import { traccia, eliminaConTraccia, utenteDellaRichiesta } from '../base44/shared/traccia.ts';
+import { traccia, eliminaConTraccia, utenteDellaRichiesta, registraConferma } from '../base44/shared/traccia.ts';
 import { STRUMENTI, catalogoStrumenti, eseguiStrumento } from '../base44/shared/strumentiAssistente.ts';
 import { campoTracciato } from '../base44/shared/campiTracciati.ts';
 import { annoCorrenteRoma } from '../base44/shared/annoTarget.ts';
@@ -441,21 +446,29 @@ console.log('6. ECOTYNA: CHI HA CAMBIATO IL TARGET DI IRIGOM');
   verifica('EcoTyna: le regioni nuove ancora vuote per nome, senza JSON', dv.length === 5 && dv.every((d, i) => d.voce === REGIONI[i] && d.riga === 'aggiunta' && d.valori === 'nessuno') && senzaJson(dv), J(dv));
   verifica('e la nota dice come si leggono', /aggiunta o tolta senza nessun valore ha solo il nome/.test(vuote.dati.nota), vuote.dati.nota);
 
-  // Dopo la copia, l'impianto si conferma in Target & Status: la conferma
-  // scrive solo la nota e non lascia righe. La nota a EcoTyna non deve dire al
-  // presente «da confermare» di un valore che puo' essere gia' confermato.
+  // Dopo la copia, l'impianto si conferma in Target & Status. Fino al
+  // 14/10/2026 la conferma scriveva solo la nota e non lasciava righe; ora
+  // lascia anche la riga della conferma (registraConferma), e la nota a EcoTyna
+  // lo dice senza smentirla. La sola nota resta senza righe: non e' un campo
+  // tracciato. Ne' la nota deve dire al presente «da confermare» di un valore
+  // che puo' essere gia' confermato.
   const ca = await caricaFunzione('copiaAnnoTarget');
   const nuovo = annoCorrenteRoma() + 1;
   const cp = await chiama(ca, { db: { ImpiantoTargetSecondaria: [{ id: 'iI', nome_impianto: 'IRIGOM S.R.L.', anno: nuovo - 1, target: 1050000, stato: 'attivo' }] }, corpo: { anno: nuovo } });
   const imp = (cp.db.ImpiantoTargetSecondaria || []).find(x => x.anno === nuovo);
   const copiate = (cp.db.ModificaDato || []).length;
   const dopoCopia = archivioFinto({ ImpiantoTargetSecondaria: [imp], ModificaDato: cp.db.ModificaDato || [] });
-  const conf = await scriviTracciato(dopoCopia.archivi, 'ImpiantoTargetSecondaria', imp.id, { note: '' }, { utente: 'Mario Rossi', origine: 'Target & Status' });
-  verifica('la conferma non lascia righe: scrive solo la nota', copiate > 0 && conf.traccia.righe === 0 && dopoCopia.db.ModificaDato.length === copiate, J({ copiate, traccia: conf.traccia }));
+  const soloNota = await scriviTracciato(dopoCopia.archivi, 'ImpiantoTargetSecondaria', imp.id, { note: '' }, { utente: 'Mario Rossi', origine: 'Target & Status' });
+  verifica('la nota da sola non lascia righe: non e\' un campo tracciato', copiate > 0 && soloNota.traccia.righe === 0 && dopoCopia.db.ModificaDato.length === copiate, J({ copiate, traccia: soloNota.traccia }));
+  const conf = await registraConferma(dopoCopia.archivi, [{ entita: 'ImpiantoTargetSecondaria', record: { ...imp, note: '' } }], { utente: 'Mario Rossi', origine: 'Target & Status' });
+  verifica('la conferma lascia la sua riga', conf.scritta === true && conf.righe === 1 && dopoCopia.db.ModificaDato.length === copiate + 1, J({ copiate, conf }));
   const st = await eseguiStrumento({ asServiceRole: { entities: dopoCopia.archivi } }, 'storico_modifiche', { soggetto: 'Irigom', cosa: 'target', anno: nuovo }, { amministratore: true });
   verifica('EcoTyna riceve le righe della copia col loro motivo', st.dati.modifiche.righe.some(x => x.campo === 'target di rete' && x.dopo === 1050 && /copia dal \d{4}, da confermare/.test(x.motivo)), J(st.dati.modifiche));
-  verifica('ma la nota non le dice ancora da confermare, e avverte che la conferma in Target & Status non lascia righe',
-    !/sono valori dell'anno prima, da confermare/.test(st.dati.nota) && /confermati in Target & Status invece non lasciano righe qui/.test(st.dati.nota)
+  verifica('e la riga della conferma: chi, il target confermato in tonnellate e il motivo', st.dati.modifiche.righe.some(x => x.campo === 'target di rete' && x.operazione === 'modificato' && x.prima === 1050 && x.dopo === 1050 && x.unita === 't'
+    && x.chi === 'Mario Rossi' && x.motivo === `confermato il valore copiato dall'anno prima (${nuovo - 1}), sul contratto ${nuovo}`), J(st.dati.modifiche));
+  verifica('la nota dice che le conferme di Target & Status lasciano la riga, senza smentirla, e non dice i valori ancora da confermare',
+    !/sono valori dell'anno prima, da confermare/.test(st.dati.nota) && !/non lasciano righe qui/.test(st.dati.nota) && /confermati in Target & Status/.test(st.dati.nota)
+    && /Anche la conferma di un valore copiato lascia la sua riga/.test(st.dati.nota)
     && /non si sa se un valore copiato e' stato confermato dopo/.test(st.dati.nota) && /tariffe preparate per l'anno/.test(st.dati.nota), st.dati.nota);
 
   // Le tariffe confermate con «Prepara l'anno» lasciano invece la loro riga
@@ -471,8 +484,8 @@ console.log('6. ECOTYNA: CHI HA CAMBIATO IL TARGET DI IRIGOM');
   const stT = await eseguiStrumento({ asServiceRole: { entities: archivioFinto({ ModificaDato: regT }).archivi } }, 'storico_modifiche', { cosa: 'tariffe' }, { amministratore: true });
   verifica('EcoTyna riceve la riga della conferma col suo motivo', stT.dati.modifiche.righe.some(x => /^confermato il valore copiato dall'anno prima/.test(x.motivo)), J(stT.dati.modifiche));
   verifica('e la nota dice che la conferma delle tariffe lascia la riga, senza smentirla',
-    !/la conferma invece non lascia righe/.test(stT.dati.nota) && /tariffe confermate con «Prepara l'anno» lasciano anche la riga della conferma/.test(stT.dati.nota)
-    && /confermato il valore copiato dall'anno prima/.test(stT.dati.nota), stT.dati.nota);
+    !/la conferma invece non lascia righe/.test(stT.dati.nota) && /Anche la conferma di un valore copiato lascia la sua riga/.test(stT.dati.nota)
+    && /le tariffe confermate con «Prepara l'anno»/.test(stT.dati.nota) && /confermato il valore copiato dall'anno prima/.test(stT.dati.nota), stT.dati.nota);
 }
 
 console.log('7. LA FINESTRA DELLA COPIA DICE SE LO STORICO NON SI E\' SCRITTO');

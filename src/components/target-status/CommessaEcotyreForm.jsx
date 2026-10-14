@@ -8,7 +8,8 @@ import { MESI } from '@/lib/pfuConstants';
 import { tonnellate, percentuale, leggiNumero, leggiStorico, conModifica, nomeUtente, dataOra, REGIONI_COMMESSA } from '@/lib/target';
 import { leggiFileTargetContratto } from '@/lib/targetContratto';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
-import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
+import { scriviConTraccia, registraConferma, avvisoTraccia } from '@/lib/scriviConTraccia';
+import { daConfermare } from '@/lib/annoTarget';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
 import VariazioneContratto, { ElencoVariazioni, avvisoVariazioniChiuse } from '@/components/target-status/VariazioneContratto';
 import { variazioniDelContratto, variazioniCheSiChiudono } from '@/lib/attesoContratto';
@@ -60,6 +61,20 @@ import { annunciaTarget, useTargetCambiati, useOrigine } from '@/lib/eventiDati'
 // se una parte e' cambiata qui e li', non si scrive niente e la scheda lo dice,
 // con l'avviso «esce dai numeri» se una variazione ne uscirebbe: si salva
 // premendo di nuovo. Lo storico e il «prima» si scrivono da quello riletto.
+//
+// LA CONFERMA DEL CONTRATTO COPIATO (14/10/2026; decisioni dell'utente del
+// 13/10/2026). La copia dell'anno porta il contratto dell'anno prima con la
+// voce «copiato dal <anno prima>, da confermare» in fondo allo storico, e
+// l'Andamento manda qui a confermarlo; ma qui si poteva solo correggerlo e
+// salvare, col pulsante spento finche' non si cambiava un numero: un contratto
+// uguale a quello dell'anno prima restava da confermare. Ora c'e' «Conferma il
+// contratto»: una voce «confermato» nello storico della commessa e la riga
+// della conferma nello storico delle modifiche (registraConferma: chi, quando,
+// il target annuo confermato), come le tariffe confermate con «Prepara
+// l'anno». Come ogni scrittura della commessa rilegge il contratto subito prima
+// (una lettura per conferma): lo storico si riscrive intero, e una variazione
+// registrata nel frattempo altrove non deve sparire. Una correzione salvata
+// conferma anche lei il contratto, e lascia le righe di quello che cambia.
 
 const ORIGINE = 'Target & Status, commessa Ecotyre';
 const testo = (v) => (v === null || v === undefined || v === '' ? '' : String(v).replace('.', ','));
@@ -426,6 +441,29 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
     setSalvando(false);
   };
 
+  // La conferma del contratto copiato (vedi in testa): sul contratto riletto.
+  const conferma = async () => {
+    setSalvando(true);
+    try {
+      const fresca = piuRecente(await base44.entities.CommessaEcotyre.filter({ anno }));
+      if (!fresca || Number(fresca.anno) !== Number(anno)) throw new Error(`il contratto del ${anno} non si trova più: ricarica la pagina`);
+      if (!daConfermare(fresca)) {
+        toast({ title: `Il contratto del ${anno} è già confermato`, description: 'Nel frattempo è stato confermato o corretto altrove: rileggo la scheda.' });
+      } else {
+        const storico_json = conModifica(fresca.storico_json, { utente: nomeUtente(user), nota: 'confermato', prima: { target_annuo_t: fresca.target_annuo_t ?? null } });
+        const esito = await scriviConTraccia('CommessaEcotyre', fresca.id, { storico_json }, { origine: ORIGINE });
+        const avviso = avvisoTraccia(await registraConferma([{ entita: 'CommessaEcotyre', record: { ...fresca, ...((esito && esito.record) || {}), storico_json } }], { origine: ORIGINE }));
+        // Un contratto confermato non e' piu' «da confermare» per la dashboard e l'Andamento aperti.
+        annunciaTarget({ anno, parti: ['contratto'], origine });
+        toast(avviso ? { ...avviso, title: `Contratto ${anno} confermato, ma fuori dallo storico` } : { title: `Contratto ${anno} confermato` });
+      }
+      await carica();
+    } catch (e) {
+      toast({ title: 'Conferma non riuscita', description: e.message || String(e), variant: 'destructive' });
+    }
+    setSalvando(false);
+  };
+
   if (caricando) return <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" />Caricamento…</div>;
 
   const annuo = numero(dati.target_annuo_t) || 0;
@@ -455,6 +493,17 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
       </div>
 
       {!record && !modificato && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">La commessa {anno} non è ancora stata inserita.</p>}
+      {record && daConfermare(record) && (
+        <div className="flex items-center justify-between gap-3 flex-wrap text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+          <span>
+            Il contratto del {anno} è copiato dal {anno - 1} e non è ancora confermato: va controllato sul contratto {anno}.
+            {isAdmin ? ' Se i numeri sono giusti confermalo; se no correggili e salva, e il salvataggio lo conferma.' : ''}
+          </span>
+          {isAdmin && !modificato && (
+            <Button size="sm" variant="outline" onClick={conferma} disabled={salvando}>{salvando && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Conferma il contratto {anno}</Button>
+          )}
+        </div>
+      )}
       {cambiatoAltrove && <p role="status" className="text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">{cambiatoAltrove}</p>}
       {isAdmin && modificato && (
         <div className="flex items-center justify-between gap-3 flex-wrap text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">

@@ -14,8 +14,18 @@
 // che finisce fuori dallo storico senza dirlo e' proprio il buco che questo
 // file chiude. prove/scrittureTracciate.mjs fallisce se una pagina scrive un
 // archivio tracciato senza passare di qui.
+//
+// LE CONFERME (14/10/2026). Confermare un valore copiato dall'anno prima toglie
+// il segno «da confermare» e non cambia nessun campo tracciato, quindi non
+// lasciava righe: chi ha confermato il target del 2027 e quando lo sapeva solo
+// lo storico_json della riga. registraConferma scrive la riga della conferma
+// (la regola e' righeDiConferma, la stessa delle tariffe confermate con
+// «Prepara l'anno»): chi, quando, che cosa e il valore confermato, per tutti i
+// record confermati insieme con una scrittura sola nel registro, senza
+// rileggere niente. La usano le conferme di Target & Status (impianti, target
+// dei raccoglitori, contratto). Prova: prove/confermeNelloStorico.mjs.
 import { base44 } from '@/api/base44Client';
-import { scriviTracciato, eliminaTracciato, creaTracciati, eliminaTracciati, notaTraccia } from '@/lib/campiTracciati';
+import { scriviTracciato, eliminaTracciato, creaTracciati, eliminaTracciati, registraConferme, notaTraccia } from '@/lib/campiTracciati';
 
 export { notaTraccia };
 
@@ -67,6 +77,19 @@ export async function creaMoltiConTraccia(entita, righe, opzioni = {}) {
 /** Cancella tanti record gia' in mano (le voci che un modello sostituisce), con una scrittura sola nel registro. */
 export async function eliminaMoltiConTraccia(entita, records, opzioni = {}) {
   return eliminaTracciati(base44.entities, entita, records, await conChi(opzioni));
+}
+
+/**
+ * La riga della conferma dei valori copiati dall'anno prima: confermati e'
+ * [{ entita, record }], coi record com'erano dopo la conferma (quelli in mano
+ * alla pagina, uniti alla risposta della scrittura). Una scrittura sola nel
+ * registro, a blocchi di cento, e nessuna lettura. Restituisce la traccia
+ * { scritta, righe, motivo? }: la conferma e' gia' scritta, e se il registro
+ * non si scrive lo si dice con avvisoTraccia. opzioni: { origine, motivo? }.
+ */
+export async function registraConferma(confermati, opzioni = {}) {
+  if (!(confermati || []).length) return { scritta: true, righe: 0 };
+  return registraConferme(base44.entities, confermati, await conChi(opzioni));
 }
 
 /**

@@ -9,10 +9,10 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus, Trash2, Edit3, AlertTriangle, Copy, ArrowRightLeft, Wrench, ChevronDown, ChevronRight, CalendarClock, CheckCircle2 } from 'lucide-react';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { formatKg, fmtTon } from '@/lib/utils';
-import { annoDelRecord, annoCorrenteRoma, daConfermare, senzaNotaCopia, commessaDellAnno } from '@/lib/annoTarget';
+import { annoDelRecord, annoCorrenteRoma, daConfermare, senzaNotaCopia, commessaDellAnno, notaCopia } from '@/lib/annoTarget';
 import { chiaveNome, conModifica, nomeUtente } from '@/lib/target';
 import { ton, it, testoErrore } from '@/components/predittivita/Comuni';
-import { scriviConTraccia, eliminaConTraccia, avvisoTraccia, notaTraccia } from '@/lib/scriviConTraccia';
+import { scriviConTraccia, eliminaConTraccia, registraConferma, avvisoTraccia, notaTraccia } from '@/lib/scriviConTraccia';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
 import { annunciaTarget, useOrigine } from '@/lib/eventiDati';
 
@@ -34,6 +34,13 @@ import { annunciaTarget, useOrigine } from '@/lib/eventiDati';
 // capacita', fine della programmazione, stato e nome finiscono nello storico
 // delle modifiche, che si apre sotto ogni impianto. Gli altri campi passano di
 // li' lo stesso, senza costare una lettura in piu'.
+//
+// La conferma di un impianto copiato dall'anno prima (decisioni dell'utente del
+// 13/10/2026, portata qui il 14/10/2026) toglie la nota della copia e lascia la
+// riga nello storico delle modifiche (registraConferma): chi, quando e il
+// target confermato, come le tariffe confermate con «Prepara l'anno». Prima
+// toglieva solo la nota. I collegamenti di raccoglitori e stoccaggi non si
+// tracciano, e la loro conferma resta la sola nota.
 const ORIGINE = 'Target & Status, impianti e stoccaggi';
 
 // Gli stessi valori di base44/shared/fineProgrammazione.ts e regolePredittivita.ts
@@ -178,14 +185,63 @@ function Elimina({ nome, onElimina, piccolo = false }) {
   );
 }
 
-/** Il segno di un record copiato dall'anno prima, con il pulsante per confermarlo. */
+/**
+ * Conferma un record copiato dall'anno prima: toglie la nota della copia e
+ * scrive la riga della conferma nello storico delle modifiche, col record in
+ * mano unito a quello che la scrittura risponde (nessuna lettura in piu'). La
+ * traccia che torna e' quella del registro: la nota non e' un campo tracciato.
+ */
+async function confermaCopiato(entita, record) {
+  const esito = await scriviConTraccia(entita, record.id, { note: senzaNotaCopia(record.note) }, { origine: ORIGINE });
+  const traccia = await registraConferma([{ entita, record: { ...record, ...((esito && esito.record) || {}) } }], { origine: ORIGINE });
+  return { record: esito && esito.record, traccia };
+}
+
+/**
+ * Il segno di un record copiato dall'anno prima, con il pulsante per confermarlo.
+ * Ogni conferma lascia la sua riga nello storico delle modifiche, che non si
+ * corregge (14/10/2026): un secondo clic sullo stesso record ne lascerebbe due.
+ * Mentre la conferma e' in volo il pulsante e' spento, e il ref ferma anche il
+ * secondo clic di un doppio clic, che arriva prima che il pulsante spento sia a
+ * video (come confermando nella griglia dei raccoglitori). Una conferma riuscita
+ * lo tiene spento finche' la scheda non mostra il record confermato: se la
+ * rilettura non riesce, a video resta il record di prima, ancora «da
+ * confermare». Una conferma non riuscita (la nota non si e' scritta, e quindi
+ * nemmeno la riga) lo riaccende, per riprovare.
+ */
 function DaConfermare({ record, entita, modificabile, scrivi }) {
-  if (!daConfermare(record)) return null;
+  const preso = useRef(null);
+  const [fase, setFase] = useState(null);
+  const daFare = daConfermare(record);
+  const id = record && record.id;
+  useEffect(() => {
+    if (!daFare && preso.current === id) { preso.current = null; setFase(null); }
+  }, [daFare, id]);
+  if (!daFare) return null;
+  const conferma = async () => {
+    if (preso.current === id) return;
+    preso.current = id;
+    setFase('volo');
+    let riuscita = false;
+    try {
+      riuscita = await scrivi(() => confermaCopiato(entita, record), 'Confermato');
+    } finally {
+      if (!riuscita) { preso.current = null; setFase(null); }
+      else if (preso.current === id) setFase('fatto');
+    }
+  };
   return (
     <span className="text-[11px] px-1 rounded bg-amber-100 text-amber-800 border border-amber-300 font-normal inline-flex items-center gap-1">
       copiato dall&apos;anno prima, da confermare
       {modificabile && (
-        <button type="button" className="underline hover:text-emerald-700" onClick={() => scrivi(() => scriviConTraccia(entita, record.id, { note: senzaNotaCopia(record.note) }, { origine: ORIGINE }), 'Confermato')}>
+        <button
+          type="button"
+          disabled={!!fase}
+          title={fase === 'fatto' ? 'Confermato: il segno sparisce quando la scheda si rilegge' : undefined}
+          className="underline hover:text-emerald-700 disabled:opacity-60 disabled:no-underline inline-flex items-center gap-0.5"
+          onClick={conferma}
+        >
+          {fase === 'volo' && <Loader2 className="w-3 h-3 animate-spin" />}
           Conferma
         </button>
       )}
@@ -279,6 +335,14 @@ function RegoleAnno({ anno, commessa, modificabile, user, scrivi }) {
   // variazione (VariazioneContratto, «fresca»): una lettura per salvataggio.
   // Fine della programmazione e chili per viaggio non cambiano il target: il
   // salvataggio non si annuncia alle altre pagine.
+  //
+  // E non confermano il contratto (14/10/2026). Un contratto copiato dall'anno
+  // prima e' «da confermare» finche' la voce della copia e' l'ultima del suo
+  // storico_json: la voce di questo salvataggio la copriva, e il contratto del
+  // 2027 risultava confermato coi numeri del 2026 senza che nessuno l'avesse
+  // guardato, e senza la riga della conferma nello storico delle modifiche. Si
+  // conferma nella scheda Commessa Ecotyre; qui la voce tiene davanti la nota
+  // della copia, come fa la copia senza le variazioni del consorzio.
   const salva = async () => {
     if (fine && !fine.startsWith(`${anno}-`)) { await scrivi(() => Promise.reject(new Error(`La fine della programmazione deve essere un giorno del ${anno}.`))); return; }
     const chili = kg.trim() ? daChili(kg) : null;
@@ -287,15 +351,16 @@ function RegoleAnno({ anno, commessa, modificabile, user, scrivi }) {
     await scrivi(async () => {
       const fresca = commessaDellAnno(await base44.entities.CommessaEcotyre.filter({ anno }), anno);
       if (!fresca) throw new Error(`il contratto del ${anno} non si trova più: ricarica la pagina`);
+      const nota = 'fine della programmazione e chili per viaggio';
       return scriviConTraccia('CommessaEcotyre', fresca.id, {
         fine_programmazione: fine || null,
         kg_per_viaggio: chili,
         storico_json: conModifica(fresca.storico_json, {
           utente: nomeUtente(user),
-          nota: 'fine della programmazione e chili per viaggio',
+          nota: daConfermare(fresca) ? `${notaCopia(anno)} · ${nota}` : nota,
           prima: { target_annuo_t: fresca.target_annuo_t ?? null, fine_programmazione: fresca.fine_programmazione || null, kg_per_viaggio: fresca.kg_per_viaggio ?? null },
         }),
-      }, { origine: ORIGINE, motivo: 'fine della programmazione e chili per viaggio' });
+      }, { origine: ORIGINE, motivo: nota });
     }, `Regole del ${anno} salvate`);
     setSalvando(false);
   };

@@ -10,11 +10,16 @@
 // funzione che scrive un campo tracciato senza passare di qui la trova
 // prove/scrittureTracciate.mjs.
 //
+// registraConferma (14/10/2026) e' la riga della conferma di un valore copiato
+// dall'anno prima, con la stessa regola delle pagine (righeDiConferma in
+// campiTracciati.ts): le conferme non cambiano nessun campo, e senza questa
+// riga non lasciavano niente nello storico.
+//
 // archivi e' base44.asServiceRole.entities. Le risposte hanno la forma
 // { record, traccia: { scritta, righe, motivo? } }: la traccia che non si
 // scrive non annulla il dato, e la funzione la rimanda a chi ha salvato
 // (notaTraccia la dice in una frase).
-import { scriviTracciato, eliminaTracciato, creaTracciati, unisciTracce, notaTraccia } from "./campiTracciati.ts";
+import { scriviTracciato, eliminaTracciato, creaTracciati, registraConferme, unisciTracce, notaTraccia } from "./campiTracciati.ts";
 
 export { unisciTracce, notaTraccia };
 
@@ -37,4 +42,14 @@ export function eliminaConTraccia(archivi, entita, id, opzioni = {}) {
 /** Crea tanti record insieme, con una sola scrittura nel registro. */
 export function creaConTraccia(archivi, entita, righe, opzioni = {}) {
   return creaTracciati(archivi, entita, righe, opzioni);
+}
+
+/**
+ * La riga della conferma di valori copiati dall'anno prima: confermati e'
+ * [{ entita, record }], coi record com'erano dopo la conferma; opzioni:
+ * { utente, origine, motivo?, anno? }. Una scrittura sola nel registro, nessuna
+ * lettura; non lancia, e la traccia che non si scrive si dice.
+ */
+export function registraConferma(archivi, confermati, opzioni = {}) {
+  return registraConferme(archivi, confermati, opzioni);
 }
