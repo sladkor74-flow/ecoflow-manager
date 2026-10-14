@@ -21,6 +21,7 @@ const { cartellaPassivaUnFoglio, cartellaPassivaPerCanale } = await caricaLibPag
 const ExcelJS = createRequire(import.meta.url)('exceljs');
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
+const J = (x) => JSON.stringify(x);
 
 const SCURO = 'FF0F4C5C';
 const MEDIO = 'FF1A7F8E';
@@ -43,11 +44,14 @@ const RETE = {
       { tipo: 'voce', soggetto: 'LOGISTICA & PNEUMATICI SRL (*)', voce: 'Campania - SALERNO', tonnellate: 0, viaggi: 0, prezzo: 68, unita_misura: 'euro_tonnellata', colonna_prezzo: '', totale: 0, note: '' },
       { tipo: 'voce', soggetto: 'LOGISTICA & PNEUMATICI SRL (*)', voce: 'Campania - AVELLINO', tonnellate: 0, viaggi: 0, prezzo: 71, unita_misura: 'euro_tonnellata', colonna_prezzo: '', totale: 0, note: '' },
       { tipo: 'voce', soggetto: 'LOGISTICA & PNEUMATICI SRL (*)', voce: 'Campania - CASERTA', tonnellate: 35.62, viaggi: 0, prezzo: 72, unita_misura: 'euro_tonnellata', colonna_prezzo: '', totale: 2564.64, note: '' },
-      { tipo: 'soggetto', soggetto: 'EMMESSE SRLS', tonnellate: 59.15, totale: 4258.8 },
+      // Il soggetto porta le tonnellate delle voci PIU' i chili senza voce, come
+      // le scrive foglioPassiva (59,15 + 1,20 = 60,35); gli euro solo delle voci
+      // (decisione dell'utente del 13/10/2026).
+      { tipo: 'soggetto', soggetto: 'EMMESSE SRLS', tonnellate: 60.35, totale: 4258.8 },
       { tipo: 'voce', soggetto: 'EMMESSE SRLS', voce: '', tonnellate: 59.15, viaggi: 0, prezzo: 72, unita_misura: 'euro_tonnellata', colonna_prezzo: '', totale: 4258.8, note: '' },
       { tipo: 'senza_voce', soggetto: 'EMMESSE SRLS', tonnellate: 1.2, dettaglio: 'conferimenti a Irigom, 1,20 t' },
     ],
-    totale_t: 183.95, totale_euro: 12887.68,
+    totale_t: 185.15, totale_euro: 12887.68,
     non_previsti: [{ soggetto: 'GREEN TYRE PROJECT SRL', tonnellate: 255.78 }],
   },
   impianti: {
@@ -277,9 +281,16 @@ const rSenza = primaChePorta(ws, 'senza voce nel modello', fasciaRete, fasciaAci
 verifica('la riga senza voce c\'e\', sotto il fornitore, e dice perche\'',
   rSenza === rEmmesse + 2 && testo(ws, rSenza, 1) === 'EMMESSE SRLS — senza voce nel modello', `${rEmmesse} ${rSenza} ${testo(ws, rSenza, 1)}`);
 verifica('e dice che cosa fare', /senza voce nel modello/.test(testo(ws, rSenza, 6)) && /aggiungi la voce o correggi il criterio/.test(testo(ws, rSenza, 6)) && /1,20 t/.test(testo(ws, rSenza, 6)), testo(ws, rSenza, 6));
-verifica('quei chili non entrano nel totale del fornitore',
-  !(righeSommate(formula(ws, rEmmesse, 2)) || []).includes(rSenza) && numero(ws, rEmmesse, 2) === 59.15,
+// Decisione dell'utente del 13/10/2026: i chili senza voce stanno nel totale del
+// fornitore, e quindi anche nella sua formula. Prima la riga portava dentro le
+// tonnellate con quei chili e la formula sommava le sole voci: al primo
+// ricalcolo di Excel il numero cambiava.
+verifica('quei chili entrano nelle tonnellate del fornitore, nella formula come nel numero che porta dentro',
+  J(righeSommate(formula(ws, rEmmesse, 2)) || []) === J([rEmmesse + 1, rSenza]) && numero(ws, rEmmesse, 2) === 60.35,
   `${formula(ws, rEmmesse, 2)} = ${val(ws, rEmmesse, 2)}`);
+verifica('ma non negli euro: un prezzo non ce l\'hanno',
+  J(righeSommate(formula(ws, rEmmesse, 5)) || []) === J([rEmmesse + 1]) && numero(ws, rEmmesse, 5) === 4258.8 && val(ws, rSenza, 5) === null,
+  `${formula(ws, rEmmesse, 5)} = ${val(ws, rEmmesse, 5)}`);
 
 console.log('\nIL TOTALE COMPLESSIVO');
 const rTotRacc = prima(ws, 'Totale complessivo', testaRacc, fasciaAci);

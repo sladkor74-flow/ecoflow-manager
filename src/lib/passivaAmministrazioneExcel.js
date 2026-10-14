@@ -23,10 +23,12 @@
 // cambiato e si aspetta che i totali si rifacciano. E' cosi' che e' fatto il
 // loro file di settembre, ed e' il motivo per cui ci lavorano dentro invece di
 // chiederne un altro. Percio' il totale di una voce e' peso per prezzo, il
-// totale di un fornitore e' la somma delle sue voci, il «Totale complessivo» e'
-// la somma dei fornitori e il numero nella fascia del canale e' la somma dei
-// tre blocchi. Ogni formula porta con se' il risultato gia' calcolato, cosi' il
-// numero si vede anche prima che Excel ricalcoli.
+// totale di un fornitore e' la somma delle sue voci (in tonnellate anche dei
+// suoi chili senza voce, 13/10/2026), il «Totale complessivo» e' la somma dei
+// fornitori e il numero nella fascia del canale e' la somma dei tre blocchi.
+// Ogni formula porta con se' il risultato gia' calcolato, cosi' il numero si
+// vede anche prima che Excel ricalcoli: e la formula deve rifare proprio quel
+// numero (prove/passivaAmministrazioneRicalcolo.mjs).
 //
 // LA FORMA DEI DATI la costruisce passivaAmministrazione.js (foglioPassiva): un
 // foglio e' un canale di un mese, con i blocchi RACCOGLITORI e
@@ -228,14 +230,22 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
   // rientrate, le voci stesse quando la tabella e' piatta. Due elenchi
   // (13/10/2026): le tonnellate non prendono le righe del surplus, che sono le
   // stesse del mese; gli euro si'. Senza surplus i due elenchi sono uguali e le
-  // formule quelle di prima.
+  // formule quelle di prima. Nella tabella piatta le tonnellate prendono anche
+  // le righe dei chili senza voce, che a due livelli stanno gia' dentro la riga
+  // del fornitore.
   const sommandiT = [];
   const sommandiE = [];
   const celleSurplus = [];
-  let aperto = null; // il fornitore in corso, con le righe delle sue voci e dei suoi surplus
+  let aperto = null; // il fornitore in corso, con le righe delle sue voci, dei suoi surplus e dei chili senza voce
   const chiudiFornitore = () => {
     if (!aperto) return;
-    const t = somma(col.tonn, aperto.voci);
+    // Le tonnellate del fornitore sono le voci PIU' i chili senza voce: e' il
+    // numero che il foglio gli da' (passivaAmministrazione.js, tSoggetto), e la
+    // formula deve rifare quello. Prima sommava le sole voci: la riga portava
+    // dentro 12 t e appena Excel ricalcolava diventava 10 (decisione del
+    // 13/10/2026: i chili senza voce stanno nel totale del fornitore). Gli euro
+    // no: quei chili un prezzo non ce l'hanno.
+    const t = somma(col.tonn, [...aperto.voci, ...aperto.senzaVoce].sort((a, b) => a - b));
     const e = somma(col.totale, [...aperto.voci, ...aperto.surplus].sort((a, b) => a - b));
     // Un fornitore senza nemmeno una voce nel modello non ha niente da sommare:
     // si scrive il numero che arriva dai movimenti, perche' perderlo sarebbe
@@ -262,7 +272,7 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
       stendi(ws, r, 1, ultima, st);
       scrivi(ws, r, col.nome, testo(riga.soggetto), st);
       scrivi(ws, r, col.eer, EER_PFU, { ...st, allinea: 'center', fmt: COD });
-      aperto = { riga: r, voci: [], surplus: [], dati: riga, st };
+      aperto = { riga: r, voci: [], surplus: [], senzaVoce: [], dati: riga, st };
       sommandiT.push(r);
       sommandiE.push(r);
       zebrata = false;
@@ -288,9 +298,16 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
     }
 
     if (riga.tipo === 'senza_voce') {
-      // I chili che nessuna voce ha preso. Non si nascondono e non entrano in
-      // nessun totale: sono il segnale che il modello va aggiornato, e dentro
-      // un totale direbbero di aver pagato qualcosa che nessun accordo copre.
+      // I chili che nessuna voce ha preso. Non si nascondono: sono il segnale
+      // che il modello va aggiornato. Non entrano in nessun totale in EURO, che
+      // direbbe di aver pagato qualcosa che nessun accordo copre; entrano invece
+      // nelle TONNELLATE del fornitore e del blocco (decisione del 13/10/2026),
+      // perche' sono chili che il fornitore ha davvero portato nel mese, e il
+      // foglio - e il PDF - glieli contano. La formula li somma come li somma
+      // il numero che porta dentro, cosi' il ricalcolo di Excel non cambia il
+      // totale.
+      if (aperto) aperto.senzaVoce.push(r);
+      else sommandiT.push(r);
       const st = { sfondo: CHIARO, bordo: GRIGLIA };
       stendi(ws, r, 1, ultima, st);
       // Il nome porta appeso il motivo: senza, la riga si legge come un secondo

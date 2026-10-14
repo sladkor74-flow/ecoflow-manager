@@ -49,9 +49,30 @@
 // degli interventi restano quelle di prima (il loro totale e' lo standard),
 // le tonnellate del surplus non si sommano a nessun totale di tonnellate, e il
 // totale in euro del blocco comprende il surplus: e' quello che si paga.
+//
+// LE SECONDARIE SONO TRASPORTI DI SECONDARIA (decisione dell'utente del
+// 13/10/2026): «le eventuali secondarie di extra raccolta saranno trattate come
+// normali trasporti di secondaria con il loro €\t oppure €\viaggio a seconda del
+// tragitto e dei contratti». E' l'eccezione alla regola dei prezzi scritti: il
+// trasporto di una secondaria la passiva lo paga con la tariffa della tratta nel
+// contratto del vettore, e il prezzo scritto sull'intervento vale solo senza
+// contratto (trasportoIntervento di extraRaccoltaCalc.js). Qui la colonna
+// TRASPORTO porta quello che si paga per il viaggio - un intervento e' un
+// viaggio, quindi a tonnellata e' t x €/t - e la nota dice da dove viene; la
+// raccolta di una secondaria e' zero, perche' un trasferimento non e' una
+// raccolta. Cosi' la formula della riga nel foglio (=ROUND per costo + viaggio
+// + oneri) rifa' l'importo della passiva. Il contesto deve portare i contratti
+// dei trasporti (il quinto argomento di contestoPrezzi): senza, una secondaria
+// resta col prezzo scritto e la nota dice che il contratto non e' stato letto.
+//
+// LO STESSO VIAGGIO SI PAGA UNA VOLTA (revisione del 14/10/2026): a viaggio, le
+// secondarie dello stesso camion, giorno, tratta e vettore pagano il viaggio una
+// volta, diviso per peso, come in passiva. Il blocco raggruppa i viaggi dagli
+// interventi del mese che ha gia' (conViaggi): la colonna TRASPORTO di ognuno
+// porta la sua quota e la nota dice con chi divide il viaggio.
 
 import { giornoRoma } from '@/lib/giornoItaliano';
-import { calcExtraRaccolta, avvisoPesoMancante, surplusDelMese } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, avvisoPesoMancante, surplusDelMese, conViaggi } from '@/lib/extraRaccoltaCalc';
 import { cifreItaliane } from '@/lib/formatoSoldi';
 
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -128,9 +149,16 @@ export function produttoreDi(r) {
  */
 export function bloccoExtraRaccolta(interventi, anno, mese, contesto = null) {
   const { dentro, senza_data } = interventiDelMese(interventi, anno, mese);
+  // I viaggi delle secondarie del mese, come li raggruppa la passiva: senza
+  // contesto i numeri restano quelli di prima (nessun contratto dei trasporti).
+  const ctx = conViaggi(contesto || undefined, dentro);
   const righe = dentro.map(r => {
-    const c = calcExtraRaccolta(r, contesto || undefined);
-    const raccolta = Number(r.costo_raccolta_t) || 0;
+    const c = calcExtraRaccolta(r, ctx);
+    const secondaria = chiave(r.tipo_movimento) === 'secondaria';
+    // una secondaria non e' una raccolta (13/10/2026): il suo costo di raccolta
+    // e' zero, come in passiva, anche se sull'intervento ce n'e' uno scritto
+    const raccoltaScritta = Number(r.costo_raccolta_t) || 0;
+    const raccolta = secondaria ? 0 : raccoltaScritta;
     const stoccaggio = Number(r.costo_stoccaggio_t) || 0;
     const trattamento = Number(r.costo_trattamento_t) || 0;
     // LA COLONNA SOVRACOSTO del foglio dell'amministrazione: tutti gli importi
@@ -147,7 +175,16 @@ export function bloccoExtraRaccolta(interventi, anno, mese, contesto = null) {
     // Il trasporto si paga A VIAGGIO: e' un importo fisso, non un prezzo a
     // tonnellata. Nel foglio dell'amministrazione e' la colonna «PREZZO
     // (Euro/viaggio)», che fino al 03/10/2026 nel gestionale non aveva un campo.
-    const trasporto = n2(Number(r.costo_trasporto_viaggio || 0));
+    // Per una secondaria (13/10/2026) e' quello che il contratto della tratta fa
+    // pagare per questo viaggio, anche quando la tariffa e' a tonnellata.
+    const tr = c.trasporto;
+    const trasporto = n2(tr.importo);
+    const notaTrasporto = !secondaria ? ''
+      : tr.interno ? ''
+        : tr.origine === 'contratto'
+          ? `trasporto dal contratto di ${tr.fornitore} per la tratta ${testo(r.stoccaggio) || '—'} → ${testo(r.destinazione) || '—'}: ${cifreItaliane(tr.valore, 2, 4)} ${tr.unita_misura}${tr.unita_misura === '€/viaggio' ? '' : `, ${euroIt(tr.importo)} per il viaggio`}${tr.viaggio ? `; stesso viaggio di ${tr.viaggio.altri.join(', ')} (${tr.viaggio.targa ? `camion ${tr.viaggio.targa}` : 'senza targa'}, ${String(tr.viaggio.giorno || '').split('-').reverse().join('/')}): il viaggio si paga una volta, diviso per peso, qui ${cifreItaliane(tr.viaggio.kg / 1000, 2, 3)} t delle ${cifreItaliane(tr.viaggio.kg_viaggio / 1000, 2, 3)}: ${euroIt(tr.importo)}` : ''}${tr.scritto > 0 ? `; i ${euroIt(tr.scritto)} scritti sull'intervento non si pagano` : ''}`
+          : tr.non_letto ? "contratto della tratta non letto: trasporto col prezzo scritto sull'intervento"
+            : tr.origine === 'intervento' ? "tratta senza contratto: trasporto col prezzo scritto sull'intervento" : '';
     return {
       numero_fir: testo(r.numero_fir) || '—',
       ordine: testo(r.id_ordine) || testo(r.numero_ordine_interno) || '—',
@@ -171,12 +208,14 @@ export function bloccoExtraRaccolta(interventi, anno, mese, contesto = null) {
       // Il totale e' quello del modulo, non un conto rifatto qui: lo standard
       // dell'intervento, perche' il surplus ha la sua riga in fondo al blocco.
       totale: n2(c.costo_standard),
-      secondaria: chiave(r.tipo_movimento) === 'secondaria',
+      secondaria,
       note: [
         // A chi va il sovracosto, prima di tutto il resto: e' la cosa che serve
         // a chi deve fatturarlo.
         c.senza_peso ? "PESO EFFETTIVO MANCANTE: i costi a tonnellata valgono zero finché non si scrive sull'intervento" : '',
-        sovraRaccoglitore ? `sovracosto ${euroIt(sovraRaccoglitore)} al raccoglitore` : '',
+        notaTrasporto,
+        secondaria && raccoltaScritta ? `i ${cifreItaliane(raccoltaScritta, 2, 4)} €/t di raccolta scritti sull'intervento non si pagano: una secondaria non è una raccolta` : '',
+        sovraRaccoglitore ? `sovracosto ${euroIt(sovraRaccoglitore)} al ${secondaria ? 'trasportatore' : 'raccoglitore'}` : '',
         sovraImpianto ? `sovracosto ${euroIt(sovraImpianto)} all'impianto` : '',
         senzaPadrone ? `${euroIt(senzaPadrone)} di pulizia e costi aggiuntivi, che non si fatturano a nessuno` : '',
         testo(r.note_costi),
@@ -186,7 +225,7 @@ export function bloccoExtraRaccolta(interventi, anno, mese, contesto = null) {
     };
   });
   // Le righe del surplus: una per fornitore e per surplus, col centesimo del mese.
-  const conto = surplusDelMese(dentro, contesto || undefined);
+  const conto = surplusDelMese(dentro, ctx);
   const surplus = conto.passivo.map(v => {
     const chi = [v.origine, v.dal && v.al ? `dal ${v.dal.split('-').reverse().join('/')} al ${v.al.split('-').reverse().join('/')}` : ''].filter(Boolean).join(', ');
     return {

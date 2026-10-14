@@ -32,20 +32,19 @@
 //      a (nel prezzo) e d (assente), e un ordine senza surplus;
 //   6. il margine (MargineCommessa.jsx): +1.268,40 € sulla rete a settembre, la
 //      colonna «di cui surplus», la ragione (le tonnellate di SMOCO), il foglio;
-//   7. I TRE REPORT DELL'AMMINISTRAZIONE NON SI TOCCANO finche' l'utente non dice
-//      come li vuole (domanda D3 del progetto): fatturazioneExport.js,
-//      formatAmministrazione.js e formatAmministrazioneExport.js sono quelli del
-//      13/10/2026 (l'impronta qui sotto), e sulle righe dei formulari (soloFormulari)
-//      settembre fa ancora 380 righe, 1.120.240 kg e 226.288,48 € sulla rete, 6
-//      righe, 18.890 kg e 4.410,10 € sull'ACI, con o senza il surplus. E sul
-//      percorso vero: la pagina delle esportazioni (AttivaEsportazioni.jsx),
-//      eseguita, passa ai quattro report le sole righe dei formulari.
+//   7. I TRE REPORT DELL'AMMINISTRAZIONE (domanda D3 del progetto, decisa
+//      dall'utente il 13/10/2026 sera: il Fuel Surcharge «deve essere una voce
+//      disgiunta con un proprio rigo (per canale)»): i formulari di settembre
+//      restano 380 righe, 1.120.240 kg e 226.288,48 € sulla rete, 6 righe,
+//      18.890 kg e 4.410,10 € sull'ACI, e sotto c'e' la riga del Fuel Surcharge
+//      (5.601,20 e 94,45), che il TOTALE comprende. E sul percorso vero: la
+//      pagina delle esportazioni (AttivaEsportazioni.jsx), eseguita, passa ai
+//      quattro report tutte le righe del documento, quella del surplus compresa.
 // Senza surplus le pagine sono quelle di prima: nessuna parola, riga o colonna
 // in piu'.
 //
 // node prove/attivaReportSurplus.mjs
 import { build } from 'esbuild';
-import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -525,67 +524,59 @@ if (!A) {
   const foglio0 = (pezzo('Margine', 'opzioniFoglioMargine') || (() => ({})))(reteM0, 2026);
   verifica('...e senza surplus il foglio di prima', (foglio0.colonne || []).length === 12 && foglio0.sottotitolo === 'Ricavo della fatturazione attiva meno costo della fatturazione passiva');
 
-  console.log('7. I TRE REPORT DELL\'AMMINISTRAZIONE NON CAMBIANO (D3)');
-  const { tabellaAttiva } = await caricaLibPagine('lib/fatturazioneExport');
-  const { tabellaAmministrazione } = await caricaLibPagine('lib/formatAmministrazione');
+  console.log('7. I TRE REPORT DELL\'AMMINISTRAZIONE: IL SURPLUS NELLA SUA RIGA (D3, decisa il 13/10/2026 sera)');
+  // L'utente: il Fuel Surcharge «deve essere una voce disgiunta con un proprio
+  // rigo (per canale)». I formulari restano quelli, con gli stessi numeri; sotto,
+  // la riga del surplus, e il TOTALE la comprende. Fino a questa decisione la
+  // pagina passava ai report le sole righe dei formulari, e qui si teneva
+  // l'impronta dei tre file perche' nessuno li cambiasse prima della risposta.
+  // I fogli veri, aperti e calcolati: prove/reportAmministrazioneSurplus.mjs.
+  // surplus vuoto se la libreria non lo da' (il codice di prima): la controprova
+  // fallisce verifica per verifica, e non si ferma alla prima
+  const libAtt = await caricaLibPagine('lib/fatturazioneExport'), libAmm = await caricaLibPagine('lib/formatAmministrazione');
+  const tabellaAttiva = (...a) => ({ surplus: [], ...libAtt.tabellaAttiva(...a) });
+  const tabellaAmministrazione = (...a) => ({ surplus: [], ...libAmm.tabellaAmministrazione(...a) });
   const righeAci0 = vociDi(E0, 'ACI'), righeAci1 = vociDi(E1, 'ACI');
   const senzaId = (t) => JSON.parse(JSON.stringify(t));
   for (const [nome, fn, kgDi] of [['fatturazioneExport', tabellaAttiva, (t, c) => somma(t.righe.map(r => ({ q: r[c === 'RETE' ? 6 : 9] })), 'q')], ['formatAmministrazione', tabellaAmministrazione, (t) => t.totale_kg]]) {
-    const r0 = fn('RETE', voci0, 2026, 'Settembre'), r1 = fn('RETE', soloFormulari(voci1), 2026, 'Settembre');
-    const a0 = fn('ACI', righeAci0, 2026, 'Settembre'), a1 = fn('ACI', soloFormulari(righeAci1), 2026, 'Settembre');
+    const r0 = fn('RETE', voci0, 2026, 'Settembre'), r1 = fn('RETE', voci1, 2026, 'Settembre');
+    const a0 = fn('ACI', righeAci0, 2026, 'Settembre'), a1 = fn('ACI', righeAci1, 2026, 'Settembre');
     const euroDi = (t) => (t.totale_euro ?? t.totale);
-    verifica(`${nome}: settembre 380 righe, 1.120.240 kg, 226.288,48 € sulla rete; 6, 18.890, 4.410,10 sull'ACI`,
-      r0.righe.length === 380 && kgDi(r0, 'RETE') === 1120240 && euroDi(r0) === 226288.48 && a0.righe.length === 6 && kgDi(a0, 'ACI') === 18890 && euroDi(a0) === 4410.1,
+    const formulariDi = (t) => (t.totale_euro_formulari ?? t.totale_formulari);
+    verifica(`${nome}: settembre senza surplus 380 righe, 1.120.240 kg, 226.288,48 € sulla rete; 6, 18.890, 4.410,10 sull'ACI; nessuna riga di surplus`,
+      r0.righe.length === 380 && kgDi(r0, 'RETE') === 1120240 && euroDi(r0) === 226288.48 && a0.righe.length === 6 && kgDi(a0, 'ACI') === 18890 && euroDi(a0) === 4410.1 && !r0.surplus.length && !a0.surplus.length,
       JSON.stringify({ n: r0.righe.length, kg: kgDi(r0, 'RETE'), e: euroDi(r0), an: a0.righe.length, akg: kgDi(a0, 'ACI'), ae: euroDi(a0) }));
-    verifica(`${nome}: col Fuel Surcharge, sulle righe dei formulari, lo stesso foglio di senza`, uguali(senzaId(r1), senzaId(r0)) && uguali(senzaId(a1), senzaId(a0)));
+    verifica(`${nome}: col Fuel Surcharge le righe dei formulari sono quelle di senza, e i chili pure`,
+      uguali(senzaId(r1.righe), senzaId(r0.righe)) && uguali(senzaId(a1.righe), senzaId(a0.righe)) && kgDi(r1, 'RETE') === 1120240 && kgDi(a1, 'ACI') === 18890);
+    verifica(`${nome}: una riga del Fuel Surcharge per canale, e il TOTALE la comprende: rete 226.288,48 + 5.601,20 = 231.889,68; ACI 4.410,10 + 94,45 = 4.504,55`,
+      r1.surplus.length === 1 && r1.surplus[0]?.nome === 'Fuel Surcharge' && r1.surplus[0]?.totale === 5601.2 && r1.surplus[0]?.base === '+5,00 €/t sulle 1.120,24 t del mese' && formulariDi(r1) === 226288.48 && euroDi(r1) === 231889.68
+      && a1.surplus.length === 1 && a1.surplus[0]?.totale === 94.45 && formulariDi(a1) === 4410.1 && euroDi(a1) === 4504.55,
+      JSON.stringify({ r: [r1.surplus.map(s => [s.base, s.totale]), formulariDi(r1), euroDi(r1)], a: [a1.surplus.map(s => s.totale), formulariDi(a1), euroDi(a1)] }));
   }
-  // Con tutte le righe del documento, il report avrebbe una riga in piu' che non
-  // sa scrivere (Tipo «Trasp.+Tratt.», niente ordine, 0 kg): finche'
-  // l'amministrazione non dice come la vuole (D3), a quei fogli si passano le
-  // righe dei formulari, soloFormulari.
-  const intera = tabellaAmministrazione('RETE', voci1, 2026, 'Settembre');
-  verifica('le righe intere del documento farebbero 381 righe nel format dell\'amministrazione: per questo soloFormulari', intera.righe.length === 381 && soloFormulari(voci1).length === 380);
   // IL PERCORSO VERO (revisione del 13/10/2026). Chi chiama i tre report e' la
   // pagina delle esportazioni, AttivaEsportazioni.jsx, coi pulsanti Excel, PDF,
   // «Format amm.» e «Format amm. PDF» di ogni canale: le righe che arrivano ai
-  // report sono quelle che passa lei. Prima qui si filtrava a mano con
-  // soloFormulari e si diceva «DA FARE»: la prova passava, e i fogli veri
-  // uscivano con la riga del surplus travestita da «Trasp.+Tratt.» con 0 kg. Ora
-  // la pagina si esegue davvero (i suoi hook e i suoi pulsanti, con React finto
-  // e il client finto) e i quattro report sono sostituiti da registratori.
+  // report sono quelle che passa lei. La pagina si esegue davvero (i suoi hook e
+  // i suoi pulsanti, con React finto e il client finto) e i quattro report sono
+  // sostituiti da registratori. Il documento rilegge la riga del surplus per
+  // prima (dati(E1)): i report la mettono lo stesso in fondo.
   // ESPORTAZIONI=<file> prova un'altra versione della pagina (una correzione
   // proposta, prima di metterla al suo posto).
   const fileEsportazioni = process.env.ESPORTAZIONI || qui('../src/components/fatturazione/AttivaEsportazioni.jsx');
   const passate = await righeDaiPulsanti(fileEsportazioni, dati(E1), [['RETE', 'Excel'], ['RETE', 'PDF'], ['RETE', 'Format amm.'], ['RETE', 'Format amm. PDF'], ['ACI', 'Format amm.']]);
-  const formulariAci = soloFormulari(righeAci1);
   for (const p of passate) {
-    const attese = p.canale === 'RETE' ? 380 : formulariAci.length;
-    verifica(`AttivaEsportazioni, ${p.canale} «${p.pulsante}»: al report arrivano le sole righe dei formulari (${attese})`,
-      !p.errore && p.righe && p.righe.length === attese && !p.righe.some(eRigaSurplus), p.errore || `${p.righe ? p.righe.length : 'nessuna'} righe, ${p.righe ? p.righe.filter(eRigaSurplus).length : 0} del surplus`);
+    const attese = p.canale === 'RETE' ? 381 : righeAci1.length;
+    verifica(`AttivaEsportazioni, ${p.canale} «${p.pulsante}»: al report arrivano tutte le righe del documento (${attese}), quella del surplus compresa`,
+      !p.errore && p.righe && p.righe.length === attese && p.righe.filter(eRigaSurplus).length === 1, p.errore || `${p.righe ? p.righe.length : 'nessuna'} righe, ${p.righe ? p.righe.filter(eRigaSurplus).length : 0} del surplus`);
   }
   const reteXls = passate.find(p => p.canale === 'RETE' && p.pulsante === 'Format amm.') || {};
-  const ammVero = reteXls.righe ? tabellaAmministrazione('RETE', reteXls.righe, 2026, 'Settembre') : { righe: [] };
+  const ammVero = reteXls.righe ? tabellaAmministrazione('RETE', reteXls.righe, 2026, 'Settembre') : { righe: [], surplus: [] };
   const attVero = (passate.find(p => p.canale === 'RETE' && p.pulsante === 'Excel') || {}).righe;
-  const attivaVera = attVero ? tabellaAttiva('RETE', attVero, 2026, 'Settembre') : { righe: [] };
-  verifica('...e i fogli che escono dicono 380 righe, 1.120.240 kg e 226.288,48 €, come senza surplus',
-    ammVero.righe.length === 380 && ammVero.totale_kg === 1120240 && ammVero.totale_euro === 226288.48 && attivaVera.righe.length === 380 && attivaVera.totale === 226288.48,
-    JSON.stringify({ amm: [ammVero.righe.length, ammVero.totale_kg, ammVero.totale_euro], att: [attivaVera.righe.length, attivaVera.totale] }));
-}
-
-console.log('7b. I TRE REPORT SONO QUELLI DEL 13/10/2026');
-{
-  // L'impronta dei tre file com'erano al 13/10/2026 (HEAD 147272f), senza i \r.
-  // Chi li cambia dopo la risposta dell'utente alla domanda D3 (la riga «Fuel
-  // Surcharge» nei report dell'amministrazione) aggiorna qui l'impronta e prova i
-  // fogli nuovi.
-  const IMPRONTE = {
-    'src/lib/fatturazioneExport.js': '36f25741147db7433d027071c26f4559c9f29177bc4e5bf147946a063883e128',
-    'src/lib/formatAmministrazione.js': 'c7d0a6d30eeddeba057c4fa03b982bb005428c6eea47a3cd8904c0751ed865ca',
-    'src/lib/formatAmministrazioneExport.js': '697f8487dc3b8f9d09953471a12eb064779faff73da659d07a56fdf7b8a17c8b',
-  };
-  for (const [file, impronta] of Object.entries(IMPRONTE)) {
-    verifica(`${file} non e' cambiato`, createHash('sha256').update(testo(file)).digest('hex') === impronta);
-  }
+  const attivaVera = attVero ? tabellaAttiva('RETE', attVero, 2026, 'Settembre') : { righe: [], surplus: [] };
+  verifica('...e i fogli che escono dicono 380 righe di formulari e 1.120.240 kg, la riga del Fuel Surcharge in fondo, 226.288,48 € di formulari e 231.889,68 € di TOTALE',
+    ammVero.righe.length === 380 && ammVero.totale_kg === 1120240 && ammVero.totale_euro_formulari === 226288.48 && ammVero.totale_euro === 231889.68 && ammVero.surplus.length === 1
+    && attivaVera.righe.length === 380 && attivaVera.totale_formulari === 226288.48 && attivaVera.totale === 231889.68 && attivaVera.surplus.length === 1,
+    JSON.stringify({ amm: [ammVero.righe.length, ammVero.totale_kg, ammVero.totale_euro_formulari, ammVero.totale_euro], att: [attivaVera.righe.length, attivaVera.totale_formulari, attivaVera.totale] }));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

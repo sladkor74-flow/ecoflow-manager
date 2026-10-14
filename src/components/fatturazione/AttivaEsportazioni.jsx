@@ -8,22 +8,34 @@ import { nomeFileAmministrazione } from '@/lib/formatAmministrazione';
 import { soloFormulari, soloSurplus, surplusPerNome, STILE_SURPLUS } from '@/lib/surplusVista';
 import { euro } from '@/lib/formatoSoldi';
 
-// IL SURPLUS NON ENTRA NEI QUATTRO FILE, PER ORA (il surplus sulle tariffe,
-// 13/10/2026). Il documento del mese ha la riga del surplus (il Fuel Surcharge
-// del consorzio), ma i report hanno le colonne dei modelli SMOCO, e come metterci
-// una riga in piu' lo decide l'amministrazione (domanda D3 del progetto del
-// surplus). Fino ad allora i file escono come prima, con le sole righe dei
-// formulari (soloFormulari, la regola delle pagine), e chi esporta legge, prima
-// e dopo, che il surplus si fattura con la sua riga a parte. Senza il filtro la
-// riga usciva come «Trasp.+Tratt.» con 0 kg, e il TOTALE del file cambiava.
-// Due record dello stesso surplus (un importo cambiato a meta' mese) si dicono
-// una volta, col totale (surplusPerNome).
+// IL SURPLUS E' UNA VOCE A SE' NEI QUATTRO FILE, CON LA SUA RIGA (decisione
+// dell'utente del 13/10/2026 sera: il Fuel Surcharge «deve essere una voce
+// disgiunta con un proprio rigo (per canale)»). La pagina passa ai file tutte le
+// righe del documento del canale, quella del surplus compresa: i report la
+// mettono sotto i formulari, con la Quantita' vuota, il TOTALE la comprende e
+// il totale dei soli formulari resta scritto (nell'Excel la riga «Totale
+// formulari», nel PDF il sottotitolo: fatturazioneExport.js,
+// formatAmministrazione.js). Fino a questa decisione (domanda D3 del progetto
+// del surplus) passava le sole righe dei formulari e diceva che il surplus si
+// fatturava a parte. Chi esporta legge, prima e dopo, che il surplus e' nel
+// file e quanto fa. Due record dello stesso surplus (un importo cambiato a
+// meta' mese) si dicono una volta, col totale (surplusPerNome), e il file ha
+// le loro due righe.
 const surplusDelCanale = (righe) => surplusPerNome(soloSurplus(righe)).map(v => `${v.nome} ${euro(v.totale)}`);
 const elencoItaliano = (voci) => (voci.length > 1 ? `${voci.slice(0, -1).join(', ')} e ${voci[voci.length - 1]}` : voci[0] || '');
-const surplusAParte = (righe) => {
-  const voci = surplusDelCanale(righe);
+/**
+ * Dopo l'esportazione: «Nel file il Fuel Surcharge (€ 5.601,20) ha la sua riga,
+ * sotto i formulari, e il TOTALE lo comprende.» Con due righe dello
+ * stesso surplus «ha le sue 2 righe»; con due surplus diversi «hanno ciascuno
+ * la sua riga». Vuoto senza surplus: l'esito e' quello di prima.
+ */
+const surplusNelFile = (righe) => {
+  const tutte = soloSurplus(righe);
+  const voci = surplusPerNome(tutte);
   if (!voci.length) return '';
-  return `Il file ha le sole righe dei formulari: ${elencoItaliano(voci)} ${voci.length === 1 ? 'si fattura con la sua riga' : 'si fatturano con le loro righe'} a parte.`;
+  const nomi = elencoItaliano(voci.map(v => `il ${v.nome} (${euro(v.totale)})`));
+  if (voci.length > 1) return `Nel file ${nomi} hanno ciascuno la sua riga, sotto i formulari, e il TOTALE li comprende.`;
+  return `Nel file ${nomi} ha ${tutte.length === 1 ? 'la sua riga' : `le sue ${tutte.length} righe`}, sotto i formulari, e il TOTALE lo comprende.`;
 };
 
 const TIPS = [
@@ -61,14 +73,15 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
   // il messaggio del server quando c'e', altrimenti quello generico della rete
   const perche = (e) => e?.response?.data?.error || e?.message || 'errore sconosciuto';
 
-  // Il surplus del mese, canale per canale, detto prima di esportare: i file non
-  // lo hanno (vedi surplusAParte).
+  // Il surplus del mese, canale per canale, detto prima di esportare: nei file
+  // e' una voce a se', con la sua riga (vedi surplusNelFile).
   const surplusDelMese = TIPS.map(t => ({ label: t.label, voci: surplusDelCanale(data[t.key]?.righe) })).filter(c => c.voci.length);
 
   // Il surplus che la prefattura non porta (Ecotyre lo comunica a parte): si
-  // fattura a parte, e non e' una differenza (risposta dell'utente del
-  // 13/10/2026). Il confronto non lo conta, quindi l'esportazione non chiede
-  // conferma per lui; qui si scrive, canale per canale, accanto all'esito.
+  // fattura con la sua riga, che i file hanno, e non e' una differenza
+  // (risposta dell'utente del 13/10/2026). Il confronto non lo conta, quindi
+  // l'esportazione non chiede conferma per lui; qui si scrive, canale per
+  // canale, accanto all'esito, con le parole del confronto.
   const surplusFuoriPrefattura = (prefattura.confronto && prefattura.confronto.surplus_a_parte) || [];
 
   // L'esportazione non si blocca, ma chi esporta senza un confronto pulito lo fa sapendolo
@@ -107,11 +120,12 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
   // la pagina e non si possono copiare.
   const unoSolo = async (tipologia, formato) => {
     const etichetta = TIPS.find(t => t.key === tipologia)?.label || tipologia;
-    const tutte = data[tipologia]?.righe || [];
-    const righe = soloFormulari(tutte);
-    const aParte = surplusAParte(tutte);
-    const conAParte = (testo) => (aParte ? `${testo} ${aParte}` : testo);
-    if (righe.length === 0) return { tipo: 'avviso', testo: `${etichetta}: nessuna riga da esportare.` };
+    // tutte le righe del documento: i file mettono il surplus nella sua riga
+    const righe = data[tipologia]?.righe || [];
+    const nelFile = surplusNelFile(righe);
+    const conSurplus = (testo) => (nelFile ? `${testo} ${nelFile}` : testo);
+    // senza formulari non c'e' niente da fatturare, nemmeno il surplus
+    if (soloFormulari(righe).length === 0) return { tipo: 'avviso', testo: `${etichetta}: nessuna riga da esportare.` };
     let nomeFile;
     try {
       nomeFile = await scrivi(tipologia, righe, formato);
@@ -124,9 +138,9 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
         tipologia, anno: periodo.anno, mese: periodo.mese,
         documento_ids: doc ? [doc.id] : [], nome_file: nomeFile,
       });
-      return { tipo: aParte ? 'avviso' : 'ok', testo: conAParte(`${nomeFile} scaricato e registrato nello storico.`) };
+      return { tipo: 'ok', testo: conSurplus(`${nomeFile} scaricato e registrato nello storico.`) };
     } catch (e) {
-      return { tipo: 'avviso', testo: conAParte(`${nomeFile} è stato scaricato, ma non è stato registrato nello storico: ${perche(e)}.`) };
+      return { tipo: 'avviso', testo: conSurplus(`${nomeFile} è stato scaricato, ma non è stato registrato nello storico: ${perche(e)}.`) };
     }
   };
 
@@ -156,7 +170,7 @@ export default function AttivaEsportazioni({ periodo, data, onReload, onVaiPrefa
         {surplusDelMese.length > 0 && (
           <div className={`mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-md px-3 py-2 text-sm ${STILE_SURPLUS.barretta} ${STILE_SURPLUS.fondo}`}>
             <span className={STILE_SURPLUS.etichetta}>Surplus</span>
-            <span>I file hanno le sole righe dei formulari, come prima: il surplus si fattura con la sua riga a parte.</span>
+            <span>Nei file il surplus è una voce a sé: la sua riga sta sotto i formulari, il TOTALE la comprende e il totale dei soli formulari resta scritto a parte.</span>
             <span className="font-medium tabular-nums">{surplusDelMese.map(c => `${c.label}: ${c.voci.join(', ')}`).join(' · ')}</span>
           </div>
         )}

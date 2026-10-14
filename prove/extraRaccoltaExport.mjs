@@ -28,8 +28,23 @@
 // 7, 10, 13. Revisione del 13/10/2026: nell'analisi di un file di piu' mesi le
 //    righe del surplus vanno per mese e poi per nome (prima le sole passive
 //    finivano in fondo, dopo il mese dopo); la riga del surplus dice che vale
-//    sugli interventi fatturati, perche' il TOTALE QUANTITA' conta anche le
-//    secondarie, e la tabella del PDF dice «SULLE STESSE TONNELLATE FATTURATE».
+//    sugli interventi fatturati.
+// 2, 7, 14. LE DECISIONI DELL'UTENTE DEL 13/10/2026 SERA: «per l'extra raccolta
+//    noi fatturiamo al consorzio solo le primarie [...]; le eventuali secondarie
+//    di extra raccolta saranno trattate come normali trasporti di secondaria».
+//    Il TOTALE QUANTITA' conta solo i chili fatturati a Ecotyre; le secondarie
+//    hanno la riga «Trasporti di secondaria (non si fatturano a Ecotyre)», e nel
+//    PDF il riquadro e il sottotitolo. Prima il totale le sommava (6.465 kg
+//    sopra un surplus su 4,465 t).
+// 8-11, 13, 15. «Il fuel surcharge non riguarda i produttori ma i
+//    trasportatori ovvero i raccoglitori, su questo non ci devono essere
+//    confusioni». L'analisi per produttore e' lo standard, senza nessuna riga
+//    del surplus (prima «Surplus · Fuel Surcharge» stava sotto i produttori, e
+//    il TOTALE dei produttori lo comprendeva). Il surplus ha il suo blocco,
+//    «Fuel Surcharge ai raccoglitori»: una riga per raccoglitore con tonnellate,
+//    ricavo da Ecotyre e, solo all'amministratore, costo, margine e note; il
+//    totale di ogni mese e' la riga in fattura. All'amministratore il conto del
+//    mese col surplus (standard, surplus, totale) chiude il file.
 // npm run prove
 import { readFileSync } from 'node:fs';
 import { resolveObjectURL } from 'node:buffer';
@@ -42,6 +57,7 @@ import { cifreItaliane } from '../src/lib/formatoSoldi.js';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
+const J = (x) => JSON.stringify(x);
 
 // Il PDF: la macchina comune (esportaTabella.js) con jspdf vero, e il documento
 // tenuto in memoria invece di salvarlo.
@@ -121,7 +137,11 @@ console.log('2. UN PESO CHE MANCA NON E\' ZERO');
 {
   const rigaB = righe.find(r => r[0] === 'FIR-B');
   verifica('la scheda senza peso ha «—» nella quantita\', non 0 e non i 3.000 kg ritirati', rigaB && rigaB[8] === '—', JSON.stringify(rigaB));
-  verifica('e il totale della quantita\' conta solo i pesi veri: 6.000 kg', cella("TOTALE QUANTITA' (kg)") === 6000, String(cella("TOTALE QUANTITA' (kg)")));
+  // Dal 13/10/2026 sera solo i chili fatturati: la primaria A, non la
+  // secondaria C (prima 6.000 kg, A e C insieme).
+  verifica('e il totale della quantita\' conta solo i chili fatturati: 2.000 kg, non la secondaria da 4.000', cella("TOTALE QUANTITA' (kg)") === 2000, String(cella("TOTALE QUANTITA' (kg)")));
+  verifica('la secondaria ha la sua riga: 4.000 kg, «non si fatturano a Ecotyre»', cella('Trasporti di secondaria (non si fatturano a Ecotyre)') === 4000,
+    J(righe.find(r => /^Trasporti di secondaria/.test(String(r[0] || '')))));
   const iTitolo = righe.findIndex(r => /^DA SISTEMARE: interventi terminati senza peso effettivo/.test(String(r[0] || '')));
   verifica('c\'e\' la riga «da sistemare» del peso mancante', iTitolo > 0, String(iTitolo));
   verifica('con la frase della fattura', iTitolo > 0 && righe[iTitolo + 1][0] === 'FIR-B' && /terminato senza peso effettivo/.test(righe[iTitolo + 1][1]), JSON.stringify(righe[iTitolo + 1]));
@@ -197,7 +217,6 @@ console.log('5. IL PREZZO DEL PDF E\' QUELLO DELL\'EXCEL: DA DUE A QUATTRO DECIM
 // fatturati la fattura ha 22,33 €; sommate intervento per intervento le quote
 // fanno 22,34. Ai raccoglitori 20,03 € (EMMESSE 16,01, GREEN TYRE 4,02 per il
 // suo subraccoglitore), a SMOCO, interna, niente.
-const J = (x) => JSON.stringify(x);
 const sezione = async (titolo, corpo) => {
   console.log(titolo);
   try { await corpo(); } catch (e) { ko++; console.log(`  FALLITA: ${titolo}: si ferma con un errore (${e && e.message})`); }
@@ -279,64 +298,101 @@ await sezione('7. IL FUEL SURCHARGE NEL RIEPILOGO DELL\'EXCEL: DOPO I SOVRACOSTI
   verifica('la riga dice t × €/t, il mese, gli interventi fatturati, l\'origine e il periodo', fs[2] === 'Surplus di ottobre 2026: 4,465 t × 5,00 €/t, sulle stesse tonnellate dei 5 interventi fatturati · consorzio Ecotyre · dal 01/10/2026 al 31/12/2026', String(fs[2]));
   verifica('il Totale imponibile comprende il surplus: 924,26, la fattura del mese', cella('Totale imponibile') === 924.26 && somma(fattura, 'totale') === 924.26, J([cella('Totale imponibile'), somma(fattura, 'totale')]));
   verifica('cioe\' lo standard (901,93) piu\' il surplus (22,33)', somma(fattura.filter(r => !r.surplus_id), 'totale') === 901.93);
-  // Il TOTALE QUANTITA' e' quello di prima e conta anche la secondaria G
-  // (2.000 kg), come nella sezione 2; il surplus vale sui chili fatturati, i
-  // 4.465 kg della fattura, e la sua riga lo dice (revisione del 13/10/2026: la
-  // frase di questa verifica diceva il contrario di quello che controllava).
+  // Dal 13/10/2026 sera il TOTALE QUANTITA' conta solo i chili fatturati, i
+  // 4.465 kg della fattura su cui vale il surplus; la secondaria G (2.000 kg)
+  // ha la sua riga. Prima il totale era 6.465 kg, tre righe sopra un surplus
+  // su 4,465 t.
   const kgFatturati = somma(fattura.filter(r => !r.surplus_id && r.quantita > 0), 'quantita');
-  verifica('il totale dei chili e\' quello di prima: 6.465 kg, la secondaria compresa (il senza peso no)', cella("TOTALE QUANTITA' (kg)") === 4465 + 2000, String(cella("TOTALE QUANTITA' (kg)")));
-  verifica('il surplus vale sui 4.465 kg fatturati, quelli della fattura, e la riga dice che sono gli interventi fatturati, non tutti',
-    kgFatturati === 4465 && /^Surplus di ottobre 2026: 4,465 t /.test(fs[2]) && /sulle stesse tonnellate dei 5 interventi fatturati/.test(fs[2]) && !/tonnellate degli interventi/.test(fs[2]), J([kgFatturati, fs[2]]));
+  verifica('il TOTALE QUANTITA\' e\' quello della fattura: 4.465 kg, la secondaria e il senza peso no', kgFatturati === 4465 && cella("TOTALE QUANTITA' (kg)") === 4465, J([kgFatturati, cella("TOTALE QUANTITA' (kg)")]));
+  const sec = righe.find(r => r[0] === 'Trasporti di secondaria (non si fatturano a Ecotyre)') || [];
+  verifica('la secondaria G nella sua riga, subito sotto: 2.000 kg, «un trasferimento da stoccaggio»', sec[1] === 2000 && e[e.indexOf("TOTALE QUANTITA' (kg)") + 1] === sec[0]
+    && /^un trasferimento da stoccaggio, pagato come trasporto di secondaria/.test(String(sec[2])), J(sec));
+  const rSec = rigaFoglio('Trasporti di secondaria (non si fatturano a Ecotyre)');
+  verifica('con il formato dei chili', rSec && rSec.getCell(2).numFmt === '#,##0', rSec ? rSec.getCell(2).numFmt : 'manca');
+  verifica('il surplus vale sui 4.465 kg fatturati, e la riga dice che sono gli interventi fatturati',
+    /^Surplus di ottobre 2026: 4,465 t /.test(fs[2]) && /sulle stesse tonnellate dei 5 interventi fatturati/.test(fs[2]), String(fs[2]));
   const r = rigaFoglio('Fuel Surcharge');
   verifica('l\'importo ha il formato degli euro', r && /€/.test(r.getCell(2).numFmt), r ? r.getCell(2).numFmt : 'manca');
   verifica('la riga ha la forma del surplus: fondo indaco chiaro, corsivo indaco scuro, barra a sinistra', indaco(r), r ? J([r.getCell(1).fill, r.getCell(1).font, r.getCell(1).border]) : 'manca');
   verifica('le altre righe del riepilogo no', !indaco(rigaFoglio('Sovracosto Trattamento')) && !indaco(rigaFoglio('Totale imponibile')));
 });
 
-await sezione('8. L\'ANALISI DELL\'AMMINISTRATORE: IL SURPLUS IN UNA RIGA SUA, IL TOTALE TORNA', async () => {
+// Le righe di un blocco del surplus nel foglio, dal suo titolo al primo vuoto:
+// { indice, testata, righe }.
+const bloccoFoglio = (titolo) => {
+  const i = righe.findIndex(r => r[0] === titolo && r.length === 1);
+  if (i < 0) return null;
+  let f = i + 2;
+  while (f < righe.length && righe[f].length) f++;
+  return { indice: i, testata: righe[i + 1], righe: righe.slice(i + 2, f) };
+};
+const titoliBlocchi = () => righe.filter(r => r.length === 1 && / (AI|AGLI|SULLA) /.test(String(r[0])) && String(r[0]) === String(r[0]).toUpperCase()).map(r => r[0]);
+
+await sezione('8. IL FUEL SURCHARGE AI RACCOGLITORI, MAI AL PRODUTTORE: L\'ANALISI E\' LO STANDARD', async () => {
   await esportaExcel(OTTOBRE, 'Ottobre', 2026, contestoPrezzi([], FORNITORI));
   const iP = righe.findIndex(r => r[0] === 'PRODUTTORE' && r[1] === 'costi aggiuntivi');
-  const produttoriSenza = righe.slice(iP + 1, righe.findIndex(r => r[0] === 'TOTALE'));
+  const analisiSenza = righe.slice(iP, righe.findIndex(r => r[0] === 'TOTALE') + 1);
   await esportaExcel(OTTOBRE, 'Ottobre', 2026, contestoCon());
   const iP2 = righe.findIndex(r => r[0] === 'PRODUTTORE' && r[1] === 'costi aggiuntivi');
   const iTot = righe.findIndex(r => r[0] === 'TOTALE');
-  const corpo = righe.slice(iP2 + 1, iTot);
-  verifica('le righe dei produttori sono quelle di prima, lo standard', J(corpo.filter(r => !/^Surplus/.test(r[0]))) === J(produttoriSenza), J(corpo));
-  const s = corpo.find(r => r[0] === 'Surplus · Fuel Surcharge') || [];
-  // colonne: 0 nome, 1 costi agg., 2 raccolta, 3 stoccaggio, 4 trattamento, 5 pulizia, 6 trasporto, 7 sovr. raccogl., 8 sovr. impianto, 9 costo totale, 10 ricavi, 11 margine
-  verifica('la riga del surplus: 20,03 nella raccolta e nel costo totale, 22,33 di ricavi, 2,30 di margine (SMOCO e\' interna)',
-    s[2] === 20.03 && s[9] === 20.03 && s[10] === 22.33 && s[11] === 2.3 && [1, 3, 4, 5, 6, 7, 8].every(c => s[c] === undefined || s[c] === null), J(s));
-  verifica('ed e\' l\'ultima prima del TOTALE', corpo[corpo.length - 1] === s);
+  const analisi = righe.slice(iP2, iTot + 1);
+  verifica('l\'analisi per produttore e\' la stessa senza e con il Fuel Surcharge, TOTALE compreso: lo standard', iP2 > 0 && J(analisi) === J(analisiSenza), J(analisi));
+  verifica('nessuna riga del surplus fra i produttori (prima «Surplus · Fuel Surcharge»)', !analisi.some(r => /surplus|fuel/i.test(String(r[0]))), J(analisi.map(r => r[0])));
   const p = passivaDi(FS, OTTOBRE);
-  const tot = righe[iTot];
-  verifica('TOTALE ricavi = Totale imponibile = fattura (924,26)', tot[10] === 924.26 && tot[10] === cella('Totale imponibile'), J(tot));
-  verifica('TOTALE costo = la passiva del mese, col surplus (1.058,71)', tot[9] === 1058.71 && p.totali.totale_complessivo === 1058.71, J([tot[9], p.totali.totale_complessivo]));
-  verifica('in ogni riga le colonne dei costi fanno il costo totale', [...corpo, tot].every(r => Math.abs([1, 2, 3, 4, 5, 6, 7, 8].reduce((x, c) => x + (Number(r[c]) || 0), 0) - r[9]) < 0.005), J(corpo));
-  verifica('e il margine e\' ricavi meno costi', [...corpo, tot].every(r => Math.abs((r[10] - r[9]) - r[11]) < 0.005));
-  verifica('la riga del surplus ha la forma del surplus', indaco(rigaFoglio('Surplus · Fuel Surcharge')));
+  const tot = righe[iTot] || [];
+  // colonne: 0 nome, 1 costi agg., 2 raccolta, ..., 9 costo totale, 10 ricavi, 11 margine
+  verifica('il TOTALE dei produttori e\' lo standard: costi 1.038,68 (la passiva senza surplus), ricavi 901,93', tot[9] === 1038.68 && p.totali.standard.totale === 1038.68 && tot[10] === 901.93, J([tot[9], p.totali.standard, tot[10]]));
+  const b = bloccoFoglio('FUEL SURCHARGE AI RACCOGLITORI');
+  verifica('il blocco «FUEL SURCHARGE AI RACCOGLITORI» c\'e\', fra il riepilogo e l\'analisi', !!b && b.indice > righe.findIndex(r => r[0] === 'Totale imponibile') && b.indice < iP2, J(b && b.indice));
+  verifica('con le colonne: raccoglitore, tonnellate, costo ai raccoglitori, ricavo da Ecotyre, margine, note',
+    !!b && J(b.testata) === J(['RACCOGLITORE', 'TONNELLATE', 'COSTO AI RACCOGLITORI (Euro)', 'RICAVO DA ECOTYRE (Euro)', 'MARGINE (Euro)', 'NOTE']), J(b && b.testata));
+  const di = (nome) => (b ? b.righe.find(r => r[0] === nome) : null) || [];
+  verifica('l\'intestazione del mese: periodo, origine e i due €/t', !!b && b.righe[0][0] === 'Ottobre 2026 · consorzio Ecotyre · dal 01/10/2026 al 31/12/2026 · 5,00 €/t da Ecotyre, 5,00 €/t ai raccoglitori', J(b && b.righe[0]));
+  verifica('EMMESSE: 3,202 t, 16,01 di costo e di ricavo, margine zero', J(di('EMMESSE SRLS').slice(0, 5)) === J(['EMMESSE SRLS', 3.202, 16.01, 16.01, 0]), J(di('EMMESSE SRLS')));
+  verifica('GREEN TYRE, che fattura per il subraccoglitore: 0,803 t, 4,02, e la nota lo dice', J(di('GREEN TYRE PROJECT SRL')) === J(['GREEN TYRE PROJECT SRL', 0.803, 4.02, 4.02, 0, 'fattura anche per TORRES GIOVANNI']), J(di('GREEN TYRE PROJECT SRL')));
+  verifica('SMOCO, interna: 0,46 t, costo zero, 2,30 da Ecotyre che le restano', J(di('SMOCO S.R.L.').slice(0, 5)) === J(['SMOCO S.R.L.', 0.46, 0, 2.3, 2.3]) && /^interno, non si paga/.test(String(di('SMOCO S.R.L.')[5])), J(di('SMOCO S.R.L.')));
+  verifica('nessun produttore nel blocco', !!b && !b.righe.some(r => /COMUNE|NAPPI/.test(String(r[0]))), J(b && b.righe.map(r => r[0])));
+  const tm = di('Totale ottobre 2026');
+  verifica('il totale del mese: 4,465 t (i chili fatturati), 20,03 (la passiva del surplus), 22,33 (la riga in fattura), 2,30',
+    J(tm.slice(0, 5)) === J(['Totale ottobre 2026', 4.465, 20.03, 22.33, 2.3]) && p.totali.surplus.totale === 20.03, J([tm, p.totali.surplus]));
+  verifica('le righe dei raccoglitori hanno la forma del surplus, il totale no', ['EMMESSE SRLS', 'GREEN TYRE PROJECT SRL', 'SMOCO S.R.L.'].every(n => indaco(rigaFoglio(n))) && !indaco(rigaFoglio('Totale ottobre 2026')));
+  const rE = rigaFoglio('EMMESSE SRLS');
+  verifica('tonnellate e importi coi loro formati', !!rE && rE.getCell(2).numFmt === '#,##0.00#' && /€/.test(rE.getCell(3).numFmt) && /€/.test(rE.getCell(4).numFmt), rE ? J([rE.getCell(2).numFmt, rE.getCell(3).numFmt]) : 'manca');
+  // Il conto del mese chiude il file: standard, surplus, totale.
+  const iC = righe.findIndex(r => r[0] === 'CONTO DEL MESE');
+  const conto = righe.slice(iC, iC + 4);
+  verifica('il conto del mese: costi 1.038,68 + 20,03 = 1.058,71 (la passiva del mese), ricavi 901,93 + 22,33 = 924,26 (il Totale imponibile)',
+    iC > iTot && J(conto) === J([['CONTO DEL MESE', 'STANDARD', 'SURPLUS', 'TOTALE'], ['Costi', 1038.68, 20.03, 1058.71], ['Ricavi', 901.93, 22.33, 924.26], ['Margine', -136.75, 2.3, -134.45]])
+    && p.totali.totale_complessivo === 1058.71 && cella('Totale imponibile') === 924.26, J(conto));
   verifica('il margine % lo comprende', cella('Margine % complessivo') === `${cifreItaliane(Math.round(((924.26 - 1058.71) / 924.26) * 10000) / 100, 2, 2)}%`, String(cella('Margine % complessivo')));
 });
 
-await sezione('9. CHI NON E\' AMMINISTRATORE: LA RIGA DA ECOTYRE SI\', I COSTI NO', async () => {
+await sezione('9. CHI NON E\' AMMINISTRATORE: LA RIGA DA ECOTYRE E I RACCOGLITORI SI\', I COSTI NO', async () => {
   const conAccordo = [...FS, surplus('tr', 'EXTRA_RACCOLTA', { nome: 'Accordo Gatim', origine: 'ACCORDO_COMMERCIALE', prestazione: 'TRATTAMENTO', euro_t_passiva: 3, euro_t_attiva: null })];
   for (const [nome, permessi] of [['non amministratore', { isAdmin: false }], ['senza permessi detti', {}]]) {
     await esportaExcel(OTTOBRE, 'Ottobre', 2026, contestoCon(conAccordo), permessi);
     const tutto = J(righe);
     verifica(`${nome}: la riga del Fuel Surcharge e il Totale imponibile ci sono`, cella('Fuel Surcharge') === 22.33 && cella('Totale imponibile') === 924.26, tutto.slice(0, 300));
-    verifica(`${nome}: niente analisi per produttore, ne' costi ne' margine`, !righe.some(r => r[0] === 'PRODUTTORE' && r[1] === 'costi aggiuntivi') && !righe.some(r => r[0] === 'TOTALE' || r[0] === 'Margine % complessivo'), etichette().join(' | '));
-    verifica(`${nome}: nessun importo ai fornitori (20,03, 16,01, 1.058,71) e l'accordo solo passivo non si nomina`, !/20\.03|16\.01|1058\.71|Accordo Gatim/.test(tutto), tutto.match(/20\.03|16\.01|1058\.71|Accordo Gatim/g));
+    verifica(`${nome}: niente analisi per produttore ne' conto del mese, ne' costi ne' margine`, !righe.some(r => r[0] === 'PRODUTTORE' && r[1] === 'costi aggiuntivi') && !righe.some(r => ['TOTALE', 'Margine % complessivo', 'CONTO DEL MESE'].includes(r[0])), etichette().join(' | '));
+    const b = bloccoFoglio('FUEL SURCHARGE AI RACCOGLITORI');
+    verifica(`${nome}: il blocco ai raccoglitori c'e', con tonnellate e ricavo da Ecotyre e basta`, !!b && J(b.testata) === J(['RACCOGLITORE', 'TONNELLATE', 'RICAVO DA ECOTYRE (Euro)'])
+      && J(b.righe.slice(1)) === J([['EMMESSE SRLS', 3.202, 16.01], ['GREEN TYRE PROJECT SRL', 0.803, 4.02], ['SMOCO S.R.L.', 0.46, 2.3], ['Totale ottobre 2026', 4.465, 22.33]]), J(b));
+    verifica(`${nome}: l'intestazione non dice i €/t ai raccoglitori`, !!b && b.righe[0][0] === 'Ottobre 2026 · consorzio Ecotyre · dal 01/10/2026 al 31/12/2026 · 5,00 €/t da Ecotyre', J(b && b.righe[0]));
+    verifica(`${nome}: nessun costo (20,03, 1.058,71), nessun «interno» e l'accordo solo passivo non si nomina`, !/20\.03|1058\.71|Accordo Gatim|ACCORDO GATIM|interno|COSTO/.test(tutto), tutto.match(/20\.03|1058\.71|Accordo Gatim|ACCORDO GATIM|interno|COSTO/g));
     await exportExtraRaccoltaPDF(OTTOBRE, 'Ottobre', 2026, contestoCon(conAccordo), { stato: STATO, ...permessi });
     const pdf = leggiPdf(globalThis.__PDF);
-    verifica(`${nome}: nel PDF niente analisi e nessun costo`, !pdf.includes('ANALISI MARGINE PER PRODUTTORE') && !pdf.some(t => /^(20,03|16,01|1\.058,71) €$|Accordo Gatim/.test(t)), pdf.filter(t => /ANALISI|20,03|1\.058|Accordo/.test(t)).join(' | '));
-    verifica(`${nome}: il PDF ha il Fuel Surcharge e il Totale imponibile`, pdf.includes('Surplus · Fuel Surcharge') && pdf.includes('22,33 €') && pdf.includes('924,26 €'));
+    verifica(`${nome}: nel PDF niente analisi, niente conto e nessun costo`, !pdf.includes('ANALISI MARGINE PER PRODUTTORE') && !pdf.includes('CONTO DEL MESE COL SURPLUS') && !pdf.some(t => /^(20,03|1\.058,71) €$|Accordo Gatim|ACCORDO GATIM|^COSTO/.test(t)), pdf.filter(t => /ANALISI|CONTO|20,03|1\.058|Accordo|COSTO/.test(t)).join(' | '));
+    verifica(`${nome}: il PDF ha il Fuel Surcharge, il blocco ai raccoglitori e il Totale imponibile`, pdf.includes('Surplus · Fuel Surcharge') && pdf.includes('FUEL SURCHARGE AI RACCOGLITORI') && pdf.includes('22,33 €') && pdf.includes('924,26 €'));
   }
   await esportaExcel(OTTOBRE, 'Ottobre', 2026, contestoCon(conAccordo), { isAdmin: true });
-  const acc = righe.find(r => r[0] === 'Surplus · Accordo Gatim') || [];
-  verifica('all\'amministratore l\'accordo solo passivo c\'e\', nella colonna del trattamento, senza ricavi', acc[4] > 0 && acc[9] === acc[4] && acc[10] === 0 && acc[11] === -acc[4], J(acc));
+  const acc = bloccoFoglio('ACCORDO GATIM AGLI IMPIANTI');
+  const gatim = (acc ? acc.righe.find(r => r[0] === 'GATIM S.R.L.') : null) || [];
+  verifica('all\'amministratore l\'accordo solo passivo ha il suo blocco agli impianti: GATIM 5,662 t (anche la secondaria), 16,99 di costo, niente ricavo',
+    !!acc && acc.testata[0] === 'IMPIANTO' && gatim[1] === 5.662 && gatim[2] === 16.99 && (gatim[3] === undefined || gatim[3] === null) && gatim[4] === -16.99, J(acc));
   verifica('e non sta nel riepilogo della fattura', !righe.some(r => r[0] === 'Accordo Gatim'));
 });
 
-await sezione('10. IL PDF: IL RIQUADRO PRIMA DEL TOTALE E LA TABELLA DEL SURPLUS', async () => {
+await sezione('10. IL PDF: IL RIQUADRO PRIMA DEL TOTALE, IL BLOCCO AI RACCOGLITORI, L\'ANALISI E IL CONTO', async () => {
   await exportExtraRaccoltaPDF(OTTOBRE, 'Ottobre', 2026, contestoCon(), { stato: STATO, isAdmin: true });
   const pdf = leggiPdf(globalThis.__PDF);
   const iTratt = pdf.indexOf('Sovracosto trattamento');
@@ -344,23 +400,22 @@ await sezione('10. IL PDF: IL RIQUADRO PRIMA DEL TOTALE E LA TABELLA DEL SURPLUS
   const iTot = pdf.indexOf('Totale imponibile');
   verifica('il riquadro del surplus sta fra i sovracosti e il Totale imponibile', iTratt >= 0 && iBox > iTratt && iTot > iBox, J([iTratt, iBox, iTot]));
   verifica('col suo importo, 22,33 €, e il Totale imponibile 924,26 €', pdf[iBox + 1] === '22,33 €' && pdf.includes('924,26 €'), J(pdf.slice(iBox, iBox + 4)));
-  const iSez = pdf.findIndex(t => /^SURPLUS SULLE TARIFFE/.test(t));
-  const iInterventi = pdf.indexOf('INTERVENTI');
-  const iAnalisi = pdf.indexOf('ANALISI MARGINE PER PRODUTTORE');
-  verifica('la tabella del surplus sta dopo gli interventi e prima dell\'analisi', iSez > iInterventi && iAnalisi > iSez, J([iInterventi, iSez, iAnalisi]));
-  // Il riquadro dei chili conta anche la secondaria (6.465), la tabella del
-  // surplus i 4,465 t fatturati: il titolo dice quali tonnellate sono.
-  verifica('il titolo della tabella dice che le tonnellate sono quelle fatturate', pdf[iSez] === 'SURPLUS SULLE TARIFFE: RIGA A PARTE IN FATTURA, SULLE STESSE TONNELLATE FATTURATE', String(pdf[iSez]));
   const tutti = testiPdf(globalThis.__PDF);
-  const iSezT = tutti.findIndex(t => /^SURPLUS SULLE TARIFFE/.test(t));
-  const iAnalisiT = tutti.indexOf('ANALISI MARGINE PER PRODUTTORE');
-  const sez = tutti.slice(iSezT, iAnalisiT);
-  verifica('la riga: Surplus · Fuel Surcharge, Ottobre 2026, consorzio Ecotyre e il periodo, 4,465 t a 5,00 €, 22,33 €',
-    J(sez.slice(-6)) === J(['Surplus · Fuel Surcharge', 'Ottobre 2026', 'consorzio Ecotyre · dal 01/10/2026 al 31/12/2026', '4,465', '5,00 €', '22,33 €']), sez.join(' | '));
-  verifica('con una riga sola niente «Totale surplus»', !pdf.includes('Totale surplus'));
-  const an = tutti.slice(iAnalisiT);
-  verifica('nell\'analisi la riga del surplus, coi 20,03 € ai raccoglitori e 2,30 € di margine', an.includes('Surplus · Fuel Surcharge') && an.includes('20,03 €') && an.includes('2,30 €'), an.join(' | ').slice(0, 600));
-  verifica('e il TOTALE dei ricavi e\' il Totale imponibile, 924,26 €; dei costi la passiva, 1.058,71 €', an.includes('924,26 €') && an.includes('1.058,71 €'), an.join(' | ').slice(0, 600));
+  const i = (t) => tutti.indexOf(t);
+  verifica('l\'ordine: interventi, Fuel Surcharge ai raccoglitori, analisi per produttore, conto del mese',
+    i('INTERVENTI') >= 0 && i('FUEL SURCHARGE AI RACCOGLITORI') > i('INTERVENTI') && i('ANALISI MARGINE PER PRODUTTORE') > i('FUEL SURCHARGE AI RACCOGLITORI') && i('CONTO DEL MESE COL SURPLUS') > i('ANALISI MARGINE PER PRODUTTORE'),
+    J(['INTERVENTI', 'FUEL SURCHARGE AI RACCOGLITORI', 'ANALISI MARGINE PER PRODUTTORE', 'CONTO DEL MESE COL SURPLUS'].map(i)));
+  verifica('niente piu\' la tabella del surplus per mese: le sue cose stanno nel blocco', !pdf.some(t => /^SURPLUS SULLE TARIFFE/.test(t)));
+  const blocco = tutti.slice(i('FUEL SURCHARGE AI RACCOGLITORI'), i('ANALISI MARGINE PER PRODUTTORE')).join(' ').replace(/\s+/g, ' ');
+  // Nel PDF il mese sta nella prima colonna e come vale nella colonna delle
+  // note, dove c'e' posto per andare a capo.
+  verifica('nel blocco l\'intestazione del mese e i raccoglitori coi loro importi', /Ottobre 2026 consorzio Ecotyre · dal 01\/10\/2026 al 31\/12\/2026 · 5,00 €\/t da Ecotyre, ?5,00 €\/t ai raccoglitori/.test(blocco)
+    && /EMMESSE SRLS 3,202 16,01 € 16,01 € 0,00 €/.test(blocco) && /Totale ottobre 2026 4,465 20,03 € 22,33 € 2,30 €/.test(blocco), blocco.slice(0, 700));
+  verifica('e nessun produttore', !/COMUNE DI|NAPPI SUD/.test(blocco), blocco);
+  const an = tutti.slice(i('ANALISI MARGINE PER PRODUTTORE'), i('CONTO DEL MESE COL SURPLUS')).join(' | ');
+  verifica('l\'analisi non ha il surplus: il suo TOTALE e\' lo standard, 1.038,68 € e 901,93 €', !/Surplus|Fuel/.test(an) && /TOTALE .*1\.038,68 € \| 901,93 €/.test(an), an.slice(0, 900));
+  const conto = tutti.slice(i('CONTO DEL MESE COL SURPLUS')).join(' | ');
+  verifica('il conto del mese: costi 1.058,71 €, ricavi 924,26 €, e il margine % complessivo', /Costi \| 1\.038,68 € \| 20,03 € \| 1\.058,71 €/.test(conto) && /Ricavi \| 901,93 € \| 22,33 € \| 924,26 €/.test(conto) && /Margine % complessivo \| -14,55%/.test(conto), conto.slice(0, 500));
 });
 
 await sezione('11. PIU\' SURPLUS E PIU\' MESI: UNA RIGA CIASCUNO, COL CENTESIMO DEL SUO MESE', async () => {
@@ -385,39 +440,50 @@ await sezione('11. PIU\' SURPLUS E PIU\' MESI: UNA RIGA CIASCUNO, COL CENTESIMO 
     v[0][1] === di(ott, 'fs5') && v[0][1] === 17.32 && v[1][1] === di(ott, 'fs6') && v[1][1] === 6.01 && v[2][1] === di(nov, 'fs6') && v[2][1] === 12, J(v.map(x => x[1])));
   verifica('la descrizione dice il mese', /^Surplus di ottobre 2026: 3,464 t × 5,00 €\/t/.test(v[0][2]) && /^Surplus di ottobre 2026: 1,001 t × 6,00 €\/t/.test(v[1][2]) && /^Surplus di novembre 2026: 2,00 t × 6,00 €\/t/.test(v[2][2]), J(v.map(x => x[2])));
   verifica('il Totale imponibile e\' la somma delle due fatture', cella('Totale imponibile') === Math.round((somma(ott, 'totale') + somma(nov, 'totale')) * 100) / 100, J([cella('Totale imponibile'), somma(ott, 'totale'), somma(nov, 'totale')]));
-  verifica('nell\'analisi il nome dice anche il mese', ['Surplus · Fuel Surcharge a 5,00 €/t, ottobre 2026', 'Surplus · Fuel Surcharge a 6,00 €/t, ottobre 2026', 'Surplus · Fuel Surcharge, novembre 2026'].every(n => righe.some(r => r[0] === n)),
-    J(righe.filter(r => /^Surplus/.test(String(r[0]))).map(r => r[0])));
+  const b = bloccoFoglio('FUEL SURCHARGE AI RACCOGLITORI');
+  const tot = (b ? b.righe.filter(r => /^(Totale|TOTALE)/.test(String(r[0]))) : []).map(r => [r[0], r[3]]);
+  verifica('nel blocco un gruppo per mese e per importo, e ogni totale e\' la sua riga in fattura: 17,32, 6,01, 12,00; in tutto 35,33',
+    J(tot) === J([['Totale Fuel Surcharge a 5,00 €/t, ottobre 2026', 17.32], ['Totale Fuel Surcharge a 6,00 €/t, ottobre 2026', 6.01], ['Totale novembre 2026', 12], ['TOTALE FUEL SURCHARGE', 35.33]]), J(tot));
+  verifica('le intestazioni dicono il mese e quale importo', !!b && ['Ottobre 2026 · Fuel Surcharge a 5,00 €/t · consorzio Ecotyre · dal 01/10/2026 al 15/10/2026 · 5,00 €/t da Ecotyre, 5,00 €/t ai raccoglitori',
+    'Ottobre 2026 · Fuel Surcharge a 6,00 €/t · consorzio Ecotyre · dal 16/10/2026 al 31/12/2026 · 6,00 €/t da Ecotyre, 6,00 €/t ai raccoglitori'].every(t => b.righe.some(r => r[0] === t)), J(b && b.righe.filter(r => r.length === 1)));
+  // A 5 €/t le righe dei raccoglitori fanno 11,01 + 4,02 + 2,30 = 17,33, la
+  // fattura (arrotondata una volta sui 3,464 t del mese) 17,32: si dice.
+  verifica('quando le righe fanno un centesimo diverso dalla fattura, la nota lo dice', !!b && b.righe.some(r => r[0] === 'Il ricavo da Ecotyre si arrotonda una volta sul mese, come in fattura: le righe fanno 17,33 €, la riga in fattura 17,32 €.'), J(b && b.righe.filter(r => r.length === 1)));
   await exportExtraRaccoltaPDF(elenco, 'Tutti', 2026, contestoCon(DUE), { stato: STATO, isAdmin: true });
   const pdf = leggiPdf(globalThis.__PDF);
   const iBox = pdf.indexOf('Surplus · Fuel Surcharge');
   verifica('nel PDF un riquadro solo per il Fuel Surcharge, col totale (35,33 €)', iBox >= 0 && pdf[iBox + 1] === '35,33 €', J(pdf.slice(iBox, iBox + 2)));
-  verifica('e la tabella con le tre righe e il totale del surplus', ['Surplus · Fuel Surcharge a 5,00 €/t', 'Surplus · Fuel Surcharge a 6,00 €/t', 'Ottobre 2026', 'Novembre 2026', 'Totale surplus'].every(t => pdf.includes(t)), pdf.filter(t => /Surplus|2026$/.test(t)).join(' | '));
+  const testoPdf = testiPdf(globalThis.__PDF).join(' ').replace(/\s+/g, ' ');
+  verifica('e il blocco coi totali dei tre gruppi e quello del surplus', ['Totale Fuel Surcharge a 5,00 €/t, ottobre 2026', 'Totale Fuel Surcharge a 6,00 €/t, ottobre 2026', 'Totale novembre 2026', 'TOTALE FUEL SURCHARGE'].every(t => testoPdf.includes(t)) && pdf.includes('35,33 €'), pdf.filter(t => /Totale|TOTALE/.test(t)).join(' | '));
   // Due surplus con nomi diversi sulle stesse tonnellate: due righe, ognuna la sua.
   const ALTRO = [...FS, surplus('gtp', 'EXTRA_RACCOLTA', { nome: 'Accordo Green Tyre', origine: 'ACCORDO_COMMERCIALE', a_chi: 'elenco', fornitori_json: J([{ id: 'F-GTP', nome: '' }]), euro_t_passiva: 4, euro_t_attiva: 4 })];
   await esportaExcel(OTTOBRE, 'Ottobre', 2026, contestoCon(ALTRO));
   const f2 = fatturaDi(ALTRO, OTTOBRE);
   verifica('nomi diversi: una riga ciascuno, coi loro importi in fattura (Accordo Green Tyre 3,21 sul subraccoglitore, Fuel Surcharge 22,33)',
     cella('Accordo Green Tyre') === 3.21 && cella('Fuel Surcharge') === 22.33 && di(f2, 'gtp') === 3.21 && cella('Totale imponibile') === somma(f2, 'totale'), J([cella('Accordo Green Tyre'), cella('Fuel Surcharge'), cella('Totale imponibile'), somma(f2, 'totale')]));
+  verifica('e due blocchi, uno per surplus, in ordine di nome', J(titoliBlocchi()) === J(['ACCORDO GREEN TYRE AI RACCOGLITORI', 'FUEL SURCHARGE AI RACCOGLITORI']), J(titoliBlocchi()));
+  const gtp = bloccoFoglio('ACCORDO GREEN TYRE AI RACCOGLITORI');
+  verifica('l\'accordo col solo Green Tyre: una riga, 0,803 t, 3,21', !!gtp && J(gtp.righe.slice(1).map(r => r.slice(0, 4))) === J([['GREEN TYRE PROJECT SRL', 0.803, 3.21, 3.21], ['Totale ottobre 2026', 0.803, 3.21, 3.21]]), J(gtp));
   await exportExtraRaccoltaPDF(OTTOBRE, 'Ottobre', 2026, contestoCon(ALTRO), { stato: STATO });
   const pdf2 = leggiPdf(globalThis.__PDF);
   const iBox2 = pdf2.indexOf('Surplus sulle tariffe');
-  verifica('e nel PDF un riquadro solo, «Surplus sulle tariffe», col totale dei due (25,54 €); i nomi nella tabella', iBox2 >= 0 && pdf2[iBox2 + 1] === '25,54 €'
-    && pdf2.includes('Surplus · Accordo Green Tyre') && pdf2.includes('Surplus · Fuel Surcharge'), J(pdf2.slice(iBox2, iBox2 + 2)));
+  verifica('e nel PDF un riquadro solo, «Surplus sulle tariffe», col totale dei due (25,54 €); i nomi nei blocchi', iBox2 >= 0 && pdf2[iBox2 + 1] === '25,54 €'
+    && pdf2.includes('ACCORDO GREEN TYRE AI RACCOGLITORI') && pdf2.includes('FUEL SURCHARGE AI RACCOGLITORI'), J(pdf2.slice(iBox2, iBox2 + 2)));
 });
 
 await sezione('12. LA PAGINA DA\' AI FILE IL SUO CONTESTO, COI SURPLUS, E I PERMESSI', async () => {
   const src = readFileSync(new URL('../src/pages/ExtraRaccolta.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
   verifica('niente piu\' contesto dei soli prezzi per i file', !/contestoFile/.test(src));
-  verifica('il contesto della pagina e\' quello coi surplus', /const contesto = useMemo\(\(\) => contestoPrezzi\(tariffeAttive, fornitori, surplusAll, subfornitori\)/.test(src));
-  verifica('e la nota accanto ai pulsanti non dice piu\' che i file hanno gli importi standard', !/I file riportano gli importi standard/.test(src) && /Nei file il surplus ha la sua riga prima del totale imponibile, col centesimo del mese come in fattura/.test(src));
+  // coi viaggi delle secondarie dall'elenco gia' letto (revisione del 14/10/2026)
+  verifica('il contesto della pagina e\' quello coi surplus, coi contratti dei trasporti e coi viaggi delle secondarie', /const contesto = useMemo\(\(\) => conViaggi\(contestoPrezzi\(tariffeAttive, fornitori, surplusAll, subfornitori, tariffeTrasporti\), records\), \[[^\]]*records\]\)/.test(src));
+  verifica('e la nota accanto ai pulsanti dice il blocco ai raccoglitori, non l\'analisi per produttore', !/I file riportano gli importi standard/.test(src) && /Nei file il surplus ha la sua riga prima del totale imponibile, col centesimo del mese come in fattura/.test(src)
+    && !/riga sua nell.{1,6}analisi per produttore/.test(src) && /blocco «\{?/.test(src) && /ai raccoglitori/.test(src));
 });
 
-await sezione('13. NELL\'ANALISI LE RIGHE DEL SURPLUS VANNO PER MESE, POI PER NOME', async () => {
+await sezione('13. I BLOCCHI DEL SURPLUS: UNO PER SURPLUS, PER NOME; DENTRO, I MESI IN ORDINE', async () => {
   // Il file «Tutti» di ottobre e novembre, con il Fuel Surcharge, un premio solo
   // da Ecotyre, un accordo col solo subraccoglitore e due accordi pagati solo ai
-  // fornitori (il trattamento e il trasporto delle secondarie). Le righe uscivano
-  // prima con la parte da Ecotyre e poi le sole passive: l'accordo dei trasporti
-  // di ottobre dopo il Fuel Surcharge di novembre (revisione del 13/10/2026).
+  // fornitori (il trattamento e il trasporto delle secondarie).
   const TUTTI = [surplus('fs-extra', 'EXTRA_RACCOLTA'),
     surplus('tr', 'EXTRA_RACCOLTA', { nome: 'Accordo trattamento', origine: 'ACCORDO_COMMERCIALE', prestazione: 'TRATTAMENTO', euro_t_passiva: 3, euro_t_attiva: null }),
     surplus('ts', 'EXTRA_RACCOLTA', { nome: 'Accordo trasporti', origine: 'ACCORDO_COMMERCIALE', prestazione: 'TRASPORTO_SECONDARIA', euro_t_passiva: 2, euro_t_attiva: null }),
@@ -425,33 +491,55 @@ await sezione('13. NELL\'ANALISI LE RIGHE DEL SURPLUS VANNO PER MESE, POI PER NO
     surplus('pr', 'EXTRA_RACCOLTA', { nome: 'Premio Ecotyre', prestazione: '', euro_t_passiva: null, euro_t_attiva: 1.5 }),
   ];
   const elenco = [...OTTOBRE, iv('N', { peso_effettivo: 2345, produttore: 'COMUNE DI NOVEMBRE', trasporto_finito_il: '2026-11-10T08:00:00.000Z' })];
-  const atteso = [
-    'Surplus · Accordo Green Tyre, ottobre 2026', 'Surplus · Accordo trasporti, ottobre 2026', 'Surplus · Accordo trattamento, ottobre 2026',
-    'Surplus · Fuel Surcharge, ottobre 2026', 'Surplus · Premio Ecotyre, ottobre 2026',
-    'Surplus · Accordo trattamento, novembre 2026', 'Surplus · Fuel Surcharge, novembre 2026', 'Surplus · Premio Ecotyre, novembre 2026',
-  ];
   await esportaExcel(elenco, 'Tutti', 2026, contestoCon(TUTTI));
-  const iP = righe.findIndex(r => r[0] === 'PRODUTTORE' && r[1] === 'costi aggiuntivi');
-  const iTot = righe.findIndex(r => r[0] === 'TOTALE');
-  const nomi = righe.slice(iP + 1, iTot).map(r => String(r[0])).filter(n => /^Surplus · /.test(n));
-  verifica('nell\'Excel: ottobre poi novembre, e nel mese per nome', J(nomi) === J(atteso), J(nomi));
-  verifica('le righe del surplus sono le ultime prima del TOTALE', righe.slice(iP + 1, iTot).slice(-atteso.length).every(r => /^Surplus · /.test(String(r[0]))));
-  // L'ordine non cambia i conti: TOTALE costo = la passiva dei due mesi, ricavi = le due fatture.
+  const ATTESI = ['ACCORDO GREEN TYRE AI RACCOGLITORI', 'ACCORDO TRASPORTI AI TRASPORTATORI DELLE SECONDARIE', 'ACCORDO TRATTAMENTO AGLI IMPIANTI', 'FUEL SURCHARGE AI RACCOGLITORI', 'PREMIO ECOTYRE SULLA RACCOLTA DEI RACCOGLITORI'];
+  verifica('all\'amministratore cinque blocchi, per nome, ognuno con chi lo riceve', J(titoliBlocchi()) === J(ATTESI), J(titoliBlocchi()));
+  const mesi = (titolo) => (bloccoFoglio(titolo) || { righe: [] }).righe.filter(r => /^Totale /.test(String(r[0]))).map(r => r[0]);
+  verifica('dentro un blocco, ottobre prima di novembre', J(mesi('FUEL SURCHARGE AI RACCOGLITORI')) === J(['Totale ottobre 2026', 'Totale novembre 2026']) && J(mesi('ACCORDO TRATTAMENTO AGLI IMPIANTI')) === J(['Totale ottobre 2026', 'Totale novembre 2026']), J([mesi('FUEL SURCHARGE AI RACCOGLITORI'), mesi('ACCORDO TRATTAMENTO AGLI IMPIANTI')]));
+  const ts = bloccoFoglio('ACCORDO TRASPORTI AI TRASPORTATORI DELLE SECONDARIE');
+  verifica('il trasporto della secondaria G: EMMESSE, 2,00 t, 4,00 di costo, nessun ricavo', !!ts && ts.testata[0] === 'TRASPORTATORE' && J(ts.righe[1].slice(0, 3)) === J(['EMMESSE SRLS', 2, 4]), J(ts));
+  // I conti sono quelli: costi = passiva di ottobre e novembre, ricavi = Totale imponibile = le due fatture.
   const passiva = (m, mese) => calcolaPassivaMese({ primarieRete: [], primarieAci: [], secondarieAll: [], extraRaccoltaAll: elenco, tariffeAll: [], fornitoriAll: FORNITORI, surplusAll: TUTTI }, 2026, m, mese, 'EXTRA_RACCOLTA').totali.totale_complessivo;
   const costi = Math.round((passiva(9, 'Ottobre') + passiva(10, 'Novembre')) * 100) / 100;
   const fatture = Math.round((somma(fatturaDi(TUTTI, elenco, 'Ottobre'), 'totale') + somma(fatturaDi(TUTTI, elenco, 'Novembre'), 'totale')) * 100) / 100;
-  verifica('e i conti sono quelli: TOTALE costo = passiva di ottobre e novembre, ricavi = Totale imponibile = le due fatture',
-    righe[iTot][9] === costi && righe[iTot][10] === fatture && cella('Totale imponibile') === fatture, J([righe[iTot][9], costi, righe[iTot][10], fatture]));
+  const costiConto = (righe.find(r => r[0] === 'Costi') || [])[3];
+  const ricaviConto = (righe.find(r => r[0] === 'Ricavi') || [])[3];
+  verifica('e i conti sono quelli: costi del conto = passiva di ottobre e novembre, ricavi = Totale imponibile = le due fatture',
+    costiConto === costi && ricaviConto === fatture && cella('Totale imponibile') === fatture, J([costiConto, costi, ricaviConto, fatture]));
   await exportExtraRaccoltaPDF(elenco, 'Tutti', 2026, contestoCon(TUTTI), { stato: STATO, isAdmin: true });
-  const tutti = testiPdf(globalThis.__PDF);
-  // Nel PDF il nome lungo va a capo: «Surplus · Fuel Surcharge,» e sotto «novembre 2026».
-  const an = tutti.slice(tutti.indexOf('ANALISI MARGINE PER PRODUTTORE'));
-  const nomiPdf = an.map((t, j) => (/^Surplus · /.test(t) ? (/2026$/.test(t) ? t : `${t} ${an[j + 1]}`) : null)).filter(Boolean);
-  verifica('nel PDF lo stesso ordine', J(nomiPdf) === J(atteso), J(nomiPdf));
+  const titoliPdf = testiPdf(globalThis.__PDF).filter(t => ATTESI.includes(t));
+  verifica('nel PDF lo stesso ordine', J(titoliPdf) === J(ATTESI), J(titoliPdf));
   // Un surplus sul solo subraccoglitore vale su un intervento: la riga lo dice.
   await esportaExcel(OTTOBRE, 'Ottobre', 2026, contestoCon(TUTTI));
   const gtp = righe.find(r => r[0] === 'Accordo Green Tyre') || [];
   verifica('un intervento solo: «sulle stesse tonnellate dell\'intervento fatturato»', /^Surplus di ottobre 2026: 0,803 t × 4,00 €\/t, sulle stesse tonnellate dell'intervento fatturato · /.test(String(gtp[2])), String(gtp[2]));
+});
+
+await sezione('14. IL PDF: LE SECONDARIE A PARTE, FUORI DAL TOTALE QUANTITA\'', async () => {
+  await exportExtraRaccoltaPDF(interventi, 'Settembre', 2026, undefined, { stato: STATO });
+  const pdf = leggiPdf(globalThis.__PDF);
+  const iKg = pdf.indexOf("Totale quantita' (kg)");
+  const iSec = pdf.indexOf('Secondarie, non fatturate (kg)');
+  verifica('il riquadro dei chili dice i fatturati: 2.000 (prima 6.000)', iKg >= 0 && pdf[iKg + 1] === '2.000', J(pdf.slice(iKg, iKg + 2)));
+  verifica('e accanto il riquadro delle secondarie: 4.000', iSec === iKg + 2 && pdf[iSec + 1] === '4.000', J(pdf.slice(iSec, iSec + 2)));
+  verifica('il sottotitolo lo dice', pdf.includes('3 interventi, di cui un trasporto di secondaria (non si fatturano a Ecotyre)'), pdf.filter(t => /interventi/.test(t)).join(' | '));
+  // Senza secondarie il riquadro non c'e' e il sottotitolo e' quello di prima.
+  const soloPrimarie = interventi.filter(r => r.tipo_movimento !== 'secondaria');
+  await exportExtraRaccoltaPDF(soloPrimarie, 'Settembre', 2026, undefined, { stato: STATO });
+  const senza = leggiPdf(globalThis.__PDF);
+  verifica('senza secondarie, niente riquadro e il sottotitolo di prima', !senza.some(t => /Secondarie/.test(t)) && senza.includes('2 interventi'), senza.filter(t => /interventi|Secondarie/.test(t)).join(' | '));
+  await esportaExcel(soloPrimarie, 'Settembre', 2026);
+  verifica('e nell\'Excel niente riga delle secondarie', !righe.some(r => /^Trasporti di secondaria/.test(String(r[0] || ''))));
+});
+
+await sezione('15. IL SURPLUS NON E\' MAI DEL PRODUTTORE, NEMMENO NEI CONTI DELL\'ANALISI', async () => {
+  // aggregaPerProduttore e' lo standard qualunque contesto riceva: prima, col
+  // surplus nel contesto, il produttore prendeva le quote del Fuel Surcharge.
+  const { aggregaPerProduttore } = await import('../src/lib/extraRaccoltaCalc.js');
+  const senza = aggregaPerProduttore(OTTOBRE, contestoPrezzi([], FORNITORI));
+  const con = aggregaPerProduttore(OTTOBRE, contestoCon());
+  verifica('con o senza il Fuel Surcharge, i produttori hanno gli stessi numeri', J(con) === J(senza), J(con['COMUNE DI PROVA']));
+  verifica('e nessuna voce del surplus', !Object.values(con).some(v => 'surplus_costo' in v || 'surplus_ricavo' in v), J(Object.keys(con['COMUNE DI PROVA'] || {})));
 });
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

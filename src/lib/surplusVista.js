@@ -36,9 +36,8 @@ export const eRigaSurplus = (riga) => !!riga && (!!riga.surplus_id || riga.origi
 /**
  * Le righe dei formulari (e dei sovracosti a corpo dell'extra raccolta): tutte
  * tranne quelle dei surplus, nello stesso ordine. Sono le righe di prima del
- * surplus: chi le passa a un foglio che non conosce la riga del surplus (i tre
- * report dell'amministrazione, finche' l'amministrazione non dice come la vuole)
- * ritrova le righe e i chili di sempre.
+ * surplus: i chili, gli ordini e il «Totale formulari» dei tre report
+ * dell'amministrazione si contano su queste.
  */
 export const soloFormulari = (righe) => (righe || []).filter(r => !eRigaSurplus(r));
 
@@ -145,6 +144,88 @@ export function dettaglioRigaSurplus(riga) {
 }
 
 const nomeVoce = (r) => String((r && r.descrizione) || '').trim() || 'Surplus';
+
+// LA RIGA DEL SURPLUS NEI TRE REPORT DELL'AMMINISTRAZIONE (decisione
+// dell'utente del 13/10/2026 sera: il Fuel Surcharge «deve essere una voce
+// disgiunta con un proprio rigo (per canale)»). Il report dell'attiva e il
+// format dell'amministrazione, in Excel e in PDF, hanno le colonne dei modelli
+// SMOCO, e la riga del surplus le riempie coi suoi pezzi: il nome dove le
+// righe dicono il tipo, l'origine dove dicono l'ordine, la validita' dove
+// dicono la data, «+5,00 €/t sulle 1.120,24 t del mese» dove dicono il
+// formulario. Pezzi corti perche' il PDF tiene tre righe per cella: la frase
+// intera, in una cella sola, sulle colonne strette dell'ACI sarebbe tagliata.
+// La Quantita' resta vuota: le tonnellate sono quelle dei formulari qui sopra,
+// e scritte anche li' le sommerebbe chi fa la somma della colonna.
+
+/**
+ * I pezzi della riga di un surplus per i report: { nome: 'Fuel Surcharge',
+ * origine: 'consorzio Ecotyre', validita: 'dal 01/10/2026 al 31/12/2026',
+ * base: '+5,00 €/t sulle 1.120,24 t del mese', euro_t: 5, kg: 1120240,
+ * ordini: 380, totale: 5601.2 }. Le tonnellate sono quelle della riga
+ * (kg_riferimento): con un surplus «solo questi fornitori» o che comincia a
+ * meta' mese non sono tutte quelle del canale. Un pezzo che manca resta vuoto;
+ * un importo a tonnellata che manca e' «—», non zero.
+ */
+export function pezziSurplusReport(riga) {
+  const { origine, periodo } = partiRigaSurplus(riga);
+  const euroT = riga && riga.tariffa_valore;
+  const prezzo = testoEuroT(euroT);
+  const kg = riga && riga.kg_riferimento;
+  return {
+    nome: nomeVoce(riga),
+    origine,
+    validita: periodo,
+    base: `${prezzo ? `+${prezzo}` : '—'} sulle ${tonnellateDaKg(kg)} t del mese`,
+    euro_t: euroT === null || euroT === undefined || euroT === '' || !Number.isFinite(Number(euroT)) ? null : Number(euroT),
+    kg: Number(kg) || 0,
+    ordini: riga && Number.isFinite(Number(riga.record_count)) ? Number(riga.record_count) : null,
+    totale: centesimi(riga && riga.totale) / 100,
+  };
+}
+
+/** Quante righe fa un testo che va a capo fra le parole in una cella larga «larga» caratteri. */
+function righeACapo(testo, larga) {
+  let righe = 1, lunga = 0;
+  for (const parola of String(testo).split(/\s+/).filter(Boolean)) {
+    const serve = lunga ? lunga + 1 + parola.length : parola.length;
+    if (lunga && serve > larga) { righe += 1; lunga = parola.length; } else lunga = serve;
+    if (lunga > larga) { righe += Math.ceil(lunga / larga) - 1; lunga %= larga; }
+  }
+  return righe;
+}
+
+/**
+ * I colori della riga del surplus nei fogli Excel (ARGB): quelli dei fogli
+ * della passiva e dell'elenco dell'extra raccolta, il token --eco-surplus
+ * delle pagine (indaco: l'ambra e il rosso vogliono dire «c'e' un problema»,
+ * e il surplus non lo e').
+ */
+export const COLORI_SURPLUS_FOGLI = { barra: 'FF6366F1', fondo: 'FFEEF2FF', testo: 'FF3730A3' };
+
+/**
+ * Veste una riga di un foglio Excel (exceljs) come riga del surplus: fondo
+ * indaco chiaro, testo indaco scuro in corsivo, barra a sinistra, come nei
+ * fogli della passiva. I testi vanno a capo nella loro cella, e la riga si
+ * alza quanto serve (una stima dalla larghezza delle colonne): le colonne dei
+ * modelli dell'amministrazione non si allargano.
+ */
+export function vestiRigaSurplusFoglio(riga, quante) {
+  let linee = 1;
+  for (let c = 1; c <= quante; c++) {
+    const cella = riga.getCell(c);
+    cella.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORI_SURPLUS_FOGLI.fondo } };
+    cella.font = { ...(cella.font || {}), italic: true, color: { argb: COLORI_SURPLUS_FOGLI.testo } };
+    if (typeof cella.value === 'string' && cella.value) {
+      cella.alignment = { ...(cella.alignment || {}), wrapText: true, vertical: 'top' };
+      const larga = Math.max(4, Math.floor(Number(riga.worksheet && riga.worksheet.getColumn(c).width) || 10));
+      linee = Math.max(linee, righeACapo(cella.value, larga));
+    }
+  }
+  const prima = riga.getCell(1);
+  prima.border = { ...(prima.border || {}), left: { style: 'thick', color: { argb: COLORI_SURPLUS_FOGLI.barra } } };
+  if (linee > 1) riga.height = Math.min(4, linee) * 13 + 2;
+  return riga;
+}
 
 /**
  * QUANTE RIGHE DI FORMULARI E QUALI DI SURPLUS, A PAROLE: «380 righe e la riga

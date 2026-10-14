@@ -100,10 +100,17 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
       // conto, come per le tariffe), l'anagrafica intera (chi e' interno, chi
       // fattura per chi) e la catena dei subfornitori. Due letture per foglio,
       // non per intervento ne' per fornitore.
+      // LE SECONDARIE DI EXTRA RACCOLTA SONO TRASPORTI DI SECONDARIA (decisione
+      // dell'utente del 13/10/2026): il prezzo e' il contratto della tratta del
+      // vettore, cioe' le tariffe passive gia' lette qui sopra, quinto argomento
+      // di contestoPrezzi. Senza, il blocco pagava una secondaria col prezzo
+      // scritto sull'intervento (o zero, «contratto della tratta non letto»),
+      // mentre la passiva usa il contratto: 0 + 40 nel foglio contro 600 + 40
+      // nella passiva (chiusura del giro, 14/10/2026). Nessuna lettura in piu'.
       const interventi = await fetchAllClient(base44.entities.ExtraRaccolta, null, '-created_date');
       const surplusAll = await fetchAllClient(base44.entities.SurplusTariffa, null, '-created_date');
       const fornitori = await fetchAllClient(base44.entities.Fornitore, null, 'ragione_sociale');
-      const extra = bloccoExtraRaccolta(interventi, periodo.anno, periodo.mese, contestoPrezzi([], fornitori, surplusAll, subfornitori));
+      const extra = bloccoExtraRaccolta(interventi, periodo.anno, periodo.mese, contestoPrezzi([], fornitori, surplusAll, subfornitori, tariffe));
       // Senza voci il foglio uscirebbe vuoto. Si propone il modello
       // dell'amministrazione - le sue righe e i suoi prezzi, quelli con cui
       // settembre 2026 torna al centesimo - e poi l'utente lo corregge dal

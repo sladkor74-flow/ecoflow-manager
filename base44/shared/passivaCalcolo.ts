@@ -190,6 +190,151 @@ function findTariffaSecondaria(tariffe, trasKey, produttore, destinatario, tipol
   return null;
 }
 
+// ─── LE SECONDARIE DELL'EXTRA RACCOLTA SONO TRASPORTI DI SECONDARIA ───
+//
+// Decisione dell'utente del 13/10/2026: «le eventuali secondarie di extra
+// raccolta saranno trattate come normali trasporti di secondaria con il loro
+// €\t oppure €\viaggio a seconda del tragitto e dei contratti». Il prezzo e'
+// quindi la tariffa TRASPORTO_SECONDARIA del vettore (chi fattura, dopo la
+// catena dei subfornitori) per quella tratta, dallo stoccaggio di partenza alla
+// destinazione, valida nel giorno italiano della fine del trasporto: prima una
+// tariffa scritta per l'extra raccolta, poi quella «TUTTE» del contratto del
+// vettore, che e' il suo contratto dei trasporti. L'unita' e' quella della
+// tariffa: a tonnellata sui chili dell'intervento, a viaggio una volta per
+// viaggio - un camion in un giorno, che puo' portare piu' interventi (qui
+// sotto, «lo stesso viaggio si paga una volta»). Il prezzo a viaggio scritto
+// sull'intervento vale solo per una tratta senza contratto.
+//
+// Prima si pagava sempre e solo quel prezzo scritto a mano, e una secondaria
+// finiva anche fra le raccolte, a zero euro sulle sue tonnellate, con l'avviso
+// «il contratto di extra raccolta prevede 80 €/t» di raccolta: un trasferimento
+// da uno stoccaggio non e' una raccolta. Con un contratto di trasporto a 30 €/t
+// sulla tratta, 20 t si pagavano zero e l'anomalia diceva «non viene pagato a
+// nessuno».
+//
+// La stessa scelta, con la stessa regola, la fanno la pagina e la scheda
+// dell'extra raccolta e il blocco del foglio dell'amministrazione
+// (trasportoIntervento in src/lib/extraRaccoltaCalc.js):
+// prove/extraRaccoltaSecondarie.mjs confronta i due conti caso per caso.
+export function tariffaTrasportoExtra(tariffe, trasKey, stoccaggio, destinazione, dataIso) {
+  const prodKey = normalizzaRagioneSociale(stoccaggio);
+  const destKey = normalizzaRagioneSociale(destinazione);
+  if (!trasKey || !prodKey || !destKey) return null;
+  for (const tip of ['EXTRA_RACCOLTA', 'TUTTE']) {
+    const trovata = (tariffe || []).find(t =>
+      t && t.prestazione === 'TRASPORTO_SECONDARIA' &&
+      String(t.direzione || 'PASSIVA').toUpperCase() === 'PASSIVA' &&
+      tariffaNonDisattivata(t) &&
+      normalizzaRagioneSociale(t.fornitore_nome) === trasKey &&
+      t.tipologia === tip &&
+      tariffaValidaPerData(t, dataIso) &&
+      normalizzaRagioneSociale(t.produttore) === prodKey &&
+      normalizzaRagioneSociale(t.destinatario) === destKey
+    );
+    if (trovata) return trovata;
+  }
+  return null;
+}
+
+// ─── LO STESSO VIAGGIO SI PAGA UNA VOLTA (revisione del 14/10/2026) ───
+//
+// Un viaggio e' un camion in un giorno (chiaveViaggio), anche nell'extra
+// raccolta: due secondarie sullo stesso automezzo, lo stesso giorno italiano,
+// sulla stessa tratta e con lo stesso vettore (chi fattura, dopo la catena dei
+// subfornitori) - per esempio due formulari divisi per classe - sono UN viaggio.
+// A tonnellata ognuna paga i suoi chili e non cambia niente; a viaggio il
+// prezzo del contratto si paga una volta sola e si divide fra gli interventi in
+// proporzione ai chili, come il viaggio misto fra rete e ACI (regola
+// dell'utente del 22/09/2026: «fai la proporzione in base al peso»). Prima ogni
+// intervento pagava il viaggio intero: due formulari dello stesso camion a 400
+// €/viaggio facevano 800 €, e le stesse due secondarie di rete 400. Senza targa
+// gli interventi dello stesso giorno sulla stessa tratta contano come un viaggio
+// solo, come nel blocco delle secondarie, e si dice.
+//
+// Il prezzo a viaggio scritto a mano sull'intervento resta di quell'intervento:
+// vale solo per una tratta senza contratto, e chi lo scrive decide quanto vale.
+//
+// La stessa regola sta nella pagina, nella scheda e nel foglio
+// dell'amministrazione (trasportoIntervento e conViaggi in
+// src/lib/extraRaccoltaCalc.js): prove/extraRaccoltaSecondarie.mjs confronta.
+
+/** Il viaggio di una secondaria: vettore, tratta, giorno italiano e targa. */
+export function chiaveViaggioExtra(r, trasKey) {
+  return `${trasKey}|${normalizzaRagioneSociale(r && r.stoccaggio)}|${normalizzaRagioneSociale(r && r.destinazione)}|${chiaveViaggio(r)}`;
+}
+
+/** Chi e' un intervento fra quelli dello stesso viaggio, per l'ordine delle quote. */
+export function chiaveInterventoExtra(r) {
+  return `${String((r && r.id) || '')}|${String((r && r.numero_fir) || '')}|${String((r && r.id_ordine) || '')}`;
+}
+
+/**
+ * Le quote di un prezzo a viaggio fra gli interventi dello stesso viaggio, al
+ * centesimo: in proporzione ai chili (senza chili, in parti uguali). L'ultimo,
+ * nell'ordine di `chiave`, prende la differenza: la somma delle quote e' il
+ * prezzo del viaggio, mai un centesimo in piu' o in meno.
+ * membri: [{ chiave, kg }] -> Map(chiave -> euro)
+ */
+export function quoteDelViaggio(valore, membri) {
+  const ordinati = [...(membri || [])].sort((a, b) => (a.chiave < b.chiave ? -1 : a.chiave > b.chiave ? 1 : 0));
+  const kgDi = (m) => (Number(m.kg) > 0 ? Number(m.kg) : 0);
+  const kgViaggio = ordinati.reduce((s, m) => s + kgDi(m), 0);
+  const quote = new Map();
+  let date = 0;
+  ordinati.forEach((m, i) => {
+    if (i === ordinati.length - 1) { quote.set(m.chiave, arrotondaAlCentesimo(valore - date)); return; }
+    const parte = kgViaggio > 0 ? kgDi(m) / kgViaggio : 1 / ordinati.length;
+    const euro = arrotondaAlCentesimo(valore * parte);
+    date += euro;
+    quote.set(m.chiave, euro);
+  });
+  return quote;
+}
+
+/**
+ * Il trasporto di un intervento di extra raccolta: quanto si paga al vettore e
+ * da dove viene il prezzo. Una primaria paga il prezzo a viaggio scritto
+ * sull'intervento, come sempre; una secondaria la tariffa della tratta
+ * (tariffaTrasportoExtra) e, solo senza, il prezzo scritto.
+ * `membri`: gli interventi dello stesso viaggio (chiaveViaggioExtra), lui
+ * compreso; con piu' di uno, a viaggio l'intervento paga la sua quota.
+ * -> { origine: 'contratto' | 'intervento' | '', tariffa, valore, unita_misura,
+ *      importo (al centesimo, la quota dell'intervento), scritto, sconosciuta,
+ *      viaggio (null, o { interventi, altri, kg, kg_viaggio, prezzo_viaggio,
+ *      quota, giorno, targa }) }
+ */
+export function trasportoInterventoExtra(r, tariffe, trasKey, membri = null) {
+  const scritto = Number((r && r.costo_trasporto_viaggio) || 0) > 0 ? Number(r.costo_trasporto_viaggio) : 0;
+  const tariffa = eSecondariaExtra(r)
+    ? tariffaTrasportoExtra(tariffe, trasKey, r && r.stoccaggio, r && r.destinazione, r && r.trasporto_finito_il)
+    : null;
+  if (tariffa) {
+    const unita = String(tariffa.unita_misura || '').trim();
+    const valore = Number(tariffa.valore) || 0;
+    const sconosciuta = !unitaPassivaLetta(unita);
+    let importo = sconosciuta ? 0 : arrotondaAlCentesimo(calcImporto(unita, valore, Number((r && r.peso_effettivo) || 0), 1));
+    let viaggio = null;
+    const insieme = Array.isArray(membri) ? membri : [];
+    if (!sconosciuta && unita === '€/viaggio' && insieme.length > 1) {
+      const quote = quoteDelViaggio(valore, insieme.map(x => ({ chiave: chiaveInterventoExtra(x), kg: Number(x && x.peso_effettivo) || 0 })));
+      importo = quote.get(chiaveInterventoExtra(r)) ?? importo;
+      const kgViaggio = insieme.reduce((s, x) => s + (Number(x && x.peso_effettivo) > 0 ? Number(x.peso_effettivo) : 0), 0);
+      viaggio = {
+        interventi: insieme.length,
+        altri: insieme.filter(x => x !== r).sort((a, b) => chiaveInterventoExtra(a).localeCompare(chiaveInterventoExtra(b))).map(x => String((x && (x.numero_fir || x.id_ordine)) || '—')),
+        kg: Number(r && r.peso_effettivo) > 0 ? Number(r.peso_effettivo) : 0,
+        kg_viaggio: kgViaggio,
+        prezzo_viaggio: valore,
+        quota: valore ? importo / valore : 0,
+        giorno: giornoRoma(r && r.trasporto_finito_il),
+        targa: String((r && r.automezzo) || '').trim(),
+      };
+    }
+    return { origine: 'contratto', tariffa, valore, unita_misura: unita, importo, scritto, sconosciuta, viaggio };
+  }
+  return { origine: scritto > 0 ? 'intervento' : '', tariffa: null, valore: scritto, unita_misura: '€/viaggio', importo: arrotondaAlCentesimo(scritto), scritto, sconosciuta: false, viaggio: null };
+}
+
 // ─── Subraccoglitori: il "di cui" da mostrare accanto al fornitore che fattura ───
 function segnaDiCui(mappa, nome, peso, viaggioKey) {
   if (!mappa.has(nome)) mappa.set(nome, { peso_kg: 0, viaggiSet: new Set() });
@@ -742,7 +887,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       ];
       secondarieForBlock = secondarieF;
     } else {
-      raccoglitoriSource = extraRaccoltaF;
+      // Fra le raccolte solo le primarie: una secondaria e' un trasferimento da
+      // uno stoccaggio e si paga come trasporto di secondaria, piu' sotto
+      // (decisione dell'utente del 13/10/2026). Prima entrava qui come una
+      // raccolta a zero euro sulle sue tonnellate.
+      raccoglitoriSource = extraRaccoltaF.filter(r => !eSecondariaExtra(r));
       // UN INTERVENTO PUO' PAGARE DUE COSE SULLO STESSO CARICO.
       //
       // Su un intervento di extra raccolta i costi li scrive l'utente a mano, e i
@@ -1409,19 +1558,51 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           tonnellate: 0,
         });
       }
-      // Il trasporto di una secondaria di extra raccolta si paga a viaggio, col
-      // prezzo scritto sull'intervento. Se quel campo e' vuoto il trasferimento
-      // non si paga a nessuno: si dice, perche' un trasferimento gratis quasi
-      // sempre e' un campo rimasto da compilare. Prima dell'03/10/2026 il campo
-      // non esisteva affatto e l'anomalia era inevitabile.
+      // Il trasporto di una secondaria di extra raccolta si paga come un
+      // trasporto di secondaria (decisione dell'utente del 13/10/2026): la
+      // tariffa TRASPORTO_SECONDARIA del vettore per la tratta, e solo senza
+      // contratto il prezzo a viaggio scritto sull'intervento. Se non c'e' ne'
+      // l'uno ne' l'altro il trasferimento non si paga a nessuno: si dice, perche'
+      // un trasferimento gratis quasi sempre e' un contratto o un campo che manca.
+      // Prima dell'03/10/2026 il campo non esisteva affatto e l'anomalia era
+      // inevitabile.
       for (const rec of extraRaccoltaF) {
-        if (String(rec.tipo_movimento || 'primaria').toLowerCase().trim() !== 'secondaria') continue;
-        if (Number(rec.costo_trasporto_viaggio || 0) > 0) continue;
-        if (isInterno(String(rec.trasportatore || '').trim())) continue;
+        if (!eSecondariaExtra(rec)) continue;
+        const trasportatore = String(rec.trasportatore || '').trim();
+        if (!trasportatore) {
+          // Senza trasportatore non si sa a chi pagare, come per una raccolta.
+          anomalie.push({
+            descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} e' un trasferimento da ${rec.stoccaggio || '—'} a ${rec.destinazione || '—'} senza trasportatore: non viene pagato a nessuno. Scrivi chi l'ha trasportato.`,
+            fornitore: '—',
+            prestazione: 'TRASPORTO_SECONDARIA',
+            classe: String(rec.classe || '—'),
+            ambito: `FIR ${rec.numero_fir || '—'}`,
+            tonnellate: round3(Number(rec.peso_effettivo || 0) / 1000),
+          });
+          continue;
+        }
+        const fatt = fatturaA(perFattura, trasportatore);
+        if (isInterno(fatt.nome)) continue;
+        if (trasportoInterventoExtra(rec, tariffe, fatt.chiave).origine) continue;
         anomalie.push({
-          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} e' un trasferimento da ${rec.stoccaggio || '—'} a ${rec.destinazione || '—'} fatto da ${rec.trasportatore || '—'}, e sull'intervento il costo del trasporto a viaggio e' vuoto: il trasferimento non viene pagato a nessuno. Scrivilo sull'intervento.`,
+          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} e' un trasferimento da ${rec.stoccaggio || '—'} a ${rec.destinazione || '—'} fatto da ${rec.trasportatore || '—'}: la tratta non ha una tariffa TRASPORTO_SECONDARIA del vettore e sull'intervento il costo del trasporto a viaggio e' vuoto, quindi il trasferimento non viene pagato a nessuno. Scrivi la tariffa della tratta nel contratto del vettore oppure, per un viaggio fuori contratto, il costo sull'intervento.`,
           fornitore: rec.trasportatore || '—',
           prestazione: 'TRASPORTO_SECONDARIA',
+          classe: String(rec.classe || '—'),
+          ambito: `FIR ${rec.numero_fir || '—'}`,
+          tonnellate: round3(Number(rec.peso_effettivo || 0) / 1000),
+        });
+      }
+      // Un costo di raccolta scritto su una secondaria non si paga: un
+      // trasferimento da uno stoccaggio non e' una raccolta (13/10/2026). Prima
+      // si pagava come una raccolta; si dice, perche' un importo scritto che
+      // sparisce dai conti nessuno lo va a cercare.
+      for (const rec of extraRaccoltaF) {
+        if (!eSecondariaExtra(rec) || !(Number(rec.costo_raccolta_t || 0) > 0)) continue;
+        anomalie.push({
+          descrizione: `Extra raccolta: l'intervento ${rec.numero_fir || '—'} e' una secondaria, un trasferimento da ${rec.stoccaggio || '—'}, e ha scritto un costo di raccolta di ${euroTesto(Number(rec.costo_raccolta_t))} €/t: non si paga, perche' una secondaria non e' una raccolta. Il trasferimento si paga come trasporto di secondaria, con la tariffa della tratta.`,
+          fornitore: rec.trasportatore || '—',
+          prestazione: 'RACCOLTA',
           classe: String(rec.classe || '—'),
           ambito: `FIR ${rec.numero_fir || '—'}`,
           tonnellate: round3(Number(rec.peso_effettivo || 0) / 1000),
@@ -1757,9 +1938,12 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     //
     // Non passa dal blocco qui sopra, e di proposito: quello e' costruito sui
     // viaggi misti fra rete e ACI - un camion che in un giorno porta formulari
-    // dei due canali - e l'extra raccolta non si mischia con nessuno. Qui un
-    // intervento e' un viaggio: ha il suo trasportatore, il suo prezzo a viaggio
-    // scritto sull'intervento e il suo importo, e si paga una volta.
+    // dei due canali - e l'extra raccolta non si mischia con nessuno. Qui ogni
+    // intervento ha la sua riga: il suo trasportatore, il suo prezzo e il suo
+    // importo. Ma un viaggio e' un camion in un giorno (revisione del
+    // 14/10/2026): a viaggio, gli interventi dello stesso camion, giorno, tratta
+    // e vettore pagano il viaggio una volta, diviso per peso (quoteDelViaggio,
+    // in cima al file), e la riga dice con chi lo divide.
     //
     // Il campo costo_trasporto_viaggio e' nato il 03/10/2026, su richiesta
     // dell'utente: prima il trasporto di un intervento non si poteva scrivere e
@@ -1767,36 +1951,144 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     // trasferimento da uno stoccaggio a un impianto e non ha un costo di
     // raccolta, non si pagava proprio niente al trasportatore, e il gestionale
     // lo diceva come anomalia.
+    //
+    // UNA SECONDARIA E' UN TRASPORTO DI SECONDARIA (decisione dell'utente del
+    // 13/10/2026): il prezzo e' la tariffa della tratta nel contratto del
+    // vettore, a tonnellata o a viaggio (trasportoInterventoExtra, in cima al
+    // file), e il prezzo scritto sull'intervento vale solo senza contratto. Il
+    // sovracosto pagato al trasportatore di una secondaria si paga qui, con il
+    // suo trasporto: fra le raccolte una secondaria non c'e' piu'.
     if (tipologia === 'EXTRA_RACCOLTA') {
+      // I viaggi delle secondarie del mese: gli interventi dello stesso camion,
+      // giorno italiano, tratta e vettore (chiaveViaggioExtra).
+      const viaggiExtra = new Map();
       for (const r of extraRaccoltaF) {
-        const prezzo = Number(r.costo_trasporto_viaggio || 0);
-        if (prezzo <= 0) continue;
+        const trasportatore = String(r.trasportatore || '').trim();
+        if (!eSecondariaExtra(r) || !trasportatore) continue;
+        const k = chiaveViaggioExtra(r, fatturaA(perFattura, trasportatore).chiave);
+        if (!viaggiExtra.has(k)) viaggiExtra.set(k, []);
+        viaggiExtra.get(k).push(r);
+      }
+      // Gli stessi viaggi con formulari di rete o ACI del mese, sulla stessa
+      // tratta e con lo stesso vettore: un camion misto con l'extra raccolta.
+      // Fra rete e ACI la passiva divide il viaggio per peso; con l'extra
+      // raccolta non lo divide, e ogni canale lo paga intero. Si dice, perche'
+      // e' lo stesso camion pagato due volte (revisione del 14/10/2026).
+      const viaggiConAltri = new Map();
+      if (viaggiExtra.size) {
+        for (const s of secondarieF) {
+          const t = String(s.trasportatore || '').trim();
+          if (!t) continue;
+          const k = chiaveViaggioExtra(s, fatturaA(perFattura, t).chiave);
+          if (!viaggiExtra.has(k)) continue;
+          if (!viaggiConAltri.has(k)) viaggiConAltri.set(k, { RETE: 0, ACI: 0 });
+          viaggiConAltri.get(k)[isAciRow(s) ? 'ACI' : 'RETE']++;
+        }
+      }
+      const viaggiDetti = new Set();
+      for (const r of extraRaccoltaF) {
         const trasportatore = String(r.trasportatore || '').trim();
         if (!trasportatore) continue;
+        const secondaria = eSecondariaExtra(r);
         const fatt = fatturaA(perFattura, trasportatore);
         const interno = isInterno(fatt.nome);
         const peso = Number(r.peso_effettivo || 0);
+        const chiaveDelViaggio = secondaria ? chiaveViaggioExtra(r, fatt.chiave) : '';
+        const membri = secondaria ? (viaggiExtra.get(chiaveDelViaggio) || [r]) : null;
+        const tr = trasportoInterventoExtra(r, tariffe, fatt.chiave, membri);
+        // Un viaggio a contratto a viaggio si guarda una volta: senza targa con
+        // piu' interventi, o insieme a formulari di rete e ACI, lo si dice.
+        if (secondaria && !interno && tr.origine === 'contratto' && tr.unita_misura === '€/viaggio' && !tr.sconosciuta && !viaggiDetti.has(chiaveDelViaggio)) {
+          viaggiDetti.add(chiaveDelViaggio);
+          const quali = membri.map(x => String(x.numero_fir || x.id_ordine || '—')).join(', ');
+          const giorno = String(giornoRoma(r.trasporto_finito_il) || '').split('-').reverse().join('/');
+          const targa = String(r.automezzo || '').trim();
+          const tratta = `${String(r.stoccaggio || '—').trim()} → ${String(r.destinazione || '—').trim()}`;
+          const kgViaggio = membri.reduce((s, x) => s + Number(x.peso_effettivo || 0), 0);
+          if (membri.length > 1 && !targa) {
+            anomalie.push({
+              descrizione: `Extra raccolta: tratta a ${euroTesto(tr.valore)} € a viaggio senza targa su ${membri.length} interventi dello stesso giorno (${quali}, ${giorno}): ${tratta}. Senza targa gli interventi dello stesso giorno contano come un viaggio solo: se i camion erano piu' d'uno, scrivi l'automezzo sugli interventi.`,
+              fornitore: fatt.nome,
+              prestazione: 'TRASPORTO_SECONDARIA',
+              classe: '—',
+              ambito: tratta,
+              tonnellate: round3(kgViaggio / 1000),
+            });
+          }
+          const altri = viaggiConAltri.get(chiaveDelViaggio);
+          // Conta solo il canale che il viaggio lo paga a viaggio: a tonnellata
+          // ognuno paga i suoi chili e il camion non si paga due volte.
+          const canali = altri ? ['RETE', 'ACI'].filter(c => {
+            if (!(altri[c] > 0)) return false;
+            const t = findTariffaSecondaria(tariffe, fatt.chiave, r.stoccaggio, r.destinazione, c, r.trasporto_finito_il);
+            return !!t && String(t.unita_misura || '').trim() === '€/viaggio';
+          }) : [];
+          if (canali.length) {
+            const formulari = canali.map(c => `${altri[c]} ${altri[c] === 1 ? 'formulario' : 'formulari'} ${c === 'RETE' ? 'di rete' : 'ACI'}`).join(' e ');
+            const dove = canali.map(c => (c === 'RETE' ? 'di rete' : 'ACI')).join(' e in quella ');
+            anomalie.push({
+              descrizione: `Extra raccolta: lo stesso camion (${targa || 'senza targa'}, ${giorno}) da ${tratta.replace(' → ', ' a ')} con ${fatt.nome} porta ${membri.length === 1 ? "l'intervento" : 'gli interventi'} ${quali} e anche ${formulari}: a ${euroTesto(tr.valore)} € a viaggio il viaggio si paga qui e anche nella passiva ${dove}, cioe' piu' di una volta. Fra rete e ACI un viaggio misto si divide per peso; con l'extra raccolta il gestionale non lo divide: controlla la fattura del vettore, che il viaggio lo fattura una volta.`,
+              fornitore: fatt.nome,
+              prestazione: 'TRASPORTO_SECONDARIA',
+              classe: '—',
+              ambito: tratta,
+              tonnellate: round3(kgViaggio / 1000),
+            });
+          }
+        }
+        const sovra = { ...CONTO_SOVRACOSTI(), interno };
+        if (secondaria) segnaSovracosto(sovra, Number(r.sovracosto_pagato_raccoglitore || 0), r);
+        if (!tr.origine && !(sovra.sovracostoEuro > 0)) continue;
+        const ignota = !interno && tr.sconosciuta && unitaIgnota(tr.tariffa, fatt.nome, 'TRASPORTO_SECONDARIA', String(r.classe || '—'), peso);
         // Un surplus del trasporto delle secondarie vale solo sugli interventi
-        // secondari: il trasporto di un intervento primario e' la sua raccolta.
-        if (eSecondariaExtra(r)) segnaSurplus('TRASPORTO_SECONDARIA', r, fatt.chiave, fatt.nome, [fatt.nome, trasportatore], interno);
+        // secondari, e solo se il trasporto si paga: il trasporto di un
+        // intervento primario e' la sua raccolta.
+        if (secondaria && tr.origine) segnaSurplus('TRASPORTO_SECONDARIA', r, fatt.chiave, fatt.nome, [fatt.nome, trasportatore], interno);
         // La partenza: per una secondaria lo stoccaggio, per una primaria chi
         // conferisce. Nel foglio dell'amministrazione e' la colonna PRODUTTORE.
         const partenza = String(r.stoccaggio || r.produttore || r.ragione_sociale || r.punto_di_raccolta || '—').trim();
-        trasportiRows.push({
-          fornitore: fatt.nome, fornitore_norm: fatt.chiave, interno,
-          riga: {
-            stoccaggio: partenza,
-            destinazione: String(r.destinazione || '—').trim(),
-            trasportatore,
-            tonnellate: round3(peso / 1000),
-            viaggi: 1,
-            tariffa_valore: prezzo,
-            unita_misura: '€/viaggio',
-            // A se stessi non si fattura, come in tutti gli altri blocchi.
-            importo: interno ? 0 : round2(prezzo),
-            note: interno ? 'interno, non fatturato' : `intervento ${r.numero_fir || r.id_ordine || ''}`.trim(),
-          },
-        });
+        const intervento = `intervento ${r.numero_fir || r.id_ordine || ''}`.trim();
+        const riga = {
+          stoccaggio: partenza,
+          destinazione: String(r.destinazione || '—').trim(),
+          trasportatore,
+          tonnellate: round3(peso / 1000),
+          viaggi: 1,
+          tariffa_valore: tr.valore,
+          unita_misura: tr.unita_misura,
+          // A se stessi non si fattura, come in tutti gli altri blocchi.
+          importo: interno ? 0 : round2(tr.importo),
+          note: interno ? 'interno, non fatturato' : intervento,
+        };
+        if (secondaria) {
+          // Da dove viene il prezzo, scritto sulla riga: il contratto della
+          // tratta, oppure l'intervento perche' la tratta un contratto non ce
+          // l'ha. Un prezzo scritto accanto a un contratto non si paga, e si dice.
+          const origine = tr.origine === 'contratto'
+            ? `contratto del vettore per la tratta${tr.tariffa && tr.tariffa.tipologia === 'TUTTE' ? ' (tariffa TUTTE)' : ''}${tr.scritto > 0 ? `; i ${euroTesto(tr.scritto)} € a viaggio scritti sull'intervento non si pagano` : ''}`
+            : tr.origine ? 'prezzo scritto sull\'intervento: la tratta non ha un contratto' : 'nessun prezzo del trasporto';
+          // Lo stesso viaggio con altri interventi: con chi, e quanto ne paga questo.
+          const v = tr.viaggio;
+          const condiviso = v
+            ? `stesso viaggio di ${v.altri.join(', ')} (${v.targa ? `camion ${v.targa}` : 'senza targa'}, ${String(v.giorno || '').split('-').reverse().join('/')}): i ${euroTesto(v.prezzo_viaggio)} € a viaggio si pagano una volta, divisi per peso, qui ${tTesto(v.kg)} t delle ${tTesto(v.kg_viaggio)}: ${euroTesto(tr.importo)} €`
+            : '';
+          Object.assign(riga, {
+            tariffa_id: tr.tariffa ? (tr.tariffa.id || '') : '',
+            importo: interno ? 0 : round2(tr.importo + sovra.sovracostoEuro),
+            ...campiSovracosto(sovra),
+            ...(v ? {
+              // la parte del viaggio che questo intervento paga, come i viaggi
+              // misti del blocco qui sopra, e con chi lo divide
+              viaggi_quota: round2(v.quota),
+              viaggio_condiviso: { interventi: v.interventi, altri: v.altri, tonnellate_viaggio: round3(v.kg_viaggio / 1000), prezzo_viaggio: v.prezzo_viaggio },
+            } : {}),
+            ...noteRiga(
+              interno ? 'interno, non fatturato' : ignota ? unitaSconosciuta(tr.unita_misura) : '',
+              [intervento, origine, condiviso, notaSovracosto(sovra, 'del trasporto')].filter(Boolean).join(' · '),
+            ),
+          });
+        }
+        trasportiRows.push({ fornitore: fatt.nome, fornitore_norm: fatt.chiave, interno, riga });
       }
     }
 

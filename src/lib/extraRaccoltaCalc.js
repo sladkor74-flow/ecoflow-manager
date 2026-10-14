@@ -7,7 +7,7 @@ import {
   sortTariffe, tariffeAttiveValide, servizioEcotyre, eSecondariaExtra, avvisoPesoMancante,
   arrotondaAlCentesimo,
 } from './ecotyreTariffe.js';
-import { tariffaValeIl } from './validitaTariffa.js';
+import { tariffaValeIl, tariffaNonDisattivata } from './validitaTariffa.js';
 import { normalizzaRagioneSociale } from './normalizzaRagioneSocialeClient.js';
 import { PROV_TO_REGION } from './regioneMap.js';
 import { surplusDelMovimento, surplusNonDisattivati, importoSurplus, etichettaSurplus, euroTDi, NOMI_ORIGINE } from './surplus.js';
@@ -46,13 +46,27 @@ export { TARIFFA_BASE_EXTRA_RACCOLTA, tariffaBaseExtraRaccolta };
  *   chiama perche' subfornitori.js importa con l'alias delle pagine, che le prove
  *   in node non sanno leggere; senza, ognuno fattura per se'.
  * Senza i tre argomenti nuovi il contesto e' quello di prima e i numeri pure.
+ *
+ * LE TARIFFE DEI TRASPORTI (13/10/2026). Una secondaria di extra raccolta si
+ * paga come un trasporto di secondaria, con la tariffa della tratta nel
+ * contratto del vettore (decisione dell'utente del 13/10/2026, vedi
+ * trasportoIntervento). `tariffePassive` sono le tariffe passive lette da chi
+ * chiama (tutte, o le sole TRASPORTO_SECONDARIA): qui restano quelle dei
+ * trasporti non disattivate. Senza, `trasporti` e' null: il contratto non e'
+ * stato letto, e una secondaria resta col prezzo scritto sull'intervento, con
+ * `trasporto.non_letto` vero perche' chi mostra il costo lo possa dire.
+ * I viaggi delle secondarie (a viaggio lo stesso camion si paga una volta) li
+ * aggiunge conViaggi, con l'elenco degli interventi che chi chiama ha gia' letto.
  */
-export function contestoPrezzi(tariffeAttive = [], fornitori = [], surplus = [], subfornitori = null) {
+export function contestoPrezzi(tariffeAttive = [], fornitori = [], surplus = [], subfornitori = null, tariffePassive = null) {
   return {
     tariffe: sortTariffe(tariffeAttiveValide(tariffeAttive || [])),
     servizio: servizioEcotyre(fornitori || []),
     surplus: surplusNonDisattivati(surplus || []).filter(s => canaleDi(s) === 'EXTRA_RACCOLTA'),
     anagrafica: anagraficaSurplus(fornitori || [], subfornitori),
+    trasporti: Array.isArray(tariffePassive)
+      ? tariffePassive.filter(t => t && t.prestazione === 'TRASPORTO_SECONDARIA' && String(t.direzione || 'PASSIVA').toUpperCase() === 'PASSIVA' && tariffaNonDisattivata(t))
+      : null,
   };
 }
 
@@ -193,9 +207,197 @@ export function tariffaPassivaProposta(tariffe, fornitore, prestazione, interven
   return null;
 }
 
+// A CHI VA UN SURPLUS, A PAROLE (13/10/2026): il Fuel Surcharge e' della
+// raccolta, e va ai raccoglitori, mai ai produttori («il fuel surcharge non
+// riguarda i produttori ma i trasportatori ovvero i raccoglitori», l'utente).
+// Il titolo del blocco del surplus nei file dell'elenco e nella nota della
+// pagina accanto ai pulsanti: «Fuel Surcharge ai raccoglitori». Un surplus
+// senza prestazione (solo da Ecotyre) si guarda sulla raccolta di ciascun
+// raccoglitore.
+const AI_CHI_SURPLUS = { RACCOLTA: 'ai raccoglitori', TRATTAMENTO: 'agli impianti', CONFERIMENTO_STOCCAGGIO: 'agli stoccaggi', TRASPORTO_SECONDARIA: 'ai trasportatori delle secondarie' };
+export const aiChiSurplus = (prestazione) => AI_CHI_SURPLUS[prestazione] || 'ai raccoglitori';
+export const titoloSurplus = (nome, prestazione) => `${nome} ${AI_CHI_SURPLUS[prestazione] || 'sulla raccolta dei raccoglitori'}`;
+
 /** Un terminato senza peso effettivo: si segnala, e la quantita' ritirata non lo sostituisce. */
 export const senzaPesoEffettivo = (r) => !(Number(r && r.peso_effettivo) > 0);
 export { avvisoPesoMancante };
+
+// ─── IL TRASPORTO: UNA SECONDARIA E' UN TRASPORTO DI SECONDARIA (13/10/2026) ───
+// Decisione dell'utente del 13/10/2026: «le eventuali secondarie di extra
+// raccolta saranno trattate come normali trasporti di secondaria con il loro
+// €\t oppure €\viaggio a seconda del tragitto e dei contratti». Qui la stessa
+// regola della passiva (tariffaTrasportoExtra e trasportoInterventoExtra in
+// base44/shared/passivaCalcolo.ts), perche' pagina, scheda e foglio
+// dell'amministrazione dicano il costo che la passiva paga:
+// prove/extraRaccoltaSecondarie.mjs confronta i due conti caso per caso.
+// - la tariffa TRASPORTO_SECONDARIA del vettore (chi fattura, dopo la catena
+//   dei subfornitori) per la tratta, dallo stoccaggio alla destinazione, valida
+//   nel giorno italiano della fine del trasporto: prima una tariffa scritta per
+//   l'extra raccolta, poi quella «TUTTE» del contratto del vettore;
+// - a tonnellata sui chili dell'intervento, a viaggio una volta per viaggio: un
+//   camion in un giorno, che puo' portare piu' interventi (qui sotto);
+// - senza contratto, il prezzo a viaggio scritto sull'intervento.
+// Una primaria paga il suo trasporto a viaggio scritto sull'intervento, come
+// sempre.
+const UNITA_TRASPORTO = { '€/t': (kg, v) => (kg / 1000) * v, '€/kg': (kg, v) => kg * v, '€/viaggio': (_kg, v) => v };
+
+// ─── LO STESSO VIAGGIO SI PAGA UNA VOLTA (revisione del 14/10/2026) ───
+// Un viaggio e' un camion in un giorno, anche nell'extra raccolta: due
+// secondarie sullo stesso automezzo, lo stesso giorno italiano, sulla stessa
+// tratta e con lo stesso vettore (chi fattura) - per esempio due formulari
+// divisi per classe - sono UN viaggio. A viaggio il prezzo del contratto si
+// paga una volta sola e si divide fra gli interventi in proporzione ai chili,
+// come il viaggio misto fra rete e ACI (regola dell'utente del 22/09/2026); a
+// tonnellata ognuno paga i suoi chili. Prima ogni intervento pagava il viaggio
+// intero: due formulari dello stesso camion a 400 €/viaggio facevano 800 €.
+// Senza targa gli interventi dello stesso giorno sulla stessa tratta contano
+// come un viaggio solo. Il prezzo scritto a mano sull'intervento resta di
+// quell'intervento. E' la regola della passiva (chiaveViaggioExtra,
+// quoteDelViaggio e trasportoInterventoExtra in base44/shared/passivaCalcolo.ts),
+// scritta due volte perche' questo file lo leggono le pagine:
+// prove/extraRaccoltaSecondarie.mjs le confronta.
+const chiaveViaggio = (r) => `${giornoRoma(r && r.trasporto_finito_il)}|${String((r && r.automezzo) || '').toUpperCase().replace(/[^A-Z0-9]/g, '')}`;
+
+/** Il viaggio di una secondaria: vettore, tratta, giorno italiano e targa. */
+export function chiaveViaggioExtra(r, trasKey) {
+  return `${trasKey}|${normalizzaRagioneSociale(r && r.stoccaggio)}|${normalizzaRagioneSociale(r && r.destinazione)}|${chiaveViaggio(r)}`;
+}
+
+/** Chi e' un intervento fra quelli dello stesso viaggio, per l'ordine delle quote. */
+export function chiaveInterventoExtra(r) {
+  return `${String((r && r.id) || '')}|${String((r && r.numero_fir) || '')}|${String((r && r.id_ordine) || '')}`;
+}
+
+/**
+ * Le quote di un prezzo a viaggio fra gli interventi dello stesso viaggio, al
+ * centesimo: in proporzione ai chili (senza chili, in parti uguali); l'ultimo,
+ * nell'ordine di `chiave`, prende la differenza, cosi' la somma e' il prezzo.
+ * membri: [{ chiave, kg }] -> Map(chiave -> euro)
+ */
+export function quoteDelViaggio(valore, membri) {
+  const ordinati = [...(membri || [])].sort((a, b) => (a.chiave < b.chiave ? -1 : a.chiave > b.chiave ? 1 : 0));
+  const kgDi = (m) => (Number(m.kg) > 0 ? Number(m.kg) : 0);
+  const kgViaggio = ordinati.reduce((s, m) => s + kgDi(m), 0);
+  const quote = new Map();
+  let date = 0;
+  ordinati.forEach((m, i) => {
+    if (i === ordinati.length - 1) { quote.set(m.chiave, arrotondaAlCentesimo(valore - date)); return; }
+    const parte = kgViaggio > 0 ? kgDi(m) / kgViaggio : 1 / ordinati.length;
+    const euro = arrotondaAlCentesimo(valore * parte);
+    date += euro;
+    quote.set(m.chiave, euro);
+  });
+  return quote;
+}
+
+/**
+ * Il contesto con i viaggi delle secondarie: gli interventi terminati, con la
+ * fine del trasporto, raggruppati per viaggio (chiaveViaggioExtra), come li
+ * raggruppa la passiva. Chi mostra il costo di un intervento lo chiama una
+ * volta con l'elenco che ha gia' letto (la pagina con tutti gli interventi, il
+ * foglio dell'amministrazione con quelli del mese): nessuna lettura in piu'.
+ * Senza, ogni intervento e' un viaggio a se'.
+ */
+export function conViaggi(contesto, interventi) {
+  const c = contesto || CONTESTO_VUOTO;
+  const p = (c.anagrafica || ANAGRAFICA_VUOTA).passiva;
+  const viaggi = new Map();
+  for (const r of interventi || []) {
+    if (!r || !eSecondariaExtra(r) || String(r.stato || '').toLowerCase().trim() !== 'terminato') continue;
+    if (!giornoRoma(r.trasporto_finito_il)) continue;
+    const trasportatore = String(r.trasportatore || '').trim();
+    if (!trasportatore) continue;
+    const k = chiaveViaggioExtra(r, p.fattura(trasportatore).chiave);
+    if (!viaggi.has(k)) viaggi.set(k, []);
+    viaggi.get(k).push(r);
+  }
+  return { ...c, viaggi };
+}
+
+// Gli interventi del viaggio di `r`, lui compreso con i suoi valori di adesso
+// (la scheda puo' averli appena cambiati): quelli del contesto con lo stesso
+// viaggio, tolto lui stesso.
+function membriDelViaggio(r, c, trasKey) {
+  if (!(c.viaggi instanceof Map)) return [r];
+  const stesso = (x) => x === r || (!!(x && x.id) && !!(r && r.id) && String(x.id) === String(r.id));
+  return [...(c.viaggi.get(chiaveViaggioExtra(r, trasKey)) || []).filter(x => !stesso(x)), r];
+}
+
+/** La tariffa della tratta nel contratto del vettore, o null. */
+export function tariffaTrasportoExtra(tariffe, trasKey, stoccaggio, destinazione, quando) {
+  const prodKey = normalizzaRagioneSociale(stoccaggio);
+  const destKey = normalizzaRagioneSociale(destinazione);
+  if (!trasKey || !prodKey || !destKey) return null;
+  for (const tip of ['EXTRA_RACCOLTA', 'TUTTE']) {
+    const trovata = (tariffe || []).find(t =>
+      t && t.prestazione === 'TRASPORTO_SECONDARIA'
+      && String(t.direzione || 'PASSIVA').toUpperCase() === 'PASSIVA'
+      && tariffaNonDisattivata(t)
+      && normalizzaRagioneSociale(t.fornitore_nome) === trasKey
+      && t.tipologia === tip
+      && tariffaValeIl(t, quando)
+      && normalizzaRagioneSociale(t.produttore) === prodKey
+      && normalizzaRagioneSociale(t.destinatario) === destKey);
+    if (trovata) return trovata;
+  }
+  return null;
+}
+
+/**
+ * Il trasporto di un intervento: quanto si paga al vettore e da dove viene il
+ * prezzo.
+ * -> { origine: 'contratto' | 'intervento' | '', tariffa, valore, unita_misura,
+ *      importo (al centesimo), scritto, fornitore, interno, sconosciuta, non_letto,
+ *      viaggio }
+ * `non_letto`: una secondaria con un contesto che le tariffe dei trasporti non
+ * le ha (contestoPrezzi senza il quinto argomento): il prezzo e' quello scritto,
+ * ma il contratto potrebbe dirne un altro. Il contratto di un vettore interno
+ * non si paga, come in passiva: a se stessa SMOCO non fattura.
+ * `viaggio`: null, oppure, per un contratto a viaggio con altri interventi sullo
+ * stesso viaggio (conViaggi), { interventi, altri, kg, kg_viaggio,
+ * prezzo_viaggio, quota, giorno, targa }: l'importo e' la quota dell'intervento.
+ */
+export function trasportoIntervento(r, contesto = CONTESTO_VUOTO) {
+  const c = contesto || CONTESTO_VUOTO;
+  const scritto = Number(r && r.costo_trasporto_viaggio) > 0 ? Number(r.costo_trasporto_viaggio) : 0;
+  const daScritto = { origine: scritto > 0 ? 'intervento' : '', tariffa: null, valore: scritto, unita_misura: '€/viaggio', importo: arrotondaAlCentesimo(scritto), scritto, fornitore: '', interno: false, sconosciuta: false, non_letto: false, viaggio: null };
+  if (!eSecondariaExtra(r)) return daScritto;
+  const trasportatore = String((r && r.trasportatore) || '').trim();
+  const p = (c.anagrafica || ANAGRAFICA_VUOTA).passiva;
+  const f = trasportatore ? p.fattura(trasportatore) : { nome: '', chiave: '' };
+  const interno = !!trasportatore && p.interno(f.nome);
+  const scrittoQui = { ...daScritto, fornitore: f.nome, interno, ...(interno ? { importo: 0 } : {}) };
+  if (!Array.isArray(c.trasporti)) return { ...scrittoQui, non_letto: true };
+  const tariffa = tariffaTrasportoExtra(c.trasporti, f.chiave, r.stoccaggio, r.destinazione, r.trasporto_finito_il);
+  if (!tariffa) return scrittoQui;
+  const unita = String(tariffa.unita_misura || '').trim();
+  const valore = Number(tariffa.valore) || 0;
+  const calcolo = UNITA_TRASPORTO[unita];
+  const kg = Number(r.peso_effettivo) > 0 ? Number(r.peso_effettivo) : 0;
+  let importo = interno || !calcolo ? 0 : arrotondaAlCentesimo(calcolo(kg, valore));
+  let viaggio = null;
+  const membri = calcolo && unita === '€/viaggio' ? membriDelViaggio(r, c, f.chiave) : [r];
+  if (membri.length > 1) {
+    // Lo stesso viaggio di altri interventi: si paga una volta, diviso per peso.
+    const quota = quoteDelViaggio(valore, membri.map(x => ({ chiave: chiaveInterventoExtra(x), kg: Number(x && x.peso_effettivo) || 0 }))).get(chiaveInterventoExtra(r)) ?? 0;
+    if (!interno) importo = quota;
+    viaggio = {
+      interventi: membri.length,
+      altri: membri.filter(x => x !== r).sort((a, b) => chiaveInterventoExtra(a).localeCompare(chiaveInterventoExtra(b))).map(x => String((x && (x.numero_fir || x.id_ordine)) || '—')),
+      kg,
+      kg_viaggio: membri.reduce((s, x) => s + (Number(x && x.peso_effettivo) > 0 ? Number(x.peso_effettivo) : 0), 0),
+      prezzo_viaggio: valore,
+      quota: valore ? quota / valore : 0,
+      giorno: giornoRoma(r.trasporto_finito_il),
+      targa: String(r.automezzo || '').trim(),
+    };
+  }
+  return {
+    origine: 'contratto', tariffa, valore, unita_misura: unita,
+    importo,
+    scritto, fornitore: f.nome, interno, sconosciuta: !calcolo, non_letto: false, viaggio,
+  };
+}
 
 const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -299,6 +501,19 @@ export function surplusIntervento(r, contesto = CONTESTO_VUOTO) {
       nomi: [...new Set([originale, f.nome].filter(Boolean))],
     };
   };
+  const p = a.passiva;
+  // A CHI VA, ANCHE NELL'ATTIVO (13/10/2026). Il surplus da Ecotyre non e' del
+  // produttore: l'utente, il 13/10/2026, «il fuel surcharge non riguarda i
+  // produttori ma i trasportatori ovvero i raccoglitori, su questo non ci devono
+  // essere confusioni». Ogni quota attiva porta quindi il fornitore a cui il
+  // surplus e' dovuto, con la regola dell'elenco: il raccoglitore (chi fattura
+  // per lui, come in passiva) per la raccolta e per un surplus senza
+  // prestazione, la destinazione per trattamento e stoccaggio. Il file
+  // dell'elenco lo usa per il blocco «Fuel Surcharge ai raccoglitori».
+  const raccoglitoreDi = trasportatore ? p.fattura(trasportatore) : { nome: '', chiave: '' };
+  const aChiVa = (s) => (['TRATTAMENTO', 'CONFERIMENTO_STOCCAGGIO'].includes(String(s.prestazione || '').trim().toUpperCase().replace(/[\s-]+/g, '_'))
+    ? { fornitore: destinazione, fornitore_chiave: normalizzaRagioneSociale(destinazione), sul_movimento: destinazione }
+    : { fornitore: raccoglitoreDi.nome, fornitore_chiave: raccoglitoreDi.chiave, sul_movimento: trasportatore });
   const attivo = [];
   if (!secondaria) {
     const raccoglitore = perAttiva(trasportatore);
@@ -308,16 +523,15 @@ export function surplusIntervento(r, contesto = CONTESTO_VUOTO) {
       fornitore: raccoglitore,
       fornitori: { RACCOLTA: raccoglitore, TRATTAMENTO: impianto, CONFERIMENTO_STOCCAGGIO: impianto },
     }, 'ATTIVA');
-    for (const { surplus: s, euro_t } of validi) attivo.push(voceSurplus(s, euro_t, kg, { importo: importoSurplus(kg, euro_t) }));
+    for (const { surplus: s, euro_t } of validi) attivo.push(voceSurplus(s, euro_t, kg, { importo: importoSurplus(kg, euro_t), ...aChiVa(s) }));
   }
 
   const passivo = [];
-  const p = a.passiva;
-  const paga = (prestazione, fornitore, chiave, nomi, interno) => {
+  const paga = (prestazione, fornitore, chiave, nomi, interno, sulMovimento) => {
     const validi = surplusDelMovimento(elenco, { tipologia: canale, prestazione, quando, fornitore: { id: p.idDi(chiave), nomi } }, 'PASSIVA');
     for (const { surplus: s, euro_t } of validi) {
       passivo.push(voceSurplus(s, euro_t, kg, {
-        prestazione, fornitore, fornitore_chiave: chiave, interno,
+        prestazione, fornitore, fornitore_chiave: chiave, interno, sul_movimento: sulMovimento,
         importo: interno ? 0 : importoSurplus(kg, euro_t),
       }));
     }
@@ -325,8 +539,8 @@ export function surplusIntervento(r, contesto = CONTESTO_VUOTO) {
   // la raccolta: solo gli interventi primari, perche' una secondaria e' un
   // trasferimento da uno stoccaggio, non una raccolta
   if (trasportatore && !secondaria) {
-    const f = p.fattura(trasportatore);
-    paga('RACCOLTA', f.nome, f.chiave, [f.nome, trasportatore], p.interno(f.nome));
+    const f = raccoglitoreDi;
+    paga('RACCOLTA', f.nome, f.chiave, [f.nome, trasportatore], p.interno(f.nome), trasportatore);
   }
   // il trattamento o lo stoccaggio, alla destinazione
   const principale = prestazioneDaTipo(r.tipo_destinazione);
@@ -334,12 +548,13 @@ export function surplusIntervento(r, contesto = CONTESTO_VUOTO) {
     const chiave = normalizzaRagioneSociale(destinazione);
     const altra = principale === 'TRATTAMENTO' ? 'CONFERIMENTO_STOCCAGGIO' : 'TRATTAMENTO';
     const prestazioni = Number(r[CAMPO_COSTO[altra]] || 0) > 0 ? [principale, altra] : [principale];
-    for (const prestazione of prestazioni) paga(prestazione, destinazione, chiave, [destinazione], p.interno(destinazione));
+    for (const prestazione of prestazioni) paga(prestazione, destinazione, chiave, [destinazione], p.interno(destinazione), destinazione);
   }
-  // il trasporto delle secondarie, se il viaggio si paga
-  if (secondaria && trasportatore && Number(r.costo_trasporto_viaggio || 0) > 0) {
-    const f = p.fattura(trasportatore);
-    paga('TRASPORTO_SECONDARIA', f.nome, f.chiave, [f.nome, trasportatore], p.interno(f.nome));
+  // il trasporto delle secondarie, se il viaggio si paga: col contratto della
+  // tratta o col prezzo scritto, come in passiva (13/10/2026)
+  if (secondaria && trasportatore && trasportoIntervento(r, c).origine) {
+    const f = raccoglitoreDi;
+    paga('TRASPORTO_SECONDARIA', f.nome, f.chiave, [f.nome, trasportatore], p.interno(f.nome), trasportatore);
   }
   return { attivo, passivo };
 }
@@ -364,23 +579,46 @@ export function surplusIntervento(r, contesto = CONTESTO_VUOTO) {
 export function surplusDelMese(interventi, contesto = CONTESTO_VUOTO) {
   const attivi = new Map();
   const passivi = new Map();
+  // A chi va (13/10/2026): per mese, surplus e fornitore che lo riceve, i chili
+  // della parte da Ecotyre e quelli della parte ai fornitori (per_fornitore).
+  const aChi = new Map();
+  const diChi = (mese, v) => {
+    const k = `${mese}|${v.chiave}|${v.fornitore_chiave || ''}`;
+    if (!aChi.has(k)) {
+      const { fornitore, fornitore_chiave, sul_movimento: _s, importo: _i, kg: _k, interno: _n, ...voce } = v;
+      aChi.set(k, { ...voce, mese, fornitore: fornitore || '', fornitore_chiave: fornitore_chiave || '', sul_movimento: new Set(), kg_attivo: 0, kg_passivo: 0, interno: false, interventi: new Set() });
+    }
+    return aChi.get(k);
+  };
   for (const r of interventi || []) {
     if (!eTerminatoExtra(r)) continue;
     const giorno = giornoRoma(r.trasporto_finito_il);
     if (!giorno) continue;
     const mese = giorno.slice(0, 7);
     const s = surplusIntervento(r, contesto);
+    const idIntervento = String(r.id || r.numero_fir || r.id_ordine || '');
     for (const v of s.attivo) {
       const k = `${mese}|${v.chiave}`;
-      const acc = attivi.get(k) || { ...v, mese, kg: 0, quote: 0, interventi: 0 };
+      const { fornitore: _f, fornitore_chiave: _fc, sul_movimento: _sm, ...voce } = v;
+      const acc = attivi.get(k) || { ...voce, mese, kg: 0, quote: 0, interventi: 0 };
       acc.kg += v.kg; acc.quote += v.importo; acc.interventi++;
       attivi.set(k, acc);
+      const chi = diChi(mese, v);
+      chi.kg_attivo += v.kg;
+      if (v.sul_movimento) chi.sul_movimento.add(v.sul_movimento);
+      chi.interventi.add(idIntervento);
     }
     for (const v of s.passivo) {
       const k = `${mese}|${v.chiave}|${v.fornitore_chiave}`;
-      const acc = passivi.get(k) || { ...v, mese, kg: 0, quote: 0, interventi: 0 };
+      const { sul_movimento: _sm, ...voce } = v;
+      const acc = passivi.get(k) || { ...voce, mese, kg: 0, quote: 0, interventi: 0 };
       acc.kg += v.kg; acc.quote += v.importo; acc.interventi++;
       passivi.set(k, acc);
+      const chi = diChi(mese, v);
+      chi.kg_passivo += v.kg;
+      chi.interno = chi.interno || !!v.interno;
+      if (v.sul_movimento) chi.sul_movimento.add(v.sul_movimento);
+      chi.interventi.add(idIntervento);
     }
   }
   const ordine = (x, y) => x.mese.localeCompare(y.mese) || x.nome.localeCompare(y.nome, 'it') || x.dal.localeCompare(y.dal)
@@ -434,8 +672,29 @@ export function surplusDelMese(interventi, contesto = CONTESTO_VUOTO) {
     interni: [...p.interni.values()].sort((x, y) => y.kg - x.kg || x.fornitore.localeCompare(y.fornitore, 'it')),
   })).sort((x, y) => x.nome.localeCompare(y.nome, 'it') || x.dal.localeCompare(y.dal));
 
+  // A CHI VA (13/10/2026): una riga per mese, surplus e fornitore che lo riceve -
+  // il raccoglitore per il Fuel Surcharge, mai il produttore - con la parte da
+  // Ecotyre (ricavo) e quella al fornitore (costo), ognuna al suo centesimo. Il
+  // costo e' quello della passiva, fornitore per fornitore (un interno: zero,
+  // con `interno`); il ricavo in fattura si arrotonda invece una volta sul mese
+  // (attivo), e la somma delle righe puo' scostarsene di un centesimo: chi le
+  // mostra lo dice. Una parte che il surplus non ha e' null, non zero.
+  // `sul_movimento`: i nomi scritti sugli interventi diversi da chi riceve, cioe'
+  // i subraccoglitori per cui il principale fattura.
+  const per_fornitore = [...aChi.values()].filter(v => v.kg_attivo > 0 || v.kg_passivo > 0).map(v => {
+    const attiva = v.euro_t_attiva !== null && v.euro_t_attiva !== undefined;
+    const passiva = v.euro_t_passiva !== null && v.euro_t_passiva !== undefined;
+    return {
+      ...v,
+      sul_movimento: [...v.sul_movimento].filter(n => normalizzaRagioneSociale(n) !== v.fornitore_chiave),
+      interventi: v.interventi.size,
+      ricavo: attiva && v.kg_attivo > 0 ? importoSurplus(Math.round(v.kg_attivo * 1000) / 1000, v.euro_t_attiva) : null,
+      costo: passiva && v.kg_passivo > 0 ? (v.interno ? 0 : importoSurplus(v.kg_passivo, v.euro_t_passiva)) : null,
+    };
+  }).sort(ordine);
+
   return {
-    attivo, passivo, interni, per_surplus,
+    attivo, passivo, interni, per_surplus, per_fornitore,
     totale_attivo: somma(attivo, 'importo'),
     totale_passivo: somma(passivo, 'importo'),
     quote_attivo: somma(attivo, 'quote'),
@@ -468,7 +727,9 @@ export function calcExtraRaccolta(r, contesto = CONTESTO_VUOTO) {
     ? r2(r2(prezzo.totale(quantita_kg)) + r2(sovraRaccolta) + r2(sovraTrasporto) + r2(sovraTrattamento))
     : 0;
 
-  const costoRaccolta = Number(r.costo_raccolta_t || 0);
+  // Una secondaria non e' una raccolta: un costo di raccolta scritto su di lei
+  // non si paga, come in passiva, che lo dice fra le anomalie (13/10/2026).
+  const costoRaccolta = eSecondariaExtra(r) ? 0 : Number(r.costo_raccolta_t || 0);
   const costoStoccaggio = Number(r.costo_stoccaggio_t || 0);
   const costoTrattamento = Number(r.costo_trattamento_t || 0);
   const costoPulizia = Number(r.costo_pulizia || 0);
@@ -479,7 +740,11 @@ export function calcExtraRaccolta(r, contesto = CONTESTO_VUOTO) {
   // non c'era niente da scriverci: il trasporto non si pagava, e per una
   // secondaria - un trasferimento da uno stoccaggio a un impianto, che non ha un
   // costo di raccolta - non si pagava proprio nulla al trasportatore.
-  const costoTrasporto = Number(r.costo_trasporto_viaggio || 0);
+  // Dal 13/10/2026 una secondaria si paga come un trasporto di secondaria: la
+  // tariffa della tratta nel contratto del vettore, a tonnellata o a viaggio, e
+  // il prezzo scritto solo senza contratto (trasportoIntervento, qui sopra).
+  const trasporto = trasportoIntervento(r, contesto);
+  const costoTrasporto = trasporto.importo;
   // I SOVRACOSTI DELLA PASSIVA HANNO UN PADRONE. L'utente, 03/10/2026: «il
   // sovraccosto nella passiva puo' essere dovuto al raccoglitore (quando ad
   // esempio ha dovuto sostenere costi imprevisti nella raccolta) o per l'impianto
@@ -504,6 +769,9 @@ export function calcExtraRaccolta(r, contesto = CONTESTO_VUOTO) {
     raccolta: arrotondaAlCentesimo(t * costoRaccolta),
     stoccaggio: arrotondaAlCentesimo(t * costoStoccaggio),
     trattamento: arrotondaAlCentesimo(t * costoTrattamento),
+    // il trasporto dell'intervento, gia' in euro (13/10/2026): a viaggio, o la
+    // tariffa della tratta per una secondaria
+    trasporto: costoTrasporto,
   };
   const costo_standard = arrotondaAlCentesimo(costi.raccolta + costi.stoccaggio + costi.trattamento
     + costoPulizia + costiAggiuntivi + costoTrasporto + sovraRaccoglitore + sovraImpianto);
@@ -526,7 +794,7 @@ export function calcExtraRaccolta(r, contesto = CONTESTO_VUOTO) {
   return {
     tonnellate, kg: senza_peso ? null : quantita_kg, senza_peso, fatturato,
     prezzo_attivo: prezzoAttivo, prezzo, ricavo, costi, costo_totale, margine, margine_perc,
-    ricavo_standard, costo_standard,
+    ricavo_standard, costo_standard, trasporto,
     surplus_attivo, surplus_passivo, surplus_ricavo, surplus_costo,
   };
 }
@@ -573,15 +841,21 @@ export function totaleRiga(r, contesto = CONTESTO_VUOTO) {
   return c.fatturato ? r2(c.prezzo.totale(c.kg)) : 0;
 }
 
-// Aggregazione per produttore per analisi margine. Con un surplus nel contesto
-// (13/10/2026) costo totale e ricavi comprendono le quote del surplus, e le due
-// voci `surplus_costo` e `surplus_ricavo` le dicono: le colonne dei costi piu'
-// surplus_costo fanno sempre il costo totale.
+// Aggregazione per produttore per analisi margine: SOLO LO STANDARD.
+//
+// IL SURPLUS NON E' DEL PRODUTTORE (decisione dell'utente del 13/10/2026): «il
+// fuel surcharge non riguarda i produttori ma i trasportatori ovvero i
+// raccoglitori, su questo non ci devono essere confusioni». Dal 13/10 mattina
+// qui costo totale e ricavi comprendevano le quote del surplus quando il
+// contesto lo portava, e un produttore risultava avere un Fuel Surcharge suo.
+// Ora l'analisi per produttore e' lo standard qualunque contesto riceva, e il
+// surplus si guarda per chi lo riceve (per_fornitore di surplusDelMese, il
+// blocco «Fuel Surcharge ai raccoglitori» del file dell'elenco).
 export function aggregaPerProduttore(records, contesto = CONTESTO_VUOTO) {
   const map = {};
   for (const r of records) {
     const p = r.produttore || '(senza produttore)';
-    if (!map[p]) map[p] = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, trasporto: 0, sovracosto_raccoglitore: 0, sovracosto_impianto: 0, surplus_costo: 0, costo_totale: 0, surplus_ricavo: 0, ricavi: 0, margine: 0 };
+    if (!map[p]) map[p] = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, trasporto: 0, sovracosto_raccoglitore: 0, sovracosto_impianto: 0, costo_totale: 0, ricavi: 0, margine: 0 };
     const c = calcExtraRaccolta(r, contesto);
     map[p].costi_aggiuntivi += Number(r.costi_aggiuntivi || 0);
     // Le voci a tonnellata come le conta il costo totale, gia' al centesimo per
@@ -590,14 +864,14 @@ export function aggregaPerProduttore(records, contesto = CONTESTO_VUOTO) {
     map[p].stoccaggio += c.costi.stoccaggio;
     map[p].trattamento += c.costi.trattamento;
     map[p].pulizia += Number(r.costo_pulizia || 0);
-    map[p].trasporto += Number(r.costo_trasporto_viaggio || 0);
+    // il trasporto che si paga davvero: per una secondaria il contratto della
+    // tratta (13/10/2026)
+    map[p].trasporto += c.costi.trasporto;
     map[p].sovracosto_raccoglitore += Number(r.sovracosto_pagato_raccoglitore || 0);
     map[p].sovracosto_impianto += Number(r.sovracosto_pagato_impianto || 0);
-    map[p].surplus_costo += c.surplus_costo;
-    map[p].surplus_ricavo += c.surplus_ricavo;
-    map[p].costo_totale += c.costo_totale;
-    map[p].ricavi += c.ricavo;
-    map[p].margine += c.margine;
+    map[p].costo_totale += c.costo_standard;
+    map[p].ricavi += c.ricavo_standard;
+    map[p].margine += Math.round((c.ricavo_standard - c.costo_standard) * 100) / 100;
   }
   return map;
 }

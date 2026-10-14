@@ -325,6 +325,10 @@ await sezione('4. L\'EXTRA RACCOLTA: IL SURPLUS IN FONDO AGLI INTERVENTI, UNA VO
       J(fm.extra.surplus.map(r => [r.tipo, r.soggetto, r.tonnellate, r.prezzo, r.totale])) === J([['surplus', 'EMMESSE SRLS', 2.631, 5, 13.16]])
       && /dell'intervento del mese/.test(fm.extra.surplus[0].note) && fm.extra.totale_interventi === 530.44 && fm.extra.totale_euro === 543.6 && fm.totale_euro === 543.6 && fm.totale_surplus === 13.16,
       J([fm.extra.surplus, fm.extra.totale_euro, fm.totale_euro]));
+    // Il nome del surplus arriva anche al canale (revisione del 13/10/2026):
+    // senza il calcolo, dalle righe del blocco; la fascia dell'Excel e il
+    // riquadro del PDF dicono «di cui Fuel Surcharge», non «di cui surplus».
+    verifica(`${come}: il canale sa che il suo surplus e' il Fuel Surcharge`, J(fm.surplus.map(s => [s.nome, s.euro_t, s.prestazione])) === J([['Fuel Surcharge', 5, 'RACCOLTA']]), J(fm.surplus));
   }
   // Il modulo vero, se c'e' gia' il suo surplus: lo stesso numero del calcolo.
   const subfornitori = await caricaLibPagine('lib/subfornitori');
@@ -426,7 +430,9 @@ export const disegna = (nome, props) => renderToStaticMarkup(React.createElement
   verifica('il modulo mostra le fasce del mese e il «di cui» nei riquadri', /<FasceSurplus surplus=\{result\.surplus_del_mese\}/.test(modulo) && (modulo.match(/<DiCuiSurplus /g) || []).length === 3 && /standard \{formatNumber\(result\.totali\.standard/.test(modulo));
   verifica('il foglio dell\'amministrazione conta il surplus dell\'extra raccolta col modulo: i surplus letti una volta, il contesto della pagina',
     /fetchAllClient\(base44\.entities\.SurplusTariffa, null, '-created_date'\)/.test(modulo)
-    && /bloccoExtraRaccolta\(interventi, periodo\.anno, periodo\.mese, contestoPrezzi\(\[\], fornitori, surplusAll, subfornitori\)\)/.test(modulo)
+    // dal 14/10/2026 (chiusura del giro) anche le tariffe passive gia' lette, per
+    // il contratto della tratta delle secondarie: prove/extraRaccoltaSecondarie.mjs, sezione 9
+    && /bloccoExtraRaccolta\(interventi, periodo\.anno, periodo\.mese, contestoPrezzi\(\[\], fornitori, surplusAll, subfornitori, tariffe\)\)/.test(modulo)
     && !/SurplusTariffa, \{ stato/.test(modulo));
   verifica('e l\'extra raccolta non chiede niente al calcolo, come prima: niente surplus contato due volte', /if \(canale === 'EXTRA_RACCOLTA'\) \{[^}]*per\[canale\] = \{\};/.test(modulo));
 });

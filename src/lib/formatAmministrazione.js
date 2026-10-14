@@ -33,10 +33,12 @@
 // Import relativo con l'estensione: questo file lo carica anche
 // formatAmministrazioneExport, e nelle prove arriva in node come file vero.
 import { FATTURANTE_ATTIVA, prezzoATonnellata } from './ecotyreTariffe.js';
+import { soloFormulari, soloSurplus, pezziSurplusReport, righeAParole } from './surplusVista.js';
 
 const tipoServizio = (r) => (r.servizio_ecotyre === 'TRASP' ? 'Trasp.' : 'Trasp.+Tratt.');
 const giorno = (v) => (v ? new Date(v).toLocaleDateString('it-IT') : '');
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+const centesimi = (v) => Math.round((Number(v) || 0) * 100);
 
 /** Il prezzo al chilo da quello a tonnellata: 202 €/t sono 0,202 €/kg. */
 export const euroAlChilo = (euroTonnellata) => Math.round((Number(euroTonnellata) || 0) / 1000 * 100000) / 100000;
@@ -60,16 +62,49 @@ const prezzoKg = (r) => { const t = prezzoTon(r); return t === null ? null : eur
 // posto di tipo, dove c'e'. Prova: prove/formatAmministrazionePdf.mjs.
 const PREZZO_PDF = 'prezzoLibero';
 
+// IL SURPLUS E' UNA VOCE A SE', CON LA SUA RIGA (decisione dell'utente del
+// 13/10/2026 sera: il Fuel Surcharge «deve essere una voce disgiunta con un
+// proprio rigo (per canale)»). I formulari restano quelli, nello stesso ordine e
+// con gli stessi numeri; sotto, il «Totale formulari», una riga per surplus e
+// il TOTALE che la comprende (chi scrive i file: formatAmministrazioneExport.js).
+// La riga del surplus riempie le colonne del foglio coi suoi pezzi
+// (pezziSurplusReport di surplusVista.js): il nome sotto il Tipo, l'origine
+// sotto l'Ordine, la validita' sotto la Data, «+5,00 €/t sulle 1.120,24 t del
+// mese» sotto il FIR. La Quantita' resta VUOTA: i chili sono gia' sopra, e
+// scritti anche li' li conterebbe due volte chi fa la somma della colonna. Il
+// prezzo e' quello del foglio: al chilo sulla rete (5 €/t sono 0,005 €/kg), a
+// tonnellata sull'ACI. Nell'ACI la colonna Note resta vuota anche qui («la
+// scrivo io a mano»). Senza surplus la tabella e' quella di prima.
+
+/**
+ * Le celle della riga di un surplus, nelle colonne del foglio del canale. Sulla
+ * rete il prezzo al chilo tiene sei decimali (un surplus a 5,125 €/t e'
+ * 0,005125 €/kg): l'importo della riga nell'Excel e' una formula su questa
+ * cella, e con i cinque di euroAlChilo farebbe 0,00513 e un altro importo.
+ */
+function celleSurplus(tipologia, p, anno, mese, periodoRete) {
+  if (tipologia === 'ACI') return ['', FATTURANTE_ATTIVA, `${anno} ${mese}`, p.nome, p.origine, p.validita, p.base, '', null, p.euro_t, p.totale, ''];
+  return [periodoRete, p.nome, p.origine, p.validita, p.base, '', null, p.euro_t === null ? null : Math.round(p.euro_t * 1000) / 1000000, p.totale, ''];
+}
+
 /**
  * La tabella del mese nel formato dell'amministrazione.
- * Torna { titolo, intestazione, colonne, righe, totale_kg, totale_euro, iKg, iTotale }.
+ * Torna { titolo, intestazione, colonne, righe, surplus, totale_kg,
+ * totale_euro_formulari, totale_euro, righe_a_parole, iKg, iTotale }.
+ * righe sono i soli formulari, e totale_kg e' il loro; surplus sono le righe
+ * dei surplus ({ celle, nome, origine, validita, base, euro_t, kg, ordini,
+ * totale }); totale_euro comprende i surplus, totale_euro_formulari no.
  * Le righe sospese restano fuori, come nel report che gia' c'e'.
  */
 export function tabellaAmministrazione(tipologia, righe, anno, mese) {
   const periodo = `${anno} ${String(mese || '').toUpperCase()}`;
   const valide = (righe || []).filter(r => !r.sospesa);
-  const totaleKg = valide.reduce((s, r) => s + (Number(r.quantita) || 0), 0);
-  const totaleEuro = r2(valide.reduce((s, r) => s + (Number(r.totale) || 0), 0));
+  const formulari = soloFormulari(valide);
+  const totaleKg = formulari.reduce((s, r) => s + (Number(r.quantita) || 0), 0);
+  const totaleFormulari = r2(formulari.reduce((s, r) => s + (Number(r.totale) || 0), 0));
+  const surplus = soloSurplus(valide).map(r => { const p = pezziSurplusReport(r); return { ...p, celle: celleSurplus(tipologia, p, anno, mese, periodo) }; });
+  const totaleEuro = (centesimi(totaleFormulari) + surplus.reduce((s, x) => s + centesimi(x.totale), 0)) / 100;
+  const conti = { surplus, totale_euro_formulari: totaleFormulari, righe_a_parole: righeAParole(valide) };
 
   if (tipologia === 'ACI') {
     return {
@@ -77,7 +112,7 @@ export function tabellaAmministrazione(tipologia, righe, anno, mese) {
       // La riga sopra la tabella, come nel file dell'amministrazione.
       intestazione: ['SMOCO', '', 'ACI', '', '', '', '', `${String(mese || '').toUpperCase()} ${anno}`],
       iKg: 8, iTotale: 10,
-      totale_kg: totaleKg, totale_euro: totaleEuro,
+      totale_kg: totaleKg, totale_euro: totaleEuro, ...conti,
       colonne: [
         { titolo: 'Regione', tipo: 'testo', peso: 0.9 },
         { titolo: 'Fatturante', tipo: 'testo', peso: 0.9 },
@@ -92,7 +127,7 @@ export function tabellaAmministrazione(tipologia, righe, anno, mese) {
         { titolo: 'Prezzo Totale', tipo: 'euro', peso: 0.9 },
         { titolo: 'Note', tipo: 'testo', peso: 1.6 },
       ],
-      righe: valide.map(r => [
+      righe: formulari.map(r => [
         // IL FATTURANTE E' SMOCO, SEMPRE (chiusura dell'audit, 11/10/2026). Qui si
         // stampava il campo della riga, e il calcolo dell'attiva ci scriveva
         // 'ECOTYRE': il foglio diceva il cliente al posto di chi emette la
@@ -114,7 +149,7 @@ export function tabellaAmministrazione(tipologia, righe, anno, mese) {
     foglio: `${String(mese || '').toUpperCase()} ${anno}`,
     intestazione: null,
     iKg: 6, iTotale: 8,
-    totale_kg: totaleKg, totale_euro: totaleEuro,
+    totale_kg: totaleKg, totale_euro: totaleEuro, ...conti,
     colonne: [
       { titolo: 'Periodo', tipo: 'testo', peso: 1 },
       { titolo: 'Tipo', tipo: 'testo', peso: 0.9 },
@@ -127,7 +162,7 @@ export function tabellaAmministrazione(tipologia, righe, anno, mese) {
       { titolo: 'Prezzo Totale', tipo: 'euro', peso: 1 },
       { titolo: 'Regione', tipo: 'testo', peso: 1 },
     ],
-    righe: valide.map(r => [
+    righe: formulari.map(r => [
       periodo, tipoServizio(r), r.ordine || '', giorno(r.data_fine_trasporto),
       r.numero_fir || '', r.classe || '', Number(r.quantita) || 0,
       prezzoKg(r), r2(r.totale), r.regione || '',

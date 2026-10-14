@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Save, ChevronLeft } from 'lucide-react';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
-import { calcExtraRaccolta, prezzoAttivoExtra, annoIntervento, avvisoPesoMancante, tariffaPassivaProposta } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, prezzoAttivoExtra, annoIntervento, avvisoPesoMancante, tariffaPassivaProposta, trasportoIntervento } from '@/lib/extraRaccoltaCalc';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { PROV_TO_REGION } from '@/lib/regioneMap';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
@@ -69,11 +69,16 @@ function NumField({ label, value, onChange }) {
 }
 
 // IL SURPLUS NELLA SCHEDA (13/10/2026). Il Fuel Surcharge del consorzio e ogni
-// altro surplus dell'extra raccolta: SMOCO lo fattura a Ecotyre e lo paga al
-// fornitore, sulle stesse tonnellate. Qui si vede la quota di questo intervento,
-// con la barretta che segna il surplus in tutte le pagine. Fuori dal modulo per
-// la stessa ragione di NumField.
+// altro surplus dell'extra raccolta: SMOCO lo fattura a Ecotyre e lo paga a chi
+// lo riceve - il Fuel Surcharge ai raccoglitori, mai al produttore (l'utente, il
+// 13/10/2026 sera: «il fuel surcharge non riguarda i produttori ma i
+// trasportatori ovvero i raccoglitori») - sulle stesse tonnellate. Qui si vede
+// la quota di questo intervento, con la barretta che segna il surplus in tutte
+// le pagine. Fuori dal modulo per la stessa ragione di NumField.
 const A_CHI = { RACCOLTA: 'al raccoglitore', TRATTAMENTO: "all'impianto", CONFERIMENTO_STOCCAGGIO: 'allo stoccaggio', TRASPORTO_SECONDARIA: 'al trasportatore' };
+// La quota da Ecotyre dice per chi e': il raccoglitore per la raccolta (e per
+// un surplus senza prestazione), la destinazione per trattamento e stoccaggio.
+const PER_CHI = { RACCOLTA: 'per il raccoglitore', TRATTAMENTO: "per l'impianto", CONFERIMENTO_STOCCAGGIO: 'per lo stoccaggio' };
 const tonn = (kg) => formatTonnellate((Number(kg) || 0) / 1000);
 const giornoIt = (v) => { const g = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(g) ? g.split('-').reverse().join('/') : ''; };
 // «fra il 01/10/2026 e il 31/12/2026»: il periodo in cui deve finire il trasporto.
@@ -450,8 +455,10 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
     // Competenza dalla fine trasporto; per una richiesta ancora aperta dalla data della richiesta.
     Object.assign(p, competenza(form.trasporto_finito_il || form.ordine_immesso_il));
     if (!p.id_ordine) p.id_ordine = p.numero_fir || `ER-${Date.now()}`;
-    // In una secondaria il soggetto da cui parte il carico e' lo stoccaggio.
-    if (p.tipo_movimento === 'secondaria') p.produttore = p.stoccaggio;
+    // In una secondaria il soggetto da cui parte il carico e' lo stoccaggio, e
+    // un costo di raccolta non c'e': una secondaria non e' una raccolta, si paga
+    // come trasporto di secondaria (decisione dell'utente del 13/10/2026).
+    if (p.tipo_movimento === 'secondaria') { p.produttore = p.stoccaggio; p.costo_raccolta_t = 0; }
     else p.stoccaggio = '';
     onSave(p);
   };
@@ -462,6 +469,40 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
     : null);
 
   const calc = calcExtraRaccolta(form, contesto);
+
+  // IL TRASPORTO DI UNA SECONDARIA (13/10/2026). E' un trasporto di secondaria
+  // come gli altri: si paga con la tariffa della tratta nel contratto del
+  // vettore, a tonnellata o a viaggio, e il prezzo scritto qui vale solo per una
+  // tratta senza contratto (decisione dell'utente del 13/10/2026). Sotto il
+  // campo si dice quale dei due la passiva paga. Senza la fine del trasporto si
+  // guarda il contratto in vigore oggi: vale quello del giorno in cui finira'.
+  const trasportoQui = form.trasporto_finito_il ? calc.trasporto : trasportoIntervento({ ...form, trasporto_finito_il: oggiRoma() }, contesto);
+  // A viaggio, lo stesso camion nello stesso giorno sulla stessa tratta si paga
+  // una volta (revisione del 14/10/2026): se porta anche altri interventi, la
+  // scheda dice quali e la quota di questo, divisa per peso come in passiva.
+  const viaggioQui = trasportoQui.viaggio;
+  const tratta = `${form.stoccaggio || '—'} → ${form.destinazione || '—'}`;
+  let testoTrasporto = null;
+  if (secondaria) {
+    if (trasportoQui.interno) {
+      testoTrasporto = <p className="text-xs text-muted-foreground">trasportatore interno: il trasporto non si fattura</p>;
+    } else if (trasportoQui.origine === 'contratto') {
+      const t = trasportoQui.tariffa;
+      testoTrasporto = (
+        <p className="text-xs text-success">
+          {form.trasporto_finito_il ? '' : 'oggi '}dal contratto di {trasportoQui.fornitore} per la tratta {tratta}{t && t.tipologia === 'TUTTE' ? ' (tariffa TUTTE)' : ''}: {formatNumber(trasportoQui.valore)} {trasportoQui.unita_misura}{trasportoQui.unita_misura !== '€/viaggio' ? ` = ${euro(trasportoQui.importo)}` : ''}
+          {viaggioQui ? `. Lo stesso viaggio (${viaggioQui.targa ? `camion ${viaggioQui.targa}` : 'senza targa'}, ${giornoIt(viaggioQui.giorno)}) porta anche ${viaggioQui.altri.join(', ')}: il viaggio si paga una volta, diviso per peso, qui ${tonn(viaggioQui.kg)} t delle ${tonn(viaggioQui.kg_viaggio)} = ${euro(trasportoQui.importo)}` : ''}
+          {trasportoQui.scritto > 0 ? `. Il prezzo scritto qui (${euro(trasportoQui.scritto)}) non si paga: vale il contratto` : ''}
+        </p>
+      );
+    } else if (trasportoQui.non_letto) {
+      testoTrasporto = <p className="text-xs text-amber-700">i contratti dei trasporti non sono stati letti: la passiva paga la tariffa della tratta, se c&apos;è, e il prezzo scritto qui solo senza contratto</p>;
+    } else if (trasportoQui.origine === 'intervento') {
+      testoTrasporto = <p className="text-xs text-muted-foreground">la tratta {tratta} non ha un contratto di trasporto: si paga il prezzo scritto qui, una volta per il viaggio</p>;
+    } else {
+      testoTrasporto = <p className="text-xs text-amber-700">la tratta {tratta} non ha un contratto di trasporto: scrivi il prezzo del viaggio, altrimenti il trasferimento non si paga a nessuno</p>;
+    }
+  }
 
   // Sotto il prezzo attivo: da dove viene, lo stesso che dira' la fattura, con lo
   // stesso avviso quando il prezzo e' di un altro anno.
@@ -681,7 +722,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
                 riga sua in fattura, sulle stesse tonnellate. */}
             {calc.surplus_attivo.map(v => (
               <RigaSurplus key={`a-${v.chiave}`}>
-                <strong className="italic text-foreground">{v.nome}</strong>{v.origine ? ` · ${v.origine}` : ''} · <strong>+{testoEuroT(v.euro_t)}</strong> da Ecotyre, {periodoSurplus({ data_inizio_validita: v.dal, data_fine_validita: v.al })}: <strong>{euro(v.importo)}</strong> su {tonn(v.kg)} t
+                <strong className="italic text-foreground">{v.nome}</strong>{v.origine ? ` · ${v.origine}` : ''} · <strong>+{testoEuroT(v.euro_t)}</strong> da Ecotyre, {periodoSurplus({ data_inizio_validita: v.dal, data_fine_validita: v.al })}: <strong>{euro(v.importo)}</strong> su {tonn(v.kg)} t{v.fornitore ? `, ${PER_CHI[v.prestazione] || 'per il raccoglitore'} ${v.fornitore}` : ''}
               </RigaSurplus>
             ))}
             {surplusPossibili.map(s => (
@@ -701,10 +742,15 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
                 destinazione: ogni sovracosto pagato sta accanto alle voci dello
                 stesso fornitore, cosi' si vede subito chi lo incassa. */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
+              {/* Una secondaria non e' una raccolta (decisione dell'utente del
+                  13/10/2026): il campo si chiude e al salvataggio vale zero; la
+                  passiva il costo di raccolta di una secondaria non lo paga. */}
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Costo raccolta (€/t)</Label>
-                <Input type="number" className="h-9 text-sm" value={form.costo_raccolta_t} onChange={e => scriviCosto('costo_raccolta_t', e.target.value)} />
-                {daDove('costo_raccolta_t')}
+                <Input type="number" className="h-9 text-sm" disabled={secondaria} value={secondaria ? '' : form.costo_raccolta_t} onChange={e => scriviCosto('costo_raccolta_t', e.target.value)} />
+                {secondaria
+                  ? <p className="text-xs text-muted-foreground">una secondaria non è una raccolta: si paga il trasporto</p>
+                  : daDove('costo_raccolta_t')}
                 {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
               </div>
               {/* L'altro costo del trasportatore, accanto a quello di raccolta: il
@@ -718,7 +764,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Costo trasporto (€/viaggio)</Label>
                 <Input type="number" className="h-9 text-sm" value={form.costo_trasporto_viaggio} onChange={e => set('costo_trasporto_viaggio', e.target.value)} />
-                <p className="text-xs text-muted-foreground">Importo fisso per il viaggio, non a tonnellata</p>
+                {secondaria ? testoTrasporto : <p className="text-xs text-muted-foreground">Importo fisso per il viaggio, non a tonnellata</p>}
                 {raccoltaInterna && <p className="text-xs text-muted-foreground">trasportatore interno: non fatturato</p>}
               </div>
               {/* Il sovracosto che si paga al RACCOGLITORE, cioe' al trasportatore
@@ -771,7 +817,7 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
               </RigaSurplus>
             ))}
             <p className="mt-2 text-xs text-muted-foreground">
-              I costi di raccolta, trasporto, stoccaggio e trattamento sono quelli scritti qui, e la fatturazione passiva paga questi. Il modulo propone solo i costi a tonnellata, dalle tariffe di extra raccolta del fornitore e solo nei campi vuoti; il costo del trasporto a viaggio e i due sovracosti si scrivono sempre a mano, perché un listino a viaggio per l&apos;extra raccolta non c&apos;è e un imprevisto non sta in nessuna tariffa. Va scritto tutto prima di passare l&apos;intervento a terminato.
+              I costi di raccolta, trasporto, stoccaggio e trattamento sono quelli scritti qui, e la fatturazione passiva paga questi. Il modulo propone solo i costi a tonnellata, dalle tariffe di extra raccolta del fornitore e solo nei campi vuoti; il costo del trasporto a viaggio e i due sovracosti si scrivono sempre a mano, perché un listino a viaggio per l&apos;extra raccolta non c&apos;è e un imprevisto non sta in nessuna tariffa. Una secondaria fa eccezione: è un trasporto di secondaria come gli altri e si paga con la tariffa della tratta nel contratto del vettore, a tonnellata o a viaggio; il prezzo scritto qui vale solo per una tratta senza contratto. Va scritto tutto prima di passare l&apos;intervento a terminato.
             </p>
 
             <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Oneri senza un fornitore a cui fatturarli</p>

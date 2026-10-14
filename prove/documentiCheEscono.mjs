@@ -478,6 +478,31 @@ await sezione('11. L\'EXTRA RACCOLTA', async () => {
   verifica('nell\'analisi gli euro restano euro (prima il sovracosto impianto usciva coi chili)', tot && /€/.test(tot.getCell(9).numFmt), tot ? tot.getCell(9).numFmt : 'manca');
   const imponibile = rigaCheInizia(ws, 'Totale imponibile');
   verifica('il totale imponibile e\' quello della pagina: 454,00', imponibile && imponibile.getCell(2).value === 454, imponibile ? String(imponibile.getCell(2).value) : 'manca');
+  // LE DECISIONI DEL 13/10/2026 SERA, coi loro formati: il TOTALE QUANTITA'
+  // sono i chili fatturati e le secondarie stanno a parte, in kg; il Fuel
+  // Surcharge ha il blocco ai raccoglitori (tonnellate e euro) e il conto del
+  // mese (euro), mai una riga fra i produttori.
+  const { contestoPrezzi } = await import('../src/lib/extraRaccoltaCalc.js');
+  const fs = { id: 'fs', nome: 'Fuel Surcharge', origine: 'CONSORZIO', tipologia: 'EXTRA_RACCOLTA', prestazione: 'RACCOLTA', a_chi: 'tutti', euro_t_passiva: 5, euro_t_attiva: 5, data_inizio_validita: '2026-10-01', data_fine_validita: '2026-12-31', stato: 'attivo' };
+  const ottobre = [
+    { ...base2, id: 'B', id_ordine: 'ER-B', numero_fir: 'FIR-B', peso_effettivo: 1234, prezzo_attivo_t: 202, costo_raccolta_t: 72, trasporto_finito_il: '2026-10-05T08:00:00.000Z' },
+    { ...base2, id: 'S', id_ordine: 'ER-S', numero_fir: 'FIR-S', tipo_movimento: 'secondaria', stoccaggio: 'NAPPI SUD SRL', produttore: 'NAPPI SUD SRL', peso_effettivo: 3000, prezzo_attivo_t: 0, costo_trasporto_viaggio: 200, trasporto_finito_il: '2026-10-06T08:00:00.000Z' },
+  ];
+  await extra.exportExtraRaccoltaExcel(ottobre, 'Ottobre', 2026, contestoPrezzi([], [{ id: 'F-L', ragione_sociale: 'LOGISTICA', stato: 'attivo' }], [fs]), { stato: statoPer('ExtraRaccolta'), isAdmin: true });
+  const ws2 = (await ultimoFile()).wb.worksheets[0];
+  const kg = rigaCheInizia(ws2, "TOTALE QUANTITA' (kg)");
+  const sec = rigaCheInizia(ws2, 'Trasporti di secondaria (non si fatturano a Ecotyre)');
+  verifica('il TOTALE QUANTITA\' sono i chili fatturati, 1.234, in kg; la secondaria a parte, 3.000, in kg', kg && kg.getCell(2).value === 1234 && kg.getCell(2).numFmt === '#,##0'
+    && sec && sec.getCell(2).value === 3000 && sec.getCell(2).numFmt === '#,##0', JSON.stringify([kg && kg.values, sec && sec.values]));
+  const titolo = rigaCheInizia(ws2, 'FUEL SURCHARGE AI RACCOGLITORI');
+  const log = titolo ? ws2.getRow(titolo.number + 3) : null;
+  verifica('il blocco ai raccoglitori: LOGISTICA 1,234 t in tonnellate, 6,17 di costo e di ricavo in euro', log && log.getCell(1).value === 'LOGISTICA' && log.getCell(2).value === 1.234 && log.getCell(2).numFmt === '#,##0.00#'
+    && log.getCell(3).value === 6.17 && /€/.test(log.getCell(3).numFmt) && log.getCell(4).value === 6.17 && /€/.test(log.getCell(4).numFmt), log ? JSON.stringify(log.values) : 'manca');
+  const costi = rigaCheInizia(ws2, 'Costi');
+  verifica('il conto del mese in euro', costi && [2, 3, 4].every(c => /€/.test(costi.getCell(c).numFmt)), costi ? JSON.stringify(costi.values) : 'manca');
+  const produttori = [];
+  for (let n = 1; n <= ws2.rowCount; n++) if (ws2.getRow(n).getCell(2).value === 'costi aggiuntivi') { for (let m = n + 1; m <= ws2.rowCount && ws2.getRow(m).getCell(1).value !== 'TOTALE'; m++) produttori.push(ws2.getRow(m).getCell(1).value); }
+  verifica('fra i produttori nessuna riga del surplus', produttori.length === 2 && !produttori.some(p => /surplus|fuel/i.test(String(p))), JSON.stringify(produttori));
 });
 
 await sezione('12. IL REPORT MENSILE ESCE IN EXCEL', async () => {

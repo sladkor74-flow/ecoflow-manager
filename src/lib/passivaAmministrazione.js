@@ -966,7 +966,15 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     // I surplus del mese su questo canale, per i riquadri e le note dei file: il
     // nome, quanto vale a tonnellata e quanto fa nel foglio. Il «di cui» del
     // canale e' la somma delle righe del foglio, cioe' quello che il foglio paga.
-    surplus: delMese.map(s => ({
+    //
+    // L'EXTRA RACCOLTA il calcolo della passiva non ce l'ha (PassivaModulo le
+    // passa un oggetto vuoto: il suo surplus lo conta il modulo Extra Raccolta),
+    // e il suo elenco restava vuoto: la fascia dell'Excel e il riquadro del PDF
+    // dicevano «di cui surplus» dove la rete e l'ACI dicono «di cui Fuel
+    // Surcharge» (revisione del 13/10/2026). Senza l'elenco del calcolo si
+    // prendono i surplus dalle righe del blocco degli interventi, uno per
+    // surplus: il nome e' lo stesso dappertutto.
+    surplus: (delMese.length || !extraFoglio ? delMese : surplusDelleRighe(extraFoglio.surplus)).map(s => ({
       nome: testo(s.nome) || 'Surplus', origine: testo(s.origine), prestazione: testo(s.prestazione).toUpperCase(),
       euro_t: Number(s.euro_t) || 0, dal: testo(s.dal), al: testo(s.al), etichetta: testo(s.etichetta),
     })),
@@ -1029,6 +1037,28 @@ export function extraConSurplus(extra, passiva) {
     totale_surplus: totaleSurplus,
     totale_euro: n2(interventi + totaleSurplus),
   };
+}
+
+/**
+ * I surplus di un elenco di righe del surplus del foglio, uno per surplus (per
+ * id, o per nome, prestazione, €/t e date quando l'id non c'e'), nella forma
+ * dell'elenco del mese del calcolo: { nome, origine, prestazione, euro_t, dal,
+ * al, etichetta }. Serve all'extra raccolta, che l'elenco del calcolo non ce
+ * l'ha (13/10/2026).
+ */
+export function surplusDelleRighe(righe) {
+  const visti = new Map();
+  for (const r of righe || []) {
+    if (!eRigaSurplus(r)) continue;
+    const id = testo(r.surplus_id)
+      || [chiave(r.nome), testo(r.prestazione).toUpperCase(), Number(r.prezzo) || 0, testo(r.dal), testo(r.al)].join('|');
+    if (visti.has(id)) continue;
+    visti.set(id, {
+      nome: testo(r.nome), origine: testo(r.origine), prestazione: testo(r.prestazione).toUpperCase(),
+      euro_t: Number(r.prezzo) || 0, dal: testo(r.dal), al: testo(r.al), etichetta: testo(r.etichetta),
+    });
+  }
+  return [...visti.values()];
 }
 
 /** I fogli dei canali chiesti, costruiti dalle voci e dalla passiva gia' calcolata. */

@@ -5,28 +5,34 @@
 // (src/components/fatturazione/AttivaEsportazioni.jsx) passa le voci del
 // documento ai quattro file: il report dell'attiva in Excel e in PDF
 // (fatturazioneExport.js) e il format dell'amministrazione in Excel e in PDF
-// (formatAmministrazioneExport.js). Come mettere il surplus in quei file lo
-// decide l'amministrazione (domanda D3 del progetto del surplus): fino ad allora
-// escono come prima, con le sole righe dei formulari. Senza filtro la riga
-// usciva come «Trasp.+Tratt.» con 0 kg e il TOTALE cambiava.
+// (formatAmministrazioneExport.js). Il 13/10/2026 sera l'utente ha deciso (la
+// domanda D3 del progetto del surplus): il Fuel Surcharge «deve essere una voce
+// disgiunta con un proprio rigo (per canale)». Da allora ai file arrivano tutte
+// le righe del documento, quella del surplus compresa, e i report la scrivono
+// nella sua riga sotto i formulari (prove/reportAmministrazioneSurplus.mjs).
+// Prima la pagina passava le sole righe dei formulari e diceva che il surplus
+// si fatturava con la sua riga a parte.
 //
 // Qui la pagina gira davvero, coi suoi pulsanti (React finto che tiene lo stato
 // fra un disegno e l'altro, client finto, i quattro file sostituiti da
 // registratori), e si guarda:
-//   1. che ai file arrivino le sole righe dei formulari, con ogni pulsante;
-//   2. che l'esito dell'esportazione dica che il surplus si fattura con la sua
-//      riga a parte, e quanto; senza surplus l'esito e' quello di prima;
+//   1. che ai file arrivino tutte le righe del documento, la riga del surplus
+//      compresa, con ogni pulsante; e che un canale senza formulari non dia un
+//      file col solo surplus;
+//   2. che l'esito dell'esportazione dica che il surplus e' nel file con la sua
+//      riga, e quanto, in verde; senza surplus l'esito e' quello di prima;
 //   3. che la pagina lo dica gia' prima di esportare, canale per canale, e che
 //      senza surplus non dica niente;
 //   4. che due record dello stesso surplus (un importo cambiato a meta' mese) si
-//      dicano una volta, col totale;
+//      dicano una volta, col totale, e che arrivino al file tutti e due; due
+//      surplus diversi si dicono uno per uno;
 //   5. che il Fuel Surcharge che la prefattura non porta (Ecotyre lo comunica a
 //      parte) si scriva accanto all'esito del confronto e NON faccia chiedere
 //      conferma all'esportazione (risposta dell'utente del 13/10/2026). Il
 //      confronto e' quello vero (confrontaPrefattura), e gli effetti della
 //      pagina girano: la pagina lo legge come lo leggerebbe dal server.
-// La prova prima/dopo di prove/attivaReportSurplus.mjs (parte 7) guarda le
-// stesse righe sui dati veri; questa guarda le parole a video.
+// La parte 7 di prove/attivaReportSurplus.mjs guarda le stesse righe sui dati
+// veri; questa guarda le parole a video.
 //
 // node prove/attivaEsportazioniSurplus.mjs
 // ESPORTAZIONI=<file> prova un'altra versione della pagina (la controprova).
@@ -145,7 +151,10 @@ async function usa(data, premi = [], { prefattura = null } = {}) {
   const dopo = M.rendi(M.Pagina, props);
   // le frasi una per una: ogni esito sta nel suo <span>
   const frasi = elementiDi(dopo).filter(el => el.type === 'span').map(el => testoDi(el).replace(/\s+/g, ' ').trim());
-  return { prima: testoDi(prima).replace(/\s+/g, ' '), dopo: testoDi(dopo).replace(/\s+/g, ' '), frasi, file: globalThis.__AI_FILE, errore };
+  // il colore di ogni esito: il riquadro che lo contiene (verde, ambra o rosso)
+  const esiti = elementiDi(dopo).filter(el => el.type === 'div' && /border-(emerald|amber|red)-300/.test(String(el.props.className || '')) && /scaricato|nessuna riga|non è stato/.test(testoDi(el)))
+    .map(el => ({ testo: testoDi(el).replace(/\s+/g, ' ').trim(), colore: /emerald/.test(el.props.className) ? 'verde' : /red/.test(el.props.className) ? 'rosso' : 'ambra' }));
+  return { prima: testoDi(prima).replace(/\s+/g, ' '), dopo: testoDi(dopo).replace(/\s+/g, ' '), frasi, esiti, file: globalThis.__AI_FILE, errore };
 }
 
 // ─── i dati: ottobre, due formulari sulla rete col Fuel Surcharge ───
@@ -170,55 +179,73 @@ verifica('i dati: col Fuel Surcharge il documento della rete ha due formulari e 
 verifica('...senza surplus i soli due formulari, e con due importi due righe (5,00 € e 14,00 €)',
   SENZA.length === 2 && !SENZA.some(eRigaSurplus) && DUE.filter(eRigaSurplus).map(r => r.totale).sort((a, b) => a - b).join() === '5,14', JSON.stringify(DUE.filter(eRigaSurplus).map(r => r.totale)));
 
-console.log('1. AI FILE ARRIVANO LE SOLE RIGHE DEI FORMULARI');
+// la frase di prima della decisione: non deve tornare
+const A_PARTE = /sole righe dei formulari|si fattura con la sua riga a parte|si fatturano con le loro righe a parte/;
+const NEL_FILE = 'attiva RETE.xlsx scaricato e registrato nello storico. Nel file il Fuel Surcharge (€ 15,00) ha la sua riga, sotto i formulari, e il TOTALE lo comprende.';
+
+console.log('1. AI FILE ARRIVANO TUTTE LE RIGHE, QUELLA DEL SURPLUS COMPRESA');
 for (const pulsante of ['Excel', 'PDF', 'Format amm.', 'Format amm. PDF']) {
   const u = await usa(dati(CON), [['RETE', pulsante]]);
   const f = u.file[0];
-  verifica(`rete, «${pulsante}»: al file arrivano i due formulari, senza la riga del surplus`,
-    !u.errore && u.file.length === 1 && f.righe.length === 2 && !f.righe.some(eRigaSurplus), u.errore || JSON.stringify(u.file.map(x => [x.formato, x.righe.length])));
+  verifica(`rete, «${pulsante}»: al file arrivano i due formulari e la riga del surplus, nell'ordine del documento`,
+    !u.errore && u.file.length === 1 && f.righe.length === 3 && f.righe.filter(eRigaSurplus).length === 1 && JSON.stringify(f.righe) === JSON.stringify(CON),
+    u.errore || JSON.stringify(u.file.map(x => [x.formato, x.righe.length, x.righe.filter(eRigaSurplus).length])));
 }
 {
   const u = await usa(dati(CON), [[null, 'Tutti e tre in Excel']]);
-  verifica('«Tutti e tre in Excel»: la rete coi due formulari, l\'ACI con la sua riga, l\'extra raccolta senza file',
-    !u.errore && u.file.length === 2 && u.file[0].tipologia === 'RETE' && u.file[0].righe.length === 2 && u.file[1].tipologia === 'ACI' && u.file[1].righe.length === 1, u.errore || JSON.stringify(u.file.map(x => [x.tipologia, x.righe.length])));
+  verifica('«Tutti e tre in Excel»: la rete con le sue tre righe, l\'ACI con la sua, l\'extra raccolta senza file',
+    !u.errore && u.file.length === 2 && u.file[0].tipologia === 'RETE' && u.file[0].righe.length === 3 && u.file[1].tipologia === 'ACI' && u.file[1].righe.length === 1, u.errore || JSON.stringify(u.file.map(x => [x.tipologia, x.righe.length])));
 }
 {
   const u = await usa(dati(SENZA), [['RETE', 'Excel']]);
   verifica('senza surplus al file arrivano tutte le righe, come prima', !u.errore && u.file.length === 1 && u.file[0].righe.length === 2, u.errore || '');
+  // un canale col solo surplus (i formulari tolti a mano dal documento): niente
+  // da fatturare, niente file
+  const solo = await usa({ ...dati(CON), RETE: { righe: CON.filter(eRigaSurplus), documento: { id: 'd-rete' } } }, [['RETE', 'Excel']]);
+  verifica('un canale senza formulari non da\' un file col solo surplus: «Rete: nessuna riga da esportare.»',
+    solo.file.length === 0 && solo.frasi.includes('Rete: nessuna riga da esportare.'), JSON.stringify({ f: solo.file.length, e: solo.esiti }));
 }
 
-console.log('2. L\'ESITO DICE CHE IL SURPLUS SI FATTURA A PARTE');
+console.log('2. L\'ESITO DICE CHE IL SURPLUS E\' NEL FILE, CON LA SUA RIGA');
 {
   const u = await usa(dati(CON), [['RETE', 'Excel']]);
-  verifica('dopo l\'Excel della rete: «Il file ha le sole righe dei formulari: Fuel Surcharge € 15,00 si fattura con la sua riga a parte.»',
-    u.dopo.includes('attiva RETE.xlsx scaricato e registrato nello storico. Il file ha le sole righe dei formulari: Fuel Surcharge € 15,00 si fattura con la sua riga a parte.'), u.dopo.slice(u.dopo.indexOf('attiva RETE'), u.dopo.indexOf('attiva RETE') + 200));
+  verifica('dopo l\'Excel della rete: «Nel file il Fuel Surcharge (€ 15,00) ha la sua riga, sotto i formulari, e il TOTALE lo comprende.»',
+    u.frasi.includes(NEL_FILE) && !A_PARTE.test(u.dopo), JSON.stringify(u.esiti));
+  verifica('...in verde: non e\' piu\' un avviso', u.esiti.length === 1 && u.esiti[0].colore === 'verde', JSON.stringify(u.esiti));
   const t = await usa(dati(CON), [[null, 'Tutti e tre in Excel']]);
   verifica('con tutti e tre: la frase sulla rete e non sull\'ACI, che non ha surplus',
-    t.frasi.includes('attiva RETE.xlsx scaricato e registrato nello storico. Il file ha le sole righe dei formulari: Fuel Surcharge € 15,00 si fattura con la sua riga a parte.')
-      && t.frasi.includes('attiva ACI.xlsx scaricato e registrato nello storico.') && t.frasi.includes('Extra Raccolta: nessuna riga da esportare.'),
+    t.frasi.includes(NEL_FILE) && t.frasi.includes('attiva ACI.xlsx scaricato e registrato nello storico.') && t.frasi.includes('Extra Raccolta: nessuna riga da esportare.'),
     JSON.stringify(t.frasi.filter(x => /^(attiva|Extra)/.test(x))));
 }
 {
   const u = await usa(dati(SENZA), [['RETE', 'Excel']]);
-  verifica('senza surplus l\'esito e\' quello di prima, senza la frase', u.dopo.includes('attiva RETE.xlsx scaricato e registrato nello storico.') && !u.dopo.includes('sole righe dei formulari'), u.dopo.slice(u.dopo.indexOf('attiva RETE'), u.dopo.indexOf('attiva RETE') + 200));
+  verifica('senza surplus l\'esito e\' quello di prima, verde e senza la frase',
+    u.frasi.includes('attiva RETE.xlsx scaricato e registrato nello storico.') && !/Fuel Surcharge|Nel file/.test(u.dopo) && u.esiti[0]?.colore === 'verde', JSON.stringify(u.esiti));
 }
 
 console.log('3. LA PAGINA LO DICE PRIMA DI ESPORTARE');
 {
   const u = await usa(dati(CON));
-  verifica('col surplus, sopra i pulsanti: «I file hanno le sole righe dei formulari, come prima: il surplus si fattura con la sua riga a parte.» e l\'importo del canale',
-    u.prima.includes('Surplus') && u.prima.includes('I file hanno le sole righe dei formulari, come prima: il surplus si fattura con la sua riga a parte.') && u.prima.includes('Rete: Fuel Surcharge € 15,00') && !u.prima.includes('ACI: Fuel'),
+  verifica('col surplus, sopra i pulsanti: «Nei file il surplus è una voce a sé: la sua riga sta sotto i formulari, il TOTALE la comprende e il totale dei soli formulari resta scritto a parte.» e l\'importo del canale',
+    u.prima.includes('Surplus') && u.prima.includes('Nei file il surplus è una voce a sé: la sua riga sta sotto i formulari, il TOTALE la comprende e il totale dei soli formulari resta scritto a parte.') && u.prima.includes('Rete: Fuel Surcharge € 15,00') && !u.prima.includes('ACI: Fuel') && !A_PARTE.test(u.prima),
     u.prima.slice(0, 400));
   const s = await usa(dati(SENZA));
-  verifica('...e senza surplus la pagina di prima, senza la fascia', !s.prima.includes('sole righe dei formulari') && !s.prima.includes('Fuel Surcharge'), s.prima.slice(0, 300));
+  verifica('...e senza surplus la pagina di prima, senza la fascia', !s.prima.includes('voce a sé') && !s.prima.includes('Fuel Surcharge'), s.prima.slice(0, 300));
 }
 
-console.log('4. DUE RECORD DELLO STESSO SURPLUS SI DICONO UNA VOLTA');
+console.log('4. DUE RECORD DELLO STESSO SURPLUS SI DICONO UNA VOLTA, E ARRIVANO TUTTI E DUE');
 {
   const u = await usa(dati(DUE), [['RETE', 'PDF']]);
-  verifica('due importi a meta\' mese: ai file i due formulari, e la frase dice «Fuel Surcharge € 19,00» una volta',
-    u.file.length === 1 && u.file[0].righe.length === 2 && u.dopo.includes('Il file ha le sole righe dei formulari: Fuel Surcharge € 19,00 si fattura con la sua riga a parte.') && u.prima.includes('Rete: Fuel Surcharge € 19,00'),
-    `${JSON.stringify(u.file.map(x => x.righe.length))} ${u.dopo.slice(u.dopo.indexOf('attiva RETE'), u.dopo.indexOf('attiva RETE') + 200)}`);
+  verifica('due importi a meta\' mese: al file i due formulari e le due righe del surplus, e la frase dice «Fuel Surcharge (€ 19,00)» una volta',
+    u.file.length === 1 && u.file[0].righe.length === 4 && u.file[0].righe.filter(eRigaSurplus).length === 2
+      && u.frasi.includes('attiva RETE.pdf scaricato e registrato nello storico. Nel file il Fuel Surcharge (€ 19,00) ha le sue 2 righe, sotto i formulari, e il TOTALE lo comprende.') && u.prima.includes('Rete: Fuel Surcharge € 19,00'),
+    `${JSON.stringify(u.file.map(x => x.righe.length))} ${JSON.stringify(u.esiti)}`);
+  // due surplus diversi sullo stesso canale: ognuno col suo nome e il suo importo
+  const ALTRO = voci([fs(), fs({ id: 'fs-x', nome: 'Bonus trasporti', origine: 'ACCORDO_COMMERCIALE', euro_t_attiva: 2, euro_t_passiva: 2 })]);
+  const d = await usa(dati(ALTRO), [['RETE', 'Excel']]);
+  verifica('due surplus diversi: «Nel file il Bonus trasporti (€ 6,00) e il Fuel Surcharge (€ 15,00) hanno ciascuno la sua riga, sotto i formulari, e il TOTALE li comprende.»',
+    d.file[0]?.righe.filter(eRigaSurplus).length === 2 && d.frasi.includes('attiva RETE.xlsx scaricato e registrato nello storico. Nel file il Bonus trasporti (€ 6,00) e il Fuel Surcharge (€ 15,00) hanno ciascuno la sua riga, sotto i formulari, e il TOTALE li comprende.'),
+    JSON.stringify(d.esiti));
 }
 
 console.log('5. IL FUEL SURCHARGE CHE LA PREFATTURA NON PORTA SI FATTURA A PARTE, SENZA CONFERMA');
