@@ -468,7 +468,11 @@ export default async function(req) {
     // fontiDellaRisposta, solo per le fonti di una voce della base di conoscenza;
     // ufficiale dice se e' un sito ufficiale letto con la ricerca accesa. Da qui
     // la chat decide il riquadro «Verificata sulle fonti».
-    const fonti = fontiDellaRisposta(esito.fonti, approvate, { ricercaOnline });
+    // Una pagina trovata online e' «consultata il» giorno della domanda
+    // (decisione del 13/10/2026): il giorno calcolato all'inizio, non quello in
+    // cui la risposta finisce, che dopo mezzanotte sarebbe il giorno dopo
+    // (chiusura del giro, 14/10/2026).
+    const fonti = fontiDellaRisposta(esito.fonti, approvate, { ricercaOnline, giorno: oggi });
     const certezza = ['alta', 'media', 'bassa'].includes(esito.certezza) ? esito.certezza : 'media';
 
     // File da preparare: se ne salva la descrizione (il file si genera nel browser).

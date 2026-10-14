@@ -59,3 +59,26 @@ export function fonteUfficiale(f, ricercaOnline) {
 export function verificataSulleFonti(fonti, ricercaOnline) {
   return (Array.isArray(fonti) ? fonti : []).some(f => !!(f && typeof f === 'object' && (f.voce || fonteUfficiale(f, ricercaOnline))));
 }
+
+const GIORNO = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Il giorno in cui una fonte trovata online e' stata consultata, 'AAAA-MM-GG', o ''.
+ *
+ * CONSULTATA, NON VERIFICATA (decisione del 13/10/2026). Una pagina trovata con la
+ * ricerca online, che nessuna voce della base di conoscenza cita, non l'ha
+ * verificata nessuno: la si e' letta il giorno della domanda, e si scrive cosi',
+ * «consultata il gg/mm/aaaa», come si cita una pagina internet. «Verificata il»
+ * resta solo per le fonti di una voce, con la data della voce. Un indirizzo scritto
+ * senza la ricerca accesa e' scritto a memoria: nessun giorno. Le risposte dal
+ * 13/10/2026 portano il giorno scritto (consultata_il, lo mette fontiDellaRisposta
+ * in baseConoscenza.ts); per quelle di prima vale il giorno della domanda, giorno.
+ */
+export function consultataIl(f, ricercaOnline, giorno) {
+  if (!f || typeof f !== 'object' || f.voce) return '';
+  const scritto = String(f.consultata_il || '').slice(0, 10);
+  if (GIORNO.test(scritto)) return scritto;
+  if (!ricercaOnline || !/^https?:\/\/\S/i.test(String(f.url || '').trim())) return '';
+  const g = String(giorno || '').slice(0, 10);
+  return GIORNO.test(g) ? g : '';
+}

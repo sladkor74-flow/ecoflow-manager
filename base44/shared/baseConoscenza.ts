@@ -8,7 +8,8 @@
 // Ultima verifica complessiva: 14 settembre 2026.
 
 import { fetchAll } from "./fetchAll.ts";
-import { leggiFontiTesto, urlUfficiale } from "./fontiConoscenza.ts";
+import { leggiFontiTesto, urlUfficiale, consultataIl } from "./fontiConoscenza.ts";
+import { oggiRoma } from "./giornoItaliano.ts";
 
 export const VERIFICATO_IL = '2026-09-14';
 
@@ -827,9 +828,16 @@ function voceDellaFonte(fonte, voci: VoceDelleFonti[], suggerita = '') {
  * (un indirizzo scritto a memoria non e' una verifica). Il riquadro «Verificata
  * sulle fonti» della chat si accende solo con una di queste due cose
  * (verificataSulleFonti, fontiConoscenza.ts).
+ *
+ * consultata_il (decisione del 13/10/2026): una pagina trovata con la ricerca
+ * online, senza voce, e' «consultata il» giorno della domanda (giorno, oggi in
+ * Italia se non lo si passa), mai «verificata il» (consultataIl,
+ * fontiConoscenza.ts). Prima non portava nessuna data, e accanto c'era solo il
+ * riquadro «Verificata sulle fonti» se il sito era ufficiale.
  */
-export function fontiDellaRisposta(fonti, approvate: VoceApprovata[] = [], { ricercaOnline = false }: { ricercaOnline?: boolean } = {}) {
+export function fontiDellaRisposta(fonti, approvate: VoceApprovata[] = [], { ricercaOnline = false, giorno = '' }: { ricercaOnline?: boolean; giorno?: string } = {}) {
   const voci = vociDelleFonti(approvate);
+  const delGiorno = String(giorno || '').slice(0, 10) || oggiRoma();
   const corto = (v, n) => { const t = String(v || '').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
   return (Array.isArray(fonti) ? fonti : [])
     .filter(f => f && typeof f === 'object' && (f.titolo || f.riferimento || f.url))
@@ -838,7 +846,14 @@ export function fontiDellaRisposta(fonti, approvate: VoceApprovata[] = [], { ric
       const url = /^https?:\/\//i.test(String(f.url || '').trim()) ? String(f.url).trim() : '';
       const fonte = { titolo: corto(f.titolo, 200), riferimento: corto(f.riferimento, 300), url };
       const voce = voceDellaFonte(fonte, voci, String(f.voce_id || '').trim());
-      return { ...fonte, verificato_il: voce ? voce.data : '', voce: voce ? voce.id : '', ufficiale: !!ricercaOnline && urlUfficiale(url) };
+      return {
+        ...fonte,
+        verificato_il: voce ? voce.data : '',
+        voce: voce ? voce.id : '',
+        ufficiale: !!ricercaOnline && urlUfficiale(url),
+        // Sulla fonte ripulita: un consultata_il scritto dal modello non passa.
+        consultata_il: voce ? '' : consultataIl(fonte, ricercaOnline, delGiorno),
+      };
     });
 }
 

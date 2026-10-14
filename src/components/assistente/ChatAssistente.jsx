@@ -20,7 +20,8 @@ import { Send, Loader2, Plus, Search, ThumbsUp, ThumbsDown, Globe, Database, Boo
 import { usePermessi } from '@/lib/permessi';
 import { dataServer } from '@/lib/utils';
 import { ACCETTATI, MAX_ALLEGATI, leggiAllegato, scaricaFileEcoTyna, nomeFile, ETICHETTE_FORMATO } from '@/lib/fileEcoTyna';
-import { leggiFontiTesto, verificataSulleFonti } from '@/lib/fontiConoscenza';
+import { leggiFontiTesto, verificataSulleFonti, consultataIl } from '@/lib/fontiConoscenza';
+import { giornoRoma } from '@/lib/giornoItaliano';
 
 // Spazio domande: conversazioni con l'Assistente, archiviate nel gestionale.
 // Una risposta confermata diventa una FAQ della base di conoscenza; una risposta
@@ -211,13 +212,17 @@ function DialogValutazione({ domanda, modo, onClose, onSalvato }) {
   );
 }
 
-function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica, onAscolta }) {
+// Esportato per prove/ecotynaFonti.mjs, che lo disegna con le fonti di una risposta.
+export function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica, onAscolta }) {
   const fonti = leggiFonti(d.fonti_json);
   const certezza = CERTEZZA[d.certezza];
   const allegati = leggiFonti(d.allegati_json);
   const salvati = leggiFonti(d.file_generati_json);
   const strumenti = leggiStrumenti(d.strumenti_json);
   const mancanti = leggiFonti(d.dati_mancanti_json);
+  // Il giorno italiano della domanda: per le risposte di prima del 13/10/2026, che
+  // non portano scritto il giorno in cui una pagina online e' stata consultata.
+  const giornoDomanda = giornoRoma(dataServer(d.created_date));
   const file = fileRecenti && fileRecenti.length ? fileRecenti : salvati;
   return (
     <div className="space-y-2">
@@ -273,16 +278,22 @@ function Messaggio({ d, onValuta, isAdmin, fileRecenti, onScarica, onAscolta }) 
             {fonti.length > 0 && (
               <div className="text-xs text-muted-foreground border-t pt-2 space-y-0.5">
                 <p className="font-medium flex items-center gap-1"><BookOpen className="w-3 h-3" /> Fonti</p>
-                {fonti.map((f, i) => (
-                  <p key={i}>
-                    {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="underline hover:text-foreground">{f.titolo || f.riferimento || f.url}</a> : (f.titolo || f.riferimento)}
-                    {f.titolo && f.riferimento ? ` — ${f.riferimento}` : ''}
-                    {/* La data solo per una fonte di una voce della base di conoscenza,
-                        ed e' la data di quella voce: prima ogni fonte senza data
-                        prendeva il 14/09/2026 d'ufficio (A71 del 20/09, 12/10/2026). */}
-                    {f.voce && f.verificato_il ? ` (base di conoscenza, verificata il ${giornoIt(f.verificato_il)})` : ''}
-                  </p>
-                ))}
+                {fonti.map((f, i) => {
+                  const consultata = consultataIl(f, d.ricerca_online, giornoDomanda);
+                  return (
+                    <p key={i}>
+                      {f.url ? <a href={f.url} target="_blank" rel="noreferrer" className="underline hover:text-foreground">{f.titolo || f.riferimento || f.url}</a> : (f.titolo || f.riferimento)}
+                      {f.titolo && f.riferimento ? ` — ${f.riferimento}` : ''}
+                      {/* La data solo per una fonte di una voce della base di conoscenza,
+                          ed e' la data di quella voce: prima ogni fonte senza data
+                          prendeva il 14/09/2026 d'ufficio (A71 del 20/09, 12/10/2026). */}
+                      {f.voce && f.verificato_il ? ` (base di conoscenza, verificata il ${giornoIt(f.verificato_il)})` : ''}
+                      {/* Una pagina trovata online, senza voce, e' «consultata il» giorno
+                          della domanda: mai «verificata il» (decisione del 13/10/2026). */}
+                      {!f.voce && consultata ? ` (consultata il ${giornoIt(consultata)})` : ''}
+                    </p>
+                  );
+                })}
               </div>
             )}
             {strumenti.length > 0 && (

@@ -16,6 +16,9 @@
 // tagliato; 6. il file scaricato lo porta scritto; 7. anche quando l'elenco
 // tagliato sta dentro un elemento di un array (la fatturazione attiva), sui dati
 // costruiti e sulla copia dei dati veri dell'11/10/2026, se c'e'.
+// Decisioni del 13/10/2026: 6. il CSV esce senza la riga dell'avviso (si carica in
+// altri programmi); 8. gli esempi tagliati della settimana dei formulari e della
+// riserva degli eseguiti portano il segno, e il file fatto da quelli e' parziale.
 // npm run prove
 import { existsSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
@@ -24,6 +27,7 @@ import * as fileEcoTyna from '../base44/shared/fileEcoTyna.ts';
 import { testoDati } from '../base44/shared/pianoAssistente.ts';
 import { eseguiStrumento } from '../base44/shared/strumentiAssistente.ts';
 import { calcolaRigheAttiva } from '../base44/shared/attivaCalcolo.ts';
+import { intervalloSettimana } from '../base44/shared/reportSettimanali.ts';
 
 // Dallo spazio dei nomi: col codice di prima (la controprova) le due funzioni
 // non ci sono, e la prova deve dire quali verifiche cadono.
@@ -191,9 +195,15 @@ console.log('6. IL FILE SCARICATO PORTA SCRITTO CHE E\' PARZIALE');
   const intero = XLSX.read(new Uint8Array(await presi.at(-1).arrayBuffer()), { type: 'array' });
   const wi = intero.Sheets[intero.SheetNames[0]];
   verifica('un file intero resta com\'era: intestazioni in A1', wi.A1 && wi.A1.v === 'Ragione sociale' && wi.A2.v === 'GOMMISTA 1 SRL', J([wi.A1, wi.A2]));
+  // Il CSV no (decisione del 13/10/2026): si carica in altri programmi, e la riga
+  // d'avviso diventava la riga delle intestazioni. L'avviso resta accanto a
+  // «Scarica» (sezione 4) e negli altri formati.
   await pagina.scaricaFileEcoTyna({ ...foglio, formato: 'csv', parziale: PARZIALE });
   const csv = (await presi.at(-1).text()).replace(/^﻿/, '').split('\r\n');
-  verifica('CSV: l\'avviso e\' la prima riga', csv[0] === `ATTENZIONE, FILE PARZIALE: ${PARZIALE}` && csv[1] === 'Ragione sociale;Tonnellate', J(csv.slice(0, 3)));
+  verifica('CSV: niente avviso dentro, la prima riga sono le intestazioni', csv[0] === 'Ragione sociale;Tonnellate' && csv[1] === 'GOMMISTA 1 SRL;1,5' && csv.length === 3 && !csv.some(r => /ATTENZIONE|PARZIALE|elenco tagliato/i.test(r)), J(csv.slice(0, 3)));
+  await pagina.scaricaFileEcoTyna({ ...foglio, formato: 'csv' });
+  const csvIntero = (await presi.at(-1).text()).replace(/^﻿/, '').split('\r\n');
+  verifica('...lo stesso CSV che da un elenco intero', JSON.stringify(csvIntero) === JSON.stringify(csv), J([csvIntero, csv]));
   await pagina.scaricaFileEcoTyna({ nome: 'Elenco', formato: 'docx', testo: '# Punti di raccolta\n\n- GOMMISTA 1 SRL', parziale: PARZIALE });
   const word = await presi.at(-1).text();
   verifica('Word: l\'avviso e\' il primo paragrafo, prima del titolo', word.indexOf('ATTENZIONE, FILE PARZIALE') > 0 && word.indexOf('ATTENZIONE, FILE PARZIALE') < word.indexOf('Punti di raccolta</h1>'), word.slice(0, 600));
@@ -205,8 +215,8 @@ console.log('6. IL FILE SCARICATO PORTA SCRITTO CHE E\' PARZIALE');
     && /const testo = testoDelDocumento\(spec\);\n  if \(formato === 'docx'\)[^\n]*\n  if \(formato === 'pdf'\) \{ \(await documentoPdf\(testo\)\)/.test(sorgente('src/lib/fileEcoTyna.js')));
   // La regola dice cio' che accade: il file si riconosce dalle righe, quindi al
   // modello si chiede di copiare i valori come li vede.
-  verifica('e la regola del prompt dice il vero: in testa al file e accanto a Scarica', /Il gestionale riconosce il file fatto da un elenco tagliato dalle sue righe e gli scrive in testa che e' parziale, con lo stesso avviso accanto al pulsante per scaricarlo: per questo nel file copia nomi, codici e numeri come li vedi nei dati, senza riscriverli/.test(REGOLE_FILE)
-    && !/Il file portera' scritto che e' parziale/.test(REGOLE_FILE));
+  verifica('e la regola del prompt dice il vero: accanto a Scarica e in testa al file, tranne il CSV', /Il gestionale riconosce il file fatto da un elenco tagliato dalle sue righe e scrive che e' parziale accanto al pulsante per scaricarlo e in testa al file, tranne il CSV, che si carica in altri programmi e resta senza avviso dentro: per questo nel file copia nomi, codici e numeri come li vedi nei dati, senza riscriverli/.test(REGOLE_FILE)
+    && !/Il file portera' scritto che e' parziale/.test(REGOLE_FILE) && !/gli scrive in testa che e' parziale, con lo stesso avviso/.test(REGOLE_FILE));
 }
 
 // Revisione del 13/10/2026, rilievo sulla A73 (regressione): la riga di un
@@ -322,6 +332,124 @@ console.log('7. UN ELENCO TAGLIATO DENTRO UN ELEMENTO DI UN ARRAY');
     const fe = (e.j.file_generati || [])[0];
     verifica('dati veri, funzione intera: al modello sono arrivati gli ordini tagliati', /ELENCO TAGLIATO: qui ci sono 20 righe delle 30 totali/.test(e.prompt));
     verifica('...il file arriva alla pagina con l\'avviso e si salva cosi\'', fe && /20 righe su 30/.test(fe.parziale || '') && JSON.parse(e.salvata.file_generati_json)[0].parziale === fe.parziale, J(fe && fe.parziale));
+  }
+}
+
+// Decisione del 13/10/2026: la settimana dei formulari tagliava gli esempi dei
+// senza fine trasporto (5) e delle date da sistemare (10), e la riserva degli
+// ordini «eseguito» i suoi esempi (10), senza nessun segno. Il modello poteva
+// contarli, e un file fatto da quegli esempi usciva intero. Ora portano l'avviso
+// ELENCO TAGLIATO degli altri elenchi; gli esempi della riserva col nome
+// dell'elenco (avviso_esempi), perche' accanto c'e' per_raccoglitore, che puo'
+// essere intero.
+console.log('8. GLI ESEMPI TAGLIATI DELLA SETTIMANA DEI FORMULARI E DELLA RISERVA');
+{
+  const { inizio } = intervalloSettimana(2026, 40);
+  const base = { stato: 'terminato', trasportatore: 'EMMESSE SRL', destinazione: 'GATIM', provincia: 'NA', classe: 'P' };
+  const senzaFine = (n) => Array.from({ length: n }, (_, i) => ({ ...base, id: `sf${i}`, id_ordine: `ET7700${String(i).padStart(3, '0')}`, numero_fir: `SFIR${500000 + i}/26`, peso_effettivo: 1000 + i, ordine_immesso_il: '2026-09-20T08:00:00Z', trasporto_iniziato_il: '2026-09-21T08:00:00Z' }));
+  const senzaImmissione = (n) => Array.from({ length: n }, (_, i) => ({ ...base, id: `si${i}`, id_ordine: `ET8800${String(i).padStart(3, '0')}`, numero_fir: `SIFIR${600000 + i}/26`, peso_effettivo: 2000 + i, trasporto_iniziato_il: `${inizio}T08:00:00Z`, trasporto_finito_il: `${inizio}T10:00:00Z` }));
+  const buoni = Array.from({ length: 3 }, (_, i) => ({ ...base, id: `ok${i}`, id_ordine: `ET9900${i}`, numero_fir: `OKFIR${700000 + i}/26`, peso_effettivo: 3000, ordine_immesso_il: `${inizio}T07:00:00Z`, trasporto_iniziato_il: `${inizio}T08:00:00Z`, trasporto_finito_il: `${inizio}T10:00:00Z` }));
+  const sdk = (archivi) => ({ asServiceRole: { entities: new Proxy({}, { get: (_t, e) => ({
+    filter: async (f, _s, n = 5000, salta = 0) => (archivi[String(e)] || []).filter(r => !f || !f.stato || r.stato === f.stato).slice(salta, salta + n).map(r => ({ ...r })),
+    list: async (_s, n = 5000, salta = 0) => (archivi[String(e)] || []).slice(salta, salta + n).map(r => ({ ...r })),
+  }) }) } });
+  const P = { anno: 2026, settimana: 40 };
+  const out = await eseguiStrumento(sdk({ PrimariaRete: [...senzaFine(12), ...senzaImmissione(14), ...buoni] }), 'settimana_formulari', P);
+  const rete = ((out.dati && out.dati.date_obbligatorie_da_sistemare && out.dati.date_obbligatorie_da_sistemare.flussi) || []).find(f => f.flusso === 'rete_primarie') || {};
+  const sf = rete.senza_fine_trasporto || {};
+  const ns = rete.nella_settimana || {};
+  verifica('i senza fine trasporto: 5 esempi dei 12, col segno', sf.formulari === 12 && (sf.esempi || []).length === 5 && sf.avviso === 'ELENCO TAGLIATO: qui ci sono 5 formulari dei 12. Il numero giusto e\' "formulari".', J(sf));
+  verifica('le date da sistemare della settimana: 10 esempi dei 14, col segno', ns.formulari === 14 && (ns.esempi || []).length === 10 && ns.avviso === 'ELENCO TAGLIATO: qui ci sono 10 formulari dei 14. Il numero giusto e\' "formulari".', J(ns));
+  const tagli = elenchiTagliati(testoDati([{ ...out, strumento: 'settimana_formulari', parametri: P }]));
+  verifica('i due tagli si leggono nel blocco del prompt', JSON.stringify(tagli.map(t => `${t.mostrate}/${t.quanti}`).sort()) === JSON.stringify(['10/14', '5/12']), J(tagli));
+  const daEsempi = (nome, formato, esempi) => ({ nome, formato, fogli: [{ nome: 'Formulari', intestazioni: ['FIR', 'Ordine', 'Date'], righe: esempi.map(x => [x.fir, x.ordine, x.date]) }] });
+  const [fsf, fns, fpdf] = fileDaElenchiTagliati([
+    daEsempi('Formulari senza fine trasporto', 'xlsx', sf.esempi || []),
+    daEsempi('Formulari della settimana da sistemare', 'csv', ns.esempi || []),
+    { nome: 'Formulari da sistemare', formato: 'pdf', testo: '# Formulari da sistemare\n\n' + (ns.esempi || []).map(x => `- ${x.fir} (${x.ordine}): ${x.date}`).join('\n') },
+  ], tagli);
+  verifica('l\'Excel dei senza fine trasporto porta il segno: «5 righe su 12»', /^Questo file e' fatto da un elenco tagliato \(5 righe su 12\)/.test(fsf.parziale || ''), J(fsf.parziale));
+  verifica('il CSV delle date da sistemare: «10 righe su 14»', /un elenco tagliato \(10 righe su 14\)/.test(fns.parziale || ''), J(fns.parziale));
+  verifica('...e l\'elenco in PDF', /un elenco tagliato \(10 righe su 14\)/.test(fpdf.parziale || ''), J(fpdf.parziale));
+  // Esempi interi: nessun segno, nessun file parziale.
+  const pochi = await eseguiStrumento(sdk({ PrimariaRete: [...senzaFine(3), ...senzaImmissione(4), ...buoni] }), 'settimana_formulari', P);
+  const r2 = ((pochi.dati && pochi.dati.date_obbligatorie_da_sistemare && pochi.dati.date_obbligatorie_da_sistemare.flussi) || []).find(f => f.flusso === 'rete_primarie') || {};
+  verifica('con 3 senza fine e 4 da sistemare gli esempi sono tutti, senza segno', r2.senza_fine_trasporto && r2.senza_fine_trasporto.esempi.length === 3 && !('avviso' in r2.senza_fine_trasporto) && r2.nella_settimana && r2.nella_settimana.esempi.length === 4 && !('avviso' in r2.nella_settimana), J(r2));
+  const t2 = elenchiTagliati(testoDati([{ ...pochi, strumento: 'settimana_formulari', parametri: P }]));
+  const [interi] = fileDaElenchiTagliati([daEsempi('Formulari senza fine trasporto', 'xlsx', r2.senza_fine_trasporto ? r2.senza_fine_trasporto.esempi : [])], t2);
+  verifica('...e il file fatto da quelli non e\' parziale', t2.length === 0 && interi && !('parziale' in interi), J([t2, interi && interi.parziale]));
+  // Un blocco troncato a meta': i formulari si leggono come le righe e gli ordini.
+  const tronco = elenchiTagliati('--- strumento: settimana_formulari\n{"flussi":[{"senza_fine_trasporto":{"formulari":12,"avviso":"ELENCO TAGLIATO: qui ci sono 5 formulari dei 12. Il numero giusto e\' \\"formulari\\"."} …(troncato)');
+  verifica('un blocco troncato: «5 formulari dei 12» si legge coi numeri', tronco.length === 1 && tronco[0].mostrate === 5 && tronco[0].quanti === 12, J(tronco));
+
+  // LA RISERVA DEGLI ESEGUITI: 37 ordini nel limbo di tre raccoglitori. Gli
+  // esempi sono 10 e lo dicono; i tre raccoglitori sono tutti.
+  let k = 0;
+  const eseguito = (racc, kg) => ({ ...base, id: `es${++k}`, stato: 'eseguito', trasportatore: racc, id_ordine: `ET6600${String(k).padStart(3, '0')}`, numero_fir: `ESFIR${800000 + k}/26`, peso_effettivo: kg, ordine_immesso_il: '2026-09-01T07:00:00Z', trasporto_iniziato_il: '2026-09-01T08:00:00Z', trasporto_finito_il: '2026-09-01T10:00:00Z' });
+  const limbo = [...Array.from({ length: 20 }, () => eseguito('EMMESSE SRL', 1500)), ...Array.from({ length: 12 }, () => eseguito('NAPPI SUD SRL', 1200)), ...Array.from({ length: 5 }, () => eseguito('ECORECUPERI SRL', 900))];
+  const pr = { canale: 'RETE', anno: 2026 };
+  const racc = await eseguiStrumento(sdk({ PrimariaRete: [...buoni, ...limbo] }), 'raccolto', pr);
+  const ris = (racc.dati && racc.dati.riserva_eseguiti) || {};
+  verifica('la riserva: 10 esempi dei 37, col segno col nome dell\'elenco', ris.ordini === 37 && (ris.esempi || []).length === 10 && ris.avviso_esempi === 'ELENCO TAGLIATO: qui ci sono 10 ordini dei 37. Il numero giusto e\' "ordini".' && !('avviso' in ris), J({ ...ris, esempi: undefined, nota: undefined }));
+  verifica('...i raccoglitori sono tutti e tre, senza segno', (ris.per_raccoglitore || []).length === 3 && !('elenco_tagliato' in ris), J(ris.per_raccoglitore));
+  const tr = elenchiTagliati(testoDati([{ ...racc, strumento: 'raccolto', parametri: pr }]));
+  verifica('nel blocco del prompt il taglio degli esempi, solo quello', JSON.stringify(tr.map(t => `${t.mostrate}/${t.quanti}`)) === JSON.stringify(['10/37']), J(tr));
+  const [fes, frac] = fileDaElenchiTagliati([
+    { nome: 'Ordini nel limbo', formato: 'xlsx', fogli: [{ nome: 'Ordini', intestazioni: ['Ordine', 'FIR', 'Tonnellate'], righe: (ris.esempi || []).map(o => [o.id_ordine, o.numero_fir, String(o.tonnellate)]) }] },
+    { nome: 'Limbo per raccoglitore', formato: 'xlsx', fogli: [{ nome: 'Raccoglitori', intestazioni: ['Raccoglitore', 'Ordini', 'Tonnellate'], righe: (ris.per_raccoglitore || []).map(r => [r.raccoglitore, String(r.ordini), String(r.tonnellate)]) }] },
+  ], tr);
+  verifica('il file degli ordini nel limbo porta il segno: «10 righe su 37»', /^Questo file e' fatto da un elenco tagliato \(10 righe su 37\)/.test(fes.parziale || ''), J(fes.parziale));
+  verifica('il file dei raccoglitori, intero, no', frac && !('parziale' in frac), J(frac && frac.parziale));
+  // 25 raccoglitori nel limbo: anche i raccoglitori sono tagliati (20 su 25), e
+  // ogni file prende il suo taglio, non quello dell'altro elenco.
+  const molti = Array.from({ length: 25 }, (_, i) => eseguito(`RACCOGLITORE ${i} SRL`, 1000 + i * 10));
+  const racc2 = await eseguiStrumento(sdk({ PrimariaRete: [...buoni, ...molti] }), 'raccolto', pr);
+  const ris2 = (racc2.dati && racc2.dati.riserva_eseguiti) || {};
+  const tr2 = elenchiTagliati(testoDati([{ ...racc2, strumento: 'raccolto', parametri: pr }]));
+  verifica('25 raccoglitori: due tagli, gli esempi (10 su 25) e i raccoglitori (20 su 25)', JSON.stringify(tr2.map(t => `${t.mostrate}/${t.quanti}`).sort()) === JSON.stringify(['10/25', '20/25']) && /20 raccoglitori/.test(ris2.elenco_tagliato || ''), J(tr2));
+  const [ges, grac] = fileDaElenchiTagliati([
+    { nome: 'Ordini nel limbo', formato: 'xlsx', fogli: [{ nome: 'Ordini', intestazioni: ['Ordine', 'FIR'], righe: (ris2.esempi || []).map(o => [o.id_ordine, o.numero_fir]) }] },
+    { nome: 'Limbo per raccoglitore', formato: 'xlsx', fogli: [{ nome: 'Raccoglitori', intestazioni: ['Raccoglitore', 'Ordini', 'Tonnellate'], righe: (ris2.per_raccoglitore || []).map(r => [r.raccoglitore, String(r.ordini), String(r.tonnellate)]) }] },
+  ], tr2);
+  verifica('...il file degli ordini col suo taglio, «10 righe su 25»', /^Questo file e' fatto da un elenco tagliato \(10 righe su 25\)/.test(ges.parziale || ''), J(ges.parziale));
+  verifica('...quello dei raccoglitori col suo, «20 righe su 25»', /^Questo file e' fatto da un elenco tagliato \(20 righe su 25\)/.test(grac.parziale || ''), J(grac.parziale));
+
+  // Sulla funzione intera: il file dei senza fine trasporto arriva alla pagina
+  // col segno, e l'elenco tagliato al modello.
+  const modulo = await caricaEcoTyna();
+  const e = await chiedi(modulo, {
+    domanda: 'Fammi un Excel coi formulari senza fine trasporto della settimana 40',
+    piano: { strumenti: [{ nome: 'settimana_formulari', parametri: P }], serve_normativa: false },
+    risposta: { risposta: 'Ecco il file.', certezza: 'alta', file_da_creare: [daEsempi('Formulari senza fine trasporto', 'xlsx', sf.esempi || [])] },
+    db: { PrimariaRete: [...senzaFine(12), ...senzaImmissione(14), ...buoni] },
+    riepilogo: 'DATI DEL GESTIONALE: riepilogo non usato in questa prova.',
+  });
+  const fe = (e.j.file_generati || [])[0];
+  verifica('funzione intera: al modello arriva il segno sugli esempi', /ELENCO TAGLIATO: qui ci sono 5 formulari dei 12/.test(e.prompt) && /ELENCO TAGLIATO: qui ci sono 10 formulari dei 14/.test(e.prompt));
+  verifica('...e il file arriva alla pagina parziale, e si salva cosi\'', fe && /un elenco tagliato \(5 righe su 12\)/.test(fe.parziale || '') && JSON.parse(e.salvata.file_generati_json)[0].parziale === fe.parziale, J(fe && fe.parziale));
+
+  // LA COPIA DEI DATI VERI DELL'11/10/2026, se c'e': oggi nessun senza fine e
+  // nessun eseguito, quindi si aggiungono a una copia degli archivi veri, come
+  // nella sezione 7, con le righe vere intorno.
+  const COPIA = new URL('../../dati-veri/treadrider-dati-veri-2026-10-11.json.gz', import.meta.url);
+  if (!existsSync(COPIA)) {
+    console.log('  dati veri: la copia dell\'11/10/2026 non c\'e\', salto');
+  } else {
+    const V = JSON.parse(gunzipSync(readFileSync(COPIA)).toString('utf8')).archivi;
+    // Un formulario vero di settembre 2026: gli eseguiti devono cadere nell'anno chiesto.
+    const modello = V.PrimariaRete.find(r => r.stato === 'terminato' && String(r.trasporto_finito_il || '').startsWith('2026-09'));
+    const nuoviSenzaFine = Array.from({ length: 12 }, (_, i) => ({ ...modello, id: 'vsf' + i, id_ordine: 'ET7700' + String(i).padStart(3, '0'), numero_fir: 'VSF' + (500000 + i) + '/26', trasporto_finito_il: null }));
+    const nuoviEseguiti = Array.from({ length: 37 }, (_, i) => ({ ...modello, id: 'ves' + i, stato: 'eseguito', id_ordine: 'ET6600' + String(i).padStart(3, '0'), numero_fir: 'VES' + (800000 + i) + '/26' }));
+    const archivi = { ...V, PrimariaRete: [...V.PrimariaRete, ...nuoviSenzaFine, ...nuoviEseguiti] };
+    const vs = await eseguiStrumento(sdk(archivi), 'settimana_formulari', P);
+    const vrete = ((vs.dati && vs.dati.date_obbligatorie_da_sistemare && vs.dati.date_obbligatorie_da_sistemare.flussi) || []).find(f => f.flusso === 'rete_primarie') || {};
+    const vsf = vrete.senza_fine_trasporto || {};
+    const [vf] = fileDaElenchiTagliati(fileEcoTyna.fileDaCreare([daEsempi('Formulari senza fine trasporto', 'xlsx', vsf.esempi || [])]), elenchiTagliati(testoDati([{ ...vs, strumento: 'settimana_formulari', parametri: P }])));
+    verifica('dati veri: 5 esempi dei 12 senza fine trasporto, e il file porta il segno', vsf.formulari === 12 && /qui ci sono 5 formulari dei 12/.test(vsf.avviso || '') && /un elenco tagliato \(5 righe su 12\)/.test((vf && vf.parziale) || ''), J([vsf.formulari, vsf.avviso, vf && vf.parziale]));
+    const vr = await eseguiStrumento(sdk(archivi), 'raccolto', pr);
+    const vris = (vr.dati && vr.dati.riserva_eseguiti) || {};
+    const [ve] = fileDaElenchiTagliati(fileEcoTyna.fileDaCreare([{ nome: 'Ordini nel limbo', formato: 'xlsx', fogli: [{ nome: 'Ordini', intestazioni: ['Ordine', 'FIR'], righe: (vris.esempi || []).map(o => [o.id_ordine, o.numero_fir]) }] }]), elenchiTagliati(testoDati([{ ...vr, strumento: 'raccolto', parametri: pr }])));
+    verifica('dati veri: la riserva con 10 esempi dei 37, e il file porta il segno', vris.ordini === 37 && /qui ci sono 10 ordini dei 37/.test(vris.avviso_esempi || '') && /un elenco tagliato \(10 righe su 37\)/.test((ve && ve.parziale) || ''), J([vris.ordini, vris.avviso_esempi, ve && ve.parziale]));
   }
 }
 

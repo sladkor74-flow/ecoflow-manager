@@ -37,6 +37,7 @@ import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } 
 import { giorniAllaScadenza, fasciaScadenza } from "./omologhe.ts";
 import { documentoDelRequisito } from "./qualificaFornitori.ts";
 import { applicaControlloClasse, targetAnnuoSoggetto } from "./classeAlbo.ts";
+import { eContrattoRaccoltaEStoccaggio } from "./segnapostiContratto.ts";
 import { calcolaRigheAttiva, riconciliaAttiva, documentoValido, eRigaACorpo, eRigaSurplus, eSecondariaExtra, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 import { piuGiorni } from "./predittivita.ts";
 import { calcolaPassivaMese, indiceMesePassiva, movimentiDateDelCanale } from "./passivaCalcolo.ts";
@@ -174,12 +175,22 @@ function riservaEseguiti(nelPeriodo, senzaFine, nonLetta) {
   const perRaccoglitore = [...per.entries()]
     .map(([raccoglitore, righe]) => { const x = riepilogoEseguiti(righe); return { raccoglitore, ordini: x.ordini, tonnellate: t3(x.kg) }; })
     .sort((a, b) => b.tonnellate - a.tonnellate);
+  const esempi = dentro.esempi.slice(0, 10);
   return {
     ...(dentro.ordini ? {
       ordini: dentro.ordini,
       formulari: contaFormulari(nelPeriodo),
       tonnellate: t3(dentro.kg),
-      esempi: dentro.esempi.slice(0, 10).map(o => ({ id_ordine: o.id_ordine, numero_fir: o.numero_fir, tonnellate: t3(o.kg) })),
+      esempi: esempi.map(o => ({ id_ordine: o.id_ordine, numero_fir: o.numero_fir, tonnellate: t3(o.kg) })),
+      // GLI ESEMPI TAGLIATI LO DICONO (decisione del 13/10/2026). Gli esempi sono
+      // dieci anche quando gli ordini nel limbo sono di piu', e arrivavano senza
+      // nessun segno: il modello poteva contarli, e un file fatto da quegli esempi
+      // usciva intero. Lo stesso avviso delle date da
+      // sistemare, col nome dell'elenco, perche' nello stesso oggetto c'e'
+      // per_raccoglitore, che ha il suo (elenco_tagliato): cosi' il file dei
+      // raccoglitori, se e' intero, non diventa parziale (elenchiTagliati,
+      // fileEcoTyna.ts).
+      ...(dentro.ordini > esempi.length ? { avviso_esempi: `ELENCO TAGLIATO: qui ci sono ${esempi.length} ordini dei ${dentro.ordini}. Il numero giusto e' "ordini".` } : {}),
     } : {}),
     ...(fuori.ordini ? { senza_fine_trasporto: { ordini: fuori.ordini, tonnellate: t3(fuori.kg) } } : {}),
     ...(perRaccoglitore.length > 1 ? { per_raccoglitore: perRaccoglitore.slice(0, 20) } : {}),
@@ -1267,13 +1278,25 @@ export const STRUMENTI = [
       // con date incoerenti, sono contati ma vanno corretti. E un archivio che si
       // sta ricaricando e' a meta': i numeri vanno presi con quell'avviso, non
       // come definitivi.
+      // GLI ESEMPI TAGLIATI LO DICONO (decisione del 13/10/2026): 5 dei senza fine
+      // trasporto e 10 della settimana arrivavano senza nessun segno, e un file
+      // fatto da quegli esempi usciva intero. Lo stesso avviso degli altri elenchi,
+      // che il modello conosce (regole 3-septies e 3-quater) e da cui
+      // fileDaElenchiTagliati (fileEcoTyna.ts) segna il file parziale.
+      const taglioFormulari = (mostrati, quanti) => (quanti > mostrati
+        ? { avviso: `ELENCO TAGLIATO: qui ci sono ${mostrati} formulari dei ${quanti}. Il numero giusto e' "formulari".` }
+        : {});
       const conDate = Object.entries(g)
         .filter(([, d]) => d && ((d.senza_fine && d.senza_fine.n > 0) || (d.date_da_sistemare || []).length))
-        .map(([chiave, d]) => ({
-          flusso: chiave, canale: canaleDelFlusso(chiave),
-          ...(d.senza_fine && d.senza_fine.n > 0 ? { senza_fine_trasporto: { formulari: d.senza_fine.n, esempi: d.senza_fine.esempi, escluso_da_ogni_settimana: true } } : {}),
-          ...((d.date_da_sistemare || []).length ? { nella_settimana: { formulari: contaDistinti(d.date_da_sistemare), esempi: d.date_da_sistemare.slice(0, 10).map(x => ({ fir: x.fir, ordine: x.ordine, date: x.date })) } } : {}),
-        }));
+        .map(([chiave, d]) => {
+          const nella = (d.date_da_sistemare || []).length ? contaDistinti(d.date_da_sistemare) : 0;
+          const esempiNella = (d.date_da_sistemare || []).slice(0, 10);
+          return {
+            flusso: chiave, canale: canaleDelFlusso(chiave),
+            ...(d.senza_fine && d.senza_fine.n > 0 ? { senza_fine_trasporto: { formulari: d.senza_fine.n, esempi: d.senza_fine.esempi, ...taglioFormulari(d.senza_fine.esempi.length, d.senza_fine.n), escluso_da_ogni_settimana: true } } : {}),
+            ...(nella ? { nella_settimana: { formulari: nella, esempi: esempiNella.map(x => ({ fir: x.fir, ordine: x.ordine, date: x.date })), ...taglioFormulari(esempiNella.length, nella) } } : {}),
+          };
+        });
       const aperti = caricamentiAperti(g);
       return {
         fonte: 'Formulari terminati nella settimana',
@@ -2350,13 +2373,16 @@ export const STRUMENTI = [
       const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
       const oggi = oggiRoma();
       const svc = base44.asServiceRole.entities;
-      const [riepilogo, catalogo, salvati, contratti, targetAnnui, targetMensili] = await Promise.all([
+      const [riepilogo, catalogo, salvati, contratti, targetAnnui, targetMensili, modelli] = await Promise.all([
         svc.RiepilogoQualifica.filter({ anno }, '-aggiornato_il', 1).catch(() => []),
         fetchAll(svc.TipoDocumentoQualifica),
         fetchAll(svc.DocumentoQualifica, { stato: 'attivo' }),
         fetchAll(svc.ContrattoFornitore, { anno }).catch(() => []),
         fetchAll(svc.TargetRaccoglitore, { anno }).catch(() => null),
         fetchAll(svc.TargetMensile, { anno }).catch(() => null),
+        // I modelli dei contratti, anche i sostituiti: dicono se un contratto di
+        // raccolta ACI e' il contratto unico di raccolta e stoccaggio (sotto).
+        fetchAll(svc.ModelloContratto).catch(() => []),
       ]);
       // LA CLASSE DELL'ALBO CONTRO IL TARGET, COME NEL MODULO (revisione del
       // 13/10/2026). Qui statoRequisito girava sui documenti salvati, senza il
@@ -2432,9 +2458,17 @@ export const STRUMENTI = [
         dati: {
           riepilogo: riepilogo[0] ? { ...riepilogo[0], nota: `Conteggi salvati il ${soloData(riepilogo[0].aggiornato_il)}` } : null,
           soggetti: elenco(soggetti, 80),
-          contratti: elenco(contratti.map(c => ({ soggetto: c.soggetto_nome, tipo: c.tipo_contratto, canale: c.canale, stato: c.stato, anno: c.anno, decorrenza: soloData(c.data_inizio), scadenza: soloData(c.data_fine), quantitativo_t: c.quantitativo_previsto_t })), 60),
+          // IL CONTRATTO ACI UNICO DI RACCOLTA E STOCCAGGIO (decisione dell'utente del
+          // 13/10/2026; chiusura del giro, 14/10/2026). Si registra come raccolta ACI,
+          // e qui EcoTyna lo diceva di sola raccolta: a «Nappi Sud ha il contratto di
+          // stoccaggio ACI?» i dati dicevano di no. Lo decide il modello del
+          // contratto, anche sostituito, come nella scheda Contratti
+          // (eContrattoRaccoltaEStoccaggio); senza il modello, i valori salvati.
+          // Una lettura sola dei modelli, pochi record, per domanda.
+          contratti: elenco(contratti.map(c => ({ soggetto: c.soggetto_nome, tipo: c.tipo_contratto, canale: c.canale, stato: c.stato, anno: c.anno, decorrenza: soloData(c.data_inizio), scadenza: soloData(c.data_fine), quantitativo_t: c.quantitativo_previsto_t,
+            raccolta_e_stoccaggio: eContrattoRaccoltaEStoccaggio(c, (modelli || []).find(m => m && m.id === c.modello_id) || null) || undefined })), 60),
           ...(targetLetti ? {} : { controllo_classe_non_eseguito: `I target del ${anno} non si sono potuti leggere: la classe dell'iscrizione all'Albo non e' stata confrontata col target, quindi un'iscrizione in classe troppo bassa qui puo' risultare valida. Dillo, e rimanda al modulo Qualifica Fornitori.` }),
-          nota: 'Qui ci sono i documenti caricati. I documenti che mancano del tutto si vedono nel modulo Qualifica Fornitori, che confronta ogni soggetto con il catalogo dei requisiti del suo ruolo. La classe dell\'iscrizione all\'Albo si confronta col target PFU dell\'anno, come nel modulo: un target oltre il limite della classe fa il documento non conforme, e il motivo e\' in "motivi".',
+          nota: 'Qui ci sono i documenti caricati. I documenti che mancano del tutto si vedono nel modulo Qualifica Fornitori, che confronta ogni soggetto con il catalogo dei requisiti del suo ruolo. La classe dell\'iscrizione all\'Albo si confronta col target PFU dell\'anno, come nel modulo: un target oltre il limite della classe fa il documento non conforme, e il motivo e\' in "motivi". Un contratto ACI con raccolta_e_stoccaggio e\' il contratto unico di raccolta e stoccaggio, coi due prezzi: copre anche lo stoccaggio ACI, che non ha un contratto a parte.',
         },
       };
     },

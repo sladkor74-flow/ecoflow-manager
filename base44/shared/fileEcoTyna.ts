@@ -159,7 +159,7 @@ export const REGOLE_FILE = [
   '  - Documenti (docx, pdf, txt): lettere, relazioni, verbali, procedure, email in testo markdown semplice (titoli con #, elenchi con -, grassetto con **, tabelle con |).',
   '  - Per modificare un foglio allegato con molte righe non riscriverle: indica da_allegato (nome esatto del file), foglio, e le operazioni in ordine (filtra, ordina, rinomina_colonna, elimina_colonne, tieni_colonne, sostituisci, imposta_valore, aggiungi_colonna, raggruppa, totale) usando i nomi delle colonne dell\'intestazione. Per documenti Word, PDF o di testo allegati riscrivi il testo completo gia\' modificato.',
   '  - Usa solo dati presenti negli allegati, nei dati del gestionale o nella domanda: mai dati inventati; cio\' che manca resta vuoto o si scrive [da completare].',
-  '  - Un elenco dei dati del gestionale con l\'avviso ELENCO TAGLIATO (o elenco_tagliato) ha solo una parte delle righe: un file fatto con quelle e\' incompleto. Non offrirlo; se l\'utente lo chiede lo stesso, crealo con quello che hai e nella risposta di\' quante righe ha e quante sono in tutto, e che l\'elenco intero si esporta dal modulo del gestionale. Il gestionale riconosce il file fatto da un elenco tagliato dalle sue righe e gli scrive in testa che e\' parziale, con lo stesso avviso accanto al pulsante per scaricarlo: per questo nel file copia nomi, codici e numeri come li vedi nei dati, senza riscriverli.',
+  '  - Un elenco dei dati del gestionale con l\'avviso ELENCO TAGLIATO (o elenco_tagliato) ha solo una parte delle righe: un file fatto con quelle e\' incompleto. Non offrirlo; se l\'utente lo chiede lo stesso, crealo con quello che hai e nella risposta di\' quante righe ha e quante sono in tutto, e che l\'elenco intero si esporta dal modulo del gestionale. Il gestionale riconosce il file fatto da un elenco tagliato dalle sue righe e scrive che e\' parziale accanto al pulsante per scaricarlo e in testa al file, tranne il CSV, che si carica in altri programmi e resta senza avviso dentro: per questo nel file copia nomi, codici e numeri come li vedi nei dati, senza riscriverli.',
   '  - Pesi: tonnellate con due decimali (tre se i kg non sono tondi), kg interi. Canali RETE, ACI ed EXTRA RACCOLTA sempre separati.',
   '  - Nome del file chiaro, senza estensione. Nessun riferimento alla piattaforma su cui e\' costruito il gestionale.',
 ].join('\n');
@@ -256,6 +256,20 @@ function valoriPropri(x, out = new Set<string>()) {
 // comparire quando lo si scrive: servono solo a legare un file al suo elenco.
 const conRighe = (t, righe) => Object.defineProperty(t, 'righe', { value: righe, enumerable: false });
 
+/** I due numeri di un avviso di taglio, «qui ci sono 10 ordini dei 37»; null se non li dice. */
+function numeriDelTaglio(taglio) {
+  const m = String(taglio).match(/qui ci sono (?:i )?(\d+) .*?\bd(?:elle|ei) (\d+)/i);
+  return { mostrate: m ? Number(m[1]) : null, quanti: m ? Number(m[2]) : null };
+}
+
+// L'AVVISO COL NOME DELL'ELENCO (decisione del 13/10/2026). La riserva degli
+// ordini «eseguito» ha due elenchi nello stesso oggetto: gli esempi (10 ordini) e
+// i raccoglitori (20). Un avviso dell'oggetto varrebbe per tutti e due, e il file
+// dei raccoglitori, intero, uscirebbe parziale. Gli esempi tagliati portano allora
+// «avviso_esempi»: vale solo per l'elenco che nomina, e gli altri elenchi
+// dell'oggetto seguono il suo avviso, se c'e', o restano interi.
+const avvisiDegliElenchi = (x) => Object.keys(x).filter(k => /^avviso_./.test(k) && typeof x[k] === 'string' && /ELENCO TAGLIATO/.test(x[k]) && Array.isArray(x[k.slice(7)]));
+
 /** Gli elenchi di un blocco di dati gia' letto: le righe di quelli tagliati e di quelli interi. */
 function elenchiDelBlocco(dati, strumento, tagliati, interi) {
   const visita = (x) => {
@@ -266,15 +280,21 @@ function elenchiDelBlocco(dati, strumento, tagliati, interi) {
       return;
     }
     if (!x || typeof x !== 'object') return;
+    const propri = new Set<string>();
+    for (const k of avvisiDegliElenchi(x)) {
+      const nome = k.slice(7);
+      propri.add(nome);
+      tagliati.push(conRighe({ strumento, ...numeriDelTaglio(x[k]) }, x[nome].map(el => valoriDi(el))));
+    }
+    const altri = Object.entries(x).filter(([k]) => !propri.has(k)).map(([, v]) => v);
     const taglio = taglioDi(x);
-    if (!taglio) { for (const v of Object.values(x)) visita(v); return; }
-    const m = taglio.match(/qui ci sono (?:i )?(\d+) .*?\bd(?:elle|ei) (\d+)/i);
+    if (!taglio) { for (const v of altri) visita(v); return; }
     const righe = [];
-    for (const v of Object.values(x)) {
+    for (const v of altri) {
       if (Array.isArray(v)) for (const el of v) righe.push(valoriDi(el));
       else visita(v);
     }
-    tagliati.push(conRighe({ strumento, mostrate: m ? Number(m[1]) : null, quanti: m ? Number(m[2]) : null }, righe));
+    tagliati.push(conRighe({ strumento, ...numeriDelTaglio(taglio) }, righe));
   };
   visita(dati);
 }
@@ -303,8 +323,9 @@ export function elenchiTagliati(testoDati) {
     }
     // Una riga che non si legge come dati (un blocco troncato a meta'): l'avviso
     // c'e', le righe no.
+    // I formulari dal 13/10/2026: gli esempi tagliati della settimana dei formulari.
     let qui = 0;
-    for (const x of riga.matchAll(/ELENCO TAGLIATO: qui ci sono (\d+) (?:righe|ordini) d(?:elle|ei) (\d+)/g)) {
+    for (const x of riga.matchAll(/ELENCO TAGLIATO: qui ci sono (\d+) (?:righe|ordini|formulari) d(?:elle|ei) (\d+)/g)) {
       trovati.push({ strumento, mostrate: Number(x[1]), quanti: Number(x[2]) });
       qui++;
     }
@@ -392,7 +413,8 @@ const comeTaglio = (t) => (t.quanti === null ? 'una parte delle righe' : `${nume
 /**
  * I file scritti dal modello da un elenco tagliato: portano parziale, il testo
  * che la chat mostra accanto al pulsante Scarica e che il file scaricato porta
- * in testa (scaricaFileEcoTyna, src/lib/fileEcoTyna.js). Un file e' di un elenco
+ * in testa (scaricaFileEcoTyna, src/lib/fileEcoTyna.js), tranne il CSV, che si
+ * carica in altri programmi (decisione del 13/10/2026). Un file e' di un elenco
  * tagliato se almeno due sue righe vengono da li' (una, se l'elenco ne mostrava
  * una sola): un file con un elenco intero, o una lettera, non e' parziale perche'
  * nello stesso blocco c'era un altro elenco tagliato. Un blocco troncato a meta',

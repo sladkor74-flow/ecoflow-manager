@@ -308,8 +308,12 @@ function formatoPeso(intestazione, valore) {
 // portava l'avviso solo nella scheda della chat, accanto a «Scarica»: il file
 // scaricato aveva 60 righe e nessuna nota, cioe' proprio il file incompleto che
 // sembra intero quando lo si inoltra. E al modello si diceva che il file l'avrebbe
-// portato scritto. Ora la riga c'e': in testa a ogni foglio, prima riga del CSV,
-// primo paragrafo del documento.
+// portato scritto. Ora la riga c'e': in testa a ogni foglio Excel e primo
+// paragrafo del documento (Word, PDF, testo).
+// Il CSV no (decisione del 13/10/2026): si usa per caricarlo in altri programmi, e
+// una riga d'avviso prima delle intestazioni diventava la riga delle intestazioni,
+// o un record da scartare a mano. Per il CSV l'avviso resta accanto al pulsante
+// Scarica, e la risposta dice quante righe ha il file e quante sono in tutto.
 export const testaParziale = (spec) => (spec && spec.parziale ? `ATTENZIONE, FILE PARZIALE: ${String(spec.parziale).trim()}` : '');
 
 /** Il testo di un documento (Word, PDF, testo) col suo avviso in testa, se e' parziale. */
@@ -476,7 +480,9 @@ export async function scaricaFileEcoTyna(spec, allegati = {}) {
         else s = String(c.v);
         return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
       };
-      const righe = [...(testa ? [[campo({ v: testa })]] : []), f.intestazioni.map(h => campo({ v: h })), ...f.righe.map(r => r.map(campo))];
+      // Niente avviso del file parziale in testa: la prima riga del CSV sono le
+      // intestazioni, perche' il CSV si carica in altri programmi (13/10/2026).
+      const righe = [f.intestazioni.map(h => campo({ v: h })), ...f.righe.map(r => r.map(campo))];
       scarica(new Blob(['﻿' + righe.map(r => r.join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), nome);
       return;
     }

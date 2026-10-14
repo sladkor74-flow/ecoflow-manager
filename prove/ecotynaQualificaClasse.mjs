@@ -10,7 +10,9 @@
 //   2. che dica lo stesso stato della funzione vera del modulo
 //      (qualificaFornitori, sul banco con l'SDK finto), sugli stessi archivi;
 //   3. che le letture in piu' siano due per domanda, non una per soggetto;
-//   4. che se i target non si leggono lo dica, invece di tacere il controllo.
+//   4. che se i target non si leggono lo dica, invece di tacere il controllo;
+//   5. che il contratto ACI unico di raccolta e stoccaggio (decisione
+//      dell'utente del 13/10/2026) si dica tale, e non di sola raccolta.
 // node prove/ecotynaQualificaClasse.mjs
 import { STRUMENTI } from '../base44/shared/strumentiAssistente.ts';
 import { caricaFunzione, chiama } from './dati/bancoFunzioni.mjs';
@@ -104,6 +106,40 @@ console.log('4. TARGET NON LETTI: SI DICE');
   const rotto = await esegui(DB, { guasti: ['TargetRaccoglitore'] });
   verifica('lo strumento risponde lo stesso', rotto.r && rotto.r.dati && rotto.r.dati.soggetti.righe.length === 3);
   verifica('e dice che il controllo della classe non e\' stato fatto', /la classe dell'iscrizione all'Albo non e' stata confrontata col target/.test(rotto.r.dati.controllo_classe_non_eseguito || ''), J(rotto.r.dati.controllo_classe_non_eseguito));
+}
+
+// 5. IL CONTRATTO ACI UNICO DI RACCOLTA E STOCCAGGIO (decisione dell'utente del
+// 13/10/2026; chiusura del giro del 14/10/2026, script ecotynaContrattoUnico.mjs
+// della revisione D-G). Si registra come raccolta ACI: EcoTyna lo diceva di
+// sola raccolta, e a «Nappi Sud ha il contratto di stoccaggio ACI?» i dati
+// dicevano di no. Lo decide il modello, anche sostituito; senza il modello, i
+// valori salvati (eContrattoRaccoltaEStoccaggio di segnapostiContratto.ts).
+console.log('5. IL CONTRATTO ACI UNICO DI RACCOLTA E STOCCAGGIO');
+{
+  const punti = (...s) => JSON.stringify(s.map(segnaposto => ({ segnaposto })));
+  const MODELLI = [
+    { id: 'mod-rs-aci', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'sostituito', punti_json: punti('CORRISPETTIVO_RACCOLTA', 'CORRISPETTIVO_STOCCAGGIO') },
+    { id: 'mod-r-aci', tipo_contratto: 'raccolta', canale: 'ACI', stato: 'attivo', punti_json: punti('CORRISPETTIVO_RACCOLTA') },
+  ];
+  const k = (id, nome, tipo, canale, altro = {}) => ({ id, anno: 2026, soggetto_chiave: nome.toLowerCase(), soggetto_nome: nome, tipo_contratto: tipo, canale, stato: 'controfirmato', data_inizio: '2026-01-02', data_fine: '2026-12-31', ...altro });
+  const CONTRATTI = [
+    k('k1', 'NAPPI SUD SRL', 'raccolta', 'ACI', { modello_id: 'mod-rs-aci', valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 92 }) }),
+    k('k2', 'NAPPI SUD SRL', 'stoccaggio', 'RETE'),
+    k('k3', 'ECORECUPERI SRL', 'raccolta', 'ACI', { modello_id: 'mod-r-aci', valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 105, CORRISPETTIVO_STOCCAGGIO: 0 }) }),
+    k('k4', 'GATIM S.R.L.', 'raccolta', 'ACI', { valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 90, CORRISPETTIVO_STOCCAGGIO: 15 }) }),
+    k('k5', 'EMMESSE SRL', 'raccolta', 'RETE', { valori_json: JSON.stringify({ CORRISPETTIVO_RACCOLTA: 72, CORRISPETTIVO_STOCCAGGIO: 10 }) }),
+  ];
+  const { r: rc, letture: lc } = await esegui({ ...DB, ContrattoFornitore: CONTRATTI, ModelloContratto: MODELLI });
+  const di = (nome, tipo, canale) => ((rc.dati.contratti && rc.dati.contratti.righe) || []).find(c => c.soggetto === nome && c.tipo === tipo && c.canale === canale) || {};
+  verifica('Nappi Sud: la raccolta ACI fatta col modello dei due prezzi e\' il contratto unico, anche col modello sostituito', di('NAPPI SUD SRL', 'raccolta', 'ACI').raccolta_e_stoccaggio === true, J(rc.dati.contratti));
+  verifica('lo stoccaggio di rete resta un contratto suo, senza il segno', di('NAPPI SUD SRL', 'stoccaggio', 'RETE').raccolta_e_stoccaggio === undefined);
+  verifica('un modello di sola raccolta decide lui, anche se fra i valori c\'e\' lo stoccaggio', di('ECORECUPERI SRL', 'raccolta', 'ACI').raccolta_e_stoccaggio === undefined, J(di('ECORECUPERI SRL', 'raccolta', 'ACI')));
+  verifica('senza modello decidono i valori salvati', di('GATIM S.R.L.', 'raccolta', 'ACI').raccolta_e_stoccaggio === true);
+  verifica('sulla rete i contratti restano due: nessun contratto unico', di('EMMESSE SRL', 'raccolta', 'RETE').raccolta_e_stoccaggio === undefined);
+  verifica('la nota dice che cosa vuol dire', /raccolta_e_stoccaggio e' il contratto unico di raccolta e stoccaggio, coi due prezzi: copre anche lo stoccaggio ACI/.test(rc.dati.nota || ''), J(rc.dati.nota));
+  verifica('i modelli si leggono una volta per domanda', lc.ModelloContratto === 1, J(lc));
+  const { r: senzaModelli } = await esegui({ ...DB, ContrattoFornitore: CONTRATTI, ModelloContratto: MODELLI }, { guasti: ['ModelloContratto'] });
+  verifica('se i modelli non si leggono lo strumento risponde, coi valori salvati', ((senzaModelli.dati.contratti || {}).righe || []).length === 5, J(senzaModelli.dati));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

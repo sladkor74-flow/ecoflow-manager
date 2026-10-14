@@ -11,13 +11,20 @@
 //        oggetti, e la base di conoscenza le scriveva nel prompt come
 //        «[object Object]».
 //
+// Decisione del 13/10/2026 (sezione 9): una pagina trovata online, che nessuna
+// voce cita, porta «consultata il gg/mm/aaaa», col giorno della domanda, mai
+// «verificata il»; la chat si disegna con React lato server e si legge.
+//
 // chiediAssistente gira intera con il banco prove/dati/bancoEcoTyna.mjs (SDK e
 // modello finti). npm run prove
-import { readFileSync } from 'node:fs';
+import { build } from 'esbuild';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { caricaEcoTyna, chiedi } from './dati/bancoEcoTyna.mjs';
 import * as conoscenza from '../base44/shared/baseConoscenza.ts';
 import * as fontiServer from '../base44/shared/fontiConoscenza.ts';
 import * as fontiPagina from '../src/lib/fontiConoscenza.js';
+import { oggiRoma } from '../base44/shared/giornoItaliano.ts';
 
 // Dallo spazio dei nomi: col codice di prima (la controprova) fontiDellaRisposta
 // non c'e', e la prova deve dire quali verifiche cadono invece di fermarsi all'import.
@@ -337,6 +344,123 @@ console.log('8. A71: LA DATA DELLA FONTE IN QUALUNQUE NOTAZIONE');
   });
   const fonti = JSON.parse((e.salvata && e.salvata.fonti_json) || '[]');
   verifica('funzione intera: le FAQ del 02-10-2026, del 2 ott. 2026 e del 02/10/26 senza voce e senza data, ma ufficiali', fonti.length === 3 && fonti.every(f => !f.voce && !f.verificato_il && f.ufficiale === true), J(fonti));
+}
+
+// Decisione del 13/10/2026: una pagina trovata con la ricerca online, che nessuna
+// voce della base di conoscenza cita, non l'ha verificata nessuno. Si scrive
+// «consultata il gg/mm/aaaa», col giorno della domanda, come si cita una pagina
+// internet; «verificata il» resta delle sole voci. Prima accanto non c'era nessun
+// giorno, e una pagina letta online non si distingueva da una scritta a memoria.
+console.log('9. UNA FONTE TROVATA ONLINE E\' «CONSULTATA IL», MAI «VERIFICATA IL»');
+{
+  // La chat disegnata con React lato server, come prove/chiusuraMesePannello.mjs.
+  // Col codice di prima Messaggio non e' esportato: le verifiche cadono, la prova
+  // non si ferma.
+  const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
+  const daAlias = (p) => { const base = qui('../src/' + p.slice(2)); return ['', '.js', '.jsx', '.ts'].map(x => base + x).find(existsSync) || base; };
+  const FINTI = { '@/api/base44Client': 'export const base44 = {};', '@/lib/AuthContext': 'export const useAuth = () => ({ user: null });' };
+  let disegna = () => '';
+  try {
+    const pacchetto = await build({
+      stdin: { contents: `import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server.browser';
+import * as chat from ${JSON.stringify(qui('../src/components/assistente/ChatAssistente.jsx'))};
+export const disegna = (d) => renderToStaticMarkup(React.createElement(chat.Messaggio, { d, onValuta() {}, isAdmin: true, fileRecenti: null, onScarica() {}, onAscolta: null }));`, resolveDir: qui('.'), loader: 'js' },
+      bundle: true, write: false, format: 'esm', platform: 'browser', logLevel: 'silent',
+      loader: { '.jsx': 'jsx', '.js': 'jsx', '.jpg': 'dataurl', '.png': 'dataurl' },
+      define: { 'process.env.NODE_ENV': '"production"' },
+      plugins: [{ name: 'finti', setup(b) {
+        b.onResolve({ filter: /^@\/(api\/base44Client|lib\/AuthContext)$/ }, (a) => ({ path: a.path, namespace: 'finto' }));
+        b.onLoad({ filter: /.*/, namespace: 'finto' }, (a) => ({ contents: FINTI[a.path], loader: 'js' }));
+        b.onResolve({ filter: /^@\// }, (a) => ({ path: daAlias(a.path) }));
+      } }],
+    });
+    // utils legge window a caricamento; la lettura delle entita' HTML di markdown crea un elemento.
+    globalThis.window = globalThis.window || { self: 1, top: 1 };
+    globalThis.document = globalThis.document || { createElement: () => ({ innerHTML: '', textContent: '' }) };
+    ({ disegna } = await import('data:text/javascript;base64,' + Buffer.from(pacchetto.outputFiles[0].text).toString('base64')));
+  } catch (err) { verifica('la chat si impacchetta e si carica', false, String(err && err.message).slice(0, 300)); }
+  const fontiDisegnate = (d) => {
+    let html = '';
+    try { html = disegna(d); } catch (err) { return 'ERRORE: ' + String(err && err.message).slice(0, 200); }
+    const i = html.indexOf('Fonti</p>');
+    return i < 0 ? '' : html.slice(i, html.indexOf('</div>', i));
+  };
+  const it = (g) => g.split('-').reverse().join('/');
+
+  const consultataIl = fontiPagina.consultataIl || (() => 'manca');
+  const [guida, norma, senzaUrl, scritta] = fontiDellaRisposta([
+    { titolo: 'Guida di settore', url: 'https://www.esempio.it/guida-fir' },
+    { titolo: 'D.Lgs. 152/2006', riferimento: 'art. 193', url: 'https://www.normattiva.it/uri-res/N2Ls?urn:nir:stato:decreto.legislativo:2006-04-03;152' },
+    { titolo: 'D.Lgs. 81/2008', riferimento: 'art. 26' },
+    { titolo: 'Altra guida', url: 'https://www.esempio.it/altra', consultata_il: '2026-01-01', verificato_il: '2026-09-14' },
+  ], [], { ricercaOnline: true, giorno: '2026-10-13' });
+  verifica('una pagina trovata online senza voce: consultata il giorno della domanda, non verificata', guida && guida.consultata_il === '2026-10-13' && guida.verificato_il === '' && !guida.voce, J(guida));
+  verifica('la norma di una voce: verificata con la data della voce, non «consultata»', norma && norma.voce === 'tua-fir-microraccolta' && norma.verificato_il === '2026-09-14' && norma.consultata_il === '', J(norma));
+  verifica('una norma senza indirizzo non e\' una pagina consultata', senzaUrl && senzaUrl.consultata_il === '' && senzaUrl.verificato_il === '', J(senzaUrl));
+  verifica('i giorni scritti dal modello non passano: vale quello della domanda', scritta && scritta.consultata_il === '2026-10-13' && scritta.verificato_il === '', J(scritta));
+  const [memoria] = fontiDellaRisposta([{ titolo: 'Guida', url: 'https://www.esempio.it/g' }], [], { ricercaOnline: false, giorno: '2026-10-13' });
+  verifica('un indirizzo scritto senza la ricerca online non e\' consultato', memoria && memoria.consultata_il === '', J(memoria));
+  const [senzaGiorno] = fontiDellaRisposta([{ titolo: 'Guida', url: 'https://www.esempio.it/g' }], [], { ricercaOnline: true });
+  verifica('senza il giorno vale oggi, in Italia', senzaGiorno && senzaGiorno.consultata_il === oggiRoma(), J(senzaGiorno));
+  verifica('lo specchio della pagina: una risposta di prima, senza il giorno scritto, prende il giorno della domanda', consultataIl({ titolo: 'x', url: 'https://www.esempio.it/', verificato_il: '2026-09-14' }, true, '2026-09-20') === '2026-09-20');
+  verifica('...una fonte di una voce mai, ne\' senza la ricerca online', consultataIl({ titolo: 'x', url: 'https://www.normattiva.it/', voce: 'tua-registro', verificato_il: '2026-09-14' }, true, '2026-09-20') === ''
+    && consultataIl({ titolo: 'x', url: 'https://www.esempio.it/' }, false, '2026-09-20') === '');
+  verifica('...e il giorno scritto vale piu\' di quello della domanda', consultataIl({ titolo: 'x', url: 'https://www.esempio.it/', consultata_il: '2026-10-13' }, true, '2026-10-14') === '2026-10-13');
+
+  // Sulla funzione intera: la ricerca accesa, una norma della voce, una pagina
+  // trovata online, una norma senza indirizzo.
+  const e = await chiedi(modulo, {
+    domanda: DOMANDA_NORMA,
+    piano: { strumenti: [], serve_normativa: true },
+    risposta: {
+      risposta: 'Il formulario accompagna il trasporto.',
+      certezza: 'media',
+      fonti: [
+        { titolo: 'D.Lgs. 152/2006', riferimento: 'art. 193', url: 'https://www.normattiva.it/uri-res/N2Ls?urn:nir:stato:decreto.legislativo:2006-04-03;152' },
+        { titolo: 'Guida di settore', url: 'https://www.esempio.it/guida-fir', verificato_il: '2026-10-12' },
+        { titolo: 'D.Lgs. 81/2008', riferimento: 'art. 26' },
+      ],
+    },
+  });
+  const fonti = JSON.parse((e.salvata && e.salvata.fonti_json) || '[]');
+  const oggi = oggiRoma();
+  verifica('funzione intera: la ricerca online era accesa', e.internet);
+  verifica('...la pagina trovata online e\' consultata oggi, senza verifica', fonti[1] && fonti[1].consultata_il === oggi && fonti[1].verificato_il === '' && !fonti[1].voce, J(fonti[1]));
+  verifica('...la norma della voce e\' verificata il 14/09/2026, non consultata; quella senza indirizzo nessuna delle due', fonti[0] && fonti[0].verificato_il === '2026-09-14' && fonti[0].consultata_il === '' && fonti[2] && fonti[2].consultata_il === '' && fonti[2].verificato_il === '', J(fonti));
+
+  // La chat: la riga di ogni fonte com'e' a video.
+  const nuova = fontiDisegnate({ id: 'n', domanda: 'D', stato: 'completata', risposta: 'R', ricerca_online: true, created_date: new Date().toISOString().replace('Z', ''), fonti_json: JSON.stringify(fonti) });
+  verifica('a video la pagina trovata online e\' «consultata il» oggi', nuova.includes(`Guida di settore</a> (consultata il ${it(oggi)})</p>`), nuova.slice(0, 600));
+  verifica('...la norma della voce «base di conoscenza, verificata il 14/09/2026»', nuova.includes(' — art. 193 (base di conoscenza, verificata il 14/09/2026)</p>'), nuova.slice(0, 600));
+  verifica('...la norma senza indirizzo senza giorno, e «verificata il» una volta sola', nuova.includes('D.Lgs. 81/2008 — art. 26</p>') && (nuova.match(/verificata il/g) || []).length === 1, nuova.slice(0, 600));
+  // Una risposta di prima del 13/10/2026: nessun consultata_il, e ancora il
+  // 14/09/2026 messo d'ufficio fino al 12/10. Vale il giorno italiano della
+  // domanda: le 22:30 UTC del 20/09 sono il 21/09 in Italia.
+  const vecchia = { id: 'v', domanda: 'D', stato: 'completata', risposta: 'R', created_date: '2026-09-20T22:30:00.000000', fonti_json: JSON.stringify([{ titolo: 'Guida di settore', url: 'https://www.esempio.it/guida-fir', verificato_il: '2026-09-14' }]) };
+  const prima = fontiDisegnate({ ...vecchia, ricerca_online: true });
+  verifica('una risposta di prima: la pagina e\' «consultata il» giorno italiano della domanda, non «verificata»', prima.includes('Guida di settore</a> (consultata il 21/09/2026)</p>') && !/verificata il/.test(prima), prima.slice(0, 400));
+  const aMemoria = fontiDisegnate({ ...vecchia, ricerca_online: false });
+  verifica('...senza la ricerca online nessun giorno', aMemoria.includes('Guida di settore</a></p>') && !/consultata il|verificata il/.test(aMemoria), aMemoria.slice(0, 400));
+
+  // A CAVALLO DELLA MEZZANOTTE (chiusura del giro, 14/10/2026). La domanda alle
+  // 23:59 del 13/10 in Italia, la risposta del modello alle 00:01 del 14/10: la
+  // pagina trovata online e' consultata il giorno della domanda, quello che
+  // chiediAssistente calcola all'inizio. L'orologio si sposta quando la funzione
+  // legge la risposta del modello.
+  const OraVera = Date;
+  let adesso = OraVera.parse('2026-10-13T21:59:00.000Z');
+  globalThis.Date = class extends OraVera { constructor(...a) { if (a.length) super(...a); else super(adesso); } static now() { return adesso; } };
+  let mezzanotte;
+  try {
+    const corpoRisposta = { risposta: 'Il formulario accompagna il trasporto.', certezza: 'media', fonti: [{ titolo: 'Guida di settore', url: 'https://www.esempio.it/guida-fir' }] };
+    const tardi = new Proxy(corpoRisposta, { get: (t, k) => { adesso = OraVera.parse('2026-10-13T22:01:00.000Z'); return t[k]; } });
+    mezzanotte = await chiedi(modulo, { domanda: DOMANDA_NORMA, piano: { strumenti: [], serve_normativa: true }, risposta: tardi });
+  } finally {
+    globalThis.Date = OraVera;
+  }
+  const fontiMezzanotte = JSON.parse((mezzanotte && mezzanotte.salvata && mezzanotte.salvata.fonti_json) || '[]');
+  verifica('domanda alle 23:59 del 13/10, risposta dopo mezzanotte: «consultata il» 13/10, il giorno della domanda', fontiMezzanotte[0] && fontiMezzanotte[0].consultata_il === '2026-10-13', J(fontiMezzanotte));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
