@@ -1066,11 +1066,13 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   //
   // Quindi tre passaggi: prima tutti i formulari identici, poi i simili, poi il
   // peso, e gli ultimi due solo sui movimenti rimasti liberi. E un formulario
-  // simile (fino a due caratteri) vale come lo stesso carico solo con almeno una
-  // conferma dalla riga: e' la regola dell'utente del 01/10/2026, la stessa dei
-  // consuntivi (confrontaConsuntivo). Senza conferma la riga e' un formulario
-  // non presente nel gestionale, e il simile si dice come osservazione.
-  const scelte = righeLette.map(r => ({ r, m: null, modo: null, senzaData: null, gia: null, prove: null, vicino: null, vicinoProve: null }));
+  // simile (fino a due caratteri) vale come lo stesso carico solo con una
+  // conferma dalla riga: e' la regola dell'utente del 01/10/2026. Dal 13/10/2026
+  // la conferma e' lo stesso peso o la data entro un giorno, a uno come a due
+  // caratteri; classe, produttore e destinatario contano solo insieme a uno di
+  // questi (confermeBastano, piu' sotto). Senza conferma la riga e' un
+  // formulario non presente nel gestionale, e il simile si dice come osservazione.
+  const scelte = righeLette.map(r => ({ r, m: null, modo: null, senzaData: null, gia: null, prove: null, vicino: null, vicinoProve: null, vicinoDist: null }));
   for (const s of scelte) {
     const { r } = s;
     if (r.firN && perFir.has(r.firN)) {
@@ -1120,9 +1122,19 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
   // diventava «formulario errato», perdeva il termine di registrazione e
   // toglieva il carico dagli assenti. A due caratteri serve lo stesso peso o la
   // data entro un giorno; gli altri dati contano solo insieme a uno di questi.
-  // A un carattere basta una conferma qualsiasi, come nei consuntivi.
+  //
+  // E A UN CARATTERE E' LO STESSO (decisione del 13/10/2026). I blocchetti dei
+  // trasportatori sono numerati in sequenza: due carichi dello stesso
+  // produttore, della stessa classe, distano proprio un carattere. Con la sola
+  // classe o il solo produttore un formulario non registrato diventava il
+  // refuso del carico vicino che il report non riporta: «formulario errato»
+  // invece di «non presente nel gestionale», senza il termine di registrazione,
+  // e il carico vicino spariva dagli assenti. Ora, a una come a due cifre di
+  // distanza, classe, produttore e destinatario contano solo insieme allo stesso
+  // peso o alla data entro un giorno. La distanza decide ancora l'ordine delle
+  // coppie e la frase dell'osservazione.
   const PESO_O_DATA = ['stesso peso', 'stessa data', 'data a un giorno di distanza'];
-  const confermeBastano = (dist, prove) => (dist <= 1 ? prove.length > 0 : prove.some(p => PESO_O_DATA.includes(p)));
+  const confermeBastano = (prove) => prove.some(p => PESO_O_DATA.includes(p));
   // Le coppie si assegnano in un ordine unico, non riga per riga (revisione del
   // 13/10/2026). Riga per riga, una riga che veniva prima con una conferma
   // debole rubava il movimento al refuso vero che veniva dopo: il refuso usciva
@@ -1147,10 +1159,10 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       // il piu' simile in assoluto, preso o no: e' quello che si nomina se la
       // riga resta senza abbinamento
       if (dist < vicinoDist || (dist === vicinoDist && punti < vicinoPunti)) { vicino = c; vicinoDist = dist; vicinoPunti = punti; vicinoProve = prove; }
-      if (usati.has(c.id) || !confermeBastano(dist, prove)) continue;
+      if (usati.has(c.id) || !confermeBastano(prove)) continue;
       coppie.push({ s, i, c, dist, prove, punti });
     }
-    if (vicino) { s.vicino = vicino; s.vicinoProve = vicinoProve; }
+    if (vicino) { s.vicino = vicino; s.vicinoProve = vicinoProve; s.vicinoDist = vicinoDist; }
   });
   coppie.sort((x, y) => x.dist - y.dist || y.prove.length - x.prove.length || x.punti - y.punti || x.i - y.i);
   for (const { s, c, prove } of coppie) {
@@ -1281,18 +1293,20 @@ export function verificaReport(righeReport, movimenti, { chiave, nome, inizio, f
       // perche' se e' davvero un refuso lo si vede subito, ma non fa l'abbinamento.
       const v = scelta.vicino;
       const giaDi = v ? usati.get(v.id) : null;
-      // A due caratteri, una conferma che da sola non basta si nomina
-      // (revisione del 13/10/2026): chi legge vede perche' non e' stato abbinato.
+      // Una conferma che da sola non basta si nomina (revisione del 13/10/2026):
+      // chi legge vede perche' non e' stato abbinato. Dalla decisione del
+      // 13/10/2026 vale a un carattere come a due, e la frase dice la distanza.
       const deboli = v && !giaDi && scelta.vicinoProve && scelta.vicinoProve.length
         ? scelta.vicinoProve.map(p => p.replace(/^stess[oa] /, (x) => (x === 'stessa ' ? 'la ' : 'il ')))
         : null;
+      const distanzaTesto = scelta.vicinoDist === 2 ? 'due caratteri' : 'un carattere';
       const simile = v ? [{
         campo: 'fir',
         gravita: 'osservazione',
         messaggio: `Simile a ${v.fir} (${descriviDifferenzaFir(r.fir, v.fir)}), ${giaDi
           ? `che e' gia' abbinato a un'altra riga del report (${giaDi})`
           : deboli
-            ? `ma a due caratteri di distanza servono lo stesso peso o la data entro un giorno (in comune ${deboli.length === 1 ? "c'e' solo" : 'ci sono solo'} ${deboli.join(' e ')})`
+            ? `ma a ${distanzaTesto} di distanza servono lo stesso peso o la data entro un giorno (in comune ${deboli.length === 1 ? "c'e' solo" : 'ci sono solo'} ${deboli.join(' e ')})`
             : `ma nessun altro dato della riga lo conferma (peso, data, classe o produttore)`}: non si considera lo stesso carico`,
       }] : [];
       esiti.push({

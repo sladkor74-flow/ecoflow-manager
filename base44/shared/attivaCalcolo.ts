@@ -30,7 +30,9 @@
 //   della passiva (formulariDoppi), e la riga resta: il ricavo lo decide
 //   l'amministrazione (segnalazione alta del 20/09, corretta il 12/10/2026);
 // - la regione di un ritiro e' quella di regioneDi, la regola unica
-//   dell'11/10/2026, e un ACI senza regione ne' provincia si segnala;
+//   dell'11/10/2026, e un ACI senza regione ne' provincia e' una riga in errore,
+//   a zero euro, che tiene fermo il documento ACI finche' non si corregge
+//   (decisione del 13/10/2026);
 // - un surplus sulle tariffe (il Fuel Surcharge del consorzio, 13/10/2026) e'
 //   UNA riga in piu' per canale, sotto le righe dei formulari, sulle stesse
 //   tonnellate del mese: vedi IL SURPLUS SULLE TARIFFE, piu' sotto.
@@ -80,6 +82,9 @@ const regioneRitiro = (r) => {
   const letta = regioneDi(r);
   return REGIONI.find(x => x.toUpperCase() === letta.toUpperCase()) || letta;
 };
+// La nota della riga ACI senza provincia ne' regione, che e' un errore dal
+// 13/10/2026: la si legge nel dettaglio del documento, fra le righe in errore.
+export const NOTA_ACI_SENZA_REGIONE = 'Ritiro senza provincia né regione: il prezzo ACI cambia con la regione, e senza non si sceglie. La riga resta a zero euro, in errore, finché non correggi la provincia nel caricamento.';
 
 // Le tariffe valide, la secondaria dell'extra raccolta e il prezzo attivo
 // dell'extra raccolta stanno in ecotyreTariffe.ts dall'11/10/2026, perche' la
@@ -296,11 +301,34 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
   // Calabria nel 2026): un ritiro senza regione ne' provincia non puo' prendere
   // quella della sua regione, e deve dirlo invece di passare con la tariffa
   // senza regione o a zero euro (12/10/2026).
+  //
+  // E' UN ERRORE, NON UN AVVISO (decisione del 13/10/2026). Fino a oggi la riga
+  // prendeva la tariffa ACI senza regione, se c'era, ed era «verificata»: il
+  // documento si verificava con un prezzo che poteva non essere il suo, e
+  // l'avviso in ambra si poteva leggere e lasciare li'. Ora la riga non prende
+  // nessuna tariffa, resta a zero euro ed e' in errore, come una riga senza
+  // prezzo: il documento ACI non si verifica finche' la provincia non si corregge
+  // nel caricamento. Non c'e' la voce «senza tariffa», che manderebbe alle
+  // tariffe: quello che manca e' la provincia. I chili restano nel mese, e il
+  // surplus, che non dipende dalla regione, li conta come prima. Sui dati veri
+  // dell'11/10/2026 nessun ritiro ACI e' senza provincia ne' regione.
   const aciSenzaRegione = [];
+  const rigaAciSenzaRegione = (r) => ({
+    ...comune(r, 'ACI', tipoServizioDi(r), 'ACI'), ticket_n: r.numero_ordine_interno || '',
+    regione: '',
+    quantita: r.peso_effettivo || 0, unita_quantita: 'kg',
+    tariffa_id: '', tariffa_valore: 0,
+    unita_misura: '€/t', unita_prezzo: '€/t', fattore_conversione: fattoreConv(null),
+    totale: 0,
+    stato_validazione: 'errore',
+    note: NOTA_ACI_SENZA_REGIONE,
+  });
   for (const r of aci) {
     if (!(r.peso_effettivo > 0)) continue;
     const regione = regioneRitiro(r);
-    const riga = daTariffa(r, 'ACI', 'ACI', regione, regione, { ticket_n: r.numero_ordine_interno || '' });
+    const riga = regione
+      ? daTariffa(r, 'ACI', 'ACI', regione, regione, { ticket_n: r.numero_ordine_interno || '' })
+      : rigaAciSenzaRegione(r);
     if (!regione) aciSenzaRegione.push(riga);
     righe.ACI.push(riga);
     segnaSurplus('ACI', r, riga);
@@ -466,19 +494,16 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     }
   }
   if (aciSenzaRegione.length) {
+    // Un errore (13/10/2026): gravita 'errore' dice alle pagine che non e' un
+    // avviso da leggere, ma quello che tiene il documento ACI fermo.
     const kg = aciSenzaRegione.reduce((s, x) => s + (Number(x.quantita) || 0), 0);
-    const aZero = aciSenzaRegione.filter(x => !x.tariffa_id).length;
     const n = aciSenzaRegione.length;
     const elenco = aciSenzaRegione.slice(0, 5).map(x => x.ordine || x.numero_fir || '—').join(', ') + (n > 5 ? ` e altri ${n - 5}` : '');
-    const conGenerica = n - aZero;
-    const esito = aZero === n ? (n === 1 ? 'il ritiro è rimasto senza prezzo' : 'questi ritiri sono rimasti senza prezzo')
-      : aZero === 0 ? `${n === 1 ? 'il ritiro ha' : 'questi ritiri hanno'} preso la tariffa ACI senza regione, che può non essere la sua`
-        : `di questi ${conGenerica} ${conGenerica === 1 ? 'ha' : 'hanno'} preso la tariffa ACI senza regione e ${aZero} ${aZero === 1 ? 'è rimasto' : 'sono rimasti'} senza prezzo`;
     anomalie.push({
-      tipo: 'regione_mancante', tipologia: 'ACI', regione: '', classe: '', eer_codice: '', servizio_ecotyre: '',
+      tipo: 'regione_mancante', gravita: 'errore', tipologia: 'ACI', regione: '', classe: '', eer_codice: '', servizio_ecotyre: '',
       tonnellate: Math.round(kg) / 1000, quanti: n,
       ordini: aciSenzaRegione.map(x => ({ ordine: x.ordine, numero_fir: x.numero_fir })),
-      descrizione: `ACI: ${n === 1 ? 'un ritiro del mese' : `${n} ritiri del mese`} senza provincia né regione (${elenco}). Il prezzo ACI cambia con la regione: senza, non si può scegliere quello giusto, e ${esito}. Correggi la provincia nel caricamento.`,
+      descrizione: `ACI: ${n === 1 ? 'un ritiro del mese' : `${n} ritiri del mese`} senza provincia né regione (${elenco}). Il prezzo ACI cambia con la regione: senza, non si può scegliere quello giusto, e ${n === 1 ? 'il ritiro resta' : 'questi ritiri restano'} a zero euro, in errore. Il documento ACI non si verifica finché non correggi la provincia nel caricamento.`,
     });
   }
   // UNA TARIFFA 'non_attivo' NON VALE MAI (regola unica di validitaTariffa.ts,

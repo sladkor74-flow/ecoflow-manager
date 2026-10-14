@@ -8,6 +8,7 @@ import { Loader2, Play, CheckCircle, AlertTriangle, Lock, RotateCcw } from 'luci
 import { useToast } from '@/components/ui/use-toast';
 import { Input } from '@/components/ui/input';
 import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
+import { formatTonnellate } from '@/lib/utils';
 // Gli importi all'italiana, e «—» se manca (chiusura dell'audit, 11/10/2026):
 // prima «€ 372976.50», e zero per un totale che non c'era.
 import { euro } from '@/lib/formatoSoldi';
@@ -101,6 +102,17 @@ const TIPS = [
 ];
 const ADMIN = "Riservato all'amministratore";
 
+// La frase di un errore che non e' una tariffa mancante: il ritiro ACI senza
+// provincia ne' regione con parole sue (13/10/2026), che mandano a correggere
+// il caricamento e non alle tariffe; un altro errore con la descrizione del calcolo.
+export function fraseErrore(a) {
+  if (a.tipo !== 'regione_mancante') return a.descrizione || '';
+  const n = Number(a.quanti) || 0;
+  const quali = n === 1 ? 'un ritiro senza provincia né regione' : n > 1 ? `${n} ritiri senza provincia né regione` : 'ritiri senza provincia né regione';
+  const peso = Number(a.tonnellate) > 0 ? ` (${formatTonnellate(a.tonnellate)} t)` : '';
+  return `ACI: ${quali}${peso}. Il prezzo ACI cambia con la regione: ${n === 1 ? 'sarà salvato' : 'saranno salvati'} a zero euro e in errore, e il documento ACI non potrà essere verificato finché non correggi la provincia nel caricamento.`;
+}
+
 export default function AttivaDashboard({ periodo, setPeriodo, data, loading, elaborating, onElabora, onReload, isAdmin, anomalie, onVaiTariffe }) {
   const { anno, mese } = periodo;
   const [anomalieAnteprima, setAnomalieAnteprima] = useState([]);
@@ -134,7 +146,13 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
     setInCorso(`${t.key}|${azione}`);
     try {
       const res = await base44.functions.invoke('cambiaStatoFatturazione', { documento_id: doc.id, azione, ...extra });
-      if (azione === 'verifica' && res.data?.errori > 0) toast({ title: `${t.label}: non verificato`, description: `${res.data.errori} righe senza tariffa, il documento resta "elaborata"`, variant: 'destructive' });
+      // Una riga in errore e' a zero euro: per una tariffa che manca o, per
+      // l'ACI, per un ritiro senza provincia ne' regione (13/10/2026).
+      if (azione === 'verifica' && res.data?.errori > 0) {
+        const quante = res.data.errori === 1 ? 'Una riga senza prezzo' : `${res.data.errori} righe senza prezzo`;
+        const perche = t.key === 'ACI' ? 'una tariffa che manca o un ritiro senza provincia' : 'una tariffa che manca';
+        toast({ title: `${t.label}: non verificato`, description: `${quante} (${perche}): il documento resta "elaborata"`, variant: 'destructive' });
+      }
     } catch (e) {
       toast({ title: `${t.label}: azione non completata`, description: e?.response?.data?.error || e.message, variant: 'destructive' });
     }
@@ -144,6 +162,14 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   };
 
   const senzaTariffa = anomalieAnteprima.filter(a => !a.tipo || a.tipo === 'senza_tariffa');
+  // GLI ERRORI CHE NON SONO UNA TARIFFA MANCANTE (decisione del 13/10/2026). Un
+  // ritiro ACI senza provincia ne' regione resta a zero euro, in errore, e il
+  // documento ACI non si verifica finche' non si corregge: il calcolo lo dice
+  // con gravita 'errore' e non lo conta piu' fra le combinazioni senza tariffa.
+  // Contavamo solo quelle: con le tariffe ACI tutte regionali (nessuna
+  // generica) «Elabora Mese» e «Rielabora» partivano senza chiedere niente. Il
+  // tipo resta, per riconoscerlo anche in una risposta di prima.
+  const erroriDaCorreggere = anomalieAnteprima.filter(a => a.tipo && a.tipo !== 'senza_tariffa' && (a.gravita === 'errore' || a.tipo === 'regione_mancante'));
   // Un documento gia' approvato o esportato non si cancella: resta nello storico come superato.
   const giaUsciti = TIPS.filter(t => ['approvata', 'esportata'].includes(data[t.key]?.documento?.stato));
   // "Elabora Mese" rifa' i canali non chiusi: uno chiuso resta com'e' finche' non lo si riapre.
@@ -151,7 +177,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   const tuttiChiusi = chiusi.length === TIPS.length;
 
   const handleElabora = () => {
-    if (senzaTariffa.length > 0 || giaUsciti.length > 0 || chiusi.length > 0) setShowConfirm(true);
+    if (senzaTariffa.length > 0 || erroriDaCorreggere.length > 0 || giaUsciti.length > 0 || chiusi.length > 0) setShowConfirm(true);
     else avviaElabora();
   };
 
@@ -159,12 +185,13 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
   // rete chiusa non impedisce piu' di rifare l'ACI a cui si e' appena aggiunta
   // la tariffa, e la rete approvata non finisce fra i superati per questo.
   const senzaTariffaDi = (t) => senzaTariffa.filter(a => a.tipologia === t.key);
+  const erroriDi = (t) => erroriDaCorreggere.filter(a => a.tipologia === t.key);
   const chiediRielabora = (t) => {
     const documento = data[t.key]?.documento;
     const stato = documento?.stato;
     // anche un documento riaperto: era stato chiuso, e resta nello storico come superato
     const riaperto = /Riaperto il /.test(String(documento?.note || ''));
-    if (['approvata', 'esportata'].includes(stato) || riaperto || senzaTariffaDi(t).length > 0) setDaRielaborare(t);
+    if (['approvata', 'esportata'].includes(stato) || riaperto || senzaTariffaDi(t).length > 0 || erroriDi(t).length > 0) setDaRielaborare(t);
     else rielaboraCanale(t);
   };
   const rielaboraCanale = async (t) => {
@@ -309,7 +336,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
 
           {conErrori.length > 0 && (
             <div className="text-sm text-red-600 flex items-center gap-1 border border-red-200 bg-red-50 p-3 rounded-lg">
-              <AlertTriangle className="w-4 h-4 shrink-0" /> Prestazioni con errori (tariffa mancante): {conErrori.map(t => `${t.label} ${data[t.key].documento.voci_errore}`).join(' · ')}. Verificare le tariffe nella tab "Tariffe": finché mancano, quel documento non si può verificare; gli altri canali vanno avanti per conto loro.
+              <AlertTriangle className="w-4 h-4 shrink-0" /> Prestazioni con errori, a zero euro: {conErrori.map(t => `${t.label} ${data[t.key].documento.voci_errore}`).join(' · ')}. Le cause sono due: una tariffa che manca (tab "Tariffe") o, per l'ACI, un ritiro senza provincia (si corregge nel caricamento); il riepilogo qui sopra dice quale. Finché restano, quel documento non si può verificare; gli altri canali vanno avanti per conto loro.
             </div>
           )}
         </>
@@ -322,6 +349,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 {senzaTariffa.length > 0 && <p>Alcune tonnellate non hanno una tariffa applicabile: le righe saranno salvate a zero euro e segnate come errore, e il documento non potrà essere verificato finché la tariffa manca.</p>}
+                {erroriDaCorreggere.map((a, i) => <p key={`errore-${i}`}>{fraseErrore(a)}</p>)}
                 {giaUsciti.length > 0 && <p>{giaUsciti.map(t => t.label).join(', ')}: il documento di questo mese è già stato approvato o esportato. Non viene cancellato: resta nello storico come superato, con la data e i due totali a confronto.</p>}
                 {chiusi.length > 0 && <p>{chiusi.map(t => t.label).join(', ')}: il documento è chiuso e resta com'è. Si rielaborano solo gli altri canali; per rifare un canale chiuso va prima riaperto.</p>}
                 <p>Confermi di voler elaborare?</p>
@@ -376,7 +404,8 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
       </AlertDialog>
 
       {/* Rielaborare un canale solo: si chiede conferma quando il suo documento
-          e' gia' uscito o quando restano righe senza tariffa, come per il mese. */}
+          e' gia' uscito o quando restano righe senza tariffa o, dal 13/10/2026,
+          ritiri ACI senza provincia, come per il mese. */}
       <AlertDialog open={!!daRielaborare} onOpenChange={(v) => { if (!v) setDaRielaborare(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -384,6 +413,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 {daRielaborare && senzaTariffaDi(daRielaborare).length > 0 && <p>{senzaTariffaDi(daRielaborare).length} gruppi di righe di questo canale non hanno una tariffa applicabile: saranno salvati a zero euro e segnati come errore, e il documento non potrà essere verificato finché la tariffa manca.</p>}
+                {daRielaborare && erroriDi(daRielaborare).map((a, i) => <p key={`errore-${i}`}>{fraseErrore(a)}</p>)}
                 {daRielaborare && ['approvata', 'esportata'].includes(data[daRielaborare.key]?.documento?.stato) && <p>Il documento è già stato {data[daRielaborare.key].documento.stato}. Non viene cancellato: resta nello storico come superato, con la data e i due totali a confronto.</p>}
                 {daRielaborare && !['approvata', 'esportata'].includes(data[daRielaborare.key]?.documento?.stato) && /Riaperto il /.test(String(data[daRielaborare.key]?.documento?.note || '')) && <p>Il documento era stato chiuso e poi riaperto. Non viene cancellato: resta nello storico come superato, con la nota della riapertura e della fattura, e la nota passa al documento nuovo.</p>}
                 <p>Gli altri canali non vengono toccati.</p>

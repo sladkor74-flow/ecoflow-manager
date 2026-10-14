@@ -1,4 +1,5 @@
 import React from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { formatNumber, fmtTon, formatIntero } from '@/lib/utils';
 import { useIndiceOmologhe } from '@/lib/omologheIndice';
 import BadgeOmologa from '@/components/shared/BadgeOmologa';
@@ -36,7 +37,11 @@ const COLUMNS = [
 // si programma il ritiro.
 const DOPO_COLONNA_OMOLOGA = 'ragione_sociale';
 
-export default function AssegnatiTable({ records, loading, ragioneSocialeFilter, posizioni = null, totaleCoda = 0 }) {
+// segni: Map id -> frasi dei controlli del portale sull'ACI (lo stimato sotto i
+// 1.500 kg ammessi, decisione dell'utente del 13/10/2026), calcolate dalla pagina
+// con problemiDellaRiga. La riga si colora e l'ID porta il segno, come nei
+// Terminati ACI (chiusura del giro, 14/10/2026: prima la tabella lo ignorava).
+export default function AssegnatiTable({ records, loading, ragioneSocialeFilter, posizioni = null, totaleCoda = 0, segni = null }) {
   const indiceOmologhe = useIndiceOmologhe();
   const indiceRentri = useIndiceRentri();
   // La sede operativa si guarda qui, dove si programma il ritiro: sul formulario
@@ -77,8 +82,10 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
           </tr>
         </thead>
         <tbody>
-          {records.map((r) => (
-            <tr key={r.id} className="border-t hover:bg-muted/50">
+          {records.map((r) => {
+            const problemi = (segni && segni.get(r.id)) || [];
+            return (
+            <tr key={r.id} className={`border-t hover:bg-muted/50 ${problemi.length ? 'bg-red-50/60' : ''}`}>
               {posizioni && (
                 <td className="px-3 py-2 whitespace-nowrap tabular-nums">
                   {posizioni.get(r.id) ? (
@@ -97,7 +104,14 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
                 else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
                 return (
                   <React.Fragment key={col.key}>
-                    <td className="px-3 py-2 whitespace-nowrap">{val ?? ''}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {col.key === 'id_ordine' && problemi.length > 0 && (
+                        <span title={`Controlli del portale: ${problemi.join('; ')}`} aria-label={`Controlli del portale: ${problemi.join('; ')}`} className="inline-flex align-middle mr-1 text-red-600">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                        </span>
+                      )}
+                      {val ?? ''}
+                    </td>
                     {col.key === DOPO_COLONNA_OMOLOGA && (
                       <>
                         <td className="px-3 py-2"><BadgeOmologa indice={indiceOmologhe} idPdr={r.id_pdr} idCliente={r.id_cliente} nome={r.ragione_sociale} /></td>
@@ -109,7 +123,8 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
                 );
               })}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

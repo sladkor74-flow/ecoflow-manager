@@ -4,11 +4,20 @@ import { Loader2, TrendingUp, FileText, AlertTriangle, ArrowRight, CheckCircle, 
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { formatTonnellate, formatKg, formatIntero, formatNumber } from '@/lib/utils';
 import { STILE_SURPLUS, baseSurplus, dettaglioSurplus } from '@/lib/surplusVista';
+import { giornoRoma } from '@/lib/giornoItaliano';
 import NomeSurplus from './NomeSurplus';
 
 const euro = (v) => `€ ${formatNumber(v || 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const conSegno = (v, testo) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${testo}`;
-const giorno = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—');
+// IL GIORNO ITALIANO, NON I PRIMI DIECI CARATTERI (13/10/2026). La data di
+// elaborazione e' un istante UTC (toISOString), e la fine del trasporto arriva
+// dal portale come mezzanotte italiana, cioe' le 22:00 o le 23:00 UTC del giorno
+// prima: tagliando la stringa un documento elaborato alle 00:30 del 1° ottobre
+// diceva «del 30/09», e un ritiro del 1° settembre «31/08», nel mese prima.
+const giorno = (v) => {
+  const g = giornoRoma(v);
+  return g ? g.split('-').reverse().join('/') : '—';
+};
 
 // Il documento salvato contro i dati di oggi: i movimenti che il portale ha
 // chiuso dopo l'elaborazione del mese si vedono qui, invece di restare non fatturati.
@@ -162,11 +171,14 @@ function Badge({ badge }) {
     );
   }
   if (badge.tipo === 'mancante') {
-    const tip = `${formatTonnellate(badge.tonnellate_mancanti)} t senza prezzo (${badge.count_mancanti} righe)`;
+    // Le righe in errore sono a zero euro: senza tariffa, con un'unita' che non
+    // si legge o, sull'ACI, senza provincia (13/10/2026). «tariffa mancante»
+    // mandava a cercare una tariffa anche quando mancava la provincia.
+    const tip = `${formatTonnellate(badge.tonnellate_mancanti)} t senza prezzo (${formatIntero(badge.count_mancanti)} ${badge.count_mancanti === 1 ? 'riga' : 'righe'} in errore): il documento non si verifica finché restano`;
     return (
       <TooltipProvider>
         <Tooltip>
-          <TooltipTrigger asChild><span className="text-xs text-destructive font-medium underline decoration-dotted cursor-help">tariffa mancante</span></TooltipTrigger>
+          <TooltipTrigger asChild><span className="text-xs text-destructive font-medium underline decoration-dotted cursor-help">senza prezzo</span></TooltipTrigger>
           <TooltipContent className="max-w-xs"><p className="text-xs">{tip}</p></TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -327,16 +339,23 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
   const tipologie = data.tipologie || [];
   const tutte = data.anomalie || [];
   const senzaTariffa = tutte.filter(a => !a.tipo || a.tipo === 'senza_tariffa');
-  const altre = tutte.filter(a => a.tipo && a.tipo !== 'senza_tariffa');
+  // GLI ERRORI STANNO A PARTE, IN ROSSO (decisione del 13/10/2026). L'ACI senza
+  // provincia ne' regione era un avviso in ambra, in mezzo agli altri: ora e' un
+  // errore, la riga e' a zero euro e il documento ACI non si verifica finche' non
+  // si corregge. Il calcolo lo dice con gravita 'errore'; il tipo resta, per
+  // riconoscerlo anche in una risposta di prima.
+  const ERRORI = ['regione_mancante'];
+  const eErrore = (a) => a.gravita === 'errore' || ERRORI.includes(a.tipo);
+  const errori = tutte.filter(a => a.tipo && a.tipo !== 'senza_tariffa' && eErrore(a));
+  const altre = tutte.filter(a => a.tipo && a.tipo !== 'senza_tariffa' && !eErrore(a));
   // un prezzo che manca, uno preso dall'anno sbagliato o delle date da sistemare
   // si guardano; il resto e' informazione. Dall'11/10/2026 anche un terminato
   // senza peso effettivo (fuori dalla fattura finche' il peso non si scrive) e le
   // righe messe a zero da un'unita' di misura sconosciuta o da una tariffa
   // disattivata: uscivano in grigio, come se fossero un'informazione. Dal
-  // 13/10/2026 anche il formulario ripetuto sullo stesso ordine e l'ACI senza
-  // regione ne' provincia (calcolaRigheAttiva, 12/10/2026): sono da decidere o da
-  // correggere, non da leggere e basta.
-  const DA_GUARDARE = ['prezzo_zero', 'prezzo_altro_anno', 'peso_mancante', 'unita_sconosciuta', 'tariffa_disattivata', 'formulario_ripetuto', 'regione_mancante'];
+  // 13/10/2026 anche il formulario ripetuto sullo stesso ordine
+  // (calcolaRigheAttiva, 12/10/2026): e' da decidere, non da leggere e basta.
+  const DA_GUARDARE = ['prezzo_zero', 'prezzo_altro_anno', 'peso_mancante', 'unita_sconosciuta', 'tariffa_disattivata', 'formulario_ripetuto'];
   const daGuardare = (a) => DA_GUARDARE.includes(a.tipo) || String(a.tipo || '').startsWith('date_');
   // Le tonnellate senza prezzo si contano per canale: una somma unica di rete,
   // ACI ed extra raccolta non appartiene a nessuna commessa.
@@ -389,6 +408,21 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
               Vai alle tariffe <ArrowRight className="w-3.5 h-3.5" />
             </button>
           )}
+        </div>
+      )}
+
+      {/* Gli errori che tengono fermo un documento: prima di verificarlo vanno corretti */}
+      {errori.length > 0 && (
+        <div className="border-2 border-destructive/40 bg-destructive/5 rounded-lg p-4">
+          <div className="flex items-center gap-2 text-destructive font-semibold mb-2">
+            <AlertTriangle className="w-5 h-5" />
+            <span>Da correggere: il documento del canale non si verifica finché restano</span>
+          </div>
+          <div className="space-y-1">
+            {errori.map((a, i) => (
+              <div key={i} className="text-sm bg-background/60 rounded px-3 py-1.5 border border-destructive/20">{a.descrizione}</div>
+            ))}
+          </div>
         </div>
       )}
 

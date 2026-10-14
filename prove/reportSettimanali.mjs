@@ -497,10 +497,21 @@ console.log('UN FORMULARIO CHE MANCA NON E\' IL REFUSO DEL VICINO (A57)');
   verifica('un numero quasi uguale senza nessuna conferma non abbina',
     r6.esito === 'non_trovata' && r6.discrepanze.some(d => d.gravita === 'osservazione' && /Simile a RGYTR027250CR/.test(d.messaggio) && /nessun altro dato della riga lo conferma/.test(d.messaggio)), JSON.stringify(r6));
   verifica('e il formulario registrato resta fra gli assenti nel report', solo.assenti.some(a => a.fir === 'RGYTR027250CR'), JSON.stringify(solo.assenti.map(a => a.fir)));
-  // Il produttore della riga, da solo, e' una conferma.
+  // Il produttore della riga, da solo, NON e' piu' una conferma (decisione del
+  // 13/10/2026): a un carattere come a due conta solo con il peso o la data.
+  // Prima la riga 7 si abbinava a RGYTR027250CR «riconosciuta dal produttore»,
+  // con peso e data diversi: il carico registrato spariva dagli assenti.
   const produttore = esito([{ n: 7, fir: 'RGYTR027251CR', peso: 3400, data_fine: '12/09/2026', produttore: 'Gomme Rossi S.r.l.' }]);
-  verifica('lo stesso numero quasi uguale col produttore giusto abbina',
-    riga(produttore, 7).gestionale && riga(produttore, 7).gestionale.fir === 'RGYTR027250CR' && JSON.stringify(riga(produttore, 7).riconosciuto_da) === '["stesso produttore"]', JSON.stringify(riga(produttore, 7)));
+  verifica('a un carattere il solo produttore giusto non abbina',
+    riga(produttore, 7).esito === 'non_trovata' && !riga(produttore, 7).gestionale && produttore.assenti.some(a => a.fir === 'RGYTR027250CR'), JSON.stringify(riga(produttore, 7)));
+  verifica('e l\'osservazione dice che a un carattere servono peso o data, e che in comune c\'e\' solo il produttore',
+    riga(produttore, 7).discrepanze.some(d => d.gravita === 'osservazione' && /Simile a RGYTR027250CR/.test(d.messaggio)
+      && /ma a un carattere di distanza servono lo stesso peso o la data entro un giorno \(in comune c'e' solo il produttore\)/.test(d.messaggio)), JSON.stringify(riga(produttore, 7).discrepanze));
+  // Col produttore e la data giusta, invece, si': la data conferma, il produttore si aggiunge.
+  const produttoreData = esito([{ n: 7, fir: 'RGYTR027251CR', peso: 3400, data_fine: '08/09/2026', produttore: 'Gomme Rossi S.r.l.' }]);
+  verifica('a un carattere il produttore con la stessa data abbina, e lo dice',
+    riga(produttoreData, 7).gestionale && riga(produttoreData, 7).gestionale.fir === 'RGYTR027250CR'
+    && JSON.stringify(riga(produttoreData, 7).riconosciuto_da) === '["stessa data","stesso produttore"]', JSON.stringify(riga(produttoreData, 7)));
   // L'impianto stesso sta su ogni riga del suo report: non conferma niente.
   const sito = esito([{ n: 8, fir: 'RGYTR027251CR', peso: 3400, data_fine: '12/09/2026', destinatario: 'IRIGOM', trasportatore: 'NAPPI SUD' }]);
   verifica('il destinatario che e\' l\'impianto stesso e il trasportatore non bastano', riga(sito, 8).esito === 'non_trovata', JSON.stringify(riga(sito, 8)));
@@ -584,9 +595,39 @@ console.log('I SIMILI IN UN ORDINE UNICO, E MAI CON LA SOLA CLASSE (A57, 13/10)'
   const p2 = riga(conProduttore([{ n: 2, fir: 'RGYTR027012CR', peso: 3400, data_fine: '11/09/2026', produttore: 'Gomme Rossi S.r.l.', classe: 'P' }]), 2);
   verifica('a due caratteri il produttore e la classe insieme non bastano',
     p2.esito === 'non_trovata' && p2.discrepanze.some(d => /in comune ci sono solo la classe e il produttore/.test(d.messaggio)), JSON.stringify(p2));
-  // A un carattere la sola classe resta una conferma, come nei consuntivi.
-  verifica('a un carattere la sola classe basta ancora',
-    fir(solo030([{ n: 5, fir: 'RGYTR027031CR', peso: 3300, data_fine: '12/09/2026', classe: 'P' }]), 5) === 'RGYTR027030CR');
+  // A UN CARATTERE COME A DUE (decisione del 13/10/2026). La sola classe a un
+  // carattere abbinava: un formulario non registrato, numerato subito dopo un
+  // carico della stessa classe che il report non riporta, diventava il suo
+  // refuso. Ora resta «non presente», col suo termine, e il carico resta fra
+  // gli assenti.
+  const unaClasse = solo030([{ n: 5, fir: 'RGYTR027031CR', peso: 3300, data_fine: '12/09/2026', classe: 'P' }]);
+  const c1 = riga(unaClasse, 5);
+  verifica('a un carattere la sola classe non abbina piu\'',
+    c1.esito === 'non_trovata' && !c1.gestionale && c1.termine && unaClasse.assenti.some(a => a.fir === 'RGYTR027030CR'), JSON.stringify({ c1, assenti: unaClasse.assenti }));
+  verifica('e l\'osservazione dice «a un carattere», con la sola classe in comune',
+    c1.simile_a === 'RGYTR027030CR' && c1.discrepanze.some(d => d.gravita === 'osservazione'
+      && /ma a un carattere di distanza servono lo stesso peso o la data entro un giorno \(in comune c'e' solo la classe\)/.test(d.messaggio)), JSON.stringify(c1.discrepanze));
+  // A un carattere la classe e il produttore insieme non bastano lo stesso.
+  const p1 = riga(conProduttore([{ n: 2, fir: 'RGYTR027031CR', peso: 3400, data_fine: '11/09/2026', produttore: 'Gomme Rossi S.r.l.', classe: 'P' }]), 2);
+  verifica('a un carattere la classe e il produttore insieme non bastano',
+    p1.esito === 'non_trovata' && p1.discrepanze.some(d => /a un carattere di distanza servono/.test(d.messaggio) && /in comune ci sono solo la classe e il produttore/.test(d.messaggio)), JSON.stringify(p1));
+  // A un carattere lo stesso peso basta (con la classe che si aggiunge), e la data entro un giorno anche.
+  const unPeso = solo030([{ n: 6, fir: 'RGYTR027031CR', peso: 2860, data_fine: '12/09/2026', classe: 'P' }]);
+  verifica('a un carattere lo stesso peso abbina, e la classe si aggiunge alle conferme',
+    fir(unPeso, 6) === 'RGYTR027030CR' && JSON.stringify(riga(unPeso, 6).riconosciuto_da) === '["stesso peso","stessa classe"]', JSON.stringify(riga(unPeso, 6)));
+  const unaData = solo030([{ n: 7, fir: 'RGYTR027031CR', peso: 3400, data_fine: '09/09/2026' }]);
+  verifica('a un carattere la data entro un giorno abbina',
+    fir(unaData, 7) === 'RGYTR027030CR' && JSON.stringify(riga(unaData, 7).riconosciuto_da) === '["data a un giorno di distanza"]', JSON.stringify(riga(unaData, 7)));
+  // L'esito non dipende dall'ordine: la riga a un carattere con la sola classe e
+  // il refuso vero a due caratteri con peso e data. Prima la prima rubava il
+  // carico (distanza piu' bassa); ora non e' nemmeno una coppia.
+  const classeVicina = { n: 2, fir: 'RGYTR027031CR', peso: 3300, data_fine: '12/09/2026', classe: 'P' };
+  const refusoDue = { n: 3, fir: 'RGYTR027012CR', peso: 2860, data_fine: '08/09/2026', classe: 'P' };
+  for (const [nome, righe] of [['nell\'ordine del report', [classeVicina, refusoDue]], ['con le righe invertite', [refusoDue, classeVicina]]]) {
+    const e = solo030(righe);
+    verifica(`il refuso a due caratteri con peso e data tiene il carico contro la sola classe a un carattere, ${nome}`,
+      fir(e, 3) === 'RGYTR027030CR' && riga(e, 2).esito === 'non_trovata', JSON.stringify(e.esiti.map(x => [x.n, x.esito, x.gestionale && x.gestionale.fir])));
+  }
   // A due caratteri la data entro un giorno basta (domanda aperta all'utente).
   const dataVicina = solo030([{ n: 6, fir: 'RGYTR027012CR', peso: 3400, data_fine: '09/09/2026' }]);
   verifica('a due caratteri la data entro un giorno abbina',

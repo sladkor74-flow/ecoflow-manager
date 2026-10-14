@@ -1,5 +1,7 @@
 // I controlli del portale sugli ordini ACI, per la pagina Terminati ACI (audit
-// del 20/09, alte A12 e A13; corrette il 12/10/2026).
+// del 20/09, alte A12 e A13; corrette il 12/10/2026) e, per lo stimato sotto i
+// 1.500 kg, per gli Assegnati ACI (13/10/2026): un ordine ancora da evadere
+// stimato troppo basso si fa correggere al consorzio prima del ritiro.
 //
 // Le due regole del portale (AGENTS.md, «Le due regole del portale sull'ACI»):
 // una richiesta ACI non si stima sotto i 1.500 kg, e un formulario non si chiude
@@ -20,6 +22,23 @@ import { formulariDoppi, MINIMO_ACI_KG, SOGLIA_ACI } from '@/lib/formulari';
 export { MINIMO_ACI_KG, SOGLIA_ACI };
 
 const kg = (v) => Number(v || 0);
+// I chili di una frase all'italiana, col punto delle migliaia: «1.400 kg», non
+// «1400 kg» (13/10/2026). Qui, senza dipendere dalle impostazioni del browser.
+const kgIt = (v) => String(Math.round(kg(v))).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+/**
+ * Lo stimato sotto i 1.500 kg: la regola del portale per una richiesta ACI.
+ * Un ordine senza stimato non e' sotto il minimo: un dato che manca non e' zero.
+ * La usano i Terminati ACI e, dal 13/10/2026, gli Assegnati ACI: la regola e'
+ * del portale, e il gestionale la segnala soltanto («nessun aci può avere uno
+ * stimato inferiore a 1.500 kg, se negli assegnati del portale è indicato così
+ * limitati a segnalarlo e provvederemo a farlo modificare al consorzio»,
+ * l'utente, 13/10/2026).
+ */
+export const stimatoSottoMinimo = (r) => {
+  const stimato = kg(r && r.peso_stimato);
+  return stimato > 0 && stimato < MINIMO_ACI_KG;
+};
 
 /**
  * Gli ordini che il portale non ammetterebbe, fra le righe date (i terminati
@@ -36,7 +55,7 @@ export function controlliPortaleAci(righe) {
   const oltre_soglia = [];
   for (const r of righe || []) {
     const stimato = kg(r.peso_stimato), effettivo = kg(r.peso_effettivo);
-    if (stimato > 0 && stimato < MINIMO_ACI_KG) sotto_minimo.push(r);
+    if (stimatoSottoMinimo(r)) sotto_minimo.push(r);
     if (stimato > 0 && effettivo > stimato * SOGLIA_ACI) {
       oltre_soglia.push({
         riga: r,
@@ -55,8 +74,8 @@ export function controlliPortaleAci(righe) {
 export function problemiDellaRiga(r, doppi = []) {
   const out = [];
   const stimato = kg(r.peso_stimato), effettivo = kg(r.peso_effettivo);
-  if (stimato > 0 && stimato < MINIMO_ACI_KG) out.push(`stimato ${Math.round(stimato)} kg, sotto i 1.500 kg ammessi per una richiesta ACI`);
-  if (stimato > 0 && effettivo > stimato * SOGLIA_ACI) out.push(`effettivo ${Math.round(effettivo)} kg oltre il 110% dello stimato del ticket (massimo ${Math.round(stimato * SOGLIA_ACI)} kg)`);
+  if (stimatoSottoMinimo(r)) out.push(`stimato ${kgIt(stimato)} kg, sotto i 1.500 kg ammessi per una richiesta ACI`);
+  if (stimato > 0 && effettivo > stimato * SOGLIA_ACI) out.push(`effettivo ${kgIt(effettivo)} kg oltre il 110% dello stimato del ticket (massimo ${kgIt(stimato * SOGLIA_ACI)} kg)`);
   const fir = String(r.numero_fir || '').trim().toUpperCase();
   if (fir && doppi.some(d => d.numero_fir === fir && d.righe.includes(r))) out.push(`formulario ${fir} ripetuto sullo stesso ordine: lo stesso ritiro caricato due volte`);
   return out;

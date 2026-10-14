@@ -13,8 +13,13 @@
 //    prendeva la tariffa generica, 230 euro invece di 240, senza un avviso. Ora
 //    la regione e' quella di regioneDi (la regola unica dell'11/10/2026), il
 //    confronto e' senza maiuscole, e un ACI senza regione ne' provincia si dice.
+//    Dalla decisione del 13/10/2026 e' un errore: la riga e' a zero euro, il
+//    documento ACI non si verifica finche' la provincia non si corregge, e
+//    l'anteprima lo mette in rosso, a parte, non fra gli avvisi in ambra.
 // npm run prove
-import { calcolaRigheAttiva } from '../base44/shared/attivaCalcolo.ts';
+import * as attivaCalcolo from '../base44/shared/attivaCalcolo.ts';
+import { caricaFunzione, chiama } from './dati/bancoFunzioni.mjs';
+import { caricaPagina, clienteFinto, aspetta, trova, testo } from './dati/paginaFinta.mjs';
 import { resolveTariffa, sortTariffe } from '../base44/shared/ecotyreTariffe.ts';
 import { resolveTariffa as resolvePagina, sortTariffe as sortPagina } from '../src/lib/ecotyreTariffe.js';
 import { formulariDoppi } from '../base44/shared/formulari.ts';
@@ -23,6 +28,9 @@ import { readFileSync } from 'node:fs';
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
 const J = JSON.stringify;
+const { calcolaRigheAttiva } = attivaCalcolo;
+const NOTA_ACI_SENZA_REGIONE = attivaCalcolo.NOTA_ACI_SENZA_REGIONE || '';
+const cambiaStato = await caricaFunzione('cambiaStatoFatturazione');
 
 const tariffe = [
   { id: 't-rete', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', valore: 202, unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2026-01-01' },
@@ -126,20 +134,59 @@ console.log('2. LA REGIONE DEL PREZZO ACI');
   verifica('nessun avviso di regione: la regione c\'e\'', !anomalie.some(a => a.tipo === 'regione_mancante'), J(anomalie));
 }
 {
-  // senza regione ne' provincia: con la tariffa generica passa, ma si dice
+  // SENZA REGIONE NE' PROVINCIA E' UN ERRORE (decisione del 13/10/2026). Prima
+  // la riga prendeva la tariffa generica (230 €/t), era «verificata» e l'avviso
+  // usciva in ambra: il documento si verificava con un prezzo che poteva non
+  // essere il suo. Ora la riga e' a zero euro, in errore, e il documento non si
+  // verifica finche' la provincia non si corregge.
   const aci = [
     { ...base, id: 'w1', id_ordine: 'ET5', numero_fir: 'F5', peso_effettivo: 2000, provincia: '', regione: '' },
     { ...base, id: 'w2', id_ordine: 'ET6', numero_fir: 'F6', peso_effettivo: 1500, provincia: 'ZZ' },
+    { ...base, id: 'w3', id_ordine: 'ET7', numero_fir: 'F7', peso_effettivo: 1000, provincia: 'BA' },
   ];
   const { righe, anomalie } = calcola(aci);
   const a = anomalie.filter(x => x.tipo === 'regione_mancante');
   verifica('un ACI senza regione ne\' provincia si segnala, una voce per il canale', a.length === 1 && a[0].tipologia === 'ACI' && a[0].quanti === 2 && a[0].tonnellate === 3.5, J(a));
-  verifica('e dice che ha preso la tariffa senza regione', /2 ritiri del mese senza provincia né regione \(ET5, ET6\)/.test(a[0]?.descrizione || '') && /preso la tariffa ACI senza regione/.test(a[0]?.descrizione || ''), a[0]?.descrizione);
-  verifica('la riga resta, al prezzo generico (lo decide l\'amministrazione)', righe.ACI.length === 2 && righe.ACI.every(r => r.tariffa_valore === 230), J(righe.ACI.map(r => r.tariffa_valore)));
-  // senza tariffa generica la riga e' a zero e si dice anche questo
+  verifica('ed e\' un errore, non un avviso', a[0]?.gravita === 'errore', J(a[0]));
+  verifica('la frase dice i ritiri, lo zero e che il documento non si verifica', /2 ritiri del mese senza provincia né regione \(ET5, ET6\)/.test(a[0]?.descrizione || '')
+    && /questi ritiri restano a zero euro, in errore/.test(a[0]?.descrizione || '') && /Il documento ACI non si verifica finché non correggi la provincia nel caricamento\./.test(a[0]?.descrizione || '')
+    && !/preso la tariffa ACI senza regione/.test(a[0]?.descrizione || ''), a[0]?.descrizione);
+  const senza = righe.ACI.filter(r => ['ET5', 'ET6'].includes(r.ordine));
+  verifica('le due righe restano nel mese, coi loro chili', senza.length === 2 && senza.reduce((s, r) => s + r.quantita, 0) === 3500, J(senza.map(r => r.quantita)));
+  verifica('ma non prendono la tariffa generica: zero euro, nessuna tariffa, in errore', senza.every(r => r.totale === 0 && r.tariffa_valore === 0 && r.tariffa_id === '' && r.stato_validazione === 'errore'),
+    J(senza.map(r => [r.tariffa_id, r.tariffa_valore, r.totale, r.stato_validazione])));
+  verifica('e la nota della riga dice perche\'', senza.every(r => r.note === NOTA_ACI_SENZA_REGIONE) && /senza provincia né regione/.test(NOTA_ACI_SENZA_REGIONE), J(senza.map(r => r.note)));
+  const ba = righe.ACI.find(r => r.ordine === 'ET7');
+  verifica('il ritiro con la provincia resta verificato, al prezzo della Puglia', ba && ba.stato_validazione === 'verificato' && ba.tariffa_id === 't-aci-pug' && ba.totale === 240, J(ba));
+  verifica('nessuna voce «senza tariffa»: quello che manca e\' la provincia, non la tariffa', !anomalie.some(x => x.tipo === 'senza_tariffa'), J(anomalie.map(x => x.tipo)));
+  // senza tariffa generica e' lo stesso: e la voce «senza tariffa» non c'e' neanche qui
   const soloRegionali = tariffe.filter(t => t.id !== 't-aci-gen');
-  const b = calcola(aci, [], [], soloRegionali).anomalie;
-  verifica('senza tariffa generica: a zero euro, e l\'avviso lo dice', b.some(x => x.tipo === 'regione_mancante' && /sono rimasti senza prezzo/.test(x.descrizione)) && b.some(x => x.tipo === 'senza_tariffa'), J(b.map(x => x.descrizione)));
+  const b = calcola(aci, [], [], soloRegionali);
+  verifica('senza tariffa generica: le stesse righe in errore, e nessuna voce «senza tariffa»', b.anomalie.some(x => x.tipo === 'regione_mancante' && x.gravita === 'errore')
+    && !b.anomalie.some(x => x.tipo === 'senza_tariffa') && b.righe.ACI.filter(r => r.stato_validazione === 'errore').length === 2, J(b.anomalie.map(x => x.descrizione)));
+  // un ritiro solo: la frase al singolare
+  const uno = calcola([aci[0]]).anomalie.find(x => x.tipo === 'regione_mancante') || {};
+  verifica('un ritiro solo: «il ritiro resta a zero euro»', /ACI: un ritiro del mese senza provincia né regione \(ET5\)/.test(uno.descrizione || '') && /il ritiro resta a zero euro, in errore/.test(uno.descrizione || ''), uno.descrizione);
+  // il surplus non dipende dalla regione: i chili della riga in errore li conta come prima
+  const fuel = [{ id: 's-fuel', gruppo: 'g-fs', nome: 'Fuel Surcharge', origine: 'CONSORZIO', tipologia: 'ACI', prestazione: 'RACCOLTA', a_chi: 'tutti', euro_t_attiva: 5, euro_t_passiva: 5, data_inizio_validita: '2026-07-01', data_fine_validita: '2026-12-31', stato: 'attivo' }];
+  const conSurplus = calcolaRigheAttiva({ reteAll: [], aciAll: aci, extraAll: [], fornitori: [], tariffe, anno: 2026, mese: 'Luglio', surplus: fuel });
+  const s = conSurplus.surplus_del_mese.ACI[0];
+  verifica('il surplus conta anche i chili dei ritiri in errore (4,50 t)', s && s.kg === 4500 && s.totale === 22.5, J(conSurplus.surplus_del_mese));
+}
+{
+  // IL DOCUMENTO NON SI VERIFICA: cambiaStatoFatturazione, la funzione vera, con
+  // le righe che il calcolo salverebbe. Con una riga ACI senza provincia il
+  // documento resta «elaborata»; corretta la provincia, si verifica.
+  const statoDopoVerifica = async (aciAll) => {
+    const { righe } = calcolaRigheAttiva({ reteAll: [], aciAll, extraAll: [], fornitori: [], tariffe, anno: 2026, mese: 'Luglio' });
+    const voci = righe.ACI.map((r, k) => ({ ...r, id: `v${k}`, documento_id: 'doc-aci' }));
+    const { j } = await chiama(cambiaStato, { db: { DocumentoFatturazione: [{ id: 'doc-aci', tipo: 'ATTIVA', tipologia: 'ACI', anno: 2026, mese: 'Luglio', stato: 'elaborata' }], VoceFatturazione: voci }, corpo: { documento_id: 'doc-aci', azione: 'verifica' } });
+    return j;
+  };
+  const senzaProvincia = await statoDopoVerifica([{ ...base, id: 'q1', id_ordine: 'ET8', numero_fir: 'F8', peso_effettivo: 2000, provincia: '', regione: '' }, { ...base, id: 'q2', id_ordine: 'ET9', numero_fir: 'F9', peso_effettivo: 1000, provincia: 'BA' }]);
+  verifica('con un ACI senza provincia il documento resta «elaborata», con una riga in errore', senzaProvincia.stato === 'elaborata' && senzaProvincia.errori === 1, J(senzaProvincia));
+  const corretto = await statoDopoVerifica([{ ...base, id: 'q1', id_ordine: 'ET8', numero_fir: 'F8', peso_effettivo: 2000, provincia: 'NA' }, { ...base, id: 'q2', id_ordine: 'ET9', numero_fir: 'F9', peso_effettivo: 1000, provincia: 'BA' }]);
+  verifica('corretta la provincia, il documento si verifica', corretto.stato === 'verificata' && corretto.errori === 0, J(corretto));
 }
 {
   // il confronto della regione, in tutti e due gli specchi
@@ -154,16 +201,40 @@ console.log('2. LA REGIONE DEL PREZZO ACI');
   }
 }
 
-console.log('3. NELL\'ANTEPRIMA DELLA FATTURA ESCONO IN AMBRA');
+console.log('3. NELL\'ANTEPRIMA: L\'ERRORE IN ROSSO E A PARTE, IL FORMULARIO RIPETUTO IN AMBRA');
 {
   // RiepilogoEcotyre.jsx: le anomalie fuori da DA_GUARDARE escono in grigio, come
-  // un'informazione. Il formulario ripetuto e l'ACI senza regione sono da
-  // decidere o da correggere (revisione del 13/10/2026).
+  // un'informazione. Il formulario ripetuto e' da decidere: ambra (revisione del
+  // 13/10/2026). L'ACI senza regione ne' provincia, dalla decisione del
+  // 13/10/2026, e' un errore: sta nel riquadro rosso di quello che tiene fermo il
+  // documento, non fra gli avvisi. La pagina gira davvero (paginaFinta), con le
+  // anomalie che il calcolo vero produce.
   const src = readFileSync(new URL('../src/components/fatturazione/RiepilogoEcotyre.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
   const elenco = /const DA_GUARDARE = \[([^\]]*)\]/.exec(src);
-  for (const tipo of ['formulario_ripetuto', 'regione_mancante']) {
-    verifica(`${tipo} e' fra le anomalie da guardare (ambra)`, !!elenco && elenco[1].includes(`'${tipo}'`) && /DA_GUARDARE\.includes\(a\.tipo\)/.test(src), elenco ? elenco[1] : 'manca l\'elenco');
-  }
+  verifica('formulario_ripetuto e\' fra le anomalie da guardare (ambra)', !!elenco && elenco[1].includes("'formulario_ripetuto'") && /DA_GUARDARE\.includes\(a\.tipo\)/.test(src), elenco ? elenco[1] : 'manca l\'elenco');
+  verifica('regione_mancante non e\' piu\' un avviso in ambra', !!elenco && !elenco[1].includes("'regione_mancante'"), elenco ? elenco[1] : '');
+
+  const { anomalie } = calcola([
+    { ...base, id: 'p1', id_ordine: 'ET5', numero_fir: 'F5', peso_effettivo: 2000, provincia: '', regione: '' },
+    { ...base, id: 'p2', id_ordine: 'ET26091175', numero_fir: 'RGYTR022620TW', peso_effettivo: 1960, provincia: 'BA' },
+    { ...base, id: 'p3', id_ordine: 'ET26091175', numero_fir: 'RGYTR022620TW', peso_effettivo: 1960, provincia: 'BA' },
+  ]);
+  const p = await caricaPagina('components/fatturazione/RiepilogoEcotyre');
+  const cl = clienteFinto({ funzioni: { getRiepilogoEcotyre: async () => ({ periodo: { anno: 2026, mese: 'Luglio' }, anomalie, tipologie: [] }) } });
+  globalThis.__CLIENTE_FINTO = cl.cliente;
+  const r = p.monta(p.Componente, { periodo: { anno: 2026, mese: 'Luglio' } });
+  await aspetta(60);
+  const rossi = trova(r.albero, el => el.type === 'div' && /border-destructive\/40/.test(el.props.className || ''));
+  const daCorreggere = rossi.find(el => /Da correggere/.test(testo(el)));
+  const regione = anomalie.find(a => a.tipo === 'regione_mancante');
+  const ripetuto = anomalie.find(a => a.tipo === 'formulario_ripetuto');
+  verifica('la pagina si monta senza errori', r.errori.length === 0, String(r.errori[0] || ''));
+  verifica('l\'ACI senza provincia sta nel riquadro rosso «Da correggere», col suo testo', !!daCorreggere && testo(daCorreggere).includes(regione.descrizione)
+    && /il documento del canale non si verifica finché restano/.test(testo(daCorreggere)), daCorreggere ? testo(daCorreggere) : J(rossi.map(testo)));
+  const ambra = trova(r.albero, el => el.type === 'div' && /text-amber-800/.test(el.props.className || ''));
+  verifica('e non fra gli avvisi in ambra', !ambra.some(el => testo(el).includes(regione.descrizione)), J(ambra.map(testo)));
+  verifica('il formulario ripetuto resta in ambra, fuori dal rosso', ambra.some(el => testo(el).includes(ripetuto.descrizione)) && !testo(daCorreggere || '').includes(ripetuto.descrizione), J(ambra.map(testo)));
+  r.smonta();
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

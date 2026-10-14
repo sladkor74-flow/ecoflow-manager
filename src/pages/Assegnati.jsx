@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { eAci } from '@/lib/canaleSecondaria';
 import { base44 } from '@/api/base44Client';
-import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Search, ListOrdered } from 'lucide-react';
+import { Loader2, FileSpreadsheet, Filter, X, Table2, LayoutGrid, Search, ListOrdered, AlertTriangle, RefreshCw } from 'lucide-react';
 import { formatIntero } from '@/lib/utils';
 import AssegnatiKpi from '@/components/assegnati/AssegnatiKpi';
 import AssegnatiMatrix from '@/components/assegnati/AssegnatiMatrix';
@@ -12,6 +12,7 @@ import MultiSelect from '@/components/shared/MultiSelect';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
+import { controlliPortaleAci, problemiDellaRiga } from '@/lib/controlliPortaleAci';
 
 export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Rete — Backlog Richieste', description = 'Ordini in stato "assegnato" di classe diversa da PFU Autodemolizione, derivati automaticamente dal caricamento delle Primarie.' }) {
   const [data, setData] = useState(null);
@@ -26,6 +27,12 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   // evadono, e averle in alto evita di doverle cercare in fondo.
   const [ordineDettaglio, setOrdineDettaglio] = useState('vecchi');
   const [tuttiRecords, setTuttiRecords] = useState(null);
+  // Una lettura degli ordini non riuscita si dice e si riprova a mano (revisione
+  // del 13/10/2026): vedi loadRecords.
+  const [erroreRecords, setErroreRecords] = useState(null);
+  // La vista ACI legge gli ordini appena si apre: il riquadro dello stimato
+  // sotto i 1.500 kg vale anche sopra la matrice (13/10/2026).
+  const vistaAci = entity === 'AssegnatoAci';
 
   const applyRagioneSociale = () => setFilters(p => ({ ...p, ragione_sociale: ragioneSocialeInput }));
 
@@ -42,6 +49,16 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   // posizione in coda si puo' ricalcolare senza rileggere l'archivio.
   // Vale solo l'ultima lettura partita (13/10/2026): un caricamento puo'
   // chiudersi mentre se ne fa una, e quella vecchia non deve prendersi lo schermo.
+  //
+  // UNA LETTURA FALLITA NON RIPARTE DA SOLA (revisione del 13/10/2026). L'effetto
+  // qui sotto legge gli ordini quando non ci sono e nessuna lettura e' in corso:
+  // e' proprio lo stato che una lettura fallita lascia. Con un errore che
+  // persiste (il limite di richieste, la rete) la lettura ripartiva subito, senza
+  // fine: 51 letture per 51 errori, che consumavano il margine al minuto di
+  // tutta l'app, e a video «Nessun ordine assegnato trovato». Ora l'errore si
+  // tiene: l'effetto non riparte, la pagina lo dice e offre «Riprova». Un
+  // caricamento delle primarie, che cambia l'archivio, vale come un nuovo
+  // tentativo.
   const ultimaLetturaOrdini = useRef(0);
   const loadRecords = useCallback(async () => {
     const mia = ++ultimaLetturaOrdini.current;
@@ -57,12 +74,19 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
         peso_t: +((r.peso_stimato || 0) / 1000).toFixed(3),
         max_chiudibile_kg: eAci(r) && Number(r.peso_stimato) > 0 ? Math.round(Number(r.peso_stimato) * 1.1) : null,
       })));
-    } catch (e) { console.error(e); }
+      setErroreRecords(null);
+    } catch (e) {
+      console.error(e);
+      if (mia === ultimaLetturaOrdini.current) setErroreRecords(e?.response?.data?.error || e?.message || 'errore sconosciuto');
+    }
     if (mia === ultimaLetturaOrdini.current) setLoadingRecords(false);
   }, [entity]);
+  const riprovaRecords = () => { setErroreRecords(null); loadRecords(); };
 
   useEffect(() => { loadData(); }, [loadData]);
-  useEffect(() => { if (viewMode === 'detail' && !tuttiRecords && !loadingRecords) loadRecords(); }, [loadRecords, viewMode, tuttiRecords, loadingRecords]);
+  useEffect(() => {
+    if ((viewMode === 'detail' || vistaAci) && !tuttiRecords && !loadingRecords && !erroreRecords) loadRecords();
+  }, [loadRecords, viewMode, vistaAci, tuttiRecords, loadingRecords, erroreRecords]);
   // Cercando un ID si passa al dettaglio degli ordini.
   useEffect(() => { if (cercaId.trim()) setViewMode('detail'); }, [cercaId]);
 
@@ -109,6 +133,28 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
     return [...trovati].sort((a, b) => verso * (quando(a).localeCompare(quando(b))
       || String(a.id_ordine || '').localeCompare(String(b.id_ordine || ''))));
   }, [trovati, ordineDettaglio]);
+  // LO STIMATO ACI SOTTO I 1.500 KG (decisione del 13/10/2026). La regola e' del
+  // portale: «nessun aci può avere uno stimato inferiore a 1.500 kg, se negli
+  // assegnati del portale è indicato così limitati a segnalarlo e provvederemo a
+  // farlo modificare al consorzio». Il gestionale lo segnala e basta, con la
+  // stessa regola dei Terminati ACI (controlliPortaleAci), sugli ordini dei
+  // filtri attivi: un riquadro col conto e, per ogni riga, che cosa non torna.
+  // Il caso vero: ET26084363, stimato 1.400 kg. Solo nella vista ACI.
+  const sottoMinimo = useMemo(() => (vistaAci && tuttiRecords ? controlliPortaleAci(records).sotto_minimo : []), [vistaAci, tuttiRecords, records]);
+  // Il segno delle righe: per ogni ordine fuori regola, le frasi di
+  // problemiDellaRiga. Su tutti gli ordini letti, non solo su quelli dei filtri:
+  // la ricerca per ID mostra anche un ordine fuori dai filtri, e il segno deve
+  // esserci lo stesso.
+  const segniRighe = useMemo(() => {
+    const m = new Map();
+    if (!vistaAci) return m;
+    for (const r of tuttiRecords || []) {
+      const p = problemiDellaRiga(r);
+      if (p.length) m.set(r.id, p);
+    }
+    return m;
+  }, [vistaAci, tuttiRecords]);
+
   // Del punto di raccolta cercato interessa la richiesta piu' avanti in coda.
   const primoInCoda = useMemo(() => {
     if (!cercaPdr && !cercaId.trim()) return null;
@@ -134,11 +180,13 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
   // dettaglio, la coda e la ricerca per ID restavano quelli di prima finche' non
   // si riapriva la pagina. Se il dettaglio e' a video si rilegge subito; se no
   // gli ordini letti si dimenticano, e si rileggono quando lo si apre.
+  // La vista ACI li rilegge sempre: il riquadro dello stimato sotto i 1.500 kg
+  // sta anche sopra la matrice (13/10/2026).
   const ricarica = useRef(null);
   ricarica.current = () => {
     loadData();
-    if (viewMode === 'detail') loadRecords();
-    else { ultimaLetturaOrdini.current++; setTuttiRecords(null); setLoadingRecords(false); }
+    if (viewMode === 'detail' || vistaAci) loadRecords();
+    else { ultimaLetturaOrdini.current++; setTuttiRecords(null); setLoadingRecords(false); setErroreRecords(null); }
   };
   useEffect(() => {
     const leggi = creaAscoltoCaricamenti(['primarie']);
@@ -230,6 +278,46 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
             </div>
           </div>
 
+          {/* Lo stimato ACI sotto i 1.500 kg: il gestionale lo segnala, lo fa
+              correggere il consorzio (decisione del 13/10/2026) */}
+          {sottoMinimo.length > 0 && (
+            <div className="border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <div className="font-semibold">
+                  {sottoMinimo.length === 1 ? 'Un ordine' : `${formatIntero(sottoMinimo.length)} ordini`} con lo stimato sotto i 1.500 kg ammessi: da far correggere al consorzio{hasFilters ? ' (con i filtri attivi)' : ''}.
+                </div>
+                <div>
+                  {sottoMinimo.slice(0, 5).map((r, i) => (
+                    <React.Fragment key={r.id}>
+                      {i > 0 && '; '}
+                      <button type="button" onClick={() => setCercaId(r.id_ordine || '')} title="Mostra l'ordine nel dettaglio" className="font-mono underline decoration-dotted hover:text-amber-950">{r.id_ordine || '—'}</button>
+                      {` (ticket ${r.numero_ordine_interno || '—'}, ${r.ragione_sociale || r.punto_di_raccolta || '—'}, stimato ${formatIntero(r.peso_stimato)} kg)`}
+                    </React.Fragment>
+                  ))}
+                  {sottoMinimo.length > 5 ? ` e altri ${formatIntero(sottoMinimo.length - 5)}` : ''}.
+                </div>
+                <div className="text-xs">Una richiesta ACI non si stima sotto i 1.500 kg: è una regola del portale, e il gestionale la segnala soltanto.</div>
+              </div>
+            </div>
+          )}
+
+          {/* Una lettura degli ordini non riuscita: si dice, e si riprova a mano */}
+          {erroreRecords && (
+            <div className="border border-destructive/40 bg-destructive/5 rounded-lg px-4 py-3 text-sm text-destructive flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span className="flex-1">
+                {tuttiRecords
+                  ? `Gli ordini non si sono riletti (${erroreRecords}): quelli a video sono della lettura di prima.`
+                  : `Gli ordini non si sono letti (${erroreRecords}).`}
+                {' '}La lettura non riparte da sola: riprova fra qualche secondo.
+              </span>
+              <button type="button" onClick={riprovaRecords} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm btn-secondario shrink-0">
+                <RefreshCw className="w-4 h-4" /> Riprova
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-3">
               <Tabs value={viewMode} onValueChange={setViewMode}>
@@ -272,13 +360,20 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
                       </span>
                     </div>
                   )}
-                  <AssegnatiTable
-                    records={ordiniMostrati}
-                    loading={loadingRecords}
-                    ragioneSocialeFilter={cercaId.trim() ? '' : filters.ragione_sociale}
-                    posizioni={coda.posizioni}
-                    totaleCoda={coda.totale}
-                  />
+                  {/* senza nessuna lettura riuscita la tabella non si mostra:
+                      direbbe «Nessun ordine assegnato trovato», che non e' vero.
+                      Con gli ordini di una lettura di prima si', e l'avviso
+                      qui sopra dice che non sono aggiornati */}
+                  {!(erroreRecords && !tuttiRecords) && (
+                    <AssegnatiTable
+                      records={ordiniMostrati}
+                      loading={loadingRecords}
+                      ragioneSocialeFilter={cercaId.trim() ? '' : filters.ragione_sociale}
+                      posizioni={coda.posizioni}
+                      totaleCoda={coda.totale}
+                      segni={segniRighe}
+                    />
+                  )}
                 </TabsContent>
               </Tabs>
             </div>
