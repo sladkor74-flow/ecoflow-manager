@@ -14,6 +14,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
 
 - **Come si lavora in questo repository**
   - I quattro controlli, prima di ogni commit
+  - Il giro di GitHub: le prove a ogni push su main (14/10/2026)
   - Lo stile dei commenti
   - Commit e push
   - Gli specchi: `base44/shared` e `src/lib`
@@ -175,6 +176,94 @@ da una copia del sorgente in cui e' sostituito solo quell'import
 (`caricaPagina(..., { file })`, 14/10/2026): `prove/pagineAnniPassati.mjs`,
 `prove/perNoiChiusiDallaPagina.mjs`.
 
+### Il giro di GitHub: le prove a ogni push su main (14/10/2026)
+
+I controlli giravano solo sul PC, prima di un commit. La piattaforma pero' fa
+commit da sola su main, e l'utente pubblica da li': un errore entrato cosi' non
+lo provava nessuno. Dal 14/10/2026 (migliorie approvate dall'utente: «per me ok
+sulle cose da sistemare, sulla velocità e su quanto da creare, procedi pure»)
+c'e' un controllo automatico prima della pubblicazione.
+
+**Che cosa gira.** `.github/workflows/prove.yml` parte a ogni push su main,
+anche a quelli della piattaforma, e a mano (Actions, «Prove», «Run workflow»).
+Lancia `npm ci`, `npx eslint --quiet .`, `node prove/specchi.mjs`,
+`npx vite build` e `npm run prove:ci`. Ogni controllo gira anche se quello prima
+e' caduto, per vedere subito quali sono caduti. Non servono segreti: il flusso
+legge il repository e basta. Un push nuovo ferma il giro di quello prima. Il
+giro non ferma la pubblicazione: segna il commit con la croce rossa e dice quale
+controllo e' caduto. Prima del primo push nessuno l'ha visto girare su GitHub:
+il primo giro va guardato.
+
+**Che cosa non gira, e perche'.** I dati veri non vanno mai su GitHub. La copia
+`../dati-veri` e i documenti dell'utente sono gli archivi e le carte vere di
+SMOCO: stanno fuori dal repository apposta, e quello che e' nel repository va
+su GitHub. Il quinto controllo, Giacenze e Dichiarazioni sui dati veri
+(`prove/datiVeri.mjs`), e le parti delle altre prove che leggono la copia
+restano sul PC: si lanciano prima del commit come sempre. Il giro di GitHub non
+li sostituisce, e un giro verde non vuol dire che i dati veri tornano.
+
+**Come la modalita' CI tiene fuori i dati veri.** `npm run prove:ci`
+(`prove/esegui.mjs --ci`) fa girare ogni prova con
+`prove/dati/soloIlRepository.mjs` davanti (`--require` in NODE_OPTIONS:
+`--import` nei worker non vale). Ogni percorso fuori dal repository si annota in
+un registro e risponde che non c'e', anche sul PC: lanciata in locale, la
+modalita' CI vede quello che vede GitHub. Le vie che il controllo guarda:
+- node:fs, compresi `realpathSync.native` e `realpath.native`;
+- import e require;
+- i worker e i processi node, anche quando la prova gli da' un ambiente ridotto:
+  il controllo, il registro e le cartelle temporanee si rimettono;
+- per i processi che non sono node, come git, la cartella e gli argomenti che
+  sono percorsi: uno fuori si cambia con un percorso che non esiste.
+
+Restano dentro il repository, node_modules e la cartella temporanea. Non resta
+dentro la cartella che contiene il repository: li' stanno i dati veri.
+
+**Il riconoscimento parte dal sorgente**, perche' il registro non vede tutto:
+per esempio un programma che legge un percorso scritto in un suo file
+(revisione del 14/10/2026: un worker, git e un node con l'ambiente ridotto
+leggevano la copia, e la prova risultava superata). Le regole:
+- Una prova che nomina la copia (`dati-veri`, `DATI_VERI`) o un documento del PC
+  (un percorso `'C:/...'` scritto) non e' mai superata. E' «in parte o
+  saltata»: si conta a parte e si dice che cosa le e' mancato.
+- Una prova che il registro vede cercare fuori una cosa che il sorgente non
+  nomina fallisce, perche' su GitHub passerebbe a vuoto. Ogni cosa va nominata
+  per quello che e': chi nomina la copia ma legge un documento del PC lo tace.
+- `SOLO_NOMINA` in `prove/esegui.mjs` e' un elenco scritto, non una variabile.
+  Raccoglie le prove che nominano la copia solo per parlarne; oggi c'e'
+  `prove/proveSuGitHub.mjs`. Sono superate, ma se cercano fuori falliscono.
+  Solo loro possono scrivere `PROVE_CI_REGISTRO`, `PROVE_CI_RADICE` o
+  `PROVE_CI_TEMP`: un'altra prova che li nomina fallisce.
+
+Chi scrive una prova sui dati veri la legge da `../dati-veri/` (o da
+`DATI_VERI`) nominato nel sorgente. Se la copia manca, salta la sezione e lo
+dice, senza uscire con errore: in CI una prova che esce con errore cade.
+
+Le prove girano con l'ora e la lingua del PC (TZ Europe/Rome, it_IT; il runner
+e' in UTC e in inglese): fra le 22 e mezzanotte UTC il giorno italiano e' gia'
+l'altro. Le imposta `npm run prove:ci`, non il flusso, cosi' la modalita' CI
+lanciata sul PC e' la stessa. Girano in parallelo (`PROVE_PARALLELE`) e si
+fermano dopo 300 s (`PROVE_CI_SECONDI`). Serve la storia intera di git
+(fetch-depth 0) per le prove che confrontano col codice di commit vecchi (`git
+show`): con la storia tagliata il giro si ferma invece di saltarle. In modalita'
+CI un processo lanciato da una prova ha il controllo davanti: npm o npx lanciati
+cosi' leggerebbero la loro cache fuori dal repository e cadrebbero. `npm run
+prove` resta quello di prima. La prova di tutto questo e'
+`prove/proveSuGitHub.mjs`, che fa girare prove finte in un repository finto con
+la copia accanto.
+
+**I minuti.** Un giro costa circa 5-6 minuti di GitHub Actions (misura del
+14/10/2026: le prove da sole, due alla volta come sul runner di un repository
+privato, fra un minuto e mezzo e due sul PC). Un repository privato nel piano
+gratuito ne ha 2.000 al mese, cioe' circa 350 giri. Finiti quelli, il giro non
+parte piu' fino al mese dopo: un commit senza il giro non e' un commit provato.
+
+**I numeri del giro, alla chiusura del 14/10/2026** (`npm run prove:ci` sul
+PC, albero di lavoro con le migliorie del giorno): 275 prove in 1 min 4 s, 8
+alla volta. 236 superate, 39 in parte o saltate (35 per la sola copia dei dati
+veri, 2 per i soli documenti del PC, 2 per tutti e due), 0 fallite. La
+modalita' CI le elenca una per una con quello che e' mancato a ciascuna: quella
+parte gira solo sul PC.
+
 ### Lo stile dei commenti
 
 Commenti e messaggi in **italiano senza lettere accentate**: si scrive `e'` al
@@ -190,7 +279,9 @@ All'utente si da' del **tu**.
 
 Si lavora su `main`, si committa e si pusha; **la pubblicazione la fa l'utente**
 dalla piattaforma. Ogni commit finisce con la riga
-`Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
+`Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`. Dal 14/10/2026 ogni
+push su main fa partire il giro di GitHub («Il giro di GitHub», sopra): non
+sostituisce i controlli sul PC, e i dati veri restano solo li'.
 
 ### Gli specchi: `base44/shared` e `src/lib`
 
@@ -250,8 +341,13 @@ la pagina Alert Engine e per `runAlertEngine`. `surplusVisibile.ts` (la parte
 attiva del surplus per chi non e' amministratore) non ha uno specchio: la usa
 solo la funzione `leggiSurplus`, e nel browser `src/lib/leggiSurplus.js` chiama
 la funzione. Con la variazione del contratto (14/10/2026) non entrano coppie:
-`contrattoRete.ts` lo usano solo gli strumenti di EcoTyna, e
-`src/lib/eventiDati.js` (l'annuncio dei target cambiati) e' solo delle pagine.
+`contrattoRete.ts` lo usano solo il server (gli strumenti di EcoTyna e, dal
+14/10/2026, `getDashboardRaccolta`), e `src/lib/eventiDati.js` (l'annuncio dei
+target cambiati) e' solo delle pagine. Con le migliorie del 14/10/2026 non
+entrano coppie: `tariffeVisibili.ts` (la parte attiva delle tariffe per chi non
+e' amministratore) la usa solo la funzione `leggiTariffe`, e nel browser
+`src/lib/leggiTariffe.js` chiama la funzione, come per il surplus. Le coppie
+restano 31.
 
 **Gli import in `src/lib` vanno bene in tutte due le forme.** La convenzione e'
 l'alias `@/` (39 dei 92 file; 12 usano un relativo, fra cui i cinque che prendono
@@ -329,6 +425,24 @@ preso e l'esportazione fallisce senza dire niente. Due chiamanti erano cosi'
 ritorno serviva subito - `AttivaEsportazioni` registra nello storico il nome del
 file appena scritto - senza `await` la registrazione partiva prima del file.
 
+Il 14/10/2026 anche `pptxgenjs` (385 kB col suo `jszip`): `exportPPT` in
+`lib/statusExports.js` lo prende al clic su «PPT»,
+`const { default: pptxgen } = await import('pptxgenjs')`. Era l'ultima libreria
+dei file ancora importata in testa. La regola vale per tutte le librerie dei
+file (`exceljs`, `jspdf`, `xlsx`, `pptxgenjs`, `jszip`, `pdf-lib`, `pdfjs-dist`,
+`html2canvas`, `canvg`), e `prove/pacchettiLeggeri.mjs` la controlla sul grafo
+vero: impacchetta l'app con esbuild divisa in pezzi e segue gli import in testa
+di ogni pagina. Nessuna pagina deve scaricare una di queste librerie
+all'apertura.
+
+**Una prova che impacchetta deve dare a esbuild la cartella: `absWorkingDir:
+RADICE`.** esbuild scrive i percorsi del resoconto (metafile) relativi alla sua
+cartella di lavoro. Senza, la prova lanciata da `prove/` o da fuori dava 13
+errori col codice giusto. Inoltre esbuild prende la cartella quando si carica,
+non quando impacchetta. Per questo `pacchettiLeggeri.mjs` si sposta apposta in
+`prove/` e solo dopo carica esbuild (`await import('esbuild')`): cosi' ogni giro
+controlla anche questo.
+
 ### Le pagine si scaricano quando si aprono (10/10/2026)
 
 In `src/App.jsx` una pagina **non si importa in testa**: si dichiara pigra,
@@ -350,9 +464,21 @@ Il guscio - `Layout`, `ProtectedRoute`, `PageErrorBoundary`, `PageNotFound` -
 resta eager: serve subito, e scaricarlo a parte vorrebbe dire due viaggi invece
 di uno.
 
+Dentro le pagine, dal 14/10/2026:
+- la Dashboard scarica a parte le tre sezioni dei canali, col grafico
+  (recharts). Sono `lazy` dentro un Suspense e si chiedono al primo disegno
+  (`preparaSezioni`), mentre il server conta il quadro;
+- Target & Status scarica a parte le cinque schede che non sono l'Andamento,
+  ognuna col suo Suspense, e le linguette restano a video.
+
+Prima apertura misurata con la build (avvio compreso, minificato): Dashboard da
+998 a 574 kB (gzip da 311 a 197), Target & Status da 1.221 a 556 kB (gzip da 405
+a 186).
+
 **Resta un avviso di build**, e resta per un motivo: tre chunk superano i 500 kB
-(`pdf.worker` 1.326, `exceljs` 940, la pagina `TargetStatus` 560) e sono tutti
-scaricati su richiesta, non all'avvio. Alzare `chunkSizeWarningLimit` per farlo
+(`pdf.worker` 1.326, `exceljs` 940 e un `index` da 532, che e' `pdf-lib` preso
+da `timbraPdf.js`, non il pacchetto principale) e sono tutti scaricati su
+richiesta, non all'avvio. La pagina `TargetStatus` non c'e' piu' (14/10/2026). Alzare `chunkSizeWarningLimit` per farlo
 tacere no: un presidio vale quanto la fiducia che gli si da', e un avviso
 addomesticato non avverte piu' di niente. Prove in `prove/paginePigre.mjs`.
 
@@ -470,6 +596,22 @@ La pagina lo dice («Gli ordini non si sono letti (...)», oppure «non si sono
 riletti: quelli a video sono della lettura di prima») e offre «Riprova»; un
 caricamento chiuso vale come un nuovo tentativo. Prova:
 `prove/pagineUnaRilettura.mjs`.
+
+**Giacenze e Dichiarazioni leggono ogni archivio una volta** (giro della
+velocita' del 14/10/2026, «per me ok ... sulla velocità»). Le due pagine rifanno
+tutto il conto a ogni apertura. `calcolaGiacenze` leggeva `GiacenzaSito` due
+volte su un anno chiuso (l'anno e l'anno dopo): 19 richieste invece di 18.
+`riepilogoDichiarazioni` leggeva `DichiarazioneSito` due volte e
+`GiacenzaSito` due volte su un anno chiuso (16 e 17 richieste invece di 15), e i
+due archivi grandi, il report delle dichiarazioni e le primarie di rete, una
+pagina per volta dopo tutti gli altri: otto richieste in fila invece di quattro.
+Ora ogni archivio si legge una volta per chiamata, tutti insieme in un
+`Promise.all`, a pagine da 5000 in ordine di id, e quello che serve per anno si
+prende in memoria; il giorno italiano di una data si calcola una volta
+(`giornoDi`). Le risposte sono identiche al carattere a quelle del commit
+5939d15, tranne gli ordini degli impianti di un anno passato (punto 25 di
+«Giacenze e Dichiarazioni»). Prova: `prove/velocitaGiacenze.mjs`, che conta le
+richieste e quante stanno in fila, su un archivio costruito e sui dati veri.
 
 ### Base44: comandi, file e riferimenti
 
@@ -1601,6 +1743,55 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
     - Chi aggiunge un campo a ogni riga di uno strumento misuri il blocco con
       `testoDati` sugli anni piu' lunghi (il 2024).
     - Prova: `prove/variazioniAParole.mjs`, parte 3.
+
+25. **Gli ordini da dichiarare di un anno passato sono i carichi di
+    quell'anno ancora aperti oggi** (giro del 14/10/2026, sull'approvazione
+    dell'utente, e revisione dello stesso giorno). Il file degli ordini non
+    dichiarati e' di oggi. Sul 2025 dei dati veri le righe degli impianti
+    contavano tutto il file (Tecnogum 320, Irigom 233, T-Cycle 118, Green Tyre
+    139, Gatim 56), accanto alla lettura del 31/12 o a «—».
+    - Su un anno PASSATO (`annoNum < annoDiOggi`, `ordiniDiUnAnnoPassato` in
+      `calcolaGiacenze`) contano le righe del file arrivate al sito in
+      quell'anno, per giorno italiano di fine trasporto (`giornoDelCarico`: la
+      fine della secondaria se il carico e' passato da un piazzale). A queste
+      si aggiungono i carichi di quell'anno che il file non ha ancora (`nAnno`).
+      Sui dati veri il 2025 e il 2024 fanno 0 su tutti gli impianti.
+    - Sull'anno in corso e sull'ANNO DOPO, che il menu delle Giacenze offre,
+      conta tutto il file, come prima: li' la giacenza di un impianto e' la
+      fotografia di oggi. La prima versione usava `!== annoDiOggi`, e sul 2027
+      dava 0 ordini accanto alle 652,84 t di Irigom. Per questa regola si usa
+      `<`, mai `!==`: in `calcolaGiacenze`, `getOrdiniDaDichiarare`
+      (`carichi_del`), `Giacenze.jsx` e `DaDichiarareTable`.
+    - Il pulsante e l'elenco che apre dicono lo stesso numero. La pagina passa
+      `carichi_del` solo su un anno passato e `getOrdiniDaDichiarare` filtra
+      con la stessa regola. La riga di riconciliazione dice gli ordini (file +
+      non ancora nel file = pulsante), senza la giacenza.
+    - L'etichetta sta in `totali.ordini_dei_carichi_del`, presente solo su un
+      anno passato: la risposta dell'anno in corso e dell'anno dopo resta al
+      carattere. Chi scrive «Ordini da dichiarare» prende l'anno da li', non da
+      `in_attesa_dei_carichi_del`. Sull'anno dopo l'attesa e' dei carichi di
+      quell'anno, gli ordini degli impianti no.
+    - Lo dicono tutti con le stesse parole, «dei carichi del 2025 ancora da
+      dichiarare oggi»: la colonna e il pulsante della Situazione
+      (`SituazioneTable`), e dalla chiusura del giro la casella in testa
+      (`GiacenzeKpi.jsx`), la colonna del PDF (`situazionePdf`), l'intestazione
+      del foglio Situazione e una nota sotto il foglio «Da dichiarare»
+      (`giacenzeExportAll.js`), e EcoTyna (`ordini_dei_carichi_del` e
+      `ordini_quali` nei totali della rete dello strumento `giacenze`: un campo
+      nei totali, non per riga, punto 24). Prova:
+      `prove/ordiniAnniPassatiEtichette.mjs`, coi tre anni: passato, in corso e
+      dopo, che restano com'erano.
+    - Il PDF dell'elenco di un anno passato lo dice in testa e nella prima nota
+      (`pdfDeiCarichiDel` in `DaDichiarareTable`). Il foglio Excel dell'elenco
+      riceve `{ carichi_del }` e lo dice in una riga in testa e nel nome del
+      file (`ordini_da_dichiarare_carichi_del_2025_<oggi>.xlsx`). Usa ancora
+      SheetJS: per «I documenti che escono» andrebbe portato a exceljs col
+      corredo comune.
+    - Lo stoccaggio, anche sull'anno dopo, segue il punto 18: i carichi
+      arrivati al piazzale in quell'anno, per tonnellate e ordini insieme.
+    - Prove: `prove/ordiniAnniPassati.mjs`, anche sull'anno dopo (sui dati veri
+      il 2027 come al commit 5939d15, 866 ordini), e
+      `prove/velocitaGiacenze.mjs` (l'anno dopo identico al carattere).
 
 **La prova confronta tutto.** Oltre alle trappole, `confrontaTutto` (in
 `prove/dueModuliStessiNumeri.mjs`) mette a fianco ogni impianto e ogni piazzale,
@@ -2916,6 +3107,10 @@ un accordo pagato solo da SMOCO e' tutto un costo, nome e fornitori compresi.
 Prova: `prove/chiLeggeCosa.mjs`, che monta anche la pagina Extra Raccolta con
 l'archivio chiuso, amministratore o no.
 
+Dal 14/10/2026 anche `Tariffa` si legge cosi': la funzione e' `leggiTariffe`, e
+la regola e' in «I costi dei fornitori sono dell'amministratore» (prova
+`prove/tariffeRiservate.mjs`).
+
 #### Un colore solo
 
 Il surplus ha una forma e un colore in ogni pagina e in ogni foglio: nelle
@@ -3541,6 +3736,16 @@ che l'utente ha dato, da non riderivare:
   si puo' ripetere e completa una copia interrotta. Il piano e' puro
   (`pianoCopiaAnno`, provato in `prove/annoTarget.mjs`,
   `prove/copiaAnnoTarget.mjs` e `prove/copiaSenzaVariazioni.mjs`).
+- **Quello che si copia si conferma**, e ogni conferma lascia la sua riga nello
+  storico delle modifiche (14/10/2026, vedi «Lo storico delle modifiche»).
+  Impianti e collegamenti si confermano dal segno «da confermare» in Impianti e
+  stoccaggi, i target dei raccoglitori dalla riga o con «Conferma tutte», il
+  contratto con «Conferma il contratto <anno>» nella scheda Commessa Ecotyre.
+  Salvare fine della programmazione e chili per viaggio (`RegoleAnno`) non
+  conferma il contratto: la sua voce nello storico_json tiene davanti la nota
+  della copia. Prima la copriva, e il contratto risultava confermato coi numeri
+  dell'anno prima senza che nessuno l'avesse guardato. Prova:
+  `prove/confermeNelloStorico.mjs`, sezione 4b.
 - **Gli anni chiusi** (prima dell'anno in corso, ora italiana: `annoChiuso`) si
   leggono soltanto: la pagina non lascia scrivere e le funzioni che scrivono li
   rifiutano. Scrive solo l'amministratore (`soloAmministratore`).
@@ -3771,11 +3976,15 @@ vuote. Pezzi corti perche' il PDF tiene tre righe per cella.
   «Note» del report dice la riga a parole.
 - **PDF**: le righe dei surplus col colore 'surplus' di `esportaTabella`, il
   TOTALE col surplus, il totale dei formulari nel sottotitolo («380 righe e la
-  riga del Fuel Surcharge · formulari € 226.288,48 · cliente Ecotyre»): una riga
-  «Totale formulari» il piede di `esportaTabellaPdf` la conterebbe fra le righe.
-  Per metterla anche nel PDF serve un'opzione di `esportaTabellaPdf` per le
-  righe di totale che il piede non conta (oggi un solo `totali`): non c'e'
-  ancora, e il sottotitolo basta.
+  riga del Fuel Surcharge · formulari € 226.288,48 · cliente Ecotyre»). Dal
+  14/10/2026 c'e' anche la riga «Totale formulari», sotto l'ultimo formulario e
+  sopra il surplus e il TOTALE: gli euro nel report, anche i chili nel format.
+  La scrive l'opzione `subtotali: [{ dopo, etichetta, valori }]` di
+  `esportaTabellaPdf`. Ogni subtotale va prima della riga numero `dopo` (un
+  `dopo` fuori misura finisce in fondo o in cima), e il piede non lo conta:
+  ottobre rete dice ancora «114 righe», cioe' 113 formulari e il Fuel
+  Surcharge. Il sottotitolo resta quello di prima. Senza surplus il PDF non
+  cambia.
 - La pagina dice, prima e dopo, che il surplus e' nel file e quanto fa («Nel
   file il Fuel Surcharge (€ 5.601,20) ha la sua riga, sotto i formulari, e il
   TOTALE lo comprende.»), in verde; un canale col solo surplus non da' un file.
@@ -4687,7 +4896,8 @@ nella scheda dei raccoglitori.
   il target di allora. Rileggono il contratto dell'anno prima di scrivere, con
   una lettura per salvataggio, la variazione («fresca»), la scheda Commessa
   Ecotyre e `RegoleAnno` di Impianti e stoccaggi (fine della programmazione e
-  chili per viaggio: il primo inventario l'aveva liquidata con «niente»).
+  chili per viaggio: il primo inventario l'aveva liquidata con «niente»), e la
+  conferma del contratto copiato nella scheda Commessa Ecotyre (14/10/2026).
   Storico e «prima» si scrivono da quello riletto. La scheda Commessa confronta
   campo per campo tre versioni: il record da cui vengono i numeri a video,
   quello riletto e quello a video (`riallineaAlContratto`).
@@ -5367,14 +5577,24 @@ istruita, e sono state misurate sul codice:
     `testoVariazioniSuperate` di `assistente.ts`) e i mesi chiesti; dice
     `regioni_di_ripiego` quando il riparto e' il ripiego, che la dashboard
     mostra senza dirlo. Li conta `contrattoDellaRete`
-    (`base44/shared/contrattoRete.ts`), cioe' `getDashboardRaccolta` per un
-    anno con le stesse regole e lo stesso ordine delle somme, piu' `quadroRete`
-    di `quadroCommessa.ts`; nessuna lettura per regione.
-    `prove/ecotynaContratto.mjs` li confronta campo per campo con la funzione
-    vera, sui dati veri. Una regola nuova della dashboard sul contratto va
-    portata anche li': altrimenti la prova diventa rossa, ed e' giusto cosi'.
-    E' una copia sorvegliata, non ancora una regola sola: il passo dopo e' che
-    `getDashboardRaccolta` chiami `contrattoDellaRete`.
+    (`base44/shared/contrattoRete.ts`), piu' `quadroRete` di
+    `quadroCommessa.ts`; nessuna lettura per regione.
+    **Dal 14/10/2026 e' una regola sola** (migliorie, gruppo H-2): il
+    contratto della rete (target annuo, raccolto, atteso alla data, scarto,
+    regioni con le variazioni, avvisi del target) lo conta
+    `contrattoReteDegliAnni`, che `getDashboardRaccolta` chiama con gli anni
+    del filtro e `contrattoDellaRete` con un anno. La dashboard non ha piu'
+    regole del contratto sue: una regola nuova sul contratto si scrive in
+    `contrattoRete.ts`, una volta. `prove/ecotynaContratto.mjs` confronta
+    ancora EcoTyna con la funzione vera campo per campo, ma con una regola
+    sola i due lati cambiano insieme e quel confronto non vede un cambio della
+    regola comune: lo vede `prove/dashboardContrattoUnaRegola.mjs`, che fa
+    girare la funzione di oggi contro quella del commit 5939d15 (git show) su
+    21 casi costruiti e sui dati veri, prima e dopo la variazione di ottobre,
+    2025, 2026 e 2027. Richiede la risposta intera identica al carattere e le
+    stesse letture, archivio per archivio. Se la regola del contratto cambia
+    apposta, il riferimento si sposta sul commit di quel cambio, come in
+    `prove/dashboardDatiVeri.mjs`.
   - **`target_raccoglitori` non e' il contratto.** `somma_target_raccoglitori_t`
     (prima `target_totale_t`) e' la somma dei raccoglitori; il contratto c'e'
     accanto (blocco `contratto_ecotyre`), e `nota_livelli` spiega i due
@@ -5888,7 +6108,12 @@ La piattaforma conserva solo `updated_date`: di un target, di un'apertura o di u
 - **Fuori, con il loro motivo**: i caricamenti dei file (il loro storico e' UploadLog), le copie d'anno in blocco, le sistemazioni una tantum e i semi. Il debito scritto e' nella lista `DA_PORTARE` di `prove/scrittureTracciate.mjs`: chi ne porta una sull'involucro la toglie dall'elenco. Lo stesso giorno ci sono passate le aperture di `chiusuraAnno`, le righe tolte da `ripulisciDichiarazioni` (col record intero come «prima», non il riassunto dell'elenco: `prove/storicoScrittureDiServizio.mjs`) e il modello delle voci della passiva in `PassivaModulo`; `TariffeUnificate` e `NuovoAnno` dicono quando la traccia di `gestisciAnagrafiche` o `preparaAnno` non si e' scritta. Resta `ImportaReportGenerale`: centinaia di target una volta l'anno, e con l'involucro ogni scrittura diventerebbe tre richieste senza ritentativi; ogni cella ha gia' il suo `storico_json`. Va portato con una scrittura del registro a blocchi. `elaboraFatturazionePassiva`, superata, crea fornitori con `Fornitore.create`, che dal 13/10/2026 e' un archivio tracciato: risponde 410 subito dopo l'autenticazione, quel codice non gira, e sta in `FUORI_PER_NATURA` col suo motivo (chiusura del giro, 14/10/2026).
 - **Revisione dell'11-12/10/2026.** I JSON si confrontano con le chiavi in ordine: il criterio di una voce della passiva riscritto dalla pagina con le chiavi in un altro ordine e' lo stesso criterio (8 voci vere di Irigom registravano un cambio mai avvenuto). Una tabella senza nessun valore (dodici null, [] o {}) vale vuoto; lo zero resta un valore. I campi json di `CAMPI_TRACCIATI` dicono l'unita' dei loro numeri (`celle` per i dodici mesi, `colonne` { colonna: { nome, unita } }): `differenzeJson(prima, dopo, campoTracciato(entita, campo))` restituisce { voce, prima, dopo, unita }, la percentuale salvata come frazione esce per cento, e a video si legge «P, percentuale 30% → 35%», «Campania, prezzo 120,00 €/t → 125,00 €/t», «giugno 900,50 t → 950,00 t». Un campo json nuovo con numeri dentro deve dire la sua unita' li'. In `storicoModifiche.ts` l'unita' di una riga si decide una volta, non lato per lato (`unitaMostrata`): su un impianto cancellato il «dopo» e' vuoto, e il target in tonnellate arrivava con 'kg'. Una riga di tabella aggiunta o tolta senza valori si dice per nome («righe Campania, Puglia, Basilicata, Calabria e Sicilia aggiunte, ancora senza valori»), mai col suo JSON.
 - **La copia dell'anno passa dallo storico** (`copiaAnnoTarget`, 11/10/2026): una riga 'create' per campo, con origine «Target & Status, copia dell'anno» e motivo «copia dal <anno prima>, da confermare» (le righe del contratto, quando la copia ne toglie le variazioni del consorzio, aggiungono quali: «...; senza la variazione del consorzio del 2026 (ottobre, Puglia +100,00 t)», dal 14/10/2026, vedi «Le variazioni del contratto in corso d'anno»); il registro si scrive a blocchi per archivio (sui dati veri 329 righe, le scritture da 11 a 19). `creaTracciati`/`creaConTraccia` accetta `unoPerUno: true` per chi ha bisogno dell'id di ogni record; se una creazione a blocchi si ferma a meta', registra quelle fatte e poi lancia. La finestra della copia in `ConfigurazioneImpianti.jsx` (`DialogoAzione`) dice in ambra quando il registro non si scrive (`notaTraccia`). Le funzioni che rimandano `traccia` sono gestisciAnagrafiche, preparaAnno, copiaAnnoTarget, chiusuraAnno e ripulisciDichiarazioni.
-- **La conferma di un valore copiato**: le tariffe confermate con «Prepara l'anno» (`preparaAnno`, azione `conferma_tariffe`; decisioni dell'utente del 13/10/2026) lasciano una riga per tariffa, scritte tutte con un solo `registraModifiche`. La riga e' fatta cosi': entita Tariffa, campo valore, prima e dopo uguali (il prezzo e' stato controllato, non cambiato), operazione update, chi, quando, origine «Nuovo anno, tariffe», motivo «confermato il valore copiato dall'anno prima (<anno prima>), sul contratto <anno>» (`righeConferma`, `MOTIVO_CONFERMA`), riservata se la tariffa e' passiva. Sui dati veri dell'11/10/2026 la copia del 2027 fa 65 tariffe (7 attive, 58 passive): confermarle lascera' 65 righe. Se il registro non si scrive le tariffe restano confermate, e la risposta lo dice (`traccia`). I target, i siti e la commessa confermati in Target & Status tolgono ancora solo il segno «da confermare» e non lasciano righe: la nota di `storico_modifiche` dice tutte e due le cose, perche' EcoTyna non riceva la riga della conferma insieme a una frase che la smentisce (revisione del 14/10/2026, nota portata dalla chiusura del giro). Chi porta la riga anche sulla conferma di Target & Status (`DaConfermare` in `ConfigurazioneImpianti.jsx`, `confermaRighe` in `TargetRaccoglitoriGrid.jsx`, la commessa) la fa come `righeConferma`, meglio con una regola sola in `campiTracciati` per tutti, e accorcia la nota. Prove: `prove/inizializzazioneAnno.mjs` e `prove/storicoModifiche.mjs`, sezione 6.
+- **La conferma di un valore copiato** (decisioni dell'utente del 13/10/2026; una regola sola per tutti dal 14/10/2026): confermare toglie il segno «da confermare» e non cambia nessun campo tracciato, ma lascia la sua riga. La regola e' `righeDiConferma` in `campiTracciati` (nei due specchi): una riga per record, sul primo campo di `CAMPI_DELLA_CONFERMA` che ha un valore. I campi sono: Tariffa `valore`; ImpiantoTargetSecondaria `target`; TargetRaccoglitore `target_tonnellate`; TargetMensile `non_raccoglie` e poi `target` (sui dati veri i 22 mesi che non raccolgono hanno il target a zero, e due righe direbbero due volte la stessa cosa); CommessaEcotyre `target_annuo_t`; GiacenzaSito `dichiara_rete` e poi `tipo_destinazione`. Il valore e' uguale prima e dopo (controllato, non cambiato); operazione update, chi, quando, origine, l'anno e il motivo `motivoDellaConferma(anno)`, «confermato il valore copiato dall'anno prima (<anno prima>), sul contratto <anno>» (`MOTIVO_CONFERMA`). La riga e' riservata come una modifica dello stesso campo. Un record senza valore ha la riga sull'ultimo campo, senza prima e dopo, e lo zero e' un valore; un archivio fuori dall'elenco (FornitoreSecondaria, che non si traccia) non lascia righe.
+  Si scrive con `registraConferma`: nelle pagine `registraConferma([{ entita, record }], { origine })` (`src/lib/scriviConTraccia.js`), nelle funzioni `registraConferma(svc, confermati, { utente, origine, anno })` (`shared/traccia.ts`). Tutte le righe di una conferma partono con una scrittura sola (`registraConferme`, a blocchi di cento) e senza letture: il record e' quello in mano alla pagina unito alla risposta della scrittura. Se il registro non si scrive la conferma resta e la pagina lo dice (`avvisoTraccia`).
+  La usano `DaConfermare` in `ConfigurazioneImpianti.jsx` (impianti; i collegamenti non si tracciano e si confermano con la sola nota) e `confermaRighe` in `TargetRaccoglitoriGrid.jsx` (annui e mensili; se si ferma a meta' registra quelle fatte). La usa anche il pulsante «Conferma il contratto <anno>» di `CommessaEcotyreForm.jsx`, nuovo: prima il contratto copiato si confermava solo correggendolo, e uno uguale a quello dell'anno prima restava da confermare. Quel pulsante rilegge il contratto prima di scrivere, come ogni scrittura della commessa.
+  Le tariffe di `preparaAnno` (`conferma_tariffe`) usano ancora `righeConferma`, uguali campo per campo a `righeDiConferma` (`prove/confermeNelloStorico.mjs`, sezione 2): chi tocca `preparaAnno` le porta sulla regola. Sui dati veri dell'11/10/2026 confermare tutto quello che la copia del 2027 scrive in Target & Status lascia 168 righe: 6 impianti, 14 annui, 147 mensili e il contratto. «Conferma tutte» dei raccoglitori ne scrive 161 in due blocchi. Vanno aggiunte le 65 delle tariffe.
+  Una correzione salvata dopo la copia conferma il record e lascia le righe di quello che cambia, non quella della conferma. Restano senza riga i siti di Giacenze e le tariffe a cui la nota della copia si toglie a mano: la nota di `storico_modifiche` lo dice e non dice piu' che le conferme di Target & Status non lasciano righe (14/10/2026). Prove: `prove/confermeNelloStorico.mjs` (regola, banco, motore, le tre pagine vere, EcoTyna), `prove/storicoModifiche.mjs` sezione 6 e `prove/inizializzazioneAnno.mjs`.
+- **Un pulsante che lascia una riga nel registro non si preme due volte** (revisione del 14/10/2026). Il registro non si corregge: update e delete sono vietati a tutti, e un doppio clic lascia due righe. Il pulsante si spegne mentre la scrittura e' in volo, e un ref ferma il secondo clic di un doppio clic, che arriva prima che il pulsante spento sia a video. Esempi: `DaConfermare` in `ConfigurazioneImpianti.jsx`, `confermando` nella griglia dei raccoglitori, `salvando` piu' la rilettura con `daConfermare` nella commessa. Se la pagina toglie il segno solo rileggendo, come `DaConfermare`, una conferma riuscita tiene il pulsante spento finche' non arriva il record confermato: se la rilettura non riesce, a video resta il record di prima, ancora «da confermare», e un altro clic scriverebbe un'altra riga. Il blocco e' per id, quindi tiene anche se nel frattempo la scheda si rilegge con oggetti nuovi; arrivato il record confermato si toglie, cosi' una copia rifatta piu' avanti si puo' confermare di nuovo. Una conferma non riuscita lo riaccende. Prova: `prove/confermeNelloStorico.mjs`, sezione 4a, col doppio clic, la scheda non riletta e la conferma che non riesce; gli update si tengono fermi con `stato.trattieni`.
 - **Prove**: `prove/scrittureTracciate.mjs` fallisce se una create/update/delete di un archivio tracciato compare fuori dall'involucro, anche via alias o `entities[...]`, se un'eccezione non serve piu' o se qualcuno tocca una riga di `ModificaDato`. `prove/storicoModifiche.mjs` prova regola, motore, pagine, le funzioni vere e lo strumento.
 
 ### I conti che si salvano non si salvano su un archivio a meta' (11/10/2026)
@@ -6040,12 +6265,81 @@ Chi non e' amministratore non perde niente a video: la scheda Contratti legge
 `apriFile`; il surplus arriva da `leggiSurplus` (vedi «Chi legge il surplus»).
 Nessuna pagina legge contratti e modelli dal browser, e nessuna funzione li legge
 coi permessi di chi chiede. Prova: `prove/chiLeggeCosa.mjs`, sezioni 1-4.
-Restano lette da tutti le tariffe passive: le legge dal browser solo
-`ExtraRaccoltaForm.jsx`, che la pagina Extra Raccolta monta per chiunque anche se
-la apre solo l'amministratore. Si chiudono montando la scheda solo per lui, e poi
-con una lettura di `Tariffa` riservata all'amministratore tranne le ATTIVA (la
-condizione sul campo va provata da un utente non amministratore dopo la
-pubblicazione).
+
+**Anche le tariffe le legge solo l'amministratore** (14/10/2026, «per me ok
+sulle cose da sistemare»). `Tariffa` aveva `rls.read` true. Il gestionale
+mostrava le passive al solo amministratore, ma dal browser chiunque fosse
+collegato leggeva l'archivio intero. Ora `rls.read` e' dell'amministratore, come
+per `SurplusTariffa`.
+- **Chi non e' amministratore** riceve le sole tariffe ATTIVE dalla funzione di
+  sola lettura `leggiTariffe`. Nel browser si chiama `leggiTariffe()` di
+  `src/lib/leggiTariffe.js`, che risponde `{ parte, tariffe }` e lancia un errore
+  se la risposta e' muta.
+- All'amministratore la funzione da' tutto l'archivio (`parte: 'tutto'`). Agli
+  altri le attive coi soli campi di `CAMPI_TARIFFA_ATTIVA`
+  (`base44/shared/tariffeVisibili.ts`): id, direzione, cliente, canale, dicitura
+  del servizio, regione, provincia, classe, EER, unita', valore, date e stato.
+  Restano fuori le note, i campi delle passive e quelli della piattaforma.
+- Una tariffa senza direzione e' passiva. Chi e' amministratore lo decide il
+  server.
+- Le tariffe arrivano per data di creazione, la piu' recente prima, come le
+  leggeva la pagina: fra due ugualmente specifiche `sortTariffe` tiene
+  quell'ordine.
+- **L'Extra Raccolta** chiede tutto a `leggiTariffe` con una chiamata sola.
+  - Tutti ricevono le attive dell'extra raccolta.
+  - Con `parte === 'tutto'` riceve anche i contratti dei trasporti delle
+    secondarie e le passive dell'extra raccolta, che passa alla scheda
+    (`tariffePassive`).
+  - Prima leggeva l'archivio due volte, tre con la scheda.
+  - Le tre letture della pagina (tariffe, fornitori, surplus) partono insieme.
+  - Se la funzione cade la pagina lo dice, e la scheda riceve null e dice che non
+    propone i costi. Mentre legge, la scheda riceve undefined.
+- **La scheda dell'intervento** (`ExtraRaccoltaForm.jsx`) si monta solo per
+  l'amministratore e non legge `Tariffa`. Montata per tutti, leggeva le passive
+  anche nella pagina degli altri.
+- **Chi legge Tariffa dal browser**: solo Tariffe & Anagrafiche
+  (`TariffeUnificate.jsx`) e la Passiva (`PassivaModulo.jsx`), disegnate solo
+  all'amministratore. Le funzioni la leggono tutte con `asServiceRole` (19 file il
+  14/10/2026, piu' `leggiTariffe`).
+- Una pagina nuova, aperta da altri, che leggesse `Tariffa` direttamente
+  riceverebbe un elenco vuoto senza un errore. Nell'Extra Raccolta vorrebbe dire
+  la sola base dell'anno (202) al posto della tariffa della tabella.
+- **Lo storico** delle passive era gia' riservato (`campoRiservato`,
+  `ModificaDato`).
+- Sui dati veri dell'11/10/2026 la pagina riceve le stesse tariffe di prima, nello
+  stesso ordine. Ogni mese del 2026 la fattura sui tre canali e l'extra raccolta
+  dicono gli stessi numeri.
+
+Prova: `prove/tariffeRiservate.mjs`. Copre la regola, l'inventario dei lettori, la
+parte attiva, la funzione sul banco e con un SDK che applica davvero la regola di
+lettura, la pagina vera con l'archivio chiuso, lo storico e i dati veri.
+
+**Due fughe chiuse dalla chiusura del giro** (14/10/2026, trovate dal gruppo
+delle tariffe):
+- **`controlloRotte` mandava i prezzi passivi di raccolta a chiunque.** La
+  funzione controlla solo che ci sia un utente collegato, e le «tariffe da
+  verificare» portavano il prezzo per destinazione, la generica, l'unita' e il
+  prezzo dentro il testo; la scheda Controllo rotte di Verifiche scriveva «72
+  €/t» a tutti. Ora `tariffeDaVerificare` (`shared/rotteConferimenti.ts`) li da'
+  solo con `{ conPrezzi: true }`, e senza dire chi chiede si nega:
+  `controlloRotte` passa `conPrezzi` solo all'amministratore. Agli altri, ed
+  EcoTyna quando chiede per loro, ogni destinazione dice solo se ha un prezzo
+  suo (`tariffa_propria`), e il testo «si paga la generica.» senza la cifra. La
+  scheda scrive «senza prezzo suo» solo dove e' vero. Prova:
+  `prove/controlloRotteTariffe.mjs` (fino a quel giorno chiedeva da utente
+  semplice e pretendeva la generica di 80: pretendeva la fuga).
+- **La direzione di una tariffa non si cambia.** La scheda la tiene in sola
+  lettura, ma `gestisciAnagrafiche` accettava un update da PASSIVA ad ATTIVA: lo
+  storico calcola `riservato` sul record di dopo, e la riga «valore 72 → 210»
+  nasceva leggibile da chi non e' amministratore. Ora la funzione risponde 400
+  («crea una tariffa nuova») e non scrive niente; senza direzione una tariffa e'
+  passiva, e scriverci PASSIVA non e' un cambio. Prova:
+  `prove/direzioneTariffaFissa.mjs`.
+
+**Dopo la pubblicazione** si verifica dal vivo con un utente non amministratore:
+l'Extra Raccolta deve avere i ricavi della fattura e nessun avviso di tariffe non
+lette, `Tariffa` letta dagli strumenti dello sviluppatore deve dare un elenco
+vuoto, e Verifiche > Controllo rotte non deve scrivere €/t.
 
 ### I documenti aziendali non salgono mai in area pubblica (30/09/2026)
 
