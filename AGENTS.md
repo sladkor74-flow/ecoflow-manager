@@ -3534,10 +3534,13 @@ che l'utente ha dato, da non riderivare:
   prima sempre con `simula: true` e la conferma dell'utente). Copia impianti e
   loro target, collegamenti degli stoccaggi (con la priorita' scritta per
   esteso), target dei raccoglitori annui e mensili, contratto Ecotyre (solo se
-  l'anno non ne ha uno) ed elenco dei siti delle giacenze; tutto "copiato dal
-  {anno-1}, da confermare". Salta quello che l'anno ha gia': si puo' ripetere e
-  completa una copia interrotta. Il piano e' puro (`pianoCopiaAnno`, provato in
-  `prove/annoTarget.mjs` e `prove/copiaAnnoTarget.mjs`).
+  l'anno non ne ha uno, e senza le variazioni del consorzio in vigore, con la
+  nota che le ricorda: decisione dell'utente del 14/10/2026, vedi «Le
+  variazioni del contratto in corso d'anno») ed elenco dei siti delle giacenze;
+  tutto "copiato dal {anno-1}, da confermare". Salta quello che l'anno ha gia':
+  si puo' ripetere e completa una copia interrotta. Il piano e' puro
+  (`pianoCopiaAnno`, provato in `prove/annoTarget.mjs`,
+  `prove/copiaAnnoTarget.mjs` e `prove/copiaSenzaVariazioni.mjs`).
 - **Gli anni chiusi** (prima dell'anno in corso, ora italiana: `annoChiuso`) si
   leggono soltanto: la pagina non lascia scrivere e le funzioni che scrivono li
   rifiutano. Scrive solo l'amministratore (`soloAmministratore`).
@@ -4717,11 +4720,70 @@ nella scheda dei raccoglitori.
     raccoglitori e non il contratto), i PDF e gli Excel gia' scaricati, i Word
     dei contratti ai subfornitori. Nessuna funzione che salva un conto legge il
     target del contratto.
-  - La copia dell'anno (`pianoCopiaAnno` di `annoTarget.ts`) porta nel nuovo
-    anno il contratto coi numeri della variazione (11.650, Puglia 2.600, ottobre
-    1.200, IRIGOM 4.550) ma senza la sua voce nello storico, solo «copiato dal
-    2026, da confermare». Copiare il contratto senza le variazioni o portarle
-    come nota e' una domanda aperta per l'utente.
+  - La copia dell'anno (`pianoCopiaAnno` di `annoTarget.ts`) legge il contratto
+    dell'anno prima quando si copia, e lo porta senza le variazioni: vedi il
+    punto dopo.
+- **Il nuovo anno nasce senza le variazioni del consorzio** (decisione
+  dell'utente del 14/10/2026, «ok» alla proposta: valevano per l'anno in cui
+  il consorzio le ha date). Prima la copia dell'anno portava nel 2027 il
+  contratto coi numeri della variazione (11.650, Puglia 2.600, ottobre 1.200,
+  IRIGOM 4.550) col solo «copiato dal 2026, da confermare»: nel 2027 nessuno
+  avrebbe saputo da dove venivano le 100 t in piu'.
+  - La regola e' una, `contrattoSenzaVariazioni(commessa, annoNuovo,
+    raccoglitori)` di `attesoContratto.ts` (specchio in `src/lib`), e la usa
+    `pianoCopiaAnno` (funzione `copiaAnnoTarget`). Ogni variazione in vigore si
+    toglie dal target annuo, dalla prima riga della sua regione (dove
+    `variazioneDelContratto` l'ha scritta: con due righe della stessa regione
+    non se ne tolgono 200 t), dal mese rivisto solo se ci e' stata scritta
+    (`nel_mese`) e dalla prima riga della sua destinazione solo se nessun
+    salvataggio l'ha riscritta dopo. La destinazione non decide `in_vigore`:
+    si segue nello storico con `numeroDellaVariazione`, come la regione e il
+    mese. Al chilo, mai sotto zero; un annuo mancante resta mancante. **Le
+    variazioni superate non si tolgono**: vale il contratto scritto dopo, come
+    per `in_vigore` (quando la regione porta ancora le loro tonnellate lo dice
+    la nota, vedi sotto).
+  - Sul caso vero il 2027 nasce a 11.550, Puglia 2.500, ottobre 1.100, IRIGOM
+    4.450. Profilo iniziale, budget, classi e previsione ACI, che le variazioni
+    non toccano, si copiano come sono, e cosi' raccoglitori, mensili, impianti,
+    collegamenti e siti.
+  - **La nota sta nello storico del contratto copiato, in una voce sola**:
+    «copiato dal 2026, da confermare · La variazione del consorzio del 2026 non
+    è copiata, perché valeva per il 2026: ottobre, Puglia +100,00 t, ... Se il
+    consorzio la conferma anche per il 2027, registrala come variazione del 2027
+    nella scheda Commessa Ecotyre.», con `variazioni_non_copiate`. Una voce
+    sola perche' `daConfermare` cerca la nota della copia nell'ultima voce: una
+    seconda voce dopo farebbe sembrare confermato il contratto. Confermato il
+    contratto (un salvataggio della scheda aggiunge la sua voce), il promemoria
+    resta leggibile in «Modifiche», in fondo alla scheda Commessa Ecotyre.
+  - La nota dice anche, una frase per caso: le destinazioni riscritte dopo una
+    variazione (si copiano come sono scritte: controllale); i target dei
+    raccoglitori dell'anno nuovo che, col contratto senza variazioni, non fanno
+    piu' la regione (il caso vero del 14/10: SMOCO in Puglia 1.950, cioe'
+    raccoglitori 2.600 contro 2.500; senza la frase il 2027 nasceva con
+    l'avviso del cruscotto e nessuno l'aveva detto prima); le variazioni
+    superate dal solo mese, quando la regione porta ancora le loro tonnellate
+    (si copiano come sono, e la nota c'e' anche senza variazioni in vigore). I
+    raccoglitori si copiano sempre come sono: se il consorzio conferma la
+    variazione per il nuovo anno, registrandola tornano a fare il contratto;
+    se no, si correggono nella scheda Target raccoglitori.
+  - La risposta della funzione, anche simulata, porta
+    `contratto_senza_variazioni` ({ variazioni, righe, raccoglitori, parti,
+    nota, motivo }). La finestra «Copia dal 2026 al 2027» (`DialogoAzione` di
+    `ConfigurazioneImpianti.jsx`) mostra i numeri con e senza e un paragrafo
+    per parte, prima di confermare e dopo; il titolo «senza le variazioni» c'e'
+    solo se se ne toglie qualcuna. Le righe di ModificaDato del contratto hanno
+    il motivo «copia dal 2026, da confermare; senza la variazione del consorzio
+    del 2026 (ottobre, Puglia +100,00 t)». Se non c'e' niente da dire, copia e
+    risposta sono quelle di prima, campo per campo.
+  - `annoTarget.ts` e `attesoContratto.ts` si importano a vicenda: regge perche'
+    nessuno dei due usa l'altro mentre si carica. Una costante in cima a uno
+    dei due calcolata con una funzione dell'altro lo romperebbe: la prova li
+    impacchetta nei due ordini. `preparaAnno` e `inizializzazioneAnno` non
+    copiano il contratto: la voce «Contratto Ecotyre» di «Nuovo anno» lo vede
+    copiato e da confermare come prima.
+  Prova: `prove/copiaSenzaVariazioni.mjs` (la regola, il piano, la funzione
+  intera sulla copia dei dati veri dell'11/10/2026, la finestra a 375 px, i due
+  moduli che si importano a vicenda).
 - **EcoTyna legge il contratto con `contratto_ecotyre`**, non con la somma dei
   raccoglitori: vedi «EcoTyna: le domande sui dati non sono domande di norma».
 - Prove: `prove/aggiornamentoDopoVariazione.mjs`, col calendario fermo al
@@ -5825,7 +5887,7 @@ La piattaforma conserva solo `updated_date`: di un target, di un'apertura o di u
 - **EcoTyna**: lo strumento `storico_modifiche` (`base44/shared/storicoModifiche.ts`) dice sempre che lo storico comincia a ottobre 2026: «nessuna modifica» non vuol dire «mai cambiato». Le righe dei mesi dell'attiva chiusi fuori dal gestionale (`segnaMesiChiusiFuori`, archivio DocumentoFatturazione) si dicono «documento della fatturazione attiva» e si trovano chiedendo di fatturazione o di chiusura (gruppo `['fattur','chius']` in `COSE`; revisione del 13/10/2026). Prova: `prove/storicoModifiche.mjs`, sezione 6. Le righe dei surplus si dicono «surplus sulle tariffe» (`NOMI_ARCHIVI`; prima EcoTyna diceva «SurplusTariffa», il nome interno) e si trovano chiedendo delle tariffe, perche' il surplus e' parte del prezzo, o del surplus, del Fuel Surcharge o del carburante, con tutti i loro campi, date, stato ed elenco compresi (13/10/2026). Un archivio tracciato nuovo ha il suo nome in `NOMI_ARCHIVI` e le sue parole in `COSE`. Prova: `prove/storicoModificheSurplus.mjs`. Le righe dei fornitori (dal 13/10/2026) si dicono «anagrafica dei fornitori (recapiti per i contratti)» e si trovano chiedendo dei recapiti, del cellulare, del referente, dell'anagrafica o dei contratti; niente «pec» fra le parole, perche' sta dentro «specifico» e «specchio» (chiusura del giro, 14/10/2026; prova: `prove/storicoModifiche.mjs`, sezione 9).
 - **Fuori, con il loro motivo**: i caricamenti dei file (il loro storico e' UploadLog), le copie d'anno in blocco, le sistemazioni una tantum e i semi. Il debito scritto e' nella lista `DA_PORTARE` di `prove/scrittureTracciate.mjs`: chi ne porta una sull'involucro la toglie dall'elenco. Lo stesso giorno ci sono passate le aperture di `chiusuraAnno`, le righe tolte da `ripulisciDichiarazioni` (col record intero come «prima», non il riassunto dell'elenco: `prove/storicoScrittureDiServizio.mjs`) e il modello delle voci della passiva in `PassivaModulo`; `TariffeUnificate` e `NuovoAnno` dicono quando la traccia di `gestisciAnagrafiche` o `preparaAnno` non si e' scritta. Resta `ImportaReportGenerale`: centinaia di target una volta l'anno, e con l'involucro ogni scrittura diventerebbe tre richieste senza ritentativi; ogni cella ha gia' il suo `storico_json`. Va portato con una scrittura del registro a blocchi. `elaboraFatturazionePassiva`, superata, crea fornitori con `Fornitore.create`, che dal 13/10/2026 e' un archivio tracciato: risponde 410 subito dopo l'autenticazione, quel codice non gira, e sta in `FUORI_PER_NATURA` col suo motivo (chiusura del giro, 14/10/2026).
 - **Revisione dell'11-12/10/2026.** I JSON si confrontano con le chiavi in ordine: il criterio di una voce della passiva riscritto dalla pagina con le chiavi in un altro ordine e' lo stesso criterio (8 voci vere di Irigom registravano un cambio mai avvenuto). Una tabella senza nessun valore (dodici null, [] o {}) vale vuoto; lo zero resta un valore. I campi json di `CAMPI_TRACCIATI` dicono l'unita' dei loro numeri (`celle` per i dodici mesi, `colonne` { colonna: { nome, unita } }): `differenzeJson(prima, dopo, campoTracciato(entita, campo))` restituisce { voce, prima, dopo, unita }, la percentuale salvata come frazione esce per cento, e a video si legge «P, percentuale 30% → 35%», «Campania, prezzo 120,00 €/t → 125,00 €/t», «giugno 900,50 t → 950,00 t». Un campo json nuovo con numeri dentro deve dire la sua unita' li'. In `storicoModifiche.ts` l'unita' di una riga si decide una volta, non lato per lato (`unitaMostrata`): su un impianto cancellato il «dopo» e' vuoto, e il target in tonnellate arrivava con 'kg'. Una riga di tabella aggiunta o tolta senza valori si dice per nome («righe Campania, Puglia, Basilicata, Calabria e Sicilia aggiunte, ancora senza valori»), mai col suo JSON.
-- **La copia dell'anno passa dallo storico** (`copiaAnnoTarget`, 11/10/2026): una riga 'create' per campo, con origine «Target & Status, copia dell'anno» e motivo «copia dal <anno prima>, da confermare»; il registro si scrive a blocchi per archivio (sui dati veri 329 righe, le scritture da 11 a 19). `creaTracciati`/`creaConTraccia` accetta `unoPerUno: true` per chi ha bisogno dell'id di ogni record; se una creazione a blocchi si ferma a meta', registra quelle fatte e poi lancia. La finestra della copia in `ConfigurazioneImpianti.jsx` (`DialogoAzione`) dice in ambra quando il registro non si scrive (`notaTraccia`). Le funzioni che rimandano `traccia` sono gestisciAnagrafiche, preparaAnno, copiaAnnoTarget, chiusuraAnno e ripulisciDichiarazioni.
+- **La copia dell'anno passa dallo storico** (`copiaAnnoTarget`, 11/10/2026): una riga 'create' per campo, con origine «Target & Status, copia dell'anno» e motivo «copia dal <anno prima>, da confermare» (le righe del contratto, quando la copia ne toglie le variazioni del consorzio, aggiungono quali: «...; senza la variazione del consorzio del 2026 (ottobre, Puglia +100,00 t)», dal 14/10/2026, vedi «Le variazioni del contratto in corso d'anno»); il registro si scrive a blocchi per archivio (sui dati veri 329 righe, le scritture da 11 a 19). `creaTracciati`/`creaConTraccia` accetta `unoPerUno: true` per chi ha bisogno dell'id di ogni record; se una creazione a blocchi si ferma a meta', registra quelle fatte e poi lancia. La finestra della copia in `ConfigurazioneImpianti.jsx` (`DialogoAzione`) dice in ambra quando il registro non si scrive (`notaTraccia`). Le funzioni che rimandano `traccia` sono gestisciAnagrafiche, preparaAnno, copiaAnnoTarget, chiusuraAnno e ripulisciDichiarazioni.
 - **La conferma di un valore copiato**: le tariffe confermate con «Prepara l'anno» (`preparaAnno`, azione `conferma_tariffe`; decisioni dell'utente del 13/10/2026) lasciano una riga per tariffa, scritte tutte con un solo `registraModifiche`. La riga e' fatta cosi': entita Tariffa, campo valore, prima e dopo uguali (il prezzo e' stato controllato, non cambiato), operazione update, chi, quando, origine «Nuovo anno, tariffe», motivo «confermato il valore copiato dall'anno prima (<anno prima>), sul contratto <anno>» (`righeConferma`, `MOTIVO_CONFERMA`), riservata se la tariffa e' passiva. Sui dati veri dell'11/10/2026 la copia del 2027 fa 65 tariffe (7 attive, 58 passive): confermarle lascera' 65 righe. Se il registro non si scrive le tariffe restano confermate, e la risposta lo dice (`traccia`). I target, i siti e la commessa confermati in Target & Status tolgono ancora solo il segno «da confermare» e non lasciano righe: la nota di `storico_modifiche` dice tutte e due le cose, perche' EcoTyna non riceva la riga della conferma insieme a una frase che la smentisce (revisione del 14/10/2026, nota portata dalla chiusura del giro). Chi porta la riga anche sulla conferma di Target & Status (`DaConfermare` in `ConfigurazioneImpianti.jsx`, `confermaRighe` in `TargetRaccoglitoriGrid.jsx`, la commessa) la fa come `righeConferma`, meglio con una regola sola in `campiTracciati` per tutti, e accorcia la nota. Prove: `prove/inizializzazioneAnno.mjs` e `prove/storicoModifiche.mjs`, sezione 6.
 - **Prove**: `prove/scrittureTracciate.mjs` fallisce se una create/update/delete di un archivio tracciato compare fuori dall'involucro, anche via alias o `entities[...]`, se un'eccezione non serve piu' o se qualcuno tocca una riga di `ModificaDato`. `prove/storicoModifiche.mjs` prova regola, motore, pagine, le funzioni vere e lo strumento.
 
