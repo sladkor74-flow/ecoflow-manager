@@ -10,6 +10,8 @@ import { leggiFileTargetContratto } from '@/lib/targetContratto';
 import { RiepilogoDate } from '@/components/primarie-rete/DateDaSistemare';
 import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
+import VariazioneContratto, { ElencoVariazioni, avvisoVariazioniChiuse } from '@/components/target-status/VariazioneContratto';
+import { variazioniDelContratto, variazioniCheSiChiudono } from '@/lib/attesoContratto';
 
 // Commessa Ecotyre dell'anno, cioe' quanto richiede il contratto: target annuo e
 // per regione, ripartizione per classe, target mensile iniziale e rivisto, budget
@@ -24,6 +26,18 @@ import StoricoModifiche from '@/components/shared/StoricoModifiche';
 // regione per regione, e col motivo scritto accanto al pulsante. Lo storico
 // delle modifiche si legge in fondo alla scheda; quello di prima (storico_json,
 // che diceva solo il target annuo di prima) resta sotto.
+//
+// LE VARIAZIONI DEL CONSORZIO IN CORSO D'ANNO (richiesta dell'utente del
+// 14/10/2026: 100 t in piu' a ottobre in Puglia, scritte solo nel target di
+// SMOCO, e la dashboard restava a 11.550 t). Non si riscrive la tabella a mano:
+// «Registra una variazione» (VariazioneContratto.jsx) cambia con una scrittura
+// sola target annuo, regione, target mensile rivisto del mese e, se si dice, la
+// destinazione, e lascia la voce nello storico col motivo e il giorno della
+// comunicazione. Qui si vede l'elenco delle variazioni dell'anno.
+// Se un salvataggio della tabella (a mano o da un foglio importato) cambia la
+// regione o il mese che una variazione aveva scritto, la variazione esce dai
+// numeri e resta in elenco barrata (revisione del 14/10/2026): la scheda lo
+// dice prima di salvare (variazioniCheSiChiudono), non dopo.
 
 const ORIGINE = 'Target & Status, commessa Ecotyre';
 const testo = (v) => (v === null || v === undefined || v === '' ? '' : String(v).replace('.', ','));
@@ -57,6 +71,22 @@ function statoDaContratto(c) {
     aci: dodici(c.budget_aci),
     destinazioni: c.destinazioni.map(x => ({ destinazione: x.destinazione, target: testo(x.target_t), trattamento: x.trattamento })),
     prezzo_regioni: c.target_prezzo_regioni.map(x => ({ regione: x.regione, target: testo(x.target_t), prezzo: testo(x.prezzo) })),
+  };
+}
+
+// I campi che il salvataggio scrive, dai dati a video (o da un foglio letto).
+function valoriDa(dati, anno) {
+  return {
+    anno,
+    target_annuo_t: numero(dati.target_annuo_t),
+    regioni_json: JSON.stringify(dati.regioni.filter(r => r.regione.trim()).map(r => ({ regione: r.regione.trim(), province: r.province.trim(), target_t: numero(r.target) }))),
+    classi_json: JSON.stringify(dati.classi.filter(c => c.classe.trim()).map(c => ({ classe: c.classe.trim(), descrizione: c.descrizione.trim(), peso: c.peso.trim(), percentuale: numero(c.percentuale) === null ? null : numero(c.percentuale) / 100 }))),
+    target_mensile_iniziale_json: JSON.stringify(dati.mensile_iniziale.map(numero)),
+    target_mensile_json: JSON.stringify(dati.mensile.map(numero)),
+    budget_rete_json: JSON.stringify(dati.rete.map(numero)),
+    budget_aci_json: JSON.stringify(dati.aci.map(numero)),
+    destinazioni_json: JSON.stringify(dati.destinazioni.filter(d => d.destinazione.trim()).map(d => ({ destinazione: d.destinazione.trim(), target_t: numero(d.target), trattamento: d.trattamento.trim() }))),
+    target_prezzo_regioni_json: JSON.stringify(dati.prezzo_regioni.filter(p => p.regione.trim()).map(p => ({ regione: p.regione.trim(), target_t: numero(p.target), prezzo: numero(p.prezzo) }))),
   };
 }
 
@@ -120,6 +150,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
   const [dati, setDati] = useState(statoDaRecord(null));
   const [modificato, setModificato] = useState(false);
   const [nota, setNota] = useState('');
+  const [variazioneAperta, setVariazioneAperta] = useState(false);
 
   // Le letture si numerano: una superata da un'altra non tocca niente. Senza,
   // cambiando anno in fretta poteva restare a video la commessa di un altro anno,
@@ -208,7 +239,11 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
       setDati(statoDaContratto(contratto));
       setModificato(true);
       setNota(`importato da ${file.name}`);
-      toast({ title: 'Dati del contratto letti dal file', description: `Controlla i valori e premi "Salva commessa ${anno}". ${contratto.avvisi.join(' ')}` });
+      // Il foglio puo' non conoscere le variazioni registrate nel gestionale
+      // (14/10/2026): se riscrive la regione o il mese di una variazione, si
+      // dice quale esce dai numeri salvandolo.
+      const chiuse = avvisoVariazioniChiuse(variazioniCheSiChiudono(record, valoriDa(statoDaContratto(contratto), anno)));
+      toast({ title: 'Dati del contratto letti dal file', description: `Controlla i valori e premi "Salva commessa ${anno}". ${contratto.avvisi.join(' ')}${chiuse ? ` Attenzione: ${chiuse}` : ''}` });
     } catch (e) {
       toast({ title: 'Lettura non riuscita', description: e.message || String(e), variant: 'destructive' });
     }
@@ -222,18 +257,7 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
       toast({ title: 'Valori non validi', description: 'Nei campi numerici scrivi solo numeri, per esempio 11550 o 851,29.', variant: 'destructive' });
       return;
     }
-    const valori = {
-      anno,
-      target_annuo_t: numero(dati.target_annuo_t),
-      regioni_json: JSON.stringify(dati.regioni.filter(r => r.regione.trim()).map(r => ({ regione: r.regione.trim(), province: r.province.trim(), target_t: numero(r.target) }))),
-      classi_json: JSON.stringify(dati.classi.filter(c => c.classe.trim()).map(c => ({ classe: c.classe.trim(), descrizione: c.descrizione.trim(), peso: c.peso.trim(), percentuale: numero(c.percentuale) === null ? null : numero(c.percentuale) / 100 }))),
-      target_mensile_iniziale_json: JSON.stringify(dati.mensile_iniziale.map(numero)),
-      target_mensile_json: JSON.stringify(dati.mensile.map(numero)),
-      budget_rete_json: JSON.stringify(dati.rete.map(numero)),
-      budget_aci_json: JSON.stringify(dati.aci.map(numero)),
-      destinazioni_json: JSON.stringify(dati.destinazioni.filter(d => d.destinazione.trim()).map(d => ({ destinazione: d.destinazione.trim(), target_t: numero(d.target), trattamento: d.trattamento.trim() }))),
-      target_prezzo_regioni_json: JSON.stringify(dati.prezzo_regioni.filter(p => p.regione.trim()).map(p => ({ regione: p.regione.trim(), target_t: numero(p.target), prezzo: numero(p.prezzo) }))),
-    };
+    const valori = valoriDa(dati, anno);
     setSalvando(true);
     let esito = null;
     try {
@@ -259,6 +283,9 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
   const confronto = (valore) => (annuo ? (Math.abs(valore - annuo) < 0.5 ? <span className="text-emerald-700">coincide con il target annuo</span> : <span className="text-amber-700">{valore < annuo ? 'mancano' : 'eccedono'} {tonnellate(Math.abs(valore - annuo))} t rispetto al target annuo</span>) : null);
   const cambiaMese = (chiave, i, v) => imposta(chiave, dati[chiave].map((x, j) => (j === i ? v : x)));
   const sommaClassi = somma(dati.classi.map(c => c.percentuale));
+  const variazioni = variazioniDelContratto(record);
+  // Le variazioni che il salvataggio di quello che c'e' a video toglierebbe dai numeri.
+  const escono = isAdmin && modificato && record ? avvisoVariazioniChiuse(variazioniCheSiChiudono(record, valoriDa(dati, anno))) : '';
 
   return (
     <div className="space-y-5 max-w-6xl">
@@ -281,7 +308,10 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
       {!record && !modificato && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">La commessa {anno} non è ancora stata inserita.</p>}
       {isAdmin && modificato && (
         <div className="flex items-center justify-between gap-3 flex-wrap text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
-          <span>I dati non sono ancora salvati: se esci, ricarichi la pagina o cambi anno o scheda senza salvare, si perdono.</span>
+          <span>
+            I dati non sono ancora salvati: se esci, ricarichi la pagina o cambi anno o scheda senza salvare, si perdono.
+            {escono && <strong className="block font-medium mt-0.5">{escono}</strong>}
+          </span>
           <Button size="sm" onClick={salva} disabled={salvando}>{salvando && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}Salva ora</Button>
         </div>
       )}
@@ -294,6 +324,24 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
           </div>
           <Tabella isAdmin={isAdmin} righe={dati.regioni} onChange={v => imposta('regioni', v)} nuovaRiga={{ regione: '', province: '', target: '' }}
             colonne={[{ chiave: 'regione', etichetta: 'Regione' }, { chiave: 'province', etichetta: 'Province' }, { chiave: 'target', etichetta: 't', numero: true, classe: 'w-28' }]} />
+        </Riquadro>
+
+        {/* Le variazioni del consorzio in corso d'anno (14/10/2026): si
+            registrano qui, una per volta e col motivo, e non si riscrivono le
+            tabelle a mano. Si scrivono sul contratto salvato: con modifiche a
+            video non ancora salvate il pulsante aspetta. */}
+        <Riquadro titolo={`Variazioni del contratto ${anno}`}>
+          <p className="text-xs text-muted-foreground">
+            Le tonnellate in più o in meno che il consorzio decide in corso d&apos;anno, per esempio un&apos;assegnazione in più per un mese in una regione.
+            Ognuna cambia il target annuo, quello della regione e il target mensile rivisto del mese, e resta qui col suo motivo.
+          </p>
+          <ElencoVariazioni variazioni={variazioni} anno={anno} targetAnnuo={record ? record.target_annuo_t : null} />
+          {isAdmin && record && (
+            <div className="flex items-center gap-2 flex-wrap pt-1">
+              <Button size="sm" variant="outline" onClick={() => setVariazioneAperta(true)} disabled={modificato}>Registra una variazione</Button>
+              {modificato && <span className="text-xs text-amber-700">Salva prima le modifiche a video: la variazione si scrive sul contratto salvato.</span>}
+            </div>
+          )}
         </Riquadro>
 
         <Riquadro
@@ -398,9 +446,15 @@ export default function CommessaEcotyreForm({ anno, isAdmin, user, onModificato 
         <section className="text-xs text-muted-foreground space-y-1">
           <div className="font-medium flex items-center gap-1"><History className="w-3.5 h-3.5" />Modifiche</div>
           {[...leggiStorico(record.storico_json)].reverse().map((v, i) => (
-            <div key={i}>{dataOra(v.il)}{v.da ? ` · ${v.da}` : ''}: {v.prima ? `target annuo prima ${tonnellate(v.prima.target_annuo_t)} t` : 'primo inserimento'}{v.nota ? ` — ${v.nota}` : ''}</div>
+            <div key={i}>{dataOra(v.il)}{v.da ? ` · ${v.da}` : ''}: {v.variazione
+              ? `variazione di ${String(MESI[v.variazione.mese_idx] || '').toLowerCase()}, ${v.variazione.regione} ${Number(v.variazione.t) > 0 ? '+' : ''}${tonnellate(v.variazione.t)} t (target annuo prima ${tonnellate(v.prima && v.prima.target_annuo_t)} t)`
+              : v.prima ? `target annuo prima ${tonnellate(v.prima.target_annuo_t)} t` : 'primo inserimento'}{v.nota ? ` — ${v.nota}` : ''}</div>
           ))}
         </section>
+      )}
+
+      {isAdmin && record && (
+        <VariazioneContratto anno={anno} commessa={record} user={user} aperta={variazioneAperta} onChiudi={() => setVariazioneAperta(false)} onSalvata={carica} />
       )}
     </div>
   );

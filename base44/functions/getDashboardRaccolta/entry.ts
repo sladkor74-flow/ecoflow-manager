@@ -5,7 +5,7 @@ import { PROV_TO_REGION, riepilogoDateVista } from "../../shared/raccoltoCalcula
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { periodoMovimento, giornoMovimento } from "../../shared/movimenti.ts";
 import { commessaDellAnno } from "../../shared/annoTarget.ts";
-import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, giornoDeiDati } from "../../shared/attesoContratto.ts";
+import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, attesoDellaRegione, giornoDeiDati } from "../../shared/attesoContratto.ts";
 import { formatoTonnellate } from "../../shared/formato.ts";
 import { quadroCommessa } from "../../shared/quadroCommessa.ts";
 
@@ -178,7 +178,12 @@ export default async function(req) {
       for (const x of regioniAnni) {
         for (const r of x.righe) {
           const v = perRegione.get(r.regione) || { target: 0, atteso: 0 };
-          const a = attesoAllaData(x.commessa, x.anno, giornoDati, r.target_t).atteso_t;
+          // L'ATTESO DI UNA REGIONE E' SUO (variazioni del contratto, 14/10/2026):
+          // attesoDellaRegione mette le variazioni in vigore della regione intere
+          // nel loro mese, e quelle delle altre regioni non la toccano. Col target
+          // della regione per la quota nazionale, le 100 t di ottobre in Puglia
+          // spostavano un pezzo di atteso anche su Campania e Sicilia.
+          const a = attesoDellaRegione(x.commessa, x.anno, giornoDati, r.regione).atteso_t;
           v.target += r.target_t;
           v.atteso = v.atteso === null || a === null ? null : v.atteso + a;
           perRegione.set(r.regione, v);

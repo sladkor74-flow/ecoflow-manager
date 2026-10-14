@@ -56,7 +56,7 @@
     },
     "storico_json": {
       "type": "string",
-      "description": "Modifiche nel tempo: [{ il, da, nota, prima }]"
+      "description": "Modifiche nel tempo: [{ il, da, nota, prima, variazione }]. variazione c'e' solo nelle variazioni del consorzio in corso d'anno (14/10/2026): { mese_idx, regione, t, destinazione, motivo, comunicata_il }, registrate da Target & Status insieme a target annuo, regione, target mensile rivisto e destinazione (variazioneDelContratto di attesoContratto.ts). Una variazione resta compresa nel contratto finche' un salvataggio dopo non riscrive il target della sua regione o del suo mese (variazioniDelContratto, revisione del 14/10/2026): per questo chi riscrive la tabella del contratto mette in prima i campi com'erano."
     }
   },
   "required": [

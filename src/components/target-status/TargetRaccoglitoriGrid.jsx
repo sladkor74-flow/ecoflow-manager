@@ -17,6 +17,8 @@ import EsportaPdf from '@/components/shared/EsportaPdf';
 import { targetRaccoglitoriPdf } from '@/lib/giacenzePdf';
 import { scriviConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
+import VariazioneContratto, { AvvisiScarti, inizialeDaScarto } from '@/components/target-status/VariazioneContratto';
+import { scartiDalContratto } from '@/lib/attesoContratto';
 
 
 // Target dei raccoglitori: l'unico punto in cui si scrivono.
@@ -32,6 +34,15 @@ import StoricoModifiche from '@/components/shared/StoricoModifiche';
 // di dopo, chi e il motivo scritto nella cella finiscono nello storico delle
 // modifiche, che si apre nella cella. Lo storico_json di ogni riga resta: il
 // pallino arancione delle celle modificate lo legge da li'.
+//
+// I RACCOGLITORI E IL CONTRATTO (richiesta dell'utente del 14/10/2026). Le 100 t
+// in piu' che il consorzio ha dato per ottobre in Puglia erano finite solo nel
+// target di SMOCO: qui il totale diceva 11.650 t, il contratto 11.550, e la
+// dashboard e gli altri moduli, che leggono il contratto, non si muovevano.
+// Quando i target annui dei raccoglitori di una regione non fanno il contratto,
+// in cima c'e' un avviso (scartiDalContratto di attesoContratto) col pulsante
+// che apre la variazione del contratto gia' compilata: regione, differenza e,
+// se dallo storico dei target mensili si capisce, il mese e la destinazione.
 const ORIGINE = 'Target & Status, target dei raccoglitori';
 
 function Storico({ json, formato }) {
@@ -383,6 +394,8 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
   // modificabili, sotto il titolo di un altro.
   const ultimaLettura = useRef(0);
   const [confermando, setConfermando] = useState(null);
+  // La variazione del contratto aperta da un avviso: i valori con cui si apre.
+  const [variazione, setVariazione] = useState(null);
 
   const carica = useCallback(async () => {
     const n = ++ultimaLettura.current;
@@ -637,6 +650,10 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
     const contratto = regioniContratto.find(x => x.regione === reg);
     return { regione: reg, annuo: qui.reduce((s, r) => s + valoreAnnuo(r), 0), mesi: qui.reduce((s, r) => s + sommaMesi(r), 0), contratto: contratto ? Number(contratto.target_t) || 0 : null };
   });
+  // Le regioni dove i raccoglitori non fanno il contratto, con la proposta del
+  // mese letta dallo storico dei target mensili. Le stesse righe della tabella
+  // per regione qui sotto: nessun conto in piu'.
+  const scarti = commessa ? scartiDalContratto(commessa, perRegione, mensili) : [];
 
   if (caricando) {
     return <div className="flex items-center justify-center py-16 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" />Caricamento target {anno}…</div>;
@@ -674,6 +691,8 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       )}
 
       <RiepilogoDate canale="Rete" riepilogo={dateRete} esempi />
+
+      <AvvisiScarti scarti={scarti} isAdmin={isAdmin} onRegistra={(s) => setVariazione(inizialeDaScarto(s))} />
 
       {righeDaConfermare.length > 0 && (
         <div className="flex items-center justify-between gap-2 flex-wrap text-sm text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
@@ -816,6 +835,13 @@ export default function TargetRaccoglitoriGrid({ anno, isAdmin, user }) {
       )}
 
       <NuovoRaccoglitore open={nuovo} onClose={() => setNuovo(false)} anno={anno} nomiSuggeriti={nomiSuggeriti} impiantiSuggeriti={impiantiSuggeriti} onCrea={creaRiga} />
+
+      {/* La variazione si scrive sul contratto: dopo, qui si rimette la commessa
+          scritta, senza rileggere tutta la scheda. */}
+      {isAdmin && commessa && (
+        <VariazioneContratto anno={anno} commessa={commessa} user={user} aperta={!!variazione} iniziale={variazione}
+          onChiudi={() => setVariazione(null)} onSalvata={(scritta) => setCommessa(scritta)} />
+      )}
 
       <ImportaReportGenerale open={importa && isAdmin} onClose={() => setImporta(false)} anno={anno} annui={annui} mensili={mensili} user={user} solaLettura={!isAdmin}
         onImportato={async () => { setImporta(false); await carica(); }} />

@@ -17,7 +17,7 @@ import { giornoRoma, annoRoma } from "./giornoItaliano.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { contaFormulari } from "./formulari.ts";
 import { commessaDellAnno } from "./annoTarget.ts";
-import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, giornoDeiDati } from "./attesoContratto.ts";
+import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, attesoDellaRegione, giornoDeiDati } from "./attesoContratto.ts";
 import { datiFinoAl } from "./statoArchivi.ts";
 
 const PAROLE_DATI = [
@@ -183,7 +183,9 @@ export async function situazioneGestionale(base44, oggi) {
       const contrattoRegione = r.target_t;
       const fatto = racc ? racc.totale : null;
       const senzaRaccolto = !raccolto;
-      const attesoRegione = attesoAllaData(commessa, anno, giornoDati, contrattoRegione).atteso_t;
+      // L'atteso della regione con le sue variazioni soltanto, come la Dashboard e
+      // l'Andamento (attesoDellaRegione, variazioni del contratto del 14/10/2026).
+      const attesoRegione = attesoDellaRegione(commessa, anno, giornoDati, r.regione).atteso_t;
       righe.push(`- ${r.regione}: contratto ${t1(contrattoRegione)} t, raccolto ${senzaRaccolto ? 'n/d (lettura non riuscita)' : `${t1(fatto)} t (${contrattoRegione ? p1(fatto / contrattoRegione * 100) : '-'}%)`}, atteso a oggi ${attesoRegione === null ? 'n/d' : `${t1(attesoRegione)} t`}, mese in corso ${senzaRaccolto ? 'n/d' : `${t1(racc?.mesi?.[mese])} t`}.`);
     }
   } else {

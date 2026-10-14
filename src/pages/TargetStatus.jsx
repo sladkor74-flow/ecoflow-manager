@@ -25,7 +25,7 @@ import { tonnellate, percentuale, anniTarget } from '@/lib/target';
 import { annoCorrenteRoma, annoChiuso, commessaDellAnno } from '@/lib/annoTarget';
 import { righeAndamento, targetMensiliValidi } from '@/lib/andamentoTarget';
 import { filtraRaccolto } from '@/lib/raccoltoFiltrato';
-import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, profiloMensile, frazioneDelMese, giornoDeiDati } from '@/lib/attesoContratto';
+import { targetAnnuoDellAnno, regioniDellAnno, attesoDellaRegione, profiloMensile, frazioneDelMese, giornoDeiDati, variazioniDelContratto } from '@/lib/attesoContratto';
 import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
 import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
 
@@ -58,18 +58,26 @@ const giornoMese = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}` : '');
 // dell'audit, 11/10/2026). Prima qui si contava sull'orologio del dispositivo:
 // con i dati fermi al 7 e oggi il 10, lo scarto era peggiore di tre giorni di
 // raccolta.
+// L'atteso di ogni regione e' attesoDellaRegione (revisione del 14/10/2026): una
+// variazione del consorzio conta intera nel suo mese e nella sua regione. Col
+// target della regione per la quota nazionale le 100 t di ottobre della Puglia
+// si spalmavano sul suo anno e cambiavano l'atteso delle altre regioni.
 function AndamentoRegioni({ raccolto, commessa, anno, giornoDati }) {
   const { righe: regioni, fonte } = regioniDellAnno(commessa, anno);
   if (!regioni.length) {
     return <p className="text-sm text-muted-foreground border rounded-lg px-4 py-3">Inserisci o importa il contratto del {anno} nella scheda Commessa Ecotyre per confrontare il raccolto di ogni regione con quanto richiesto.</p>;
   }
   const profilo = profiloMensile(commessa);
+  // Le variazioni del consorzio sono gia' nei numeri del contratto (14/10/2026):
+  // sotto la tabella si dice quali sono, perche' il contratto non e' piu' quello
+  // inserito a inizio anno. Solo quelle che il contratto comprende ancora.
+  const variazioni = variazioniDelContratto(commessa).filter(v => v.in_vigore);
   const perRegione = new Map((raccolto?.by_regione || []).map(r => [String(r.regione).toLowerCase(), r]));
   const righe = regioni.map(r => {
     const racc = perRegione.get(String(r.regione).toLowerCase());
     const contratto = Number(r.target_t) || 0;
     const raccoltoT = racc ? racc.totale : 0;
-    const atteso = attesoAllaData(commessa, anno, giornoDati, contratto).atteso_t;
+    const atteso = attesoDellaRegione(commessa, anno, giornoDati, r.regione).atteso_t;
     return { ...r, contratto, raccolto: raccoltoT, atteso, percentuale: contratto ? (raccoltoT / contratto) * 100 : null, scarto: atteso === null ? null : raccoltoT - atteso };
   });
   const somma = (k) => (righe.some(r => r[k] === null) ? null : righe.reduce((s, r) => s + r[k], 0));
@@ -123,6 +131,7 @@ function AndamentoRegioni({ raccolto, commessa, anno, giornoDati }) {
           : ' Il target mensile del contratto non è inserito: per ora in dodicesimi.'}
         {" Scarto positivo: avanti sull'atteso; negativo: indietro."}
         {fonte === 'ripiego' && ` Il contratto del ${anno} non ha il riparto per regione: questo è quello scritto nel gestionale come ripiego, va inserito nella scheda Commessa Ecotyre.`}
+        {variazioni.length > 0 && ` Il contratto comprende le variazioni del consorzio registrate nella scheda Commessa Ecotyre: ${variazioni.map(v => `${v.mese.toLowerCase()}, ${v.regione} ${v.t > 0 ? '+' : ''}${tonnellate(v.t)} t (${v.motivo})`).join('; ')}. Nell'atteso ognuna conta intera nel suo mese e nella sua regione: le altre regioni non cambiano.`}
       </p>
     </div>
   );

@@ -168,7 +168,9 @@ verifica('la classifica dei raccoglitori della dashboard lo dice', /da_confermar
 console.log("4. TARGET & STATUS: L'ATTESO SUI DATI, LE CARD COL SEGNO SPIEGATO");
 const pagina = senzaCommenti(sorgente('src/pages/TargetStatus.jsx'));
 verifica('nessun giorno del dispositivo', !/new Date\(/.test(pagina) && !/meseCorrente|getMeseCorrente/.test(pagina), (pagina.match(/.*new Date\(.*/g) || []).join('\n'));
-verifica('l\'atteso per regione con attesoAllaData sul giorno dei dati', /attesoAllaData\(commessa, anno, giornoDati, contratto\)/.test(pagina) && /giornoDeiDati\(/.test(pagina));
+// Dal 14/10/2026 l'atteso di una regione e' attesoDellaRegione: una variazione
+// del consorzio conta solo nel suo mese e nella sua regione (prove/variazioneContratto.mjs).
+verifica('l\'atteso per regione con attesoDellaRegione sul giorno dei dati', /attesoDellaRegione\(commessa, anno, giornoDati, r\.regione\)/.test(pagina) && !/attesoAllaData\(commessa, anno, giornoDati, contratto\)/.test(pagina) && /giornoDeiDati\(/.test(pagina));
 verifica('nessuna costante del target scritta nella pagina', !/11550|11200|TARGET_BY_YEAR/.test(pagina));
 // Il PDF dell'Andamento (statusExports.exportPDF) fa riepilogo.map: gli si
 // passava l'oggetto delle card e si fermava con «kpis.map is not a function».
