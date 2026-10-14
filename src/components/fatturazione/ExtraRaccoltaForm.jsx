@@ -8,7 +8,6 @@ import { Label } from '@/components/ui/label';
 import { Save, ChevronLeft } from 'lucide-react';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
 import { calcExtraRaccolta, prezzoAttivoExtra, annoIntervento, avvisoPesoMancante, tariffaPassivaProposta, trasportoIntervento } from '@/lib/extraRaccoltaCalc';
-import { fetchAllClient } from '@/lib/fetchAllClient';
 import { PROV_TO_REGION } from '@/lib/regioneMap';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { formatNumber, formatTonnellate } from '@/lib/utils';
@@ -152,10 +151,21 @@ const giornoProposta = (f) => f.trasporto_finito_il || f.ordine_immesso_il || og
 // `contesto` sono le tariffe attive e i fornitori che la pagina ha letto
 // (contestoPrezzi): il prezzo proposto e l'avviso sotto il campo vengono dalla
 // stessa funzione della fattura (chiusura dell'audit, 11/10/2026).
-export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, contesto, interventi = [] }) {
+// `tariffePassive` sono le tariffe passive dell'extra raccolta, con cui la scheda
+// propone i costi (14/10/2026): le legge la pagina, nella stessa chiamata a
+// leggiTariffe delle attive, invece di rileggerle qui. Tariffa la legge solo
+// l'amministratore, e la scheda la monta solo per lui. null vuol dire che non si
+// sono lette: la scheda lo dice, invece di non proporre niente in silenzio;
+// finche' la pagina le sta leggendo arriva undefined, cioe' nessuna.
+export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, contesto, interventi = [], tariffePassive = [] }) {
   const [form, setForm] = useState({ ...EMPTY });
   const [fornitori, setFornitori] = useState([]);
-  const [tariffe, setTariffe] = useState([]);
+  // solo le tariffe passive dell'extra raccolta: la rete non si usa mai al loro
+  // posto. Tutte, senza filtro sullo stato (11/10/2026): il filtro
+  // { stato: 'attivo' } perdeva le tariffe con lo stato vuoto, che per la
+  // passiva valgono; le disattivate le scarta tariffaValeIl.
+  const tariffe = tariffePassive || [];
+  const tariffeNonLette = tariffePassive === null;
   const [province, setProvince] = useState([]);
   const [tipologie, setTipologie] = useState([]);
   // Da dove viene ciascun costo passivo: 'mano' se l'ha scritto l'utente (o era
@@ -174,14 +184,6 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
       try {
         const f = await base44.entities.Fornitore.filter({ stato: 'attivo' }, 'ragione_sociale', 500);
         setFornitori(f);
-      } catch {}
-      try {
-        // solo le tariffe passive dell'extra raccolta: la rete non si usa mai al
-        // loro posto. Tutte, a pagine, senza filtro sullo stato (11/10/2026): il
-        // filtro { stato: 'attivo' } perdeva le tariffe con lo stato vuoto, che
-        // per la passiva valgono; le disattivate le scarta tariffaValeIl.
-        const t = await fetchAllClient(base44.entities.Tariffa, { direzione: 'PASSIVA', tipologia: 'EXTRA_RACCOLTA' }, '-created_date');
-        setTariffe(t);
       } catch {}
       // Tutte le province italiane: leggerle dalle primarie ne caricava solo una parte.
       setProvince(Object.keys(PROV_TO_REGION).sort());
@@ -819,6 +821,9 @@ export default function ExtraRaccoltaForm({ open, initial, onSave, onCancel, con
             <p className="mt-2 text-xs text-muted-foreground">
               I costi di raccolta, trasporto, stoccaggio e trattamento sono quelli scritti qui, e la fatturazione passiva paga questi. Il modulo propone solo i costi a tonnellata, dalle tariffe di extra raccolta del fornitore e solo nei campi vuoti; il costo del trasporto a viaggio e i due sovracosti si scrivono sempre a mano, perché un listino a viaggio per l&apos;extra raccolta non c&apos;è e un imprevisto non sta in nessuna tariffa. Una secondaria fa eccezione: è un trasporto di secondaria come gli altri e si paga con la tariffa della tratta nel contratto del vettore, a tonnellata o a viaggio; il prezzo scritto qui vale solo per una tratta senza contratto. Va scritto tutto prima di passare l&apos;intervento a terminato.
             </p>
+            {tariffeNonLette && (
+              <p className="mt-1 text-xs text-amber-700">Le tariffe passive dell&apos;extra raccolta non si sono potute leggere: il modulo non propone i costi, scrivili a mano o ricarica la pagina.</p>
+            )}
 
             <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Oneri senza un fornitore a cui fatturarli</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">

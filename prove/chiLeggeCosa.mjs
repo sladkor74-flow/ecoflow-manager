@@ -11,6 +11,8 @@
 //   amministratore la parte attiva (quanto SMOCO fattura in piu' a Ecotyre)
 //   arriva dalla funzione di sola lettura leggiSurplus
 //   (base44/shared/surplusVisibile.ts, src/lib/leggiSurplus.js).
+// Dal 14/10/2026 anche Tariffa, nello stesso modo (funzione leggiTariffe): la
+// sua prova e' prove/tariffeRiservate.mjs.
 //
 // Chiudere la lettura di un archivio ha un rischio che non si vede: una pagina
 // che lo legge ancora dal browser, aperta da chi non e' amministratore, riceve un
@@ -301,10 +303,15 @@ await sezione('8. L\'EXTRA RACCOLTA CON L\'ARCHIVIO CHIUSO: CHI NON E\' AMMINIST
     const p = await caricaPagina('pages/ExtraRaccolta', { file: copia });
     // L'archivio chiuso come lo chiude la piattaforma: a chi non e' amministratore
     // la lettura diretta restituisce un elenco vuoto, senza errore. La funzione
-    // risponde con le regole vere (surplusVisibile.ts).
+    // risponde con le regole vere (surplusVisibile.ts). Le tariffe, chiuse allo
+    // stesso modo dal 14/10/2026, arrivano da leggiTariffe (qui nessuna: la
+    // prova delle tariffe e' prove/tariffeRiservate.mjs).
     const c = clienteFinto({
       archivi: { ExtraRaccolta: INTERVENTI, Tariffa: [], Fornitore: FORNITORI, SurplusTariffa: admin ? ARCHIVIO : [] },
-      funzioni: { leggiSurplus: async () => ({ ok: true, parte: admin ? 'tutto' : 'attiva', surplus: V.surplusPerChiLegge(ARCHIVIO, admin) }) },
+      funzioni: {
+        leggiSurplus: async () => ({ ok: true, parte: admin ? 'tutto' : 'attiva', surplus: V.surplusPerChiLegge(ARCHIVIO, admin) }),
+        leggiTariffe: async () => ({ ok: true, parte: admin ? 'tutto' : 'attiva', tariffe: [] }),
+      },
     });
     globalThis.__CLIENTE_FINTO = c.cliente;
     const r = p.monta(p.Componente, {});

@@ -29,6 +29,12 @@ export default function ControlloRotte() {
 
   const sospetti = (data.flussi || []).flatMap(f => (f.sospetti || []).map(s => ({ ...s, flusso: f.nome })));
   const tariffe = data.tariffe_da_verificare || [];
+  // Il prezzo arriva solo all'amministratore (controlloRotte, 14/10/2026): agli
+  // altri arriva tariffa_propria, e «senza prezzo suo» si scrive solo dove e'
+  // vero.
+  const prezzoDi = (d) => (d.tariffa !== null && d.tariffa !== undefined
+    ? `, ${d.tariffa} €/t`
+    : (d.tariffa_propria === true ? '' : ', senza prezzo suo'));
   // I terminati con le date obbligatorie da sistemare, flusso per flusso e di
   // qualunque anno (regola del 22/09/2026): chi non ha la fine trasporto resta
   // fuori dalle rotte dell'anno, e va detto.
@@ -114,7 +120,7 @@ export default function ControlloRotte() {
           <p className="text-xs text-muted-foreground mb-2">Se il contratto prevede un prezzo diverso per impianto di scarico, si sta applicando quello generico: da verificare sul contratto, non da correggere a occhio.</p>
           <div className="space-y-1 text-sm">
             {tariffe.map((t, i) => (
-              <div key={i}><span className="font-medium">{t.origine}</span> <span className="text-muted-foreground">({t.tipologia})</span>: {t.destinazioni.map(d => `${d.destinazione} ${formatIntero(d.viaggi)} viaggi${d.tariffa !== null && d.tariffa !== undefined ? `, ${d.tariffa} €/t` : ', senza prezzo suo'}`).join(' · ')}</div>
+              <div key={i}><span className="font-medium">{t.origine}</span> <span className="text-muted-foreground">({t.tipologia})</span>: {t.destinazioni.map(d => `${d.destinazione} ${formatIntero(d.viaggi)} viaggi${prezzoDi(d)}`).join(' · ')}</div>
             ))}
           </div>
         </div>

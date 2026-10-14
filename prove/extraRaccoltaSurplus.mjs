@@ -51,6 +51,7 @@ import { giornoRoma } from '../src/lib/giornoItaliano.js';
 import { caricaLibPagine } from './dati/libPagine.mjs';
 import { caricaPagina, clienteFinto, aspetta, trova, testo } from './dati/paginaFinta.mjs';
 import { surplusPerChiLegge } from '../base44/shared/surplusVisibile.ts';
+import { tariffePerChiLegge } from '../base44/shared/tariffeVisibili.ts';
 
 const subfornitori = await caricaLibPagine('lib/subfornitori');
 const { bloccoExtraRaccolta } = await caricaLibPagine('lib/extraRaccoltaAmministrazione');
@@ -231,12 +232,19 @@ async function montaPagina({ admin = true, archivi = {}, rompiSurplus = false } 
   // all'amministratore e la sola parte attiva agli altri; l'archivio, chiuso a
   // chi non e' amministratore, non si legge.
   const archivio = archivi.SurplusTariffa || FS;
+  // Le tariffe allo stesso modo dal 14/10/2026: la funzione leggiTariffe con le
+  // regole vere (tariffeVisibili.ts), e l'archivio Tariffa chiuso a chi non e'
+  // amministratore (prove/tariffeRiservate.mjs).
+  const tariffe = archivi.Tariffa || [];
   const c = clienteFinto({
-    archivi: { ExtraRaccolta: TUTTI, Tariffa: [], Fornitore: FORNITORI, ...archivi, SurplusTariffa: admin ? archivio : [] },
-    funzioni: { leggiSurplus: async () => {
-      if (rompiSurplus) throw new Error('lettura non riuscita');
-      return { ok: true, parte: admin ? 'tutto' : 'attiva', surplus: surplusPerChiLegge(archivio, admin) };
-    } },
+    archivi: { ExtraRaccolta: TUTTI, Fornitore: FORNITORI, ...archivi, Tariffa: admin ? tariffe : [], SurplusTariffa: admin ? archivio : [] },
+    funzioni: {
+      leggiSurplus: async () => {
+        if (rompiSurplus) throw new Error('lettura non riuscita');
+        return { ok: true, parte: admin ? 'tutto' : 'attiva', surplus: surplusPerChiLegge(archivio, admin) };
+      },
+      leggiTariffe: async () => ({ ok: true, parte: admin ? 'tutto' : 'attiva', tariffe: tariffePerChiLegge(tariffe, admin) }),
+    },
   });
   globalThis.__CLIENTE_FINTO = c.cliente;
   const r = p.monta(p.Componente, {});
@@ -288,9 +296,11 @@ await sezione('6. LA PAGINA LO DICE: RIQUADRI, FASCIA, CENTESIMO DEL MESE', asyn
   verifica('accanto ai file c\'e\' scritto che il surplus ha la sua riga e il blocco ai raccoglitori, mai per produttore',
     testo(r.albero).includes('Nei file il surplus ha la sua riga prima del totale imponibile, col centesimo del mese come in fattura, e il blocco «Fuel Surcharge ai raccoglitori»: per raccoglitore le tonnellate, il costo e il ricavo da Ecotyre, mai per produttore.')
     && !testo(r.albero).includes('I file riportano gli importi standard') && !testo(r.albero).includes('analisi per produttore'), testo(r.albero).match(/Nei file[^.]*\./g));
-  // I contratti dei trasporti (13/10/2026): una lettura, solo per l'amministratore.
-  const trasporti = c.letture('Tariffa').filter(l => J(l).includes('TRASPORTO_SECONDARIA'));
-  verifica('i contratti dei trasporti delle secondarie si leggono una volta', trasporti.length === 1, J(c.letture('Tariffa')));
+  // I contratti dei trasporti (13/10/2026): solo per l'amministratore. Dal
+  // 14/10/2026 arrivano nella stessa chiamata a leggiTariffe delle tariffe
+  // attive, e l'archivio non si legge piu' dal browser.
+  verifica('le tariffe, coi contratti dei trasporti delle secondarie, si chiedono una volta a leggiTariffe, e l\'archivio non si legge',
+    c.funzioniChiamate('leggiTariffe').length === 1 && c.letture('Tariffa').length === 0, J([c.funzioniChiamate('leggiTariffe').length, c.letture('Tariffa')]));
   for (const [scritta, quale] of [['Esporta Excel', 'excel'], ['Esporta PDF', 'pdf']]) {
     const chiesto = await premi(r, scritta);
     const [tipo, interventi, mese, anno, contestoFile, opzioni] = chiesto || [];
@@ -311,7 +321,8 @@ await sezione('6. LA PAGINA LO DICE: RIQUADRI, FASCIA, CENTESIMO DEL MESE', asyn
 await sezione('6b. CHI NON E\' AMMINISTRATORE NON VEDE LA PARTE DEI FORNITORI', async () => {
   const conAccordo = [...FS, surplus('tr', 'EXTRA_RACCOLTA', { nome: 'Accordo trattamento', prestazione: 'TRATTAMENTO', euro_t_passiva: 3, euro_t_attiva: null })];
   const { c, r, scegli } = await montaPagina({ admin: false, archivi: { SurplusTariffa: conAccordo } });
-  verifica('i contratti dei trasporti, che sono costi, non si leggono', !c.letture('Tariffa').some(l => J(l).includes('TRASPORTO_SECONDARIA')), J(c.letture('Tariffa')));
+  verifica('i contratti dei trasporti, che sono costi, non si leggono: ne\' l\'archivio, ne\' altro che la sola parte attiva di leggiTariffe',
+    c.letture('Tariffa').length === 0 && c.funzioniChiamate('leggiTariffe').length === 1, J([c.letture('Tariffa'), c.funzioniChiamate('leggiTariffe').length]));
   await scegli(0, '2026');
   await scegli(1, 'Ottobre');
   const costi = testo(riquadro(r, 'Costi'));

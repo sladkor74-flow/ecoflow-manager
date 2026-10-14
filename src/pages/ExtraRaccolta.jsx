@@ -12,6 +12,7 @@ import { formatNumber, formatTonnellate, formatKg } from '@/lib/utils';
 import { euro } from '@/lib/formatoSoldi';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { leggiSurplus } from '@/lib/leggiSurplus';
+import { leggiTariffe } from '@/lib/leggiTariffe';
 import * as subfornitori from '@/lib/subfornitori';
 import { testoEuroT, periodoSurplus, statoSurplus, surplusTocca, euroTDi, NOMI_ORIGINE, NOMI_PRESTAZIONE, aiDestinatari } from '@/lib/surplus';
 import { STILE_SURPLUS } from '@/lib/surplusVista';
@@ -177,10 +178,14 @@ export default function ExtraRaccolta() {
   // I contratti dei trasporti (13/10/2026): una secondaria di extra raccolta si
   // paga come un trasporto di secondaria, con la tariffa della tratta nel
   // contratto del vettore (decisione dell'utente del 13/10/2026). Sono costi:
-  // si leggono solo per l'amministratore, e finche' non ci sono (null) il
+  // arrivano solo all'amministratore, e finche' non ci sono (null) il
   // costo di una secondaria e' quello scritto sull'intervento.
   const [tariffeTrasporti, setTariffeTrasporti] = useState(null);
   const [trasportiNonLetti, setTrasportiNonLetti] = useState(false);
+  // Le tariffe passive dell'extra raccolta, con cui la scheda propone i costi
+  // (14/10/2026): solo dell'amministratore, l'unico che apre la scheda.
+  // undefined finche' si leggono, null se non si sono lette (la scheda lo dice).
+  const [tariffePassiveExtra, setTariffePassiveExtra] = useState(undefined);
   const coda = useRef(null);
   if (!coda.current) coda.current = nuovaCoda();
 
@@ -231,20 +236,39 @@ export default function ExtraRaccolta() {
 
   useEffect(() => {
     let vivo = true;
+    // Senza le tariffe la pagina sa solo il prezzo scritto e la base
+    // dell'anno, e senza i fornitori non sa la dicitura: lo dice, invece di
+    // mostrare un ricavo che la fattura potrebbe non avere. Le letture sono
+    // separate, perche' una che non risponde non si porti via le altre, e
+    // partono insieme (14/10/2026): le tariffe ora vengono da una funzione,
+    // come i surplus, e una dopo l'altra la pagina aspettava la somma dei tempi.
     (async () => {
-      // Senza le tariffe la pagina sa solo il prezzo scritto e la base
-      // dell'anno, e senza i fornitori non sa la dicitura: lo dice, invece di
-      // mostrare un ricavo che la fattura potrebbe non avere. Le due letture
-      // sono separate, perche' una che non risponde non si porti via l'altra.
       try {
+        // Dalla funzione leggiTariffe, non dall'archivio (14/10/2026): Tariffa la
+        // legge solo l'amministratore, perche' le passive sono i prezzi dei
+        // fornitori, e a chi non lo e' la lettura diretta darebbe un elenco
+        // vuoto, cioe' la sola base dell'anno senza un errore. La funzione da' a
+        // tutti le attive e all'amministratore anche le passive: una chiamata
+        // sola per tutto quello che la pagina e la scheda usano.
         // Tutte le EXTRA_RACCOLTA attive, anche non_attivo con una data di fine:
         // la fattura le considera (tariffeAttiveValide), e un filtro sullo stato
         // qui farebbe scegliere un altro prezzo.
-        const t = await base44.entities.Tariffa.filter({ direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA' }, '-created_date', 500);
-        if (vivo) setTariffeAttive(t || []);
+        const { parte, tariffe } = await leggiTariffe();
+        if (vivo) {
+          setTariffeAttive(tariffe.filter(t => t.direzione === 'ATTIVA' && t.tipologia === 'EXTRA_RACCOLTA'));
+          // Per l'amministratore (lo decide il server): i contratti dei
+          // trasporti delle secondarie, tutti (il disattivato lo toglie
+          // contestoPrezzi), e le passive dell'extra raccolta per la scheda.
+          if (parte === 'tutto') {
+            setTariffeTrasporti(tariffe.filter(t => t.prestazione === 'TRASPORTO_SECONDARIA'));
+            setTariffePassiveExtra(tariffe.filter(t => t.direzione === 'PASSIVA' && t.tipologia === 'EXTRA_RACCOLTA'));
+          }
+        }
       } catch {
-        if (vivo) setTariffeNonLette(true);
+        if (vivo) { setTariffeNonLette(true); setTrasportiNonLetti(true); setTariffePassiveExtra(null); }
       }
+    })();
+    (async () => {
       try {
         // Tutta l'anagrafica, non solo i fornitori con la spunta della dicitura
         // (13/10/2026): per il surplus serve sapere chi e' interno (SMOCO non lo
@@ -255,6 +279,8 @@ export default function ExtraRaccolta() {
       } catch {
         if (vivo) setTariffeNonLette(true);
       }
+    })();
+    (async () => {
       try {
         // Dalla funzione leggiSurplus, non dall'archivio (decisione del
         // 13/10/2026): SurplusTariffa lo legge solo l'amministratore, e a chi non
@@ -269,21 +295,6 @@ export default function ExtraRaccolta() {
     })();
     return () => { vivo = false; };
   }, []);
-  // Una lettura sola, e solo per l'amministratore: le tariffe del trasporto
-  // delle secondarie, tutte (il disattivato lo toglie contestoPrezzi).
-  useEffect(() => {
-    if (!isAdmin) return undefined;
-    let vivo = true;
-    (async () => {
-      try {
-        const t = await fetchAllClient(base44.entities.Tariffa, { prestazione: 'TRASPORTO_SECONDARIA' }, '-created_date');
-        if (vivo) setTariffeTrasporti(t || []);
-      } catch {
-        if (vivo) setTrasportiNonLetti(true);
-      }
-    })();
-    return () => { vivo = false; };
-  }, [isAdmin]);
   // Il contesto dei prezzi e del surplus: lo stesso della fattura e della
   // passiva, con la catena dei subfornitori (il surplus di un subraccoglitore va
   // al principale, come la tariffa) e, per l'amministratore, i contratti dei
@@ -840,14 +851,21 @@ export default function ExtraRaccolta() {
         </Tabs>
       </div>
 
-      <ExtraRaccoltaForm
-        open={formOpen}
-        contesto={contesto}
-        interventi={records}
-        initial={formInitial}
-        onSave={save}
-        onCancel={() => { setFormOpen(false); setFormInitial(null); }}
-      />
+      {/* La scheda la apre solo l'amministratore (Aggiungi, Modifica e Duplica
+          sono suoi), e propone i costi con le tariffe passive: si monta solo
+          per lui (14/10/2026). Montata per tutti, leggeva i prezzi dei
+          fornitori anche nella pagina di chi non e' amministratore. */}
+      {isAdmin && (
+        <ExtraRaccoltaForm
+          open={formOpen}
+          contesto={contesto}
+          interventi={records}
+          tariffePassive={tariffePassiveExtra}
+          initial={formInitial}
+          onSave={save}
+          onCancel={() => { setFormOpen(false); setFormInitial(null); }}
+        />
+      )}
     </div>
   );
 }

@@ -131,8 +131,27 @@
     "unita_misura",
     "valore"
   ],
+  // LA LETTURA E' DELL'AMMINISTRATORE, come la scrittura (decisione del
+  // 14/10/2026, «per me ok sulle cose da sistemare»). Le tariffe PASSIVE sono i
+  // prezzi dei fornitori, cioe' i costi, e i costi li vede solo l'amministratore:
+  // con la lettura aperta a tutti il gestionale non le mostrava agli altri, ma
+  // dal browser, con gli strumenti dello sviluppatore, chiunque fosse collegato
+  // leggeva l'archivio intero. E' la strada del 13/10/2026 per SurplusTariffa.
+  // A chi non e' amministratore le sole tariffe ATTIVE (quello che SMOCO
+  // fattura a Ecotyre) le da' la funzione di sola lettura leggiTariffe
+  // (base44/shared/tariffeVisibili.ts, src/lib/leggiTariffe.js): oggi la pagina
+  // Extra Raccolta. Le funzioni dei conti leggono con asServiceRole, e le sole
+  // pagine che leggono l'archivio dal browser sono dell'amministratore
+  // (Tariffe & Anagrafiche, la Passiva). Una pagina aperta da altri che lo
+  // leggesse direttamente riceverebbe un elenco vuoto, senza un errore. Lo
+  // storico delle modifiche delle passive era gia' riservato (campoRiservato,
+  // ModificaDato). Prova: prove/tariffeRiservate.mjs.
   "rls": {
-    "read": true,
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
     "create": {
       "user_condition": {
         "role": "admin"

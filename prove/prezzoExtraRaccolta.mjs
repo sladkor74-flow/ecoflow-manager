@@ -140,8 +140,11 @@ console.log('LA DICITURA SCEGLIE LA TARIFFA ANCHE IN PAGINA');
 console.log('LA PAGINA E LA SCHEDA LEGGONO LE TARIFFE E LE USANO');
 {
   const p = sorgente('src/pages/ExtraRaccolta.jsx');
-  verifica('la pagina legge le tariffe attive dell extra raccolta',
-    p.includes("base44.entities.Tariffa.filter({ direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA' }"));
+  // Dalla funzione leggiTariffe dal 14/10/2026: Tariffa la legge solo
+  // l'amministratore, e a chi non lo e' la lettura diretta darebbe un elenco
+  // vuoto (prove/tariffeRiservate.mjs).
+  verifica('la pagina legge le tariffe attive dell extra raccolta, da leggiTariffe',
+    p.includes('await leggiTariffe()') && p.includes("setTariffeAttive(tariffe.filter(t => t.direzione === 'ATTIVA' && t.tipologia === 'EXTRA_RACCOLTA'));"));
   verifica('e calcola ogni intervento con quelle', /calcExtraRaccolta\(r, contesto\)/.test(p) && !/calcExtraRaccolta\(r\)/.test(p));
   verifica('e le passa alla scheda', /<ExtraRaccoltaForm[\s\S]*?contesto=\{contesto\}/.test(p));
   const s = sorgente('src/components/fatturazione/ExtraRaccoltaForm.jsx');

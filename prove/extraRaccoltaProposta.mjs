@@ -55,8 +55,17 @@ console.log('LA SCHEDA LA USA, E LEGGE TUTTE LE TARIFFE');
 {
   const src = readFileSync(new URL('../src/components/fatturazione/ExtraRaccoltaForm.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
   verifica('la scheda chiama tariffaPassivaProposta col giorno di oggi in Italia', /tariffaPassivaProposta\(tariffe, forn, prestazione, f, oggiRoma\(\)\)/.test(src));
-  verifica('e legge le tariffe a pagine, senza il filtro sullo stato',
-    /fetchAllClient\(base44\.entities\.Tariffa, \{ direzione: 'PASSIVA', tipologia: 'EXTRA_RACCOLTA' \}/.test(src) && !/Tariffa\.filter\(\{[^}]*stato: 'attivo'/.test(src) && !/t\.stato !== 'attivo'/.test(src));
+  // Dal 14/10/2026 Tariffa la legge solo l'amministratore: le passive
+  // dell'extra raccolta le legge la pagina, nella stessa chiamata a leggiTariffe
+  // delle attive, e la scheda le riceve (prove/tariffeRiservate.mjs). Tutte,
+  // senza il filtro sullo stato, come prima.
+  verifica('e riceve dalla pagina le tariffe passive, senza leggere l\'archivio e senza il filtro sullo stato',
+    /export default function ExtraRaccoltaForm\(\{[^}]*tariffePassive = \[\][^}]*\}\)/.test(src) && /const tariffe = tariffePassive \|\| \[\];/.test(src)
+    && !/entities\.Tariffa\b/.test(src) && !/Tariffa\.filter\(\{[^}]*stato: 'attivo'/.test(src) && !/t\.stato !== 'attivo'/.test(src));
+  const pagina = readFileSync(new URL('../src/pages/ExtraRaccolta.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('la pagina gliele passa: tutte le passive dell\'extra raccolta di leggiTariffe, senza il filtro sullo stato',
+    /setTariffePassiveExtra\(tariffe\.filter\(t => t\.direzione === 'PASSIVA' && t\.tipologia === 'EXTRA_RACCOLTA'\)\);/.test(pagina)
+    && /<ExtraRaccoltaForm[\s\S]*?tariffePassive=\{tariffePassiveExtra\}[\s\S]*?\/>/.test(pagina) && !/entities\.Tariffa\b/.test(pagina));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

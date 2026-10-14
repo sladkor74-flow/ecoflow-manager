@@ -171,8 +171,18 @@ export function conferimentiSospetti(righe, archivio) {
  * @param {string} archivio nome dell'archivio
  * @param {array} tariffe   le tariffe attive della prestazione che interessa
  * @param {string} tipologia RETE, ACI o EXTRA_RACCOLTA
+ * @param {object} [opzioni]
+ * @param {boolean} [opzioni.conPrezzi] i prezzi solo all'amministratore
+ *
+ * I PREZZI SONO COSTI DEI FORNITORI (chiusura del giro del 14/10/2026). Le
+ * tariffe di raccolta sono passive: controlloRotte, che risponde a chiunque sia
+ * collegato, le mandava tutte (il prezzo per destinazione, la generica e il
+ * prezzo dentro il testo), e la scheda Controllo rotte di Verifiche scriveva
+ * «72 €/t» a chi non e' amministratore. Senza conPrezzi la voce dice solo
+ * quali destinazioni hanno un prezzo loro (tariffa_propria) e quali no: senza
+ * dire chi chiede si nega, come vedeICosti di EcoTyna.
  */
-export function tariffeDaVerificare(righe, archivio, tariffe, tipologia) {
+export function tariffeDaVerificare(righe, archivio, tariffe, tipologia, { conPrezzi = false } = {}) {
   const k = (v) => normalizzaRagioneSociale(v);
   const attive = (tariffe || []).filter(t => String(t.stato || 'attivo') === 'attivo'
     && (!t.tipologia || t.tipologia === tipologia || t.tipologia === 'TUTTE'));
@@ -185,6 +195,8 @@ export function tariffeDaVerificare(righe, archivio, tariffe, tipologia) {
     const generica = sue.find(t => !t.destinazione);
     const scoperte = o.destinazioni.filter(d => !perDestinazione.some(t => k(t.destinazione) === k(d.destinazione)));
     if (!scoperte.length) continue;
+    const sua = (d) => perDestinazione.find(t => k(t.destinazione) === k(d.destinazione));
+    const generico = conPrezzi ? ` ${generica ? generica.valore : '?'}` : '';
     fuori.push({
       origine: o.origine,
       tipologia,
@@ -192,17 +204,19 @@ export function tariffeDaVerificare(righe, archivio, tariffe, tipologia) {
         destinazione: d.destinazione,
         viaggi: d.viaggi,
         kg: d.kg,
-        tariffa: (perDestinazione.find(t => k(t.destinazione) === k(d.destinazione)) || {}).valore ?? null,
+        ...(conPrezzi ? { tariffa: (sua(d) || {}).valore ?? null } : { tariffa_propria: !!sua(d) }),
       })),
-      tariffa_generica: generica ? generica.valore : null,
-      unita_misura: (generica || perDestinazione[0] || {}).unita_misura || '',
+      ...(conPrezzi ? {
+        tariffa_generica: generica ? generica.valore : null,
+        unita_misura: (generica || perDestinazione[0] || {}).unita_misura || '',
+      } : {}),
       destinazioni_senza_tariffa_propria: scoperte.map(d => d.destinazione),
       kg_in_gioco: scoperte.reduce((s, d) => s + d.kg, 0),
       testo: `${o.origine} conferisce su ${o.destinazioni.length} destinazioni `
         + `(${o.destinazioni.map(d => `${d.destinazione} ${d.viaggi} viaggi`).join(', ')}) `
         + (perDestinazione.length
-          ? `ma per ${scoperte.map(d => d.destinazione).join(' e ')} non c'e' una tariffa propria: si paga la generica di ${generica ? generica.valore : '?'}.`
-          : `e si paga tutto alla stessa tariffa, ${generica ? generica.valore : '?'}. `)
+          ? `ma per ${scoperte.map(d => d.destinazione).join(' e ')} non c'e' una tariffa propria: si paga la generica${conPrezzi ? ` di${generico}` : ''}.`
+          : `e si paga tutto alla stessa tariffa${conPrezzi ? `,${generico}` : ''}. `)
         + ` Controlla il contratto: se il prezzo cambia con la destinazione, la tariffa va inserita per ciascuna.`,
     });
   }

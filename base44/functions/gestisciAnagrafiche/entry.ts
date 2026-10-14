@@ -758,6 +758,16 @@ export default async function(req) {
       // Per update, fondi il record esistente con i nuovi dati
       if (operazione === 'update') {
         const esistente = await base44.asServiceRole.entities.Tariffa.get(id);
+        // LA DIREZIONE DI UNA TARIFFA NON SI CAMBIA (chiusura del giro del
+        // 14/10/2026). La scheda la tiene in sola lettura, ma la funzione
+        // accettava un update da PASSIVA ad ATTIVA: lo storico guarda il record
+        // di dopo, che e' attivo, e la riga «valore 72 -> 210» nasceva non
+        // riservata, col prezzo del fornitore leggibile da chi non e'
+        // amministratore. Senza direzione una tariffa e' passiva.
+        if (dati && dati.direzione !== undefined && esistente
+          && norm(dati.direzione || 'PASSIVA') !== norm(esistente.direzione || 'PASSIVA')) {
+          return Response.json({ error: 'La direzione di una tariffa non si cambia: crea una tariffa nuova.' }, { status: 400 });
+        }
         effettivi = { ...esistente, ...dati };
       }
 

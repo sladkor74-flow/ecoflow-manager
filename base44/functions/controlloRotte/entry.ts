@@ -26,6 +26,7 @@ export default async function(req) {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    const conPrezzi = user.role === 'admin';
 
     const body = await req.json().catch(() => ({}));
     const anno = Number(body.anno) || Number(oggiRoma().slice(0, 4));
@@ -88,10 +89,12 @@ export default async function(req) {
       sospetti_per_flusso: risultato.map(f => ({ flusso: f.nome, quanti: f.sospetti.length })),
       stoccaggi_condivisi: condivisi,
       // Chi conferisce su piu' destinazioni senza un prezzo per ciascuna: il
-      // contratto potrebbe prevederlo, e allora si sta pagando male.
+      // contratto potrebbe prevederlo, e allora si sta pagando male. I prezzi
+      // sono costi dei fornitori: solo all'amministratore (14/10/2026). Agli
+      // altri, e a EcoTyna quando chiede per loro, le stesse voci senza prezzi.
       tariffe_da_verificare: [
-        ...tariffeDaVerificare(rete.filter(dellAnno), 'PrimariaRete', tariffe.filter(t => t.prestazione === 'RACCOLTA'), 'RETE'),
-        ...tariffeDaVerificare(aciPrim.filter(dellAnno), 'PrimariaAci', tariffe.filter(t => t.prestazione === 'RACCOLTA'), 'ACI'),
+        ...tariffeDaVerificare(rete.filter(dellAnno), 'PrimariaRete', tariffe.filter(t => t.prestazione === 'RACCOLTA'), 'RETE', { conPrezzi }),
+        ...tariffeDaVerificare(aciPrim.filter(dellAnno), 'PrimariaAci', tariffe.filter(t => t.prestazione === 'RACCOLTA'), 'ACI', { conPrezzi }),
       ],
     });
   } catch (error) {
