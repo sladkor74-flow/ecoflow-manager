@@ -22,6 +22,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Le librerie pesanti si caricano quando servono (10/10/2026)
   - Le pagine si scaricano quando si aprono (10/10/2026)
   - Il limite di richieste della piattaforma (22/09/2026)
+  - Il registro degli errori del sito (14/10/2026, rivisto il 15/10/2026)
   - Base44: comandi, file e riferimenti
   - Regole tecniche della piattaforma e delle pagine
   - I documenti che escono: una veste sola e la data dei dati (11/10/2026)
@@ -70,7 +71,9 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
     - La parola "gestionale" sulla stampa non siamo noi
   - La ricerca per punto di raccolta nei Terminati Rete (12/10/2026)
   - La dashboard: il quadro della commessa e l'elenco unico delle cose da gestire (11/10/2026)
+  - Il riepilogo della settimana per la direzione (14-15/10/2026)
   - La chiusura del mese passo passo (11/10/2026)
+  - La Guida dentro il gestionale (14-15/10/2026)
   - Il target del contratto e l'atteso alla data (11/10/2026)
   - Le variazioni del contratto in corso d'anno (14/10/2026)
   - L'Andamento di Target & Status: le stesse parole in pagina, Excel, PDF e presentazione (11/10/2026)
@@ -90,6 +93,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Lo storico delle modifiche: chi ha cambiato un numero che fa i conti (11/10/2026)
   - I conti che si salvano non si salvano su un archivio a meta' (11/10/2026)
   - I file del Caricamento Dati si sostituiscono (29/09/2026)
+  - La copia di sicurezza di tutti gli archivi (14-15/10/2026)
 - **I file, la privacy e i permessi**
   - I costi dei fornitori sono dell'amministratore, anche in EcoTyna (11/10/2026)
   - I documenti aziendali non salgono mai in area pubblica (30/09/2026)
@@ -133,6 +137,41 @@ prova si salta e lo dice. Quando l'albero di lavoro ha lavori a meta', si lancia
 su una copia pulita di HEAD (`git archive HEAD base44 prove`). **Dopo ogni
 pubblicazione che tocca questi due moduli, gli stessi tre controlli si rifanno
 sul sito.**
+
+**La copia scaricata da Caricamento Dati vale solo se e' completa** (revisione
+del 15/10/2026). Dal 14/10/2026 l'amministratore scarica da Caricamento Dati,
+sezione «Copia di sicurezza» (vedi «La copia di sicurezza di tutti gli
+archivi»), la copia di tutti gli archivi, nello stesso formato della copia dei
+dati veri. Rinominata `treadrider-dati-veri-AAAA-MM-GG.json.gz` e messa in
+`../dati-veri/`, diventa la copia del quinto controllo (lo dice anche
+`../dati-veri/LEGGIMI.md`). Se durante la copia Giacenze o Dichiarazioni non
+hanno risposto, il file vale come copia di sicurezza ma non per il controllo.
+Succede per esempio con un 500 o un 504 dopo una pubblicazione, perche' il
+ritentativo ripete solo i 429 e i 503. Lo stesso vale se un archivio non si e'
+letto. La pagina lo dice per nome, la riga di `CopiaSicurezza` lo segna
+(`archivi_non_letti`, `attesi_mancanti`) e `prove/datiVeri.mjs` fallisce con «la
+copia ha tutto quello che serve ai tre controlli». Prima passava con 99
+verifiche su 158, tutte verdi: i confronti di Giacenze saltavano senza una
+parola. Su una copia completa il controllo non aggiunge verifiche, quindi 158
+restano 158. Le risposte attese si cercano con l'anno della copia
+(`riepilogoDichiarazioni_<anno>`, `calcolaGiacenze_<anno>`), non col 2026
+scritto a mano. Prova: `prove/copiaSicurezzaDatiVeri.mjs`, sezione 3.
+
+**Una prova che scrive file nella cartella temporanea li toglie alla fine**
+(revisione del 15/10/2026). La cartella si crea con `mkdtempSync` e si toglie
+anche se la prova cade: in un `finally` con `rmSync(cartella, { recursive: true,
+force: true })`, oppure, in una prova scritta di seguito, con
+`process.on('exit', togliCartella)`, perche' l'evento arriva anche dopo un errore
+non preso. In fondo, una verifica che la cartella non resti. Una copia dei dati
+veri lasciata in `%TEMP%` e' una copia in piu' dei costi fuori da
+`../dati-veri`: `prove/copiaSicurezzaDatiVeri.mjs` ne lasciava una da 3,7 MB a
+ogni giro. Dalla chiusura dello stesso giorno si puliscono anche
+`prove/chiLeggeCosa.mjs`, `prove/guida.mjs`, `prove/registroErrori.mjs`,
+`prove/riepilogoSettimanale.mjs` e `prove/tariffeRiservate.mjs`, che a ogni giro
+lasciavano le copie delle pagine che montano. Altre prove lasciano ancora le loro
+(`extra-surplus-`, `dopo-variazione-`, `anni-passati-`, `conferme-`,
+`per-noi-chiusi-`, `todo-cancellati-` e altre): sono copie di sorgenti, non dati,
+e si sistemano alla prima occasione con la stessa regola.
 
 C'e' anche `npm run typecheck` (`tsc -p ./jsconfig.json`), che non e' fra i
 quattro obbligatori. Le prove non sono di cortesia: molte leggono il **sorgente**
@@ -178,6 +217,15 @@ non darebbe. `caricaPagina('lib/x')` impacchetta anche una libreria di
 da una copia del sorgente in cui e' sostituito solo quell'import
 (`caricaPagina(..., { file })`, 14/10/2026): `prove/pagineAnniPassati.mjs`,
 `prove/perNoiChiusiDallaPagina.mjs`.
+
+**Il primo disegno di una pagina non vede quello che dipende dalle letture**
+(revisione del 15/10/2026). `renderToStaticMarkup` non esegue gli effetti: un
+pulsante che aspetta i numeri resta «non pronto» per tutti. Una verifica su
+quello che cambia fra amministratore e non amministratore dopo le letture si fa
+sul componente disegnato pronto, come la pagina lo passa quando ogni lettura ha
+risposto, oppure sulla pagina montata con `paginaFinta`. Il caso: in
+`prove/dashboardPagina.mjs` la frase «costi e margine» del riepilogo della
+settimana, provata al primo disegno, non poteva fallire.
 
 **Una prova che dice «N giorni fa» ferma l'orologio** (revisione del
 14/10/2026). Se chiama una funzione o una pagina che chiede oggi a `oggiRoma()`,
@@ -275,8 +323,12 @@ alla volta. 236 superate, 39 in parte o saltate (35 per la sola copia dei dati
 veri, 2 per i soli documenti del PC, 2 per tutti e due), 0 fallite. Alla
 chiusura delle richieste del 14/10/2026 sera: 279 prove in 1 min 2 s, 238
 superate, 41 in parte o saltate (36 per la sola copia, 2 per i soli documenti
-del PC, 3 per tutti e due), 0 fallite. La modalita' CI le elenca una per una con
-quello che e' mancato a ciascuna: quella parte gira solo sul PC.
+del PC, 3 per tutti e due), 0 fallite. Alla chiusura delle cose nuove del
+15/10/2026 (copia di sicurezza, riepilogo della settimana, registro degli errori,
+Guida): 284 prove in circa un minuto, 240 superate, 44 in parte o saltate (39 per la
+sola copia, 2 per i soli documenti del PC, 3 per tutti e due), 0 fallite. La
+modalita' CI le elenca una per una con quello che e' mancato a ciascuna: quella
+parte gira solo sul PC.
 
 ### Lo stile dei commenti
 
@@ -505,7 +557,16 @@ a 186).
 da `timbraPdf.js`, non il pacchetto principale) e sono tutti scaricati su
 richiesta, non all'avvio. La pagina `TargetStatus` non c'e' piu' (14/10/2026). Alzare `chunkSizeWarningLimit` per farlo
 tacere no: un presidio vale quanto la fiducia che gli si da', e un avviso
-addomesticato non avverte piu' di niente. Prove in `prove/paginePigre.mjs`.
+addomesticato non avverte piu' di niente.
+
+Dal 14/10/2026 `prove/paginePigre.mjs` non conta piu' le pagine a mano: ogni
+file di `src/pages` dev'essere pigro in `App.jsx`, tranne le pagine dell'accesso
+che `App.jsx` non instrada (Login, Register, ForgotPassword, ResetPassword,
+OAuthConsent); nessuna pigra punta a un file che non c'e'; le pigre sono almeno
+ventotto, la Guida compresa. Una pagina nuova si dichiara pigra e basta, senza
+riscrivere un numero nella prova.
+
+Prove in `prove/paginePigre.mjs`.
 
 ### Il limite di richieste della piattaforma (22/09/2026)
 
@@ -638,6 +699,67 @@ prende in memoria; il giorno italiano di una data si calcola una volta
 «Giacenze e Dichiarazioni»). Prova: `prove/velocitaGiacenze.mjs`, che conta le
 richieste e quante stanno in fila, su un archivio costruito e sui dati veri.
 
+### Il registro degli errori del sito (14/10/2026, rivisto il 15/10/2026)
+
+Una delle cose da creare proposte all'utente il 14/10/2026 e approvate lo stesso
+giorno («per me ok ... su quanto da creare, procedi pure»): «un registro degli
+errori del sito. Oggi un errore di rete visto da un collega lo scopri solo se te
+lo dice». Le pagine annotano da se' i loro errori nell'archivio `ErroreSito`
+(`src/lib/registroErrori.js`, installato da `src/main.jsx` prima della prima
+pagina): una pagina che si rompe (`PageErrorBoundary`), un errore non preso
+(window `error` e `unhandledrejection`), una chiamata a una funzione o a un
+archivio che fallisce dopo i ritentativi del limite di richieste. Lo legge solo
+l'amministratore: in Alert & Controllo, scheda «Errori del sito»
+(`src/components/alerts/ErroriSito.jsx`, anche da `?tab=errori`), e in «Da
+gestire» (`vociErroriSito`, `cruscotto.ts`). Chiunque sia collegato **crea** la
+riga del suo errore: rls `create: true`, e in `permessi.js` c'e'
+`SOLO_CREAZIONE`. Leggere, segnare visti e togliere sono dell'amministratore.
+
+- **Il freno** (`creaRegistro`). Un errore uguale si conta in `volte`. La riga
+  dopo dello stesso errore aspetta 2, 10, 30, 60, 120 e poi 240 minuti. Lo
+  stesso errore ha al piu' 8 righe al giorno (`MASSIMO_RIGHE_PER_ERRORE`), e una
+  sessione al piu' 20 righe al giorno: il conto riparte col giorno italiano,
+  perche' l'app installata resta aperta per giorni. Un errore nuovo non aspetta
+  dietro a uno ripetuto: il timer si rifissa. Quando la scheda va in secondo
+  piano o si chiude (`visibilitychange`, `pagehide`), le righe in attesa partono
+  subito, una volta sola e dentro l'evento, con almeno due minuti fra due righe
+  uguali.
+- **Mai dentro un 429.** Il registro guarda anche SOTTO il limite di richieste
+  (`agganciaChiamate` con `suLimite`): ogni tentativo respinto lo ferma per due
+  minuti, anche quelli che `conPazienza` poi ripete. La sua create va
+  sull'archivio crudo (`moduloCrudo`, preso prima dell'aggancio): un tentativo
+  solo, senza ritentativi. Una scrittura che fallisce si perde. Un rifiuto (400,
+  401, 403, 404) spegne il registro per la sessione. Chi aggiunge un altro
+  involucro al client lo mette con `defineProperty` e lascia passare il segno
+  `Symbol.for('ecoflow.limiteRichieste')`.
+- **Non sono errori del sito** le risposte che il gestionale da' apposta e che
+  la pagina spiega: il 409 `rinviato`, il 403 `sola_lettura` e, da `apriFile`,
+  il 404 `senza_file` (documento oltre i 40 giorni) e il 403 `riservato`. Una
+  risposta nuova di questo genere porta un campo `true` e va aggiunta a
+  `RISPOSTE_APPOSTA`.
+- **Che cosa si scrive.** Della pagina, solo il percorso (mai la query string
+  ne' l'hash). Il messaggio passa da `pulisciMessaggio`, che toglie token (anche
+  scritti in JSON), email, indirizzi, contenuti di file, codici lunghi e il nome
+  della piattaforma. Chi lo dice `created_by_id`: la lettura non restituisce
+  `created_by` (sulla copia dei dati veri dell'11/10/2026, 31.923 righe con
+  `created_by_id` e nessuna con `created_by`). La scheda risale all'email con
+  una sola lettura di `User`; il cruscotto conta gli utenti per
+  `created_by_id`.
+- **In «Da gestire»** una voce sola, area «Errori del sito», sezione dati: quanti
+  errori non ancora visti da ieri (giorno italiano), i piu' frequenti col
+  messaggio, la chiamata e la pagina, e quanti utenti. `cruscottoOperativo` legge
+  il registro solo per l'amministratore, una lettura filtrata sui non visti e
+  limitata a `LIMITE_ERRORI_CRUSCOTTO` righe; il titolo dice «almeno» solo se la
+  lettura e' piena e tutte le righe lette sono da ieri. Attenzione con una
+  pagina che si rompe, un errore non preso o un errore del server; le altre sono
+  un'informazione. Niente «Chiedi a EcoTyna»: EcoTyna non legge quel registro.
+- **Conservazione.** Le righe piu' vecchie di 40 giorni le toglie
+  l'amministratore dalla scheda («Togli quelli più vecchi di 40 giorni»), un
+  giorno per volta, dopo una conferma. Niente si cancella da solo.
+- Prove: `prove/registroErrori.mjs` (anche la tempesta di 429, sezione 6B),
+  `prove/cruscotto.mjs` (la voce, anche sul banco), `prove/chiLeggeCosa.mjs`
+  sezione 11, `prove/scrittureDegliUtenti.mjs`.
+
 ### Base44: comandi, file e riferimenti
 
 Questo e' un repository di un'app Base44: codice dell'utente, modifiche aderenti
@@ -749,6 +871,10 @@ proprieta'. Lo controlla `prove/extraRaccoltaScheda.mjs`.
 **I tre report dell'attiva per l'amministrazione non cambiano colonne.** Il primo foglio e' cella per cella quello di prima (intestazioni in riga 1, le righe, una riga vuota, il TOTALE sotto il Prezzo Totale); il blocco di testa sta in un secondo foglio, «Note». Se l'amministrazione vuole la testa sopra la tabella, va chiesto a lei.
 
 **Un prezzo unitario nel PDF ha il tipo del suo Excel (revisione delle migliorie, 11/10/2026).** In `esportaTabella.js` il tipo `'euro'` scrive due decimali fissi, `'prezzo'` quattro fissi e `'prezzoLibero'` da due a quattro: `FORMATI.prezzoLibero`, `'#,##0.00##'`, che nel PDF scrive come `cifreItaliane(v, 2, 4)`. Se l'Excel di una colonna di prezzi usa `prezzoLibero`, anche il PDF deve usare `prezzoLibero`: con `'euro'` un prezzo al chilo da 0,202 usciva «0,20 €», e il PDF dell'extra raccolta diceva un prezzo diverso dall'Excel dello stesso mese. Dal 12/10/2026 anche il format dell'amministrazione: la tabella (`formatAmministrazione.js`) dichiara `tipoPdf: 'prezzoLibero'` sul prezzo unitario accanto a `tipo: 'euro'`, e il PDF (`formatAmministrazioneExport.js`) passa a `esportaTabella` `c.tipoPdf || c.tipo`; l'Excel resta sul tipo e sul titolo (0,2020 al chilo, 240,00 a tonnellata). Prova: `prove/formatAmministrazionePdf.mjs`, che fa il PDF vero e ne legge le celle. Le prove della regola: `prove/extraRaccoltaExport.mjs` sezione 5 (il totale si cerca nella riga del suo formulario, non in tutto il PDF), `prove/documentiCheEscono.mjs` sezione 15.
+
+**Un PDF scrive solo i caratteri che i suoi caratteri hanno (revisione del 15/10/2026).** I PDF del corredo usano la Helvetica standard, con la codifica WinAnsi: l'ASCII, le lettere accentate del Latin-1 e pochi segni (€ « » – — ’ •). Basta un solo carattere fuori e jspdf scrive tutta la stringa in due byte per lettera: la cella esce illeggibile senza nessun errore. Il caso trovato e' il meno tipografico «−» (U+2212) di `tSegno` (`src/components/dashboard/formato.js`), negli scarti «Non quadra» in meno e nelle variazioni del consorzio «in meno». Il riepilogo della settimana fa passare ogni testo da `perIlPdf` (`src/lib/riepilogoSettimanale.js`): oltre al meno, una lettera fuori dalla codifica perde l'accento (Ș diventa S) e un segno che resta fuori diventa «?», non tutta la cella. Dalla chiusura dello stesso giorno anche `perPdf` di `esportaTabella.js`, che serve tutti gli altri PDF del corredo, scrive il meno e i trattini U+2010-2012 come «-»: il PDF del quadro della commessa, con una variazione del consorzio in meno, scriveva in due byte la cella sotto il target e la nota (`prove/riepilogoSettimanale.mjs`, sezione 9). Il resto della ricaduta di `perIlPdf` (accenti tolti, «?») in `perPdf` non c'e' ancora. In un PDF un numero col segno si scrive col trattino «-», oppure si passa il numero alla colonna del suo tipo.
+
+**Una cella del PDF tiene tre righe e il resto cade senza segno** (`esportaSezioniPdf`, `.slice(0, 3)`). Un testo che puo' essere lungo (il titolo di una voce, un elenco di archivi o di ID, una frase) si spezza prima, nelle righe sotto della stessa tabella. Il riepilogo lo fa con `pezziDellaCella`, che misura con le larghezze dei caratteri di jspdf (il maggiore fra tondo e grassetto). `prove/riepilogoSettimanale.mjs`, sezioni 7 e 8, rifa' col jspdf vero il conto di `esportaSezioniPdf` su ogni PDF che produce: nessuna riga in due byte, nessuna cella oltre tre righe, nessun titolo fuori pagina. Gli altri PDF del corredo possono ancora perdere la coda di una cella lunga: andrebbe continuata nelle righe sotto, o chiusa con «...» alla terza riga.
 
 **Per provare un export**: ogni funzione accetta in fondo `opzioni.stato`, lo stato dei dati gia' letto, e allora non chiede niente al server. Il download si intercetta con un `document` finto e `resolveObjectURL` di node:buffer, e il file si rilegge con exceljs: `prove/documentiCheEscono.mjs` lo fa per tutti gli export e confronta i totali del file con quelli a video. Per i PDF delle librerie che caricano `esportaTabella` pigro si sostituisce `await import('@/lib/esportaTabella')` col modulo caricato con jspdf vero, come in `prove/extraRaccoltaExport.mjs`. Nel testo del PDF i caratteri €, — e • arrivano nella codifica dei font standard (0x80, 0x97, 0x95), a volte come byte nudi.
 
@@ -4699,6 +4825,7 @@ La pagina (`src/pages/Dashboard.jsx`, componenti in `src/components/dashboard/`)
 - **Lo stoccaggio ACI che non quadra** (13/10/2026) e' una voce sua di «Da gestire»: «giacenze:scostamenti-aci» (Giacenze, attenzione, sezione impianti, /giacenze), col dettaglio sulla classe 9 e il giorno del controllo, mai insieme alla rete. Si legge dalla fotografia (`fg.siti`, `scostamentiAci`), quindi vale anche per una fotografia scritta prima. La voce della rete dice solo la rete: il suo dettaglio e' `notaDelGiorno` sulle righe della rete, non la nota intera.
 - **Il surplus finito l'anno prima** (13/10/2026): dal 1° gennaio `vociSurplusFiniti` ricorda un surplus con l'importo da Ecotyre finito l'anno prima e non riscritto nell'anno in corso con lo stesso nome (senza accenti ne' maiuscole, come `conflittiSurplus`; un disattivato non conta come riscritto). Titolo «Fuel Surcharge del 2026: finito il 31/12/2026», area «Surplus sulle tariffe», canali e date senza importi, collegamento `/fatturazione?tab=tariffe&sezione=surplus`, chiave `surplus-finito:<nome>|<anno>`. Il dettaglio dice che, se il consorzio lo rinnova, va riscritto con le date nuove, perche' non si copia da solo nell'anno nuovo. Un accordo pagato solo da SMOCO non si dice: e' un costo riservato (`campoRiservato`). `cruscottoOperativo` legge `SurplusTariffa` (una lettura, l'archivio e' piccolo) e passa `dati.surplus` coi soli nome, origine, canale, date, stato e `euro_t_attiva`, mai `euro_t_passiva` (chiusura del giro, 14/10/2026: prima non lo leggeva, e la voce non sarebbe uscita mai). Riscritto il surplus, la voce sparisce da sola.
 - **I raccoglitori che non fanno il contratto** (chiusura del giro, 14/10/2026, sulla richiesta dell'utente dello stesso giorno: le 100 t di ottobre in Puglia scritte solo nel target di SMOCO, e la dashboard ferma a 11.550 t). `vociContrattoRaccoglitori` in `cruscotto.ts` fa la stessa regola dell'avviso della scheda Target raccoglitori (`scartiDalContratto`) sugli stessi numeri: la somma dei target annui dei raccoglitori dell'anno, regione per regione com'e' scritta, contro il riparto del contratto. Sotto mezza tonnellata e' un arrotondamento (sui dati veri dell'11/10 Campania 4.400,38 e Calabria 1.649,62 non fanno voci). Una voce sola, area «Target raccoglitori», sezione rete: «I raccoglitori della Puglia hanno 100,00 t più del contratto 2026», o «In 2 regioni ...», col dettaglio regione per regione e che cosa fare (registrare la variazione nel contratto, o correggere i target), collegamento `/target-status?tab=raccoglitori&anno=`, chiave `contratto-raccoglitori:<anno>`. Senza riparto per regione, o senza nessun target dei raccoglitori nell'anno (lo dice la voce dell'anno nuovo), niente. Un target senza regione non si conta, e la voce lo dice. Nessuna lettura in piu': `cruscottoOperativo` legge gia' contratti e target annui per l'anno nuovo. Prova: `prove/cruscotto.mjs` (anche la funzione vera sul banco, da utente non amministratore).
+- **Due voci del solo amministratore** (14-15/10/2026): gli errori del sito (`vociErroriSito`, vedi «Il registro degli errori del sito») e il promemoria della copia di sicurezza (`vociPromemoriaCopia`, vedi «La copia di sicurezza di tutti gli archivi»). `cruscottoOperativo` gira col ruolo di servizio e risponde a tutti: i due registri li legge solo se chi chiede e' l'amministratore (`eAmministratore(user)`), con una lettura ciascuno - gli errori non visti, al piu' `LIMITE_ERRORI_CRUSCOTTO`, e l'ultima riga di `CopiaSicurezza` - e passa a `cruscotto` solo i campi che le voci usano, piu' `amministratore`. A chi non lo e' non si legge niente e non arriva niente. Una lettura che cade toglie solo la sua voce: un registro non letto non e' «nessun errore» ne' «copia mai fatta». Tutte e due in sezione dati e senza «Chiedi a EcoTyna» (`AREE_SENZA_ECOTYNA`). Prova: `prove/cruscotto.mjs`, anche la funzione vera sul banco da amministratore e da utente.
 
 Prove: `prove/dashboardPagina.mjs` (richieste, numeri disegnati, voci, PDF, sorgente), `prove/quadroCommessa.mjs`, `prove/dashboardRaccoltaQuadro.mjs`, `prove/cruscottoQuadro.mjs`, `prove/dashboardDatiVeri.mjs` (sulla copia dei dati veri: Irigom compreso e la pagina disegnata).
 
@@ -4750,6 +4877,18 @@ Ogni voce si nasconde «per oggi» o «per 7 giorni»; le critiche solo per oggi
 
 In Alert & Controllo ogni riga dice «Si corregge in …» col collegamento (`src/lib/doveSiRisolve.js`) e il modulo col suo nome, non col codice. Un modulo che non si conosce non ha collegamento: nessuna pagina inventata.
 
+### Il riepilogo della settimana per la direzione (14-15/10/2026)
+
+Una delle cose da creare proposte all'utente il 14/10/2026 e approvate lo stesso giorno («per me ok sulle cose da sistemare, sulla velocità e su quanto da creare, procedi pure»): «un riepilogo settimanale per la direzione, il lunedì, in PDF o per email: target e scarti per regione, alert critici, dichiarazioni da fare, fatture del mese». Il pulsante «Riepilogo della settimana (PDF)» sta nella dashboard, per tutti (`src/components/dashboard/RiepilogoSettimanale.jsx`). Gli argomenti del PDF li fa `src/lib/riepilogoSettimanale.js`, e il PDF esce dal corredo comune (`esportaSezioniPdf`, vedi «I documenti che escono»), con jspdf scaricato solo al clic.
+
+- **I numeri sono quelli che la dashboard ha gia' letto**: il quadro dell'anno (`getDashboardRaccolta`), il cruscotto (`cruscottoOperativo`) e, per l'amministratore, il margine (`calcolaMargine`), con le parole e le cifre della pagina (`righeQuadro.js`, `formato.js`): il PDF e la dashboard dicono lo stesso numero con la stessa scrittura. L'unica lettura in piu' e' il raccolto della settimana, la funzione `riepilogoSettimana` (il conto in `base44/shared/riepilogoSettimana.ts`, solo server, nessuno specchio), e parte solo al clic: la pagina la passa al pulsante in `leggiSettimana` e non la chiama mai in un effetto. Sono tre letture filtrate sulla fine trasporto della settimana, un giorno in piu' davanti perche' la mezzanotte italiana del lunedi' e' ancora domenica in UTC, una pagina per archivio: sulla copia dei dati veri dell'11/10/2026 la settimana dal 28/09 al 04/10 sono 83 righe di rete, una di ACI e nessuna di extra raccolta. Risponde tonnellate e ritiri, nessun euro: la chiama chiunque guardi la dashboard.
+- **La settimana** e' da lunedi' a domenica sul giorno italiano di `trasporto_finito_il`, mai la chiusura a portale: quella appena finita o quella in corso, scelta a video, coi giorni scritti; numero e anno sono quelli della settimana ISO. Un giorno che i dati non coprono ancora e' «—», non zero. La funzione rifiuta un giorno che non e' un lunedi' e una settimana non ancora cominciata. Se la settimana non ha giorni dell'anno scelto in testa alla pagina, il pulsante dice quale anno scegliere.
+- **Le sezioni**: la rete della settimana (giorno per giorno e chi ha raccolto), il contratto Ecotyre dell'anno (target con le variazioni, atteso, scarto), i mesi, le regioni con target, scarto e settimana, i raccoglitori piu' indietro e piu' avanti; ACI ed extra raccolta a parte, ognuno con le sue tabelle, e nessuna riga, colonna o riquadro li somma; gli impianti dalla fotografia della notte (quadratura col portale, da dichiarare per canale, chi non quadra, i caricamenti entrati dopo la notte); «Da gestire» intero, comprese le voci nascoste a video, e gli ID degli ordini rimasti «eseguito»; la fatturazione attiva dell'anno, mese per mese e canale per canale. Una parte che non si e' potuta leggere lo dice nella sua sezione, col perche': mai uno zero al posto di un numero che non c'e'.
+- **Costi e margine solo all'amministratore**: a chi non lo e' la sezione dell'economia non c'e', e le voci del margine e della passiva (`margine:`, `passiva:`) non entrano anche se arrivassero. Il nome del file della sua copia finisce con «con economia (riservato)». Nella sua copia entrano anche le voci di «Da gestire» che sono solo sue: gli errori del sito e il promemoria della copia di sicurezza.
+- **Niente email**: il PDF si scarica e lo manda chi lo ha fatto. La nota sotto il pulsante lo dice («Da girare alla direzione: il PDF si scarica e lo mandi tu, il gestionale non manda email.»), e all'amministratore aggiunge «La tua copia, da amministratore, ha anche costi e margine.».
+
+Prove: `prove/riepilogoSettimanale.mjs` (la settimana, anche a cavallo del mese e dell'anno; il conto; la funzione sul banco; il PDF col jspdf vero su dati costruiti e sui dati veri dell'11/10/2026; la pagina; i caratteri e le celle; il meno negli altri PDF del corredo), `prove/dashboardPagina.mjs` (la lettura solo al clic, la nota per ruolo sul pulsante disegnato pronto), `prove/pacchettiLeggeri.mjs`.
+
 ### La chiusura del mese passo passo (11/10/2026)
 
 `base44/shared/chiusuraMese.ts` (le regole, pure), la funzione `statoChiusuraMese` e il pannello `src/components/dashboard/ChiusuraMese.jsx` (props `{ isAdmin, anno }`, montato dalla dashboard per l'anno scelto). Una riga - «Settembre 2026: 4 di 8 fatti, mancano ...» - che si apre in dieci passi: dati del mese, terminati, dichiarazioni, attiva rete/ACI/extra, passiva rete/ACI/extra, quadrature FIR. Ogni passo ha lo stato (`fatto`, `da_fare`, `non_serve`), il perche', le voci e il collegamento al modulo col periodo (`?tab=&anno=&mese=&canale=`). Sotto, i mesi prima ancora aperti, che si aprono uno per volta chiedendo `{ anno, mese }`.
@@ -4770,6 +4909,21 @@ In Alert & Controllo ogni riga dice «Si corregge in …» col collegamento (`sr
 Prove: `prove/chiusuraMese.mjs` (le regole, con la fotografia vera del guardiano e il foglio DICHIARAZIONI del 09/10), `prove/statoChiusuraMese.mjs` (la funzione intera con un SDK finto che conta le letture e sa `$in`, ordinamento e numero di righe, e il giorno di oggi fissato), `prove/chiusuraMesePannello.mjs` (i passi disegnati con React lato server), `prove/chiusuraMeseDatiVeri.mjs` (la funzione intera sulla copia dei dati veri dell'11/10/2026, coi sei scenari dei revisori del 12/10; si salta senza la copia o con un'altra copia), `prove/mesiChiusiFuori.mjs` (segnaMesiChiusiFuori e statoChiusuraMese intere sulla copia dei dati veri, con un archivio finto scrivibile: piano, conferma, storico, dopo; si salta senza la copia). **Nelle prove le esportazioni si scrivono come le registra l'interfaccia**, con `documento_ids` pieni: una prova con `documento_ids: []` passava senza provare niente.
 
 **I collegamenti portano scheda e periodo** (11/10/2026). Le pagine leggono l'indirizzo con `leggiCollegamento` di `src/lib/collegamenti.js`: Fatturazione `?tab=passiva|attiva&anno=&mese=&canale=` (scheda, mese della passiva e dell'attiva, canale della passiva), Verifiche Fornitori `?tab=consuntivi&anno=&mese=&canale=`, Verifiche `?tab=quadratura-fir`, Dichiarazioni Impianti `?tab=irigom&anno=&mese=` (la pratica di Irigom si apre su quel mese quando le pratiche sono lette). Un parametro che non si capisce si ignora e la pagina si apre come sempre; una scheda dell'amministratore aperta da un altro utente pure. Il mese si scrive col nome delle pagine («Settembre») o col numero. Chi aggiunge in `chiusuraMese.ts` un collegamento con `?tab=` deve trovare la scheda nell'elenco `SCHEDE` della pagina: `prove/collegamentiPagine.mjs` lo controlla, insieme alla regola pura.
+
+### La Guida dentro il gestionale (14-15/10/2026)
+
+Proposta all'utente il 14/10/2026 e accettata lo stesso giorno («per me ok ... su quanto da creare, procedi pure»): una pagina «Guida» (`/guida`, `src/pages/Guida.jsx`, pigra in `src/App.jsx`) nel menu per tutti, subito dopo Richieste. I testi e la struttura stanno in `src/lib/guida.js`; la pagina li mostra soltanto e non legge nessun archivio: il livello viene da `usePermessi`, nessuna richiesta in piu' al server.
+
+- **Una parte per ogni voce del menu** (`MODULI`: stesso nome, stesso percorso, stesso ordine di `NAV_ITEMS`): a che cosa serve, che cosa vedi, che cosa puoi esportare (o perche' niente), che cosa fa solo l'amministratore, le note per livello (`perLivello`). **Chi aggiunge una voce al menu scrive la sua parte nella guida**: `prove/guida.mjs` legge `NAV_ITEMS` eseguendo l'elenco com'e' scritto (apici singoli o doppi, apostrofi, proprieta' in qualsiasi ordine; dal 15/10/2026, prima una regex perdeva le voci scritte diversamente), conta le `label:` scritte contro le voci lette e cade su un modulo senza guida, un nome cambiato o una guida per un modulo tolto.
+- **E la aggiunge al modulo di richiesta** (chiusura del 15/10/2026). La guida dice «Scegli il modulo. Se non è nell'elenco, scegli «Altro»», ma `MODULI` di `src/pages/Richieste.jsx` non aveva Dashboard, Omologhe, Dichiarazioni RENTRI, Dichiarazioni Impianti, Verifiche Fornitori, Richieste, Guida e Utenti: chi chiedeva una correzione su quelle pagine doveva scegliere «Altro». Ora l'elenco ha tutte le voci del menu, nello stesso ordine, e «Altro» in fondo; il valore salvato di EcoTyna resta 'Assistente' (`ETICHETTE_MODULI`). La sezione 1 di `prove/guida.mjs` lo controlla.
+- **Per livello**: `livelloDellaGuida(livello, isAdmin)`; amministratore e' solo chi lo e' per il ruolo, e un livello «admin» scritto altrove, o non ancora letto, vale consultazione. Chi legge vede il suo livello (le righe `puo`/`nonPuo` di `src/lib/livelli.js`, le stesse della pagina Utenti) e solo le sue note; l'amministratore vede i tre livelli e tutte le note, col suo segnato. «I passi del mese» (caricamenti, copia di sicurezza, verifiche settimanali, liste di inizio mese, Richieste ECT, i passi di `chiusuraMese.ts`, la fatturazione) sono solo dell'amministratore, anche nella ricerca. A chi non e' amministratore il blocco si chiama «Lo fa solo l'amministratore» e porta a «Apri una richiesta».
+- **Sezioni per tutti**: «Come chiedere una correzione o un caricamento» (Richieste: la risposta resta nella pagina, nessuna email), «Le parole del portale», «Come chiedere a EcoTyna» (gli esempi aprono `/assistente?domanda=`; aperti negli Assegnati, chiusi nei Terminati, Richieste ECT solo per le email).
+- **La ricerca** sta in cima alla pagina: senza accenti, alla radice delle parole, tutte le parole devono esserci, parole evidenziate e moduli trovati gia' aperti. **Non e' sticky, e non puo' esserlo** finche' il Layout resta com'e': il `<main>` ha `overflow-y-auto` ma non scorre mai (il contenitore ha solo `min-h-screen`, scorre la finestra), e uno sticky si aggancia al primo antenato con un suo scorrimento, quindi se ne va col resto. In fondo alla pagina c'e' «Torna alla ricerca». La sezione 7 della prova cade se la pagina torna sticky, o il commento lo promette, senza un'altezza fissa nel Layout.
+- **La guida non promette quello che il gestionale non fa**: ogni frase e' presa dalle pagine e da questo file. I collegamenti (`collegamentiDellaGuida`) sono rotte vere di `App.jsx`, mai rimandi; un `?tab=` sta fra le `SCHEDE` e le `TabsTrigger` della pagina, che legge l'indirizzo. Le novita' del 14/10/2026 (riepilogo della settimana, copia di sicurezza, errori del sito) si nominano solo se le pagine le montano.
+- **Il promemoria della copia** («se passano sette giorni senza una copia, «Da gestire» della Dashboard te lo ricorda») e' stato tolto il 15/10/2026, quando `vociPromemoriaCopia` (`base44/shared/promemoriaCopia.ts`) non la chiamava nessuno, e rimesso alla chiusura dello stesso giorno, quando `cruscotto.ts` ha cominciato a chiamarla. La sezione 8 di `prove/guida.mjs` lega la promessa alla chiamata nei due sensi: la guida, e la sezione della copia in Caricamento Dati («dopo sette giorni la dashboard te lo ricorda»), la possono fare solo se un file di `src` o `base44` (prove e commenti esclusi) chiama la regola; e quando la chiamata c'e' la guida la deve fare nei passi del mese. Allo stesso modo la parte della Dashboard solo dell'amministratore nomina gli errori del sito e il promemoria della copia se e solo se «Da gestire» li dice.
+- Una colonna a 375 px: nessuna tabella, nessuna larghezza fissa, moduli che si aprono al tocco con `<details>`.
+
+Prove: `prove/guida.mjs` (menu e guida, il modulo di richiesta, collegamenti, rotta pigra, livelli, ricerca, pagina col React finto, piattaforma e 375 px, novita' del giro e promemoria della copia, pagina disegnata con React vero lato server: a chi consulta e all'operatore base solo le note del loro livello).
 
 ### Il target del contratto e l'atteso alla data (11/10/2026)
 
@@ -6492,6 +6646,74 @@ richieste ECT invece sale e il suo indirizzo non lo conserva nessun record:
 e lo ANNOTA nel registro `FileDaRimuovere` (audit del 03/10/2026), altrimenti
 nessuno saprebbe piu' che esiste.
 
+### La copia di sicurezza di tutti gli archivi (14-15/10/2026)
+
+Una delle cose da creare proposte all'utente il 14/10/2026 e approvate lo stesso
+giorno («per me ok ... su quanto da creare, procedi pure»): «una copia di
+sicurezza periodica dei dati: un'esportazione completa, per esempio ogni
+settimana, scaricabile dall'amministratore. Oggi la copia dei dati veri la
+facciamo a mano.» Sta in Caricamento Dati, sezione «Copia di sicurezza»
+(`src/components/caricamento/CopiaSicurezza.jsx`, ancora `#copia-sicurezza`),
+solo per l'amministratore; la lettura, il file e il registro stanno in
+`src/lib/copiaSicurezza.js`.
+
+- **Tutti gli archivi.** `ARCHIVI_DELLA_COPIA` ha un nome per ogni file di
+  `base44/entities`, e `prove/copiaSicurezza.mjs` cade dicendo quale manca:
+  **chi aggiunge un archivio lo aggiunge li'**. Ogni archivio si legge a pagine
+  da 5000 in ordine di id, coi doppioni tolti, come `fetchAll`; uno che non
+  finisce in cento pagine non si copia a meta' senza dirlo.
+- **Piano.** Al massimo `RICHIESTE_AL_MINUTO` (40) richieste in ogni minuto,
+  sulle circa settanta di tutta l'app, contando anche le letture delle due
+  funzioni chiamate per gli attesi (15 e 18). Con l'avanzamento a video e
+  «Annulla».
+- **Un momento solo.** Prima di leggere guarda il registro dei caricamenti: con
+  un caricamento in corso non comincia. Alla fine, se il registro e' cambiato
+  durante la lettura, la copia non si scarica. Anche mentre la pagina stessa
+  carica un file o rifa' i ricalcoli il pulsante aspetta (`fermo`).
+- **Il formato e' quello della copia dei dati veri**: `{ meta, archivi, attesi
+  }`, JSON compresso nel browser (`CompressionStream`, o fflate dove manca), col
+  nome `treadrider-copia-AAAA-MM-GG.json.gz` sul giorno italiano. Gli attesi
+  sono le risposte di `riepilogoDichiarazioni` e `calcolaGiacenze` con `{ anno
+  }`, senza `registra`: non scrivono. Rinominata, la copia diventa quella del
+  quinto controllo, ma solo se e' completa (vedi «I quattro controlli» e
+  `../dati-veri/LEGGIMI.md`).
+- **I dati non lasciano il PC.** Il file si prepara nel browser e finisce nei
+  Download. Nel gestionale resta solo una riga di `CopiaSicurezza`, coi
+  conteggi e senza i dati: giorno, chi, archivi, righe, kB, archivi non letti,
+  attesi mancanti. La scrive e la legge solo l'amministratore; update e delete
+  non li ha nessuno. Produrre il file e registrarlo sono due passi: se la riga
+  non si scrive, il file c'e' lo stesso e la pagina lo dice.
+- **I documenti allegati non sono nella copia**: i record tengono i loro
+  riferimenti (`file_uri`, `file_url`). Un `file_uri` basta a chiunque sia
+  collegato per farsi aprire il documento (vedi «Il `file_uri` e' la chiave del
+  documento»), e la copia ha anche costi e prezzi dei fornitori: la sezione dice
+  di conservarla come un documento riservato.
+- **Solo l'amministratore.** La pagina la disegna sotto `isAdmin` e la libreria
+  chiede al server chi e' collegato prima di leggere: un altro utente
+  leggerebbe gli archivi riservati vuoti, e la copia direbbe il falso. E'
+  l'unico lettore generico ammesso oltre agli Assegnati (vedi «I costi dei
+  fornitori sono dell'amministratore»).
+- **Il promemoria in «Da gestire»** (agganciato alla chiusura del 15/10/2026).
+  La regola e' `vociPromemoriaCopia` (`base44/shared/promemoriaCopia.ts`, pura):
+  nessuna copia negli ultimi sette giorni («L'ultima copia di sicurezza è del
+  gg/mm/aaaa: scaricane una», un'informazione, attenzione dai quattordici
+  giorni), mai fatta, o l'ultima incompleta (con gli archivi che mancano). Una
+  copia senza gli attesi resta buona come copia di sicurezza, e il promemoria
+  tace. I giorni sono italiani. Un registro non letto non e' «mai fatta»: niente
+  voce. Solo per l'amministratore. Fino alla chiusura la regola non la chiamava
+  nessuno, e la sezione prometteva «dopo sette giorni la dashboard te lo
+  ricorda» a vuoto: ora `cruscottoOperativo` legge l'ultima riga del registro
+  (una lettura, una riga, solo per lui) e `cruscotto.ts` la passa alla regola.
+  La voce porta a `/caricamento-dati#copia-sicurezza`.
+
+Prove: `prove/copiaSicurezza.mjs` (l'elenco degli archivi, il registro, la
+lettura sull'SDK finto con piu' di 5000 righe e doppioni, il ritmo, il file
+riaperto, che cosa ferma la copia, il promemoria a 0, 6, 7 e 8 giorni e mai
+fatta, la pagina per l'amministratore e per gli altri),
+`prove/copiaSicurezzaDatiVeri.mjs` (la copia della copia dei dati veri riletta
+da `prove/datiVeri.mjs`), `prove/cruscotto.mjs` (il promemoria nella dashboard,
+anche sul banco).
+
 ## I file, la privacy e i permessi
 
 ### I costi dei fornitori sono dell'amministratore, anche in EcoTyna (11/10/2026)
@@ -6594,6 +6816,19 @@ per `SurplusTariffa`.
 Prova: `prove/tariffeRiservate.mjs`. Copre la regola, l'inventario dei lettori, la
 parte attiva, la funzione sul banco e con un SDK che applica davvero la regola di
 lettura, la pagina vera con l'archivio chiuso, lo storico e i dati veri.
+
+**La copia di sicurezza e' l'unico lettore generico ammesso oltre agli
+Assegnati** (14/10/2026, chiusura del 15/10/2026). `src/lib/copiaSicurezza.js`
+legge per nome (`client.entities[nome]`) tutti gli archivi, compresi `Tariffa`,
+`ContrattoFornitore` e `ModelloContratto`, perche' e' una copia di tutto. Lo fa
+solo per l'amministratore, che quegli archivi li legge comunque: Caricamento
+Dati disegna la sezione sotto `isAdmin`, e la libreria chiede `auth.me` e si
+ferma se `role !== 'admin'` prima di qualunque lettura. `prove/chiLeggeCosa.mjs`
+e `prove/tariffeRiservate.mjs` (sezione 2 di tutte e due) ammettono l'eccezione
+solo con queste due guardie, e hanno le loro controprove: senza il controllo del
+ruolo, col controllo dopo la prima lettura o con la sezione disegnata a tutti,
+cadono. Fino alla chiusura le due prove cadevano sulla copia, e `npm run prove`
+era rosso.
 
 **Due fughe chiuse dalla chiusura del giro** (14/10/2026, trovate dal gruppo
 delle tariffe):
