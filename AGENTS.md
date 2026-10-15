@@ -878,6 +878,8 @@ proprieta'. Lo controlla `prove/extraRaccoltaScheda.mjs`.
 
 **Per provare un export**: ogni funzione accetta in fondo `opzioni.stato`, lo stato dei dati gia' letto, e allora non chiede niente al server. Il download si intercetta con un `document` finto e `resolveObjectURL` di node:buffer, e il file si rilegge con exceljs: `prove/documentiCheEscono.mjs` lo fa per tutti gli export e confronta i totali del file con quelli a video. Per i PDF delle librerie che caricano `esportaTabella` pigro si sostituisce `await import('@/lib/esportaTabella')` col modulo caricato con jspdf vero, come in `prove/extraRaccoltaExport.mjs`. Nel testo del PDF i caratteri €, — e • arrivano nella codifica dei font standard (0x80, 0x97, 0x95), a volte come byte nudi.
 
+**Ogni foglio con l'elenco «Da dichiarare» dice se la riga e' nel file del portale (15/10/2026).** Dal 15/10/2026 l'elenco comprende i carichi che il file non ha ancora («Giacenze e Dichiarazioni», punto 16), e il PDF della scheda, il suo Excel e il foglio «Da dichiarare» dell'Excel di tutta la pagina li scrivono come righe, con lo stesso totale. Le tre colonne (`INTESTAZIONI_NEL_FILE`, `celleNelFile`: nel file o no col giorno del file, il giorno dell'arrivo all'impianto quando non e' la fine trasporto, il dichiarato a portale dopo il file tolto dalla riga) e le note (`noteSchedaDaDichiarare` per la scheda, `noteElencoDaDichiarare` per la pagina, che sono le prime della scheda) stanno in `src/lib/giacenzePdf.js`, che non importa niente: le prove che caricano gli Excel lo caricano cosi' com'e', mentre la riga d'import da `giacenzeDaDichiarareExport` la fingono testuale (`documentiCheEscono`, `attesaDellAnno`, `pagineAnniPassati`, `ordiniAnniPassatiEtichette`), e un nome nuovo importato da li' le rompe. Una secondaria arrivata dopo il file non ha la primaria: la colonna Ordine scrive il suo numero (`ordine_primaria || ordine_secondaria`), e il dichiarato oltre i carichi sta in una riga sua, perche' il TOTALE sia la somma delle righe. Il foglio della pagina usciva con le righe nuove scritte come le altre, senza dire quali erano, e con la colonna Ordine vuota per la secondaria (chiusura del giro). PDF ed Excel della scheda ricevono gli stessi filtri (`filtriDocumento()` in `DaDichiarareTable`): con filtri diversi le note dei due file dicevano cose diverse, e dal pulsante di uno stoccaggio l'Excel diceva che l'elenco comprende i carichi arrivati dopo, che li' non si cercano (`carichi_dopo_il_file.cercati`). Prove: `prove/daDichiarareCarichiDopo.mjs` (sezione 8: il foglio della pagina ha le righe della scheda cella per cella, anche col dichiarato oltre i carichi) e `prove/documentiCheEscono.mjs` (sezione 8, il file vero riletto con exceljs).
+
 ### Quando la piattaforma modifica il codice da sola
 
 La scansione di sicurezza della piattaforma apre commit sul repo da sola, come
@@ -1690,15 +1692,62 @@ dire a uno dei due un numero diverso dall'altro rompe quella prova.
     Senza lettura la quadratura non si fa, e la pagina dice perche'
     (`quadratura_anno_chiuso`): non «da verificare». Una giacenza di riferimento
     scritta a mano non e' una lettura.
-16. **L'elenco degli ordini da dichiarare si riconcilia col pulsante e con la
-    giacenza.** Arrivando dal pulsante di un impianto, `getOrdiniDaDichiarare`
-    (`riconcilia: true`) restituisce righe del file + carichi non ancora nel
-    file - dichiarato dopo la fotografia = giacenza delle Giacenze, e righe +
-    carichi = numero del pulsante. I carichi che il file del portale non ha
-    ancora li decide `carichiNonNelFile`
-    (`shared/riconciliazioneDaDichiarare.ts`), una regola sola per Giacenze,
-    Dichiarazioni ed elenco: `segna()` restituisce la chiave dell'impianto, o
-    null, e le Giacenze ci contano sopra le classi.
+16. **L'elenco degli ordini da dichiarare e' la giacenza, riga per riga**
+    (15/10/2026). La domanda dell'utente: «non capisco perche' ad ottobre in
+    t-cycle sono entrati finora 49,04 t e nelle giacenze alla voce di ottobre
+    risulta ancora 40,92 t». La Situazione diceva 372,92 t e il pulsante 122
+    ordini, ma l'elenco, il suo totale e la fascia «Di quali mesi» avevano
+    solo le righe del file del 09/10 (ottobre 16 · 40.920 kg): i 4 carichi del
+    12-13/10 (8.120 kg) stavano solo nel «quali sono» della riga di
+    riconciliazione, che compariva solo arrivando dal pulsante. E l'utente:
+    vale per tutti gli impianti, non solo per T-Cycle.
+    - `getOrdiniDaDichiarare` restituisce il file del portale PIU' i carichi
+      che il gestionale conosce e il file non ha ancora, come RIGHE con
+      `nel_file` falso. Li decide `carichiNonNelFile`
+      (`shared/riconciliazioneDaDichiarare.ts`), una regola sola per Giacenze,
+      Dichiarazioni ed elenco: `segna()` restituisce la chiave dell'impianto, o
+      null, e le Giacenze ci contano sopra le classi; `candidato()` e' la
+      stessa decisione senza la domanda al portale, e `movimenti()` da' i
+      formulari da cui l'elenco fa le righe. Passano dagli stessi filtri e
+      dalla stessa paginazione delle altre, in ordine di fine trasporto.
+    - Il dichiarato a portale dopo la fotografia si toglie dalle righe partendo
+      dal carico arrivato da piu' tempo, come fa il portale
+      (`scalaDichiaratoDopo`): le righe restano e dicono quanto e' stato tolto.
+      Quello che supera i carichi e' una giacenza sotto zero e va in una riga a
+      parte (`parti.oltre_kg`).
+    - Cosi', per ogni impianto, il totale dell'elenco e' la giacenza della
+      Situazione al chilo, il numero di righe e' quello del pulsante, e i mesi
+      (`contoPerMese`, il mese dell'arrivo al sito: per un carico passato da uno
+      stoccaggio la fine trasporto della secondaria) sono quelli che le
+      Dichiarazioni Impianti dicono da dichiarare. Vale per tutti gli
+      impianti, senza casi per nome; Tecnogum resta fuori, perche' la rete non
+      ce la dichiara.
+    - La riga di riconciliazione di un impianto c'e' sempre: dal pulsante, dal
+      menu, con anno, provincia o ricerca. `riconcilia: true` non serve piu' e
+      si ignora. Un sito con due ruoli dice lo stoccaggio a parte, «in attesa
+      di dichiarazione»; con tutti i siti c'e' `riconciliazione_siti`, impianto
+      per impianto. Dal pulsante di uno stoccaggio no: li' l'elenco e'
+      l'attesa del piazzale, i carichi dopo il file non si cercano
+      (`carichi_dopo_il_file.cercati` falso) e nessuna nota dice il contrario.
+    - Le parole contano quanto i numeri: «arrivato dopo il file» solo se il
+      carico e' arrivato al sito DOPO il giorno del file
+      (`arrivato_dopo_il_file`). Un ordine terminato prima e che il file non
+      ha (chiuso a portale dopo il file), o del giorno stesso del file, e'
+      «non ancora nel file (terminato il gg/mm/aaaa)», e la testa dice «+ N
+      arrivati dopo» solo se lo sono tutti.
+    - Il menu dei siti e' lo stesso con o senza un sito scelto (la scheda lo
+      rifa' a ogni risposta, e scelto T-Cycle perdeva T.R.S.): la funzione lo
+      da' con le letture che fa gia' (`candidato`), nessuna in piu'. Sui dati
+      veri l'elenco costa 6 richieste per sito e 6 con tutti i siti.
+    - La scheda, il suo PDF, il suo Excel e il foglio «Da dichiarare»
+      dell'Excel di tutta la pagina (che e' l'elenco di tutti i siti), con gli
+      stessi filtri, portano le stesse righe e lo stesso totale, con la colonna
+      «Nel file del portale» (vedi «I documenti che escono»).
+    - Prova: `prove/daDichiarareCarichiDopo.mjs` (le tre funzioni vere insieme,
+      la scheda, il PDF, i due Excel, i dati veri). Sulla copia dell'11/10 i
+      carichi che il file non ha sono 0, e l'ottobre di T-Cycle e' 16 · 40.920
+      kg in elenco, Dichiarazioni Impianti e Terminati Rete: i numeri non
+      cambiano, cambia che quelli successivi al file entrano dappertutto.
 17. **Le regole si scrivono una volta, e le prove lo verificano guastandole.**
     Oltre ai carichi non ancora nel file, le righe su cui si ripartisce il
     target dei raccoglitori sono `conferitiPerRipartizione`
