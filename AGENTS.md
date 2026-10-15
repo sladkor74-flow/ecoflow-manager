@@ -34,6 +34,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Il guardiano notturno e la memoria dei numeri (10/10/2026)
   - Il battito dei lavori e le identita' fra moduli (11/10/2026)
   - Nessun anno scritto nelle pagine (11/10/2026)
+  - Il cambio d'anno: la prova generale del 15/10/2026
   - Il dichiarato e' di chi tratta, non di chi stocca (10/10/2026)
   - Una dichiarazione per mese, e un avviso non grida a zero (10/10/2026)
   - Giacenze e Dichiarazioni: lo stesso numero, controllato da una prova (10/10/2026)
@@ -82,6 +83,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - Le attivita' della to-do list che si chiudono da sole (28/09/2026)
   - La to-do list: i completati nella loro sezione (12/10/2026)
   - La to-do list: i cancellati dal portale (14/10/2026)
+  - Le richieste ECT: il foglio del 09/10/2026 e il cambio d'anno (15/10/2026)
   - EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
   - EcoTyna: il modulo giusto per ogni domanda sulla commessa (14/10/2026)
   - La voce di EcoTyna: il testo detto, frase per frase (11/10/2026)
@@ -156,6 +158,11 @@ parola. Su una copia completa il controllo non aggiunge verifiche, quindi 158
 restano 158. Le risposte attese si cercano con l'anno della copia
 (`riepilogoDichiarazioni_<anno>`, `calcolaGiacenze_<anno>`), non col 2026
 scritto a mano. Prova: `prove/copiaSicurezzaDatiVeri.mjs`, sezione 3.
+L'anno della copia e' quello del giorno italiano di `meta.letto_dal`, la stessa
+regola di `copiaSicurezza.js` (prova generale del cambio d'anno, difetto 28,
+15/10/2026). Con l'anno UTC di `letto_fino_al` una copia fatta fra mezzanotte e
+l'una del 1° gennaio cercava gli attesi dell'anno sbagliato e falliva 7
+controlli. Prova: `prove/annoDellaCopia.mjs`.
 
 **Una prova che scrive file nella cartella temporanea li toglie alla fine**
 (revisione del 15/10/2026). La cartella si crea con `mkdtempSync` e si toglie
@@ -217,6 +224,17 @@ non darebbe. `caricaPagina('lib/x')` impacchetta anche una libreria di
 da una copia del sorgente in cui e' sostituito solo quell'import
 (`caricaPagina(..., { file })`, 14/10/2026): `prove/pagineAnniPassati.mjs`,
 `prove/perNoiChiusiDallaPagina.mjs`.
+
+**Per leggere le parole che un componente scrive c'e'
+`prove/dati/disegnaComponente.mjs`** (prova generale del cambio d'anno,
+15/10/2026). `disegnaComponente(percorso, nome)` impacchetta il componente con i
+suoi import veri (finti solo il client della piattaforma e l'accesso, con un
+amministratore) e lo disegna con React lato server: restituisce `(props) =>
+HTML`, e `testoDi` riduce l'HTML alle parole a video. Cercare una frase nel
+sorgente dice che c'e', non che esce quando deve. Gli effetti non girano (vedi
+sotto): i dati si passano nei props. Lo usano `prove/targetAttesoAllaData.mjs`,
+`prove/andamentoFiltriAnno.mjs` e `prove/cambioAnnoRitocchi.mjs`, che ferma
+anche l'orologio per le parole che dipendono da oggi.
 
 **Il primo disegno di una pagina non vede quello che dipende dalle letture**
 (revisione del 15/10/2026). `renderToStaticMarkup` non esegue gli effetti: un
@@ -858,6 +876,19 @@ rimontava l'input e il cursore usciva dal campo dopo ogni cifra. Un
 sottocomponente si scrive a livello di modulo e riceve valore e scrittura come
 proprieta'. Lo controlla `prove/extraRaccoltaScheda.mjs`.
 
+**«Oggi» nelle pagine e nelle funzioni e' sempre il giorno italiano** (prova
+generale del cambio d'anno, 15/10/2026): `oggiRoma`, `giornoRoma`, mai
+`new Date().toISOString().slice(0, 10)`. Fra mezzanotte e l'una (le due
+d'estate) il giorno UTC e' ancora ieri: l'01/01/2027 alle 00:30 un'omologa
+scaduta il 31/12 «scadeva oggi» e il file si chiamava
+`Dichiarazioni_RENTRI_2026-12-31.xlsx`. Sono stati corretti cosi' Omologhe, il
+badge delle omologhe, il nome del file e i controlli delle Dichiarazioni RENTRI
+(difetto 30), il mese del controllo normativo gia' fatto (difetto 36), lo
+«Scaduto» della to-do list (difetto 34) e il giorno proposto dalla Nuova
+rilevazione dei piazzali (difetto 29). Una data che arriva dal campo data come
+'AAAA-MM-GG' si confronta come giorno, senza passare per `new Date`. Prove:
+`prove/omologheRegistro.mjs`, `prove/battitoLavori.mjs`, `prove/menuTodo.mjs`.
+
 ### I documenti che escono: una veste sola e la data dei dati (11/10/2026)
 
 **Ogni file che si manda fuori passa dal corredo `src/lib/fogliProfessionali.js`**: exceljs, mai SheetJS, che nella versione del progetto non sa scrivere ne' grassetti ne' colori. Un export costruisce le sue righe come prima, un elenco di elenchi, e le consegna a `foglioDaRighe(wb, nome, { doc, righe, testate, stili, formati, larghezze })`, che le scrive cella per cella uguali sotto il blocco di testa; `scaricaCartella(wb, nome)` scarica il file. Dall'11/10/2026 ci passano la passiva per canale, i tre report dell'attiva, il report dei conferimenti, il confronto col consuntivo, giacenze, dichiarazioni, andamento raccoglitori, extra raccolta (Excel e PDF), il Report Mensile (Excel al posto del CSV, `src/lib/reportMensileExport.js`) ed `esportaTabellaExcel`, quindi anche margine, dettaglio dell'attiva, matrice delle province e qualifica. Resta su SheetJS `giacenzeDaDichiarareExport.js`.
@@ -1393,6 +1424,16 @@ notte pesa sui tempi e sul limite di richieste. Per farla bene ci vuole un passo
 a parte (`{ voci: [...] }`) che confronti solo i mesi la cui fotografia e' piu'
 recente dell'ultimo caricamento riuscito dei tipi che legge.
 
+**Le identita' al cambio d'anno (15/10/2026).** Un impianto con una giacenza
+(non 0, non «—») che un modulo solo elenca e' un caso, dalle due parti, come il
+piazzale (difetto 12: il 05/01/2027, senza la copia d'anno, le Giacenze avevano
+cinque impianti con una giacenza e le Dichiarazioni nessuno). A gennaio e
+febbraio il controllo guarda anche l'anno prima con le stesse fonti
+(`anniDaControllare`, `unisciAnni` in `invarianti.ts`, difetto 27): una riga
+sola per giorno, e ogni caso col suo anno («2026: Irigom S.r.l., ACI: ...»).
+Prima dal 1° gennaio il 2026, che si sta ancora chiudendo, non lo guardava
+nessuno. Prove: `prove/identitaFraModuli.mjs`, `prove/guardianoNotturno.mjs`.
+
 ### Nessun anno scritto nelle pagine (11/10/2026)
 
 Gli anni e il mese da cui parte una pagina vengono dal giorno italiano,
@@ -1405,12 +1446,158 @@ margine ed extra raccolta avevano `[2024, 2025, 2026]`: dal 1° gennaio 2027 il
 `src/pages` e `src/components` e fallisce su un `useState(2026)` o un elenco di
 anni scritto a mano.
 
+**Gli anni si contano quando la pagina si disegna, non quando il modulo si
+carica** (prova generale del cambio d'anno, 15/10/2026, difetto 35). Gli elenchi
+degli anni si calcolano dentro il componente (`useMemo` su `oggiRoma()`), mai in
+una costante fuori. Le pagine restano in memoria finche' la scheda non si
+ricarica: una lista calcolata quando il modulo si carica, il 31/12, il 04/01
+non offre l'anno nuovo. Erano cosi' Dichiarazioni Impianti, Extra Raccolta,
+Fatturazione passiva e attiva, Margine e, chiusa a fine giro, la scheda Zone dei
+raccoglitori di Target & Status. `prove/anniDellePagine.mjs` monta le pagine
+vere col modulo caricato il 31/12 e montato il 04/01, e fallisce su una
+costante del modulo calcolata con `annoDiOggi`, `anniDaScegliere`,
+`meseDiLavoro` o `oggiRoma`. I file dell'Extra Raccolta con l'anno su «Tutti»
+prendono l'anno dei movimenti (`annoDelDocumento`, difetto 20: dicembre fatto a
+febbraio usciva «Dicembre 2027»): con lo stesso mese in due anni la pagina
+chiede l'anno, e senza mese il documento dice «Tutti gli anni».
+
 La tolleranza e' quella della quadratura (`TOLLERANZA_QUADRATURA_T`), una sola
 per tutto il gestionale, e le tonnellate si scrivono con `formatoTonnellate`:
 un secondo formato qui dentro scriveva «1,200 t» dove tutto il resto dice
 «1,20 t», e l'ha trovato una prova.
 
 Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
+
+### Il cambio d'anno: la prova generale del 15/10/2026
+
+Il passaggio dal 2026 al 2027 e' stato fatto prima che succeda davvero. Cinque
+simulazioni sui dati veri (la copia dell'11/10/2026, piu' un dicembre 2026 e un
+gennaio-febbraio 2027 costruiti apposta: ritiri, secondarie, dichiarazioni,
+letture del portale, contratto e target 2027, tariffe 2027 presenti o assenti),
+con l'orologio fermo nei giorni che contano: 28/12/2026, 31/12/2026 alle 23:30,
+01/01/2027 alle 00:30, 02/01, 05/01, 15/01 e 10/02/2027. Piu' di ottanta
+scenari in cinque aree (movimenti e pagine; Giacenze e Dichiarazioni; tariffe e
+soldi; target, contratti e alert; EcoTyna e i controlli di tutti i giorni).
+Ogni difetto e' stato riprodotto con uno script, e un secondo controllo,
+indipendente, ha provato a smentirlo: quattro segnalazioni sono cadute.
+**37 difetti confermati: 8 gravi, 19 medi, 10 piccoli.** Uno era rotto gia'
+quel giorno: il foglio Richieste ECT del 09/10/2026 non si caricava (10).
+
+Il piano e' stato approvato dall'utente il 14/10/2026 («per me ok sulle cose da
+sistemare ... procedi pure») e il 15/10/2026 («procedi»). Le correzioni sono
+state fatte in sei gruppi, ognuno sui suoi file, ognuna con la sua prova in
+`prove/` che fallisce col codice di prima; ogni gruppo ha avuto una revisione
+avversaria e un ritocco. Dove sta adesso ogni regola:
+
+- **Richieste ECT, To-Do e Da gestire** (2, 3, 10, 34, 37): «Le richieste ECT:
+  il foglio del 09/10/2026 e il cambio d'anno», «La to-do list: i completati
+  nella loro sezione», «La dashboard».
+- **Giacenze e Dichiarazioni: la chiusura dell'anno e le aperture 2027** (4, 5,
+  6, 11, 12, 27, 29, 31): «LA CHIUSURA DEL 31/12/2026 E LE APERTURE DEL 2027»
+  in «Decisioni della direzione del 20/09/2026», e «Il battito dei lavori e le
+  identita' fra moduli».
+- **Tariffe e lista del nuovo anno** (7, 15, 21, 32): «Quando una tariffa vale»
+  e «L'ANNO NUOVO VA PREPARATO».
+- **Passiva, consuntivi, margine ed Extra Raccolta** (16, 17, 18, 19, 20, 35):
+  «La passiva, il congelamento e i consuntivi», «Il margine», «Il foglio della
+  passiva dell'amministrazione», «Nessun anno scritto nelle pagine».
+- **Target, contratto, alert e qualifica** (1, 22, 23, 24, 25, 26, 33): «La
+  dashboard», «Il target del contratto e l'atteso alla data», «Le variazioni del
+  contratto in corso d'anno», «Il motore degli alert al cambio d'anno», «La
+  qualifica dei fornitori».
+- **Settimane, EcoTyna e orologi** (8, 13, 14, 28, 30, 36, e la parte di EcoTyna
+  del 2 e del 15): «Come si legge un movimento», «EcoTyna: il modulo giusto per
+  ogni domanda sulla commessa», «Le dichiarazioni e il mese di competenza», «I
+  quattro controlli», «Regole tecniche della piattaforma e delle pagine».
+
+**Le decisioni dell'utente del 15/10/2026** («ok per i tuoi consigli sulle prime
+4, tanto poi entro la fine dell'anno avremo i contratti e decideremo i prezzi;
+riguardo alla risposta 5 avremo i prezzi concordati entro fine anno quindi non
+ci sarà il problema, in ogni caso va bene il tuo consiglio»). Ognuna e' scritta
+nel commento del codice che la applica, con la data:
+
+- **D1, la settimana 53.** La 53 del 2026 e' intera, dal 28/12/2026 al
+  03/01/2027, in tutte le Verifiche, come nelle Secondarie e nel riepilogo
+  della settimana. Se la stampa WINSINFO della 53 si fermera' al 31/12, i
+  formulari dell'1, del 2 e del 3 gennaio usciranno «registrati, assenti nel
+  report», e si vedra' subito.
+- **D2, l'ACI degli impianti al 31/12.** A portale l'ACI degli impianti non
+  c'e': la chiusura dell'anno propone la giacenza che il gestionale calcola al
+  31/12 (apertura + arrivi - dichiarato), con accanto quella della lettera di
+  Ecotyre e lo scarto, e la salva l'amministratore quando l'ha vista.
+- **D3, Tecnogum nel 2027.** Continua a non dichiarare la rete: dal 1° gennaio
+  si porta avanti dal 2026 «non dichiara la rete», segnato «da confermare sul
+  contratto 2027», senza aspettare la copia d'anno (`sitiDellAnno`). Le
+  1.833,43 t a portale sono carichi del 2026 che nessuno dichiarera' a SMOCO.
+- **D4, le tariffe copiate e non confermate.** Una riga di un documento del mese
+  prezzata con una tariffa copiata dall'anno prima e non confermata ferma il
+  documento come una riga senza prezzo. La conferma e' in Target & Status ›
+  Nuovo anno. Un prezzo vecchio che passa per nuovo e' peggio di un prezzo che
+  manca.
+- **D5, il foglio della passiva per l'amministrazione.** Una riga senza la
+  tariffa dell'anno resta «—» (prezzo e totale null; il totale del foglio lo
+  dice e non la conta come zero) finche' la tariffa dell'anno non c'e', come
+  nella fatturazione passiva; la nota dice l'anno del prezzo quando c'e'.
+
+**Il difetto 9 non e' di questo giro.** Le ore del file del portale sono
+italiane (lo dicono le pause pranzo, uguali d'inverno e d'estate) e si salvano
+come ore UTC, a cui poi si aggiunge di nuovo l'ora italiana: un ordine immesso
+«31/12/2026 23:30» finisce in gennaio 2027, e sui dati veri 19 ordini di rete
+hanno l'immissione al giorno dopo (ET26020377, 31/01/2026 23:55, passa a
+febbraio). Oggi le fini trasporto arrivano senza ora, quindi raccolto e periodi
+non cambiano. Cambia il modo in cui si salvano le ore e le finestre di lettura
+di piu' moduli: va fatto in un giro a se'.
+
+**La chiusura del giro** ha portato la regola nuova dove i gruppi non potevano
+arrivare, ognuna con la sua prova (`prove/cambioAnnoRitocchi.mjs`, piu'
+`prove/anniDellePagine.mjs` e la sezione 7 di
+`prove/passivaAmministrazioneRicalcolo.mjs`): la pagina della qualifica e il
+presidio con `oggi`; il contesto di EcoTyna senza ritiri del 2027; PDF,
+presentazione ed Excel dell'Andamento coi target copiati; il dettaglio
+dell'attiva «da confermare»; l'anno del prezzo delle voci nello storico; la
+nota dell'economia nel PDF del quadro; le richieste completate dell'anno prima;
+la scheda dell'impianto e il riepilogo delle Dichiarazioni senza apertura; i
+siti portati dall'anno prima a video; la scheda Siti che non scrive zeri; il
+PDF della passiva per l'amministrazione coi «—»; la scheda Zone dei
+raccoglitori. Quattro prove hanno cambiato i loro dati perche' la regola e'
+cambiata apposta: una rete senza data di fine non si salva piu'
+(`prove/anagraficheDoppioni.mjs`, `prove/storicoModifiche.mjs`), la chiusura
+legge anche i due file delle proposte (`prove/rinvioCaricamenti.mjs`), un'ACI
+mai scritta su una riga della chiusura e' «—» (`prove/velocitaGiacenze.mjs`).
+E `prove/provaDel2Gennaio.mjs` cerca nel sorgente la condizione nuova della
+scheda dell'impianto, che mostra anche un canale senza apertura.
+
+**Il commit.** Le modifiche dei gruppi dipendono l'una dall'altra: le
+esportazioni nuove di `ecotyreTariffe.ts` (`rigaConTariffaDaConfermare`,
+`annoDellaCopia`, `tariffaDaConfermare`) e il segno `tariffa_da_confermare` di
+`passivaCalcolo.ts` servono a `consuntivoFornitore.ts`, a
+`passivaAmministrazione.js` e al margine. Il giro si committa intero, mai a
+pezzi.
+
+**Che cosa resta aperto.**
+- L'origine dell'ID di una richiesta ECT: un ID del foglio scritto male che
+  coincide con un altro ordine vero, una volta preso, vale come scritto a mano.
+  Serve un campo nello schema `RichiestaEct` che dica da dove viene
+  `id_ordine_manuale`; intanto la risposta e la pagina lo segnalano
+  (`id_diversi_dal_foglio`).
+- La chiusura del mese e la dashboard contano gia' il minimo da dichiarare di
+  un canale senza apertura (`resta_almeno`), ma non lo dicono «almeno X t», e un
+  minimo zero va fra i «niente da dichiarare».
+- Da gennaio fino alla chiusura salvata, per un impianto senza apertura le
+  Giacenze dicono la rete a portale e la riga «Da dichiarare» delle
+  Dichiarazioni dice «—»: il guardiano notturno confronta portale con portale e
+  tace, `prove/datiVeri.mjs` su una copia di quei giorni no (5 impianti).
+- Il blocco dell'extra raccolta del foglio dell'amministrazione
+  (`extraRaccoltaAmministrazione.js`) non legge ancora le tratte delle
+  secondarie con la tariffa copiata (D4).
+- Quello che la prova non ha potuto provare: la stampa WINSINFO vera della 53;
+  le pagine montate una per una all'orologio fermo (Assegnati, Terminati, PDR,
+  Secondarie, Terziarie, Report); la pratica Irigom di dicembre col registro
+  vero; come il portale scrive un carico finito dopo la mezzanotte del 31/12; il
+  programma delle secondarie dal 04 al 10/01/2027; un piazzale del 2026 che
+  cambia numero dopo la prima lettura del 2027 (visto una volta). E il
+  01/01/2028: al 12/10/2026 c'erano 30 ordini di febbraio 2026 ancora aperti,
+  fuori dall'export «dal 1° gennaio dell'anno scorso».
 
 ### Il dichiarato e' di chi tratta, non di chi stocca (10/10/2026)
 
@@ -2355,6 +2542,22 @@ li', e non riscrive la regola:
   (`pivotCalculator.ts`, oggi non usato). Prima la correggeva solo il dettaglio,
   e la stessa pagina diceva 2 viaggi nella tabella e 1 nei KPI. Prova:
   `prove/settimanaIso53.mjs`, che fa girare le tre parti sugli stessi movimenti;
+- **Le Verifiche usano la settimana ISO intera** (prova del cambio d'anno del
+  15/10/2026, difetto 14; D1, decisione dell'utente del 15/10/2026).
+  `intervalloSettimana` (in `base44/shared/reportSettimanali.ts` e, uguale, in
+  `src/lib/verifiche.js`: due copie di una funzione, non uno specchio di file,
+  quindi `prove/specchi.mjs` non le controlla e lo fa
+  `prove/reportSettimanali.mjs`) va da lunedi' a domenica senza fermarsi al
+  31/12. La 53 del 2026 va dal 28/12/2026 al 03/01/2027, la 1 del 2026 comincia
+  il 29/12/2025. `settimaneNellAnno` e' la settimana del 28 dicembre: il 2026 ne
+  ha 53, il 2027 52. `chiusuraMese.settimaneDelMese` mette la 53 del 2026 in
+  dicembre 2026 e in gennaio 2027, e la 1 del 2026 anche in dicembre 2025.
+  `soggettiDellaSettimana` guarda l'anno ISO. Le arretrate vanno in ordine di
+  calendario («53, 1»). Prima l'1, il 2 e il 3 gennaio 2027 non stavano in
+  nessuna verifica, e un formulario di sabato 02/01 omesso dal report non era
+  «assente» da nessuna parte. Le verifiche salvate partono dalla 37 del 2026,
+  quindi nessuna chiave cambia. Prove: `prove/reportSettimanali.mjs`,
+  `prove/chiusuraMese.mjs`, `prove/settimanaIso53.mjs`;
 - `giornoElenco / annoElenco / meseElenco`: per gli elenchi e i loro filtri di
   giorno, mese e anno, che mostrano anche ordini senza trasporto. Un terminato
   si colloca solo sulla fine trasporto; un ordine non terminato all'immissione.
@@ -2581,6 +2784,23 @@ PASSIVA. Cosi' «GATIM» e «GATIM S.R.L.» non possono avere due prezzi per lo
 stesso periodo. L'elenco delle tariffe segna «Duplicata» con la stessa chiave
 (`src/lib/conflittiTariffa.js`). Prove: `prove/validitaTariffa.mjs`,
 `prove/controlloRotteTariffe.mjs`, `prove/strumentiTariffe.mjs`.
+
+**Le tariffe di rete e ACI sono annuali anche in anagrafica** (prova generale
+del cambio d'anno, 15/10/2026, difetto 7). `controlliPeriodoTariffa` in
+`validitaTariffa.ts` (specchio in `src/lib`): RETE, ACI e TUTTE, attive e
+passive, vogliono inizio e fine, e la fine al piu' il 31/12 dell'anno di inizio.
+Altrimenti `gestisciAnagrafiche` risponde 400 con `campo` ed `errori`, in create
+e in update, sul record com'e' dopo il salvataggio: anche cambiare il solo
+prezzo di una rete rimasta aperta chiede la fine. L'extra raccolta resta
+libera, e una tariffa disattivata non si controlla. `TariffeForm` propone come
+«Al» il 31/12 dell'anno del «Dal» e mostra l'errore sotto il campo. «Riapri»
+(`fineRiapertura`) riapre una rete o ACI al piu' fino al 31/12 del suo anno, e
+una tariffa gia' al 31/12 non si riapre sull'anno dopo: l'anno nuovo ha bisogno
+della sua. Prima una tariffa senza fine valeva l'anno dopo in silenzio (il
+10/02/2028 gennaio si fatturava a 205 €/t senza un avviso) e la lista del nuovo
+anno la contava «pronta». **Una prova che crea una rete o ACI la scrive con la
+fine**, altrimenti riceve 400 (`prove/anagraficheDoppioni.mjs` e
+`prove/storicoModifiche.mjs` sono state corrette cosi').
 
 ### Il surplus sulle tariffe (12-13/10/2026)
 
@@ -2975,6 +3195,24 @@ non si riapre niente (D7). Prove: `prove/passivaSurplus.mjs` (tiene l'impronta
 dei totali di ogni mese del 2026 col codice di prima del surplus, sulla copia
 dell'11/10/2026: con un'altra copia quella parte si salta e lo dice) e
 `prove/consuntivoSurplus.mjs` (sezione 5 per il congelamento).
+
+**La tariffa che manca e' nostra, non del fornitore** (prova del cambio d'anno,
+15/10/2026, difetti 16 e 17; D4, decisione dell'utente del 15/10/2026).
+`costoAttesoDallaPassiva` conta `senza_tariffa_t` (righe «senza tariffa» o con
+unita' sconosciuta, e le tratte del vettore delle secondarie che la passiva
+salta e annota solo nelle anomalie) e `da_confermare_t` (righe prezzate con una
+tariffa copiata da «Prepara le tariffe» e non confermata, con `anno_copia`). Se
+una delle due e' piu' di zero, `esitoConsuntivo` mette a null `quadra_importo`,
+lo scarto e il previsto; la ragione va in `non_controllato` e in
+`importo_sospeso`, e se il resto torna il verdetto e' null («da confrontare»).
+Il testo dice «Non si è potuto controllare l'importo: nella passiva di gennaio
+2027 manca la tariffa…», mai «si scosta di». `congelaPassivaMese` risponde 409
+con `tariffe_mancanti` e `tariffe_da_confermare` e congela solo con
+`conferma: true`; la pagina chiede con l'elenco. Un conto congelato quando la
+tariffa mancava o era copiata, e che oggi c'e' o e' confermata, dice «rifai il
+congelamento», anche quando il prezzo confermato e' lo stesso e il conto non si
+e' mosso. Il file Excel della verifica riceve `esitoPerIlFile(esito)`: «—» col
+perche', non 0,00 €. Prova: `prove/consuntivoSurplus.mjs`, sezioni 6-8.
 
 L'attiva, la prefattura e il margine col surplus sono nelle loro sezioni: «La
 fatturazione attiva verso Ecotyre», «Il surplus nella prefattura: ogni ordine
@@ -3754,6 +3992,23 @@ quando dall'impianto sono usciti solo metalli ferrosi e nessuna gomma (Irigom,
 rete di aprile 2026): a portale non si carica nulla e il ferro si dichiara con
 la prossima uscita di gomma. Nessuno dei due e' un mancante.
 
+**Piu' mesi caricati a portale lo stesso giorno** (prova del cambio d'anno del
+15/10/2026, difetto 13). Il portale fa un caricamento per giorno e per
+impianto. Dopo il passo mese per mese, `agganciaMesiInsieme`
+(`agganciaDichiarazioni.ts`) prova insieme i nostri mesi consecutivi rimasti
+senza riscontro (fino a `MAX_MESI_INSIEME` = 12, l'arretrato di Gatim) contro UN
+caricamento, cioe' un giorno solo, entro `TOLLERANZA_KG`. Si agganciano solo se
+i mesi degli ordini che chiude (`c.mesi`, per fine trasporto) sono proprio i
+nostri. Le righe prendono il giorno del caricamento e il segno `insieme_mesi`;
+l'esito dice `insieme_ad_altri_mesi`. Mai caricamenti di giorni diversi: una
+data presa in prestito sposta il dichiarato dopo la fotografia (novembre con la
+data dell'08/01/2027). I materiali di ogni mese sono i suoi, letti per fine
+trasporto (`materiali_mesi`), quando i chili di ogni mese tornano. Se non
+tornano si potrebbero solo stimare: non si scrivono, e l'esito lo dice
+(`materiali_non_scritti`). Prima Gatim con novembre e dicembre 2026 caricati il
+12/01/2027 aveva i due mesi «da inserire» e la pagina chiedeva un doppione da
+35.000 kg. Prova: `prove/storiaDichiarazioni.mjs`, sezione 11.
+
 ### Decisioni della direzione del 20/09/2026 sulla fatturazione attiva
 
 - Nel 2026 a Ecotyre si fattura a **202 euro la tonnellata** sulla **rete** e
@@ -3835,6 +4090,80 @@ la prossima uscita di gomma. Nessuno dei due e' un mancante.
     chiusura e copia funzionano in tutti e due gli ordini;
   - **la lista ha la settima voce**, «Aperture degli impianti al 31/12».
 
+  **LA CHIUSURA DEL 31/12/2026 E LE APERTURE DEL 2027** (prova generale del
+  cambio d'anno, 15/10/2026, difetti 4, 5, 6, 11, 12, 29 e 31; decisioni
+  dell'utente del 15/10/2026, D2 e D3).
+  - **Un'apertura mai letta e' «—», mai zero** (`aperturaNetta`,
+    `aperturaDelSito` in `shared/giacenzaPortale.ts`). Vale per un campo vuoto
+    su una riga con `apertura_del`, o su un impianto che l'anno prima c'era (la
+    sua riga, o la riga dell'anno scritta dalla chiusura:
+    `sitiDellAnno().haLAnnoPrima`) in un anno cominciato. Per quell'impianto
+    anche uno zero senza `apertura_del` non e' una lettura: la scheda Siti
+    scriveva 0 dove il campo non c'era, e dalla chiusura del giro non lo scrive
+    piu' (`TargetManager.jsx`: la casella vuota resta «—» e non si salva). Il
+    perche' ha le stesse parole nei due moduli (`PERCHE_SENZA_APERTURA`,
+    `PERCHE_ACI_NON_LETTA`, `PERCHE_RETE_NON_LETTA`). Un impianto nuovo
+    dell'anno riparte da zero; una giacenza scritta a mano diversa da zero resta
+    quella; il 2026 non cambia. La notte non dice «si scosta» per un impianto
+    senza apertura: lo dice a parte (`notaSenzaApertura`). Nei numeri del giorno
+    la giacenza del canale e' null, ma il resto da dichiarare e' quello che si
+    conosce, con `senza_apertura` e `resta_almeno`: i carichi dell'anno senza la
+    casella dall'anno prima, l'ACI coi suoi mesi, la rete il minimo. Un resto
+    null faceva dire alla chiusura del mese «fatto» e alla dashboard 0 t. Nelle
+    Dichiarazioni la riga del canale c'e' anche senza arrivi; l'ACI tiene i
+    mesi, la rete e' «—» mese per mese, e il perche' sta in `flusso.perche`. La
+    scheda dell'impianto dice «manca l'apertura del 31/12» in testa (non
+    «giacenza a portale non disponibile»), «—» col perche' nella giacenza al
+    31/12 dell'anno prima (non 0,00), e mostra il canale senza mesi; il
+    riepilogo tiene la riga e il suo «—» porta il perche' del canale
+    (`SezioneImpianto.jsx`, `Riepilogo.jsx`, chiusura del giro).
+  - **La chiusura propone, l'amministratore salva** (`proposteDegliImpianti`).
+    La rete e' la parte dell'impianto del file del 31/12: righe del ruolo
+    'imp', piu' i carichi che il file non ha, meno il dichiarato dopo. E' il
+    `giacenza_portale_t` delle Giacenze al 31/12, e il testo dice quale id
+    contare (T-Cycle: 118 righe dell'impianto e 72 del piazzale sotto la stessa
+    ragione sociale, distinte solo dall'id). L'ACI e' la giacenza che il
+    gestionale calcola al 31/12 (D2), con accanto la lettera di Ecotyre e lo
+    scarto. Le caselle vuote prendono la proposta (`proponi`, solo per la
+    chiusura in corso). Un numero diverso si salva solo confermato (`conferme`,
+    `da_confermare`). Una proposta sotto zero non si propone (`negativa`, avvisi
+    `aci_negativa`/`rete_negativa`), e un numero sotto zero non si salva mai
+    (`rifiutate`). Con una giacenza ACI al 31/12 e la casella vuota c'e'
+    l'avviso `aci_vuota`.
+  - **La riga dell'anno dopo nasce anche senza lettura.** Porta ruolo,
+    tipologia e dichiara_rete, e la nota «… · dalla chiusura del 31/12/AAAA»,
+    che la copia d'anno riconosce (`rigaDellaChiusura`). A chi la rete non la
+    dichiara la rete non si chiede. **Finche' la riga dell'anno manca**,
+    Giacenze, Dichiarazioni ed elenco «Da dichiarare» prendono ruolo e
+    dichiara_rete dall'anno prima (`sitiDellAnno`, D3). Lo dicono le risposte
+    (`portata_dal`, `nota_portata`, `siti_portati`, `nota_siti_portati`), una
+    frase nella nota della notte, e dalla chiusura del giro anche le pagine:
+    «portato dal 2026, da confermare sul contratto 2027» accanto al sito nella
+    Situazione delle Giacenze, nella scheda dell'impianto delle Dichiarazioni e
+    nella riconciliazione di «Da dichiarare», e la frase dei siti portati in
+    testa alle Dichiarazioni.
+  - **I carichi di fine dicembre che il portale chiude a gennaio** entrano da
+    soli nell'apertura (nel 2026 il 93,4% dei carichi si e' chiuso a portale uno
+    o piu' giorni dopo la fine del trasporto). La chiusura scrive l'istante e i
+    movimenti gia' visti: `apertura_salvata_il` e `apertura_rettificate_json` su
+    GiacenzaSito, `chiusura_salvata_il` e `chiusura_rettificate_json` su
+    GiacenzaStoccaggio. Leggendo si aggiungono quelli arrivati dopo (`arrivi` in
+    `aperturaNetta`/`letturaDelTrentuno`, `rilevazioniDopoLaChiusura`), e la
+    scheda lo dice (`arrivatiDopoLaChiusuraDellAnno`). La chiusura non va
+    rifatta, e senza una chiusura salvata non si legge niente in piu'.
+  - La chiusura legge anche il file degli ordini non dichiarati e il report
+    delle dichiarazioni: il salvataggio si rinvia anche sui loro caricamenti
+    (`TIPI_RINVIO.chiusura` + `TIPI_PROPOSTE`, `prove/rinvioCaricamenti.mjs`).
+  - I testi della chiusura scrivono le date gg/mm/aaaa (`giornoScritto`), anche
+    nel foglio Excel. La Nuova rilevazione propone il giorno italiano, e avvisa
+    se un 31/12 sostituirebbe la fotografia della chiusura (l'01/01/2027 alle
+    00:30 proponeva il 31/12, e salvata portava il 2026 di Nappi Sud da 35,88 a
+    25,88 t).
+  Prove: `prove/aperturaNetta.mjs`, `prove/aperture2027.mjs`,
+  `prove/provaDel2Gennaio.mjs`, `prove/chiusuraAnno.mjs`,
+  `prove/pagineDichiarazioniGiacenze.mjs`, `prove/cambioAnnoRitocchi.mjs`
+  (sezioni 8 e 9).
+
   Due voci della lista, scritte lo stesso giorno, mentivano. **«Target e siti»**
   contava `ImpiantoTarget`, un archivio che non ha mai avuto una riga e che la
   copia non scrive: sarebbe rimasta rossa per sempre. Ora conta i target annui
@@ -3872,6 +4201,53 @@ la prossima uscita di gomma. Nessuno dei due e' un mancante.
   `scartate` (`preparaAnno`) col motivo, che si vede nella conferma e nel
   messaggio finale, col prezzo all'italiana. Con zero tariffe da copiare la
   conferma non propone «Prepara».
+
+  **Un prezzo copiato e non confermato non fattura in silenzio** (15/10/2026,
+  difetto 15; D4, decisione dell'utente del 15/10/2026). Il 10/02/2027 gennaio
+  si fatturava a 202 €/t con le righe «verificato» e nessun avviso.
+  - La riga attiva resta «da_controllare» col prezzo e la nota «prezzo copiato
+    dal {anno} con «Prepara le tariffe», da confermare in Target & Status ›
+    Nuovo anno». Il dettaglio dell'attiva la scrive «da confermare» in ambra,
+    anche nei file, e la conta fra le anomalie (`AttivaDetail.jsx`, chiusura
+    del giro): prima usciva «ok» in verde con «Nessuna anomalia».
+  - L'anomalia `tariffa_da_confermare` (nome concordato col margine e con
+    EcoTyna: non si cambia) c'e' una per canale nell'attiva, e una per
+    fornitore, prestazione, tratta e tariffa nella passiva.
+  - `prezzoAttivoExtra` dice «Tariffa copiata dal 2026, da confermare:
+    202 €/t».
+  - `cambiaStatoFatturazione` «verifica» risponde 400 finche' ci sono righe
+    cosi'.
+  - Una copia esce dallo stato «da confermare» in tre modi: col pulsante di
+    conferma; con un prezzo cambiato a mano con «Modifica»
+    (`noteDopoIlPrezzo`); oppure se la tariffa e' nuova e scritta a mano, anche
+    con «Duplica», con la nota della copia (`noteDellaTariffaNuova`, in
+    create). La nota della copia se ne va e restano chi e quando. Le copie le
+    scrive soltanto `preparaAnno`, che non passa da `gestisciAnagrafiche`.
+
+  **La lista: tariffe aperte «da chiudere», contratti contati sui
+  controfirmati** (15/10/2026, difetti 7 e 21).
+  - Tariffe aperte: una rete o ACI senza fine, o con la fine oltre il suo
+    31/12, e' «manca» se e' degli anni prima e «parziale» se e' dell'anno, col
+    campo `da_chiudere`. Le passive si nominano senza prezzo, perche' sono costi
+    e la lista la legge chiunque. La sola extra raccolta non fa «pronte» le
+    attive.
+  - Contratti, voce 6: gli annullati non contano. `preparaAnno` calcola gli
+    attesi con `situazioneContratti`, come `contrattiAnno` e con la cache, e li
+    passa come `totaliContratti`: «pronto» solo con tutti gli attesi
+    controfirmati, «parziale» se qualcuno lo e', «manca» con nessuno. Prima
+    diceva «pronto – Nel 2026 non ce n'erano: niente da rinnovare» mentre il
+    modulo Contratti ne aspettava 32, con 0 controfirmati.
+  - Senza gli attesi (la dashboard, che non rilegge i movimenti) non e' mai
+    «pronto». Ma con i contratti fatti tutti controfirmati la voce porta
+    `tace_in_dashboard`: resta gialla nella scheda e da sola non accende
+    `avvicinandosi`. La prova della dashboard chiama la lista come la chiama
+    `cruscottoOperativo`, senza `totaliContratti`.
+
+  **Tariffe & Anagrafiche con l'elenco vuoto** (difetto 32): «Nessuna tariffa
+  in vigore oggi: N tariffe sono scadute il 31/12/AAAA. Per l'anno nuovo:
+  Target & Status › Nuovo anno › «Prepara le tariffe», oppure «Mostra
+  archiviate».», con l'anno calcolato. Prima diceva «Nessuna tariffa. Clicca
+  "Aggiungi tariffa" per iniziare», con 65 tariffe scadute.
 - I report per l'amministrazione sono **tre, separati**: rete, ACI, extra
   raccolta. Le loro colonne non si toccano senza l'assenso dell'amministrazione.
 - La prefattura del portale copre **solo rete e ACI**. L'extra raccolta non e'
@@ -4330,6 +4706,24 @@ margine li legge dal record. Settembre 2026 col Fuel Surcharge: +1.268,40 €
 sulla rete (253,68 t di SMOCO x 5) e +24,50 € sull'ACI. Prova:
 `prove/margineSurplus.mjs`.
 
+**Un margine con prezzi mancanti e' «—»** (prova del cambio d'anno,
+15/10/2026, difetto 18). Il 15/01/2027, senza le tariffe 2027, la dashboard
+diceva «Rete € 0,00 · nessun ricavo · 7,10 t» e l'extra raccolta «€ −113,50 ·
+−77,2% del ricavo». Ogni mese e l'anno hanno `prezzi_mancanti` (righe
+dell'attiva in errore piu' passive senza tariffa), `parziale` e
+`testo_prezzi_mancanti`. Con prezzi che mancano, margine, % ed €/t sono null;
+ricavo e costo restano e si dicono parziali. «Nessun ricavo» si scrive solo con
+0 t. `righe_da_confermare` (e `testo_da_confermare`) conta le tariffe copiate e
+non confermate, e il margine resta un numero. La frase arriva in tutti i posti
+che mostrano il margine: la scheda Margine, la sezione Economia della
+dashboard, il PDF della settimana e, dalla chiusura del giro, la colonna «Nota»
+dell'Economia nel PDF del quadro (`esportaQuadro.js`). Extra Raccolta: con un
+intervento da fatturare senza prezzo `totaliExtraRaccolta` e l'analisi per
+produttore dell'Excel e del PDF scrivono il margine «—» con la frase
+`testoInterventiSenzaPrezzo`. Prove: `prove/margine.mjs`,
+`prove/dashboardPagina.mjs`, `prove/riepilogoSettimanale.mjs`,
+`prove/extraRaccoltaSurplus.mjs` (6e), `prove/cambioAnnoRitocchi.mjs` (6).
+
 ### Il foglio della passiva dell'amministrazione (11/10/2026)
 
 **La riga va sotto la voce della sua tariffa.** La passiva scrive su ogni riga
@@ -4423,6 +4817,32 @@ foglio come Excel (SUM, ROUND, somme di celle) e pretende il numero della
 cella, anche su ogni mese del 2026 dei dati veri col modello, con le voci
 dell'archivio e col Fuel Surcharge vero; settembre 2026 del modello resta al
 centesimo.
+
+**Le righe «—»** (prova del cambio d'anno, 15/10/2026, difetto 19; D4 e D5,
+decisioni dell'utente del 15/10/2026). Prima gennaio 2027 senza le tariffe 2027
+usciva rete 2.515,50 € (GATIM 6 t × 70 €) e ACI 344,00 € coi prezzi del 2026, e
+la nota diceva solo «il prezzo arriva dal modello». La voce ha `prezzo_anno`: il
+modello dell'amministrazione e le voci copiate portano i prezzi del 2026, e
+vuoto vuol dire l'anno della voce. Nel foglio di un anno dopo, una voce con
+movimenti «senza tariffa» e prezzo di un anno prima e' «—»: prezzo e totale
+null, fuori dal totale, con la nota «Tariffa 2027 mancante: il prezzo della
+voce (70 €/t) e' del 2026…». Lo stesso vale per una voce o una tratta prezzata
+con una tariffa copiata e non confermata («Tariffa 2027 copiata dal 2026 e non
+ancora confermata (70 €/t)…»). Le tratte delle secondarie senza la tariffa del
+mese non hanno una riga, ma il totale del trasporto le dice. Ogni blocco e il
+foglio hanno `senza_prezzo` (`mancanti`, `da_confermare`, `tratte`, `testo`):
+l'Excel scrive «—» come testo, fuori dalle somme, con «Totale parziale: …»
+sotto il totale, la pagina lo dice sopra il foglio, e dalla chiusura del giro
+anche il PDF (`passivaAmministrazionePdf.js`): «—» in ambra nel prezzo e nel
+totale (non «vari» e «0,00 €»), «Totale parziale» sotto il blocco e il
+trasporto, «parziale» nei riquadri e accanto al totale del canale, e la legenda
+con le due ragioni. Una voce senza movimenti tiene il prezzo, che e' un
+riferimento. «Prezzo del 2026, contratto scaduto: vale anche per il 2027?» di
+`VociPassivaDialog` cambia solo `prezzo_anno`, e fa passare la voce da «—» a un
+totale: `prezzo_anno` e' fra i campi tracciati (`campiTracciati`, i due
+specchi), e la conferma lascia la sua riga nello storico. Prove:
+`prove/passivaAmministrazioneRicalcolo.mjs`, sezioni 5-7,
+`prove/modelloPassivaAmministrazione.mjs`, `prove/cambioAnnoRitocchi.mjs` (5).
 
 ### Un nome, un record: anagrafica e consuntivi (11/10/2026)
 
@@ -4867,8 +5287,9 @@ La pagina (`src/pages/Dashboard.jsx`, componenti in `src/components/dashboard/`)
 - **Le parole e i numeri della rete** (cifre, mesi, regioni) stanno in `righeQuadro.js`, e li usano pagina e PDF. «Esporta il quadro (PDF)» (`esportaQuadro.js`) usa i dati a video. L'economia esce solo con «con l'economia» spuntata dall'amministratore, mai per gli altri, anche se la casella arrivasse accesa. «Da gestire» non va nel PDF.
 
 - **La quadratura con il portale e' una sola** (revisione delle migliorie, 11/10/2026). La dashboard (`quadroImpianti` in `cruscotto.ts`) conta le stesse righe di Dichiarazioni Impianti (`riepilogoDichiarazioni`, `totali.siti_che_quadrano` / `siti_da_quadrare`): gli impianti e gli stoccaggi puri della rete che hanno una giacenza a portale, letti dalla fotografia della notte. Una riga di stoccaggio ha il canale in fondo alla chiave (`nappi sud|RETE`); l'ACI degli stoccaggi si conta a parte (`aci_stoccaggi`), mai con la rete. Anche l'etichetta e' quella della pagina: «Rete: quadratura con il portale». Contando i soli impianti, l'11/10/2026 la dashboard diceva «5 su 5» e la pagina «6 su 6». Dal 12/10/2026 anche il guardiano (`indicatoriGiorno.ts`) conta le stesse righe, e la sua nota e la voce dicono chi si scosta, impianto o stoccaggio (vedi «Il guardiano notturno», prudenza 3).
-- **Un anno chiuso si misura al 31/12.** Per un anno chiuso `quadro.rete.atteso.giorno` e' il 31/12 (`fine_anno: true`), e le etichette («Atteso al», «sul loro target al», le colonne del PDF) leggono `quadro.giorno_misura`, non `giorno_dati`, che e' dell'anno dopo. Il perche' della tabella delle regioni dice la cosa vera (`percheSenzaScarto`): senza contratto, con un target di ripiego (il 2025: «ha un target di ripiego ... e senza contratto non c'è un riparto per regione»), senza riparto per regione, senza ritiri.
+- **Un anno chiuso si misura al 31/12, dal 1° gennaio** (prova generale del cambio d'anno, 15/10/2026, difetto 1). La regola e' una, `giornoDellaMisura(anno, giornoDati, oggi)` di `attesoContratto.ts` (specchio in `src/lib`): un anno prima di quello italiano di oggi si misura al 31/12 qualunque sia l'ultimo ritiro caricato (atteso uguale al contratto, `fine_anno: true`, proiezione finale uguale al raccolto, mesi interi); l'anno in corso senza ancora un ritiro suo non ha giorno («—», atteso `null`, mai 0,00: «nessun ritiro del 2027 ancora terminato»); altrimenti il giorno dei dati. Senza `oggi` resta la regola di prima. La usano `quadroRete`, `quadroAci`, `quadroExtra`, `contrattoReteDegliAnni`, `contrattoDellaRete` (quindi EcoTyna), Target & Status (`giornoMisura` per la tabella per regione e la card dello scarto) e KpiCards; il contesto generale di EcoTyna (`assistente.ts`) dice «nessun ritiro RETE del 2027 e' ancora terminato (l'ultimo e' del 22/12/2026): l'atteso del 2027 non c'e' ancora, non e' zero». `quotaDeiPesi` da' 1 al 31/12 e `null` per un giorno dei dati dell'anno prima. Le etichette leggono `quadro.giorno_misura`, non `giorno_dati`. Prima il 05/01/2027, con l'ultimo ritiro al 22/12, il 2026 diceva «Atteso al 22/12: 11.274,709 t» e una proiezione, e il 15/01 numeri diversi: due misure dello stesso anno. Il perche' della tabella delle regioni dice la cosa vera (`percheSenzaScarto`): senza contratto, con un target di ripiego (il 2025: «ha un target di ripiego ... e senza contratto non c'è un riparto per regione»), senza riparto per regione, senza ritiri. Prove: `prove/quadroCommessa.mjs` (sezione 8), `prove/ecotynaContratto.mjs` (4), `prove/targetAttesoAllaData.mjs` (6), `prove/cambioAnnoRitocchi.mjs` (2).
 - **L'attiva di un anno passato** (`mesiAttivaAnnoPassato`) si guarda dal primo mese che ha un documento. Un anno senza documenti, come il 2025 fatturato prima del gestionale, non ha mesi: c'e' la nota `mesi_attiva_nota`, a video e nel PDF. Mai dodici «da elaborare».
+- **Mesi dell'attiva di due anni, tutti con l'anno** (`statoMesiAttiva` in `base44/shared/cruscotto.ts`, difetto 37 della prova del cambio d'anno, 15/10/2026). Prima usciva «Ottobre 2026, Novembre 2026, Dicembre 2026, Gennaio»; adesso ogni mese porta il suo anno, anche in «Prefattura Ecotyre non caricata». Con i mesi di un anno solo, quello guardato resta senza anno. Prova: `prove/cruscotto.mjs`.
 - **Province ferme** (`provinceFerme`, `quadroCommessa.ts`): le province che lavorano, cioe' con un ritiro nell'anno o in quello prima, tutto l'anno, e che non hanno ritiri dal primo dei due mesi finiti in poi (fine trasporto, giorno italiano). Non sono `province_with_zeros` di Terminati Rete, che risponde a un'altra domanda (due mesi a zero in qualunque momento dell'anno); e Terminati Rete (`fermeDallAnnoPrima` in `primarieReteAnalytics.ts`) guarda l'anno prima solo a gennaio e febbraio: da allineare. `provinceFerme` riceve anche le province del contratto dell'anno (`provinceDelContratto`, le passa `quadroRete`): una provincia del contratto senza ritiri ne' nell'anno ne' in quello prima entra fra le ferme con `mai_servita` e `ultimo` vuoto, da marzo come nella matrice, e il riquadro dice «del contratto, mai servita nel <anno>» (13/10/2026).
 - **«Controlli automatici»** riassume le voci con origine `presidi` e la voce del guardiano fermo (area Manutenzione), dovunque stiano (`riassuntoControlli`). Il suo segno porta al filtro `FILTRO_CONTROLLI`, non alla sezione «dati». «Tutti regolari» si scrive solo a cruscotto letto e con la notte che ha scritto. **Chi aggiunge un controllo automatico che diventa una voce** le da' origine `presidi` o area Manutenzione, altrimenti la riga dice «tutti regolari» accanto alla voce.
 - **Lo stoccaggio ACI che non quadra** (13/10/2026) e' una voce sua di «Da gestire»: «giacenze:scostamenti-aci» (Giacenze, attenzione, sezione impianti, /giacenze), col dettaglio sulla classe 9 e il giorno del controllo, mai insieme alla rete. Si legge dalla fotografia (`fg.siti`, `scostamentiAci`), quindi vale anche per una fotografia scritta prima. La voce della rete dice solo la rete: il suo dettaglio e' `notaDelGiorno` sulle righe della rete, non la nota intera.
@@ -5007,8 +5428,25 @@ restituita. Il resto sta in `base44/shared/attesoContratto.ts` (specchio
   `annoTarget.ts`: il contratto, i target mensili) si mostra «copiato, da
   confermare» e **non apre alert**: `checkTargetAlerts` lo restituisce in
   `da_confermare`, e lo scostamento grave di `runAlertEngine` lo salta.
+  Vale anche per l'ACI e per l'Andamento (prova del cambio d'anno, 15/10/2026,
+  difetti 23 e 24): `quadro.aci.da_confermare` e' il `daConfermare` del
+  contratto, e Canale ACI e la sezione ACI della dashboard scrivono «copiata dal
+  <anno prima>, da confermare» accanto a previsione e corrispettivi e
+  «calcolato col prezzo del <anno prima>» sul valore del raccolto (i
+  corrispettivi ACI sono annuali, senza tacito rinnovo). `righeAndamento` porta
+  per ogni riga `annuoDaConfermare`, `targetCopiati`, `targetScritti` e per ogni
+  mese `daConfermare`; la frase sopra le tabelle e il segno della riga stanno in
+  `andamentoTarget` (`fraseTargetCopiati`, `segnoTargetCopiati`,
+  `targetCopiatiDellAnno` sui record), cosi' TargetTable, Report generale e i
+  file dell'Andamento dicono le stesse parole e lo stesso numero: il PDF e la
+  presentazione (`statusExports.js`, il conto dell'anno passato dalla pagina) e
+  l'ultima colonna «Target da confermare» del foglio Raccoglitori di
+  `exportStatusExcel`. I numeri restano quelli scritti; le celle copiate in
+  corsivo arancio e il loro Δ senza colore. Il 15/01/2027 sui dati veri: «161
+  target su 161 copiati dal 2026».
 
-Prove: `prove/targetAttesoAllaData.mjs`, `prove/annoTarget.mjs`.
+Prove: `prove/targetAttesoAllaData.mjs`, `prove/annoTarget.mjs`,
+`prove/cambioAnnoRitocchi.mjs` (sezione 3, i file dell'Andamento).
 
 ### Le variazioni del contratto in corso d'anno (14/10/2026)
 
@@ -5219,6 +5657,12 @@ nella scheda dei raccoglitori.
     impacchetta nei due ordini. `preparaAnno` e `inizializzazioneAnno` non
     copiano il contratto: la voce «Contratto Ecotyre» di «Nuovo anno» lo vede
     copiato e da confermare come prima.
+  - **Il ruolo dei target si copia ed e' nella chiave** (prova del cambio
+    d'anno, 15/10/2026, difetto 26): `pianoCopiaAnno` porta `ruolo` sugli annui
+    e sui mesi e lo mette in `kRacc`, come l'identita' della riga nella scheda
+    Target raccoglitori. Prima le primarie di T-Cycle (1.050 t impianto, 250 t
+    piazzale) nel 2027 diventavano 1.300 t senza ruolo. Una riga senza ruolo si
+    copia come prima. Prova: `prove/copiaAnnoTarget.mjs`.
   Prova: `prove/copiaSenzaVariazioni.mjs` (la regola, il piano, la funzione
   intera sulla copia dei dati veri dell'11/10/2026, la finestra a 375 px, i due
   moduli che si importano a vicenda).
@@ -5401,10 +5845,23 @@ rotte, scostamenti e SLA. Ora:
   l'alert resta aperto com'e' (si chiudono solo i doppioni) e la risposta lo
   conta (`alerts_anni_non_controllati`): il cambio d'anno e la fine di febbraio
   non fanno sparire niente.
-- **Mix classi, ritardo SLA e scostamento** si misurano sull'anno in corso e la
-  loro chiave non porta l'anno: un loro alert scritto l'ultima volta
-  (`updated_date`) in un anno prima resta aperto. Le date obbligatorie girano su
-  tutti gli anni.
+- **Mix classi e ritardo SLA** si misurano sull'anno in corso e la loro chiave
+  non porta l'anno: un loro alert scritto l'ultima volta (`updated_date`) in un
+  anno prima resta aperto. **Lo scostamento dal target ha l'anno nel record_id**
+  (prova del cambio d'anno, 15/10/2026, difetto 22):
+  `raccoglitore|regione|mese anno` («ALFA SRL|Puglia|Gennaio 2027»), con lo
+  SPAZIO prima dell'anno, e il testo dice «Gennaio 2027». Un alert per anno; un
+  ignorato vale solo per il suo anno; un alert scritto prima senza l'anno e'
+  dell'anno di `created_date` (non `updated_date`: un ignorato ha
+  `updated_date` nel giorno in cui lo si ignora) e nello stesso anno prende
+  record_id e testo nuovi senza doppioni. Prima un ignorato del 2026 bloccava
+  il gennaio 2027, e un aperto veniva riscritto coi numeri del 2027 senza anno.
+  **Mai la barra prima dell'anno**: `raccoglitore|regione|mese|anno` e' il
+  record_id degli avvisi di `checkTargetAlerts`, che cerca il «gia' aperto» fra
+  tutti gli aperti di primarie_rete, e uno scostamento con quel record_id
+  bloccava «Target non raggiunto» e l'aggiornamento di «Target a rischio». Le
+  date obbligatorie girano su tutti gli anni. Prova: `prove/alertCambioAnno.mjs`
+  (sezioni 15 e 16, le due funzioni vere sullo stesso archivio).
 - **Province inattive: si chiude da solo solo l'alert dei mesi che la matrice ha
   guardato** (`perimetroProvince`, `mesiDellaMatrice`, 13/10/2026). La matrice
   rivaluta i mesi finiti dell'anno e, a gennaio e febbraio, novembre e dicembre
@@ -5603,6 +6060,13 @@ ECT evasa stava nella tabella delle aperte con la targhetta verde.
   senza letture, e solo con l'elenco intero: con 500 righe lette il suo conto
   potrebbe essere piu' basso di quello vero (chiusura del giro, 14/10/2026).
   Prova: `prove/menuTodo.mjs` (sezione 3 per la pagina).
+- **«Scaduto» dal giorno dopo, sul giorno italiano** (`eScaduta(todo, oggi)` in
+  `src/components/todo/ElencoAttivita.jsx`, difetto 34 del 15/10/2026).
+  `data_scadenza` arriva dal campo data come 'AAAA-MM-GG' e si confronta come
+  giorno con `oggiRoma()`. Mai `new Date(data_scadenza)`: la mezzanotte UTC e'
+  l'una di notte italiana, e l'attivita' si diceva scaduta dall'una del giorno
+  stesso. A video la scadenza si scrive gg/mm/aaaa direttamente dalla stringa.
+  Prova: `prove/menuTodo.mjs`, sezione 4.
 
 ### La to-do list: i cancellati dal portale (14/10/2026)
 
@@ -5668,6 +6132,76 @@ evidente sul portale»*.
   `prove/cancellatiDalPortaleAgganci.mjs` per gli agganci fuori dalla regola: gli
   schemi, il ricalcolo dopo le primarie sul banco con `importaBlocco` vero, la
   voce della dashboard, l'elenco vuoto disegnato con React.
+
+### Le richieste ECT: il foglio del 09/10/2026 e il cambio d'anno (15/10/2026)
+
+Dalla prova generale del cambio d'anno (difetti 10, 3 e 2) e dalla sua revisione.
+Il foglio del 09/10/2026 non si caricava; a gennaio le richieste di dicembre
+sparivano da dashboard, To-Do List e ricalcolo dopo le primarie; ricaricato a
+gennaio, il foglio rifaceva le richieste di dicembre come doppioni senza spunta.
+
+- **Le colonne si leggono dall'intestazione** (`colonneFoglio` in
+  `base44/shared/richiesteEct.ts`, specchio `src/lib/richiesteEct.js`). Il foglio
+  del 09/10/2026 ha «numero d'ordine» dopo la provincia: letto per posizione,
+  ogni riga passava per intestazione e il caricamento diceva «non contiene
+  richieste». Nelle righe in cima, fino a quella con «ordine immesso», si cercano
+  provincia, numero d'ordine, ordine immesso, ordine evaso, trasportatore e mail.
+  La nota e' la prima colonna senza titolo dopo queste. Senza intestazione vale
+  l'ordine di prima (`COLONNE_DI_PRIMA`). Una riga con l'ID ma senza immissione e'
+  una richiesta. Il file vero del 09/10/2026 ne ha 56, 13 con l'ID (l'area arriva
+  alla riga 67, ma le ultime otto righe sono vuote).
+- **L'ID del foglio vale come scritto a mano** (`idOrdiniDelFoglio`: maiuscolo,
+  separato da virgole, forma `^[A-Z]{2,4}\d{6,}$` come nella to-do list). Va in
+  `id_ordine_manuale` solo se nel gestionale non ce n'e' gia' uno e solo se TUTTI i
+  suoi ordini sono fra assegnati e primarie. Il motivo: un ID scritto male, preso
+  una volta, non si correggeva piu' dal foglio, perche' lo schema non dice da
+  dove viene un ID a mano. La risposta di `importaRichiesteEct` ha `id_dal_foglio`,
+  `id_del_foglio_non_trovati` e `id_diversi_dal_foglio` (con `gestionale_trovato`),
+  e la pagina li scrive. Un ordine nuovo si prende ricaricando il foglio dopo le
+  primarie. Resta un caso: un ID scritto male che coincide con un altro ordine
+  vero, una volta preso, vale come scritto a mano anche se il foglio poi lo
+  corregge; per chiuderlo serve un campo nello schema che dica da dove viene
+  `id_ordine_manuale`.
+- **Ogni richiesta ha il suo anno**: quello della mail, o dell'immissione se la
+  mail manca (`annoRichiesta`). Mai un anno solo per tutto il foglio. Le richieste
+  salvate si leggono tutte con una lettura sola, senza filtro, e si abbinano
+  quelle degli anni che il foglio porta. Il terzo passaggio di `abbinaRichieste`
+  (riga e produttore) vale solo nello stesso anno; fra due gemelle vince quella
+  con lo stesso ordine.
+- **Il termine senza anno si legge dalla mail** (`scadenzaDaNota(nota,
+  giornoDellaMail)`): e' il primo giorno o mese che non viene prima della mail.
+  L'anno dopo vale solo entro 183 giorni dalla mail (`GIORNI_TERMINE_AVANTI`).
+  Mail del 18/12/2026: «entro il 10/01» = 10/01/2027, «entro gennaio» =
+  31/01/2027. Mail del 12/09: «entro l'11/09» resta l'11/09, cioe' oltre il
+  termine. Un anno scritto nella nota vale com'e'; con un numero al posto della
+  mail vale la regola di prima.
+- **Le richieste da seguire non finiscono il 31/12** (`richiesteDaSeguire(richieste,
+  anno)`): quelle dell'anno, piu' quelle degli anni prima ancora aperte,
+  `da_confermare` o evase senza spunta (`ancoraDaSeguire`). La usano
+  `cruscottoOperativo` e `riconosciRitiriEct` (`importaBlocco`), ognuno con UNA
+  lettura di `RichiestaEct` senza filtro d'anno (48-64 richieste l'anno). Mai
+  piu' `filter({ anno })` sulle richieste.
+- **Il ricalcolo dopo le primarie** guarda anche le richieste degli anni prima
+  chiuse dal portale, ma le riapre solo con una prova in positivo
+  (`riapertaDalPortale`: un ordine visto cancellato e' di nuovo nell'archivio e non
+  e' cancellato). Un cancellato uscito dal file del portale e' «sconosciuto», e
+  non deve riaprire una richiesta di due anni prima.
+- **La To-Do List** usa `richiesteDellaTodo`: le richieste da seguire, piu' quelle
+  degli anni prima chiuse quest'anno (`chiusaNellAnno`: spuntate quest'anno, o
+  viste cancellate quest'anno). Cosi' una richiesta di dicembre spuntata a
+  gennaio resta fra le completate, e la spunta si puo' togliere. Sulla riga da
+  fare e, dalla chiusura del giro, sulla scheda fra le completate
+  (`RichiesteCompletate.jsx`) compare «richiesta del 2026» quando l'anno non e'
+  quello di oggi. `evasione_confermata_il` e `visto_il` sono gia' giorni italiani
+  (la pagina scrive la spunta col giorno di Roma, il caricamento `oggiRoma()`):
+  tagliarne l'anno e' giusto.
+- **EcoTyna** (lo strumento `richieste_ect`, vedi «L'anno di cui parla EcoTyna»)
+  fa la stessa regola, scritta per conto suo: se cambia qui, va cambiata anche
+  li'.
+- Prove: `prove/richiesteEct.mjs` (le due impaginazioni; il file vero in sola
+  lettura, se c'e'; gli anni col banco di `importaRichiesteEct`; `importaBlocco`
+  vero per `ritiri_ect`; i tre casi della revisione), `prove/cruscotto.mjs`
+  («IL CAMBIO D'ANNO IN DA GESTIRE») e `prove/cambioAnnoRitocchi.mjs` (7).
 
 ### EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
 
@@ -6215,6 +6749,43 @@ arrivate via email.
   la batteria delle domande scritte come le scrive l'utente (errori di battitura
   compresi), gli strumenti sui dati veri contro i moduli, gli Assegnati come la
   pagina, «Dove ho guardato», e la sezione 7 per la revisione.
+
+#### L'anno di cui parla EcoTyna (15/10/2026)
+
+Dalla prova generale del cambio d'anno: il 05/01/2027 «quanto abbiamo raccolto a
+dicembre?» rispondeva «Dicembre 2027: 0 t», e l'esempio della Guida sugli ordini
+chiusi a Cosenza da luglio a settembre dava 0 (2027) invece di 46 ordini (2026).
+
+- **Un mese detto senza anno e' l'ultimo gia' cominciato** (difetto 8). Per gli
+  strumenti dei fatti gia' avvenuti (`STRUMENTI_DEI_FATTI` in
+  `pianoAssistente.ts`: raccolto, ordini_chiusi, secondarie, terziarie,
+  fatturazione, report_mensile, dichiarazioni_impianti) la regola e' questa: se
+  l'anno non e' detto ne' scritto, o il piano ha scritto solo l'anno di oggi, e
+  i mesi vengono tutti dopo quello in corso, l'anno e' quello di oggi meno uno.
+  La scelta lo scrive («dicembre 2026, l'ultimo dicembre finito») e la risposta
+  lo deve dire (blocco «ANNO DEL MESE»). Contratto, target e predittivita'
+  restano sull'anno di oggi. La Guida lo dice in «Come chiedere a EcoTyna».
+  Prova: `prove/mesiChiesti.mjs`.
+- **settimana_formulari ha l'anno ISO** (difetto 14). Senza settimana valgono
+  settimana e anno ISO di oggi (il 02/01/2027 e' la 53 del 2026; prima diceva
+  «settimana 53 del 2027, dal 2028-01-03 al 2027-12-31»). Con la sola settimana
+  vale l'ultima con quel numero gia' cominciata. Una settimana che non esiste lo
+  dice, senza numeri. Prova: `prove/settimanaIso53.mjs`.
+- **L'anno di oggi messo dal piano per abitudine non passa** a
+  settimana_formulari e richieste_ect, se la domanda non dice un anno
+  (`domandaDiceLAnno`: «2025», «quest'anno», «l'anno scorso», «del '25», «due
+  anni fa»...). Un anno PASSATO scritto dal piano passa sempre (seconda revisione
+  del 15/10/2026).
+- **richieste_ect senza anno** (difetto 2) fa una lettura sola e da' le
+  richieste dell'anno di oggi, piu' quelle degli anni prima non ancora chiuse
+  (aperte, da confermare, evase senza risposta al consorzio) e quelle degli anni
+  prima chiuse quest'anno, come la To-Do List (`richiesteDellaTodo`). Ogni riga
+  ha il suo anno e, se serve, `chiusa_nel`. La regola e' copiata da
+  `richiesteEct.ts`: se cambia la', va cambiata anche qui. Prova:
+  `prove/numeriEcotyna.mjs`.
+- **tariffe** (difetto 15): una tariffa copiata e non confermata
+  (`daConfermare`) dice «vale oggi, copiata dal 2026 e da confermare», con
+  `avviso_copiate` (D4). Prova: `prove/strumentiTariffe.mjs`.
 
 ### La voce di EcoTyna: il testo detto, frase per frase (11/10/2026)
 
@@ -7292,6 +7863,28 @@ cui conviene guardarli - mai letti, letture fallite, letture interrotte da piu'
 di un quarto d'ora, documenti senza scadenza ricavata, letture piu' vecchie di
 sei mesi (`daAnalizzare` in `base44/shared/analisiDocumento.ts`). Non rilegge
 tutto ogni volta: un file non cambia, cambiano le norme e il tempo.
+
+**Da gennaio a marzo resta da qualificare chi ha lavorato nell'ultimo trimestre
+dell'anno prima** (prova generale del cambio d'anno, 15/10/2026, difetti 25 e
+33). `individuaSoggetti(base44, anno, { oggi })` aggiunge chi ha terminati da
+ottobre a dicembre dell'anno prima (giorno italiano della fine trasporto),
+segnato `da_ultimo_trimestre` e `ruoli_da_ultimo_trimestre`, come i contratti
+(decisione dell'utente del 13/10/2026); senza `oggi` conta solo l'anno
+(`contrattiAnno` e `preparaAnno` guardano l'anno prima da se', e con `oggi`
+l'ultimo trimestre lo conterebbero due volte). Prima il 01/01/2027 il controllo
+delle 7:30 trovava 0 soggetti, i contratti scaduti il 31/12 non si dicevano e
+la CQC di un fornitore del 2026 era «errore del catalogo» ogni giorno feriale.
+Passano `oggi` `controlloQualifiche`, `qualificaFornitori` (la pagina, la
+fatturazione passiva e il ricalcolo dopo un caricamento: senza, alle 9
+riscriveva il riepilogo del 2027 salvato alle 7:30 senza gli scaduti) e
+`presidioQualifica` (il contesto dell'intestatario). **Il registro dei
+promemoria a cavallo dell'anno**: da gennaio a marzo `controlloQualifiche`
+legge anche `AvvisoQualifica` dell'anno prima (una lettura filtrata per anno):
+una soglia che non si ripete non riparte, un promemoria che si ripete aspetta i
+sette giorni dall'ultimo invio anche se era del 31/12 (l'Albo di C.L. SERVICE
+arrivava il 28/12/2026 e di nuovo il 05/01/2027). Si scrive solo il registro
+dell'anno. Prove: `prove/presidiNotturni.mjs` (la qualifica al cambio d'anno),
+`prove/cambioAnnoRitocchi.mjs` (1).
 
 **L'analisi di un documento sta in `base44/shared/analisiDocumento.ts`**, non
 dentro la sua funzione, perche' la usano in due: il pulsante del modulo e il
