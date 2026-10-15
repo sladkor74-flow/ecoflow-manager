@@ -2,7 +2,7 @@ import React from 'react';
 import { CheckSquare, Square, Loader2 } from 'lucide-react';
 import SezioneCompletati from '@/components/todo/SezioneCompletati';
 import { completamentoRichiesta, testoCompletamentoRichiesta, gg } from '@/lib/todoSezioni';
-import { listaOrdini, annoRichiesta } from '@/lib/richiesteEct';
+import { listaOrdini, annoRichiesta, testoTermine } from '@/lib/richiesteEct';
 import { oggiRoma } from '@/lib/giornoItaliano';
 import NoteRichiesta from '@/components/todo/NoteRichiesta';
 
@@ -18,6 +18,11 @@ import NoteRichiesta from '@/components/todo/NoteRichiesta';
 // voce della dashboard, «aspettano la risposta al consorzio»), e la spunta si
 // mette da qui. Togliendola, una richiesta col ritiro rilevato resta qui; una
 // spuntata a mano senza ritiro torna fra le da ritirare.
+//
+// Il termine e' quello che valeva: corretto a mano dall'amministratore, se c'e',
+// e allora lo dice col termine del foglio accanto (testoTermine, 15/10/2026).
+// Fra le completate non si corregge: una richiesta chiusa non ha piu' un ritiro
+// da fare entro un giorno.
 //
 // Schede e non tabella: a 375 px una riga si legge senza scorrere di lato.
 //
@@ -82,7 +87,7 @@ export default function RichiesteCompletate({ tutte = [], righe = tutte, esitoDi
               <p className="text-xs text-muted-foreground">Spuntata il {gg(r.evasione_confermata_il)}.</p>
             )}
             <p className="text-xs text-muted-foreground">
-              Mail del {gg(r.mail_inviata_il) || '—'}{r.scadenza ? `, entro il ${gg(r.scadenza)}` : ''}{r.trasportatore ? ` · ${r.trasportatore}` : ''}
+              Mail del {gg(r.mail_inviata_il) || '—'}{testoTermine(r) ? `, ${testoTermine(r)}` : ''}{r.trasportatore ? ` · ${r.trasportatore}` : ''}
             </p>
             {annoDi(r) && annoDi(r) !== annoOggi && <p className="text-[11px] text-amber-800">richiesta del {annoDi(r)}</p>}
             {r.nota && <p className="text-[11px] text-muted-foreground break-words">{r.nota}</p>}

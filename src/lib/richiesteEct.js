@@ -694,11 +694,93 @@ export function testoTerminatiSenzaFine(lista) {
     : `${n} richieste del consorzio hanno l'ordine terminato ma senza data di fine trasporto: restano aperte finché la data non arriva (${quali}).`;
 }
 
+/**
+ * IL TERMINE DI UNA RICHIESTA, CORRETTO A MANO O DAL FOGLIO (15/10/2026).
+ * Richiesta dell'utente, testuale: «nella to-do list permetti la modifica delle
+ * richieste aperte per successive integrazioni e\o annotazioni». Il termine che
+ * il consorzio chiede si ricava dalla nota del foglio (scadenzaDaNota) e il
+ * caricamento lo riscrive in `scadenza` a ogni giro: corretto a mano li', il
+ * caricamento dopo lo rimetteva com'era. Per questo la correzione sta in un campo
+ * suo, `scadenza_manuale`, che il caricamento del foglio (importaRichiesteEct) e
+ * il ricalcolo dei ritiri (importaBlocco, ritiri_ect) non nominano mai, come
+ * id_ordine_manuale: quando c'e' vale lui, e svuotato (null) torna quello del
+ * foglio. Lo scrive solo l'amministratore, dalla To-Do List (NoteRichiesta.jsx).
+ *
+ * Chi legge il termine di una richiesta lo legge da qui, MAI da r.scadenza: la
+ * colonna «Entro» e il conto «in ritardo» della To-Do List, le completate, la
+ * voce «richieste del consorzio oltre il termine» della dashboard (cruscotto.ts),
+ * lo strumento richieste_ect di EcoTyna. Letto altrove, una richiesta col
+ * termine spostato a mano resterebbe «in ritardo» in un posto e no nell'altro.
+ *
+ * Torna { termine, corretto_a_mano, dal_foglio }: `termine` e' il giorno che vale
+ * (AAAA-MM-GG, o null se non ce n'e' nessuno), `dal_foglio` quello ricavato dalla
+ * nota (o null). Una correzione che non e' un giorno non vale: resta il foglio.
+ */
+export function termineRichiesta(r) {
+  const manuale = soloData(r && r.scadenza_manuale);
+  const foglio = soloData(r && r.scadenza);
+  return { termine: manuale || foglio || null, corretto_a_mano: !!manuale, dal_foglio: foglio || null };
+}
+
+/** Il giorno entro cui ritirare (AAAA-MM-GG): corretto a mano se c'e', se no dal foglio; null se nessuno. */
+export function scadenzaDi(r) {
+  return termineRichiesta(r).termine;
+}
+
+/**
+ * Che cosa scrivere in `scadenza_manuale` quando l'amministratore salva il
+ * giorno `giorno` (AAAA-MM-GG o gg/mm/aaaa; vuoto = nessuno). Vuoto, o lo stesso
+ * giorno del foglio, e' null: non e' una correzione, e' tornare al termine del
+ * foglio (rilievo della revisione del 15/10/2026). Scritto come correzione, il
+ * giorno del foglio restava «corretto a mano» e bloccato: col foglio ricaricato
+ * dopo un sollecito («entro il 12/10») il termine nuovo non contava piu', e la
+ * richiesta non risultava in ritardo ne' nella To-Do List ne' nella dashboard ne'
+ * in EcoTyna. Lo usano il campo (NoteRichiesta.jsx) e chi scrive
+ * (RichiesteEct.jsx, salvaTermine). Prova: prove/termineRichiesteEct.mjs.
+ */
+export function correzioneDelTermine(r, giorno) {
+  const nuovo = soloData(giorno);
+  return nuovo && nuovo !== termineRichiesta(r).dal_foglio ? nuovo : null;
+}
+
+const giornoIt = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : '');
+
+/**
+ * Il termine a video: «entro il gg/mm/aaaa», e quando e' corretto a mano lo dice
+ * con quello del foglio accanto: «entro il 05/11/2026 (corretto a mano; dal
+ * foglio: 31/10/2026)», o «(corretto a mano; il foglio non ne dice uno)».
+ * Vuoto se la richiesta non ha un termine.
+ */
+export function testoTermine(r) {
+  const t = termineRichiesta(r);
+  if (!t.termine) return '';
+  if (!t.corretto_a_mano) return `entro il ${giornoIt(t.termine)}`;
+  return `entro il ${giornoIt(t.termine)} (corretto a mano; ${t.dal_foglio ? `dal foglio: ${giornoIt(t.dal_foglio)}` : 'il foglio non ne dice uno'})`;
+}
+
+/**
+ * Quanti giorni mancano al termine (negativi se e' passato), contati sui giorni
+ * di calendario. Il primo argomento e' il giorno (AAAA-MM-GG) o la richiesta: di
+ * una richiesta si prende il termine che vale (scadenzaDi). null senza termine.
+ */
 export function giorniAllaScadenza(scadenza, oggi) {
-  if (!scadenza) return null;
+  const giorno = scadenza && typeof scadenza === 'object' && !(scadenza instanceof Date) ? scadenzaDi(scadenza) : soloData(scadenza);
+  if (!giorno) return null;
   const a = Date.UTC(+oggi.slice(0, 4), +oggi.slice(5, 7) - 1, +oggi.slice(8, 10));
-  const b = Date.UTC(+scadenza.slice(0, 4), +scadenza.slice(5, 7) - 1, +scadenza.slice(8, 10));
+  const b = Date.UTC(+giorno.slice(0, 4), +giorno.slice(5, 7) - 1, +giorno.slice(8, 10));
   return Math.round((b - a) / 86400000);
+}
+
+/**
+ * Oltre il termine: il termine che vale (scadenzaDi) e' passato rispetto a `oggi`
+ * (AAAA-MM-GG). Non guarda l'esito: «in ritardo» e' solo una richiesta ancora da
+ * ritirare, e l'esito lo controlla chi chiama, ognuno col suo (salvato, della
+ * pagina, ricontrollato sui terminati).
+ */
+export function oltreIlTermine(r, oggi) {
+  const t = scadenzaDi(r);
+  const o = soloData(oggi);
+  return !!t && !!o && t < o;
 }
 
 /**

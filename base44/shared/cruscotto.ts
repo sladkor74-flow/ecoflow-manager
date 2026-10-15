@@ -10,7 +10,7 @@
 // Funzioni pure: ricevono gli elenchi gia' letti. Rete, ACI ed extra raccolta
 // restano separati anche qui.
 import { giornoRoma } from "./giornoItaliano.ts";
-import { statoRichiesta, evasaInParte } from "./richiesteEct.ts";
+import { statoRichiesta, evasaInParte, oltreIlTermine } from "./richiesteEct.ts";
 import { giorniFa, chiSiScosta, notaDelGiorno, scostamentiAci, notaAci } from "./indicatoriGiorno.ts";
 import { surplusNonDisattivati, NOMI_ORIGINE } from "./surplus.ts";
 import { campoRiservato } from "./campiTracciati.ts";
@@ -731,12 +731,16 @@ export function cruscotto(dati) {
   // Dal 14/10/2026 una richiesta si chiude da sola anche EVASA IN PARTE: un
   // ordine terminato e gli altri cancellati a portale (evasaInParte). Di lei
   // «gli ordini risultano tutti ritirati» non e' vero, e la voce lo dice.
+  // Dal 15/10/2026 il termine e' quello che vale nella To-Do List: corretto a
+  // mano dall'amministratore (scadenza_manuale), se c'e', se no quello del foglio
+  // (oltreIlTermine, richiesteEct.ts). Letto da r.scadenza, una richiesta col
+  // termine spostato in avanti restava «oltre il termine» qui e non nella pagina.
   let ectScadute = 0, ectDaRispondere = 0, ectInParte = 0;
   for (const r of dati.richiesteEct || []) {
     const esito = r.esito || statoRichiesta(r);
     // 'da_confermare' resta per le richieste salvate prima di quella data.
     if (esito === 'da_confermare' || (esito === 'evasa' && !r.evasione_confermata)) { ectDaRispondere++; if (evasaInParte(r)) ectInParte++; }
-    else if (esito === 'aperta' && r.scadenza && String(r.scadenza).slice(0, 10) < oggi) ectScadute++;
+    else if (esito === 'aperta' && oltreIlTermine(r, oggi)) ectScadute++;
   }
   const dettaglioDaRispondere = !ectInParte
     ? 'Gli ordini risultano tutti ritirati: la richiesta e\' evasa, resta da rispondere alla mail e spuntarla.'

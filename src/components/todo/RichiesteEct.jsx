@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, CheckSquare, Square, AlertTriangle, Search, Upload } from 'lucide-react';
-import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine, testoOrdiniDateDaSistemare, testoAvanzamentoRichiesta, richiesteDellaTodo, annoRichiesta } from '@/lib/richiesteEct';
+import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine, testoOrdiniDateDaSistemare, testoAvanzamentoRichiesta, richiesteDellaTodo, annoRichiesta, scadenzaDi, oltreIlTermine, termineRichiesta, correzioneDelTermine } from '@/lib/richiesteEct';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { dividiRichieste, esitoDellaPagina } from '@/lib/todoSezioni';
 import RichiesteCompletate from '@/components/todo/RichiesteCompletate';
@@ -79,13 +79,24 @@ const senzaOrdine = (r) => !r.id_ordine && !r.id_ordine_manuale;
 // L'anno di una richiesta: quello salvato, o quello della sua mail.
 const annoDellaRiga = (r) => Number(r && r.anno) || annoRichiesta(r);
 
+// Il termine che vale: quello corretto a mano dall'amministratore, se c'e', se
+// no quello ricavato dalla nota del foglio (termineRichiesta, 15/10/2026).
+// Corretto a mano lo dice sotto; la frase intera, col termine del foglio, sta
+// nella colonna del produttore (NoteRichiesta.jsx), che a 375 px si legge senza
+// scorrere.
 function Scadenza({ r, esito }) {
-  if (!r.scadenza) return <span className="text-muted-foreground">—</span>;
-  const g = giorniAllaScadenza(String(r.scadenza).slice(0, 10), OGGI());
+  const t = termineRichiesta(r);
+  if (!t.termine) return <span className="text-muted-foreground">—</span>;
+  const g = giorniAllaScadenza(t.termine, OGGI());
   const chiusa = esito === 'evasa' || esito === 'annullata';
   const colore = chiusa ? 'text-muted-foreground' : g < 0 ? 'text-red-700 font-medium' : g <= 7 ? 'text-amber-700 font-medium' : '';
   const quando = chiusa ? '' : g < 0 ? ` (in ritardo di ${-g} ${-g === 1 ? 'giorno' : 'giorni'})` : g === 0 ? ' (oggi)' : ` (fra ${g} ${g === 1 ? 'giorno' : 'giorni'})`;
-  return <span className={colore}>{gg(r.scadenza)}{quando}</span>;
+  return (
+    <span className={colore}>
+      {gg(t.termine)}{quando}
+      {t.corretto_a_mano && <span className="block text-[11px] font-normal text-muted-foreground">corretto a mano</span>}
+    </span>
+  );
 }
 
 export default function RichiesteEct({ isAdmin }) {
@@ -187,6 +198,25 @@ export default function RichiesteEct({ isAdmin }) {
     }
   };
 
+  // IL TERMINE CORRETTO A MANO (15/10/2026: «nella to-do list permetti la
+  // modifica delle richieste aperte per successive integrazioni e\o
+  // annotazioni»). Si scrive solo scadenza_manuale, che il caricamento del foglio
+  // non nomina mai: il termine ricavato dalla nota (scadenza) resta quello del
+  // foglio e torna a valere quando la correzione si svuota (null). Solo
+  // l'amministratore, come la regola dell'archivio. Una scrittura e nessuna
+  // lettura: la riga si aggiorna qui, e con lei la colonna «Entro», l'ordine e
+  // il conto delle richieste in ritardo. Un errore torna a chi l'ha chiesto
+  // (NoteRichiesta.jsx), che lo dice. Lo stesso giorno del foglio non e' una
+  // correzione: si scrive null, se no il termine resterebbe bloccato li' anche
+  // quando il foglio ricaricato ne porta uno nuovo (correzioneDelTermine,
+  // rilievo della revisione del 15/10/2026).
+  const salvaTermine = useCallback(async (r, giorno) => {
+    if (!isAdmin || !r) return;
+    const valore = correzioneDelTermine(r, giorno);
+    await base44.entities.RichiestaEct.update(r.id, { scadenza_manuale: valore });
+    setRighe(prima => prima.map(x => (x.id === r.id ? { ...x, scadenza_manuale: valore } : x)));
+  }, [isAdmin]);
+
   const spunta = async (r) => {
     if (!isAdmin) return;
     setOccupato(r.id);
@@ -217,7 +247,8 @@ export default function RichiesteEct({ isAdmin }) {
   const conteggi = useMemo(() => ({
     da_fare: daFare.length,
     senza_ordine: daFare.filter(senzaOrdine).length,
-    in_ritardo: daFare.filter(r => esitoDi(r) === 'aperta' && r.scadenza && giorniAllaScadenza(String(r.scadenza).slice(0, 10), OGGI()) < 0).length,
+    // col termine che vale, corretto a mano o dal foglio (oltreIlTermine)
+    in_ritardo: daFare.filter(r => esitoDi(r) === 'aperta' && oltreIlTermine(r, OGGI())).length,
   }), [daFare, esitoDi]);
 
   const trovata = useCallback((r) => {
@@ -229,7 +260,7 @@ export default function RichiesteEct({ isAdmin }) {
     let v = daFare;
     if (filtro === 'senza_ordine') v = v.filter(senzaOrdine);
     v = v.filter(trovata);
-    return [...v].sort((a, b) => String(a.scadenza || '9999').localeCompare(String(b.scadenza || '9999'))
+    return [...v].sort((a, b) => String(scadenzaDi(a) || '9999').localeCompare(String(scadenzaDi(b) || '9999'))
       || String(b.mail_inviata_il || '').localeCompare(String(a.mail_inviata_il || '')));
   }, [daFare, filtro, trovata]);
   const completateViste = useMemo(() => completate.filter(trovata), [completate, trovata]);
@@ -249,7 +280,8 @@ export default function RichiesteEct({ isAdmin }) {
         Quando quell&apos;ordine compare fra i terminati la richiesta si chiude da sola ed esce dalla tabella: la trovi fra le
         <strong> completate</strong>, in fondo, con la data del ritiro da comunicare al consorzio, e la spunta la metti tu quando
         hai risposto alla mail. Sull&apos;ID ordine puoi scrivere, e correggere, anche più di un ordine separati da virgola: resta
-        così anche ai caricamenti successivi.
+        così anche ai caricamenti successivi. Il termine viene dalla nota del foglio; corretto a mano su una richiesta aperta
+        vale quello, e resta anche ricaricando il foglio finché non lo svuoti.
       </p>
 
       {isAdmin && (
@@ -267,7 +299,7 @@ export default function RichiesteEct({ isAdmin }) {
           </label>
           <span className="text-xs text-muted-foreground max-w-xl">
             Il file «Gestione Ecotyre», foglio «Richieste ECT». Le richieste nuove si aggiungono, quelle già in elenco si
-            aggiornano e le tue spunte, le note interne e le annotazioni non vengono toccate.
+            aggiornano e le tue spunte, le note interne, i termini corretti a mano e le annotazioni non vengono toccate.
           </span>
         </div>
       )}
@@ -421,8 +453,10 @@ export default function RichiesteEct({ isAdmin }) {
                         <span className="block text-[11px] text-amber-800">richiesta del {annoDellaRiga(r)}</span>
                       )}
                       {r.nota && <span className="block text-[11px] text-muted-foreground">{r.nota}</span>}
-                      {/* Nota interna e annotazioni (15/10/2026): NoteRichiesta.jsx. */}
-                      <NoteRichiesta richiesta={r} modificabile={isAdmin} />
+                      {/* Nota interna, termine corretto a mano e annotazioni
+                          (15/10/2026): NoteRichiesta.jsx. Il termine lo scrive
+                          salvaTermine, solo per l'amministratore. */}
+                      <NoteRichiesta richiesta={r} modificabile={isAdmin} termine onTermine={isAdmin ? salvaTermine : null} />
                     </td>
                     <td className="px-2 py-2">{r.provincia || '—'}</td>
                     <td className="px-2 py-2">{r.classe || '—'}</td>

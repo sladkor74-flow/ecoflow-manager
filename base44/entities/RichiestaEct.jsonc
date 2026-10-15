@@ -32,7 +32,12 @@
     "scadenza": {
       "type": "string",
       "format": "date",
-      "description": "Entro quando il consorzio chiede il ritiro, ricavata dalla nota della richiesta"
+      "description": "Entro quando il consorzio chiede il ritiro, ricavata dalla nota della richiesta: il caricamento del foglio Richieste ECT la riscrive a ogni giro. Se l amministratore l ha corretta a mano vale scadenza_manuale"
+    },
+    "scadenza_manuale": {
+      "type": "string",
+      "format": "date",
+      "description": "Il termine corretto a mano dall amministratore dalla pagina To-Do List, su una richiesta ancora da ritirare (15/10/2026): quando c e vale lui e non quello ricavato dalla nota (scadenza), per la colonna Entro, le richieste in ritardo, la dashboard ed EcoTyna. Come id_ordine_manuale resta ai caricamenti successivi: il caricamento del foglio Richieste ECT (importaRichiesteEct) e il ricalcolo dei ritiri dopo le primarie (importaBlocco, ritiri_ect) non lo toccano. Svuotato (null) torna il termine del foglio; anche il giorno uguale a quello del foglio si scrive null, perche non e una correzione e altrimenti resterebbe bloccato quando il foglio ricaricato porta un termine nuovo"
     },
     "nota": {
       "type": "string",

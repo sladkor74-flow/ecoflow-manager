@@ -33,7 +33,7 @@ import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale, caricamentiAperti, contaDistinti } from "./quadraturaFirDati.ts";
 import { intervalloSettimana, settimanaIso, settimaneNellAnno, dataItaliana, statoCaricamenti, riepilogoVociDate, voceDate } from "./reportSettimanali.ts";
 import { situazioneGestionale, terminatiSenzaFine, totaleGiacenze, senzaFileDelPortale, testoVariazioni, testoVariazioniSuperate } from "./assistente.ts";
-import { listaOrdini, statoRichiesta, evasioneOrdini, chiusaDalPortale, ordiniSalvatiRichiesta } from "./richiesteEct.ts";
+import { listaOrdini, statoRichiesta, evasioneOrdini, chiusaDalPortale, ordiniSalvatiRichiesta, termineRichiesta } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza, distanza } from "./omologhe.ts";
@@ -2767,7 +2767,13 @@ export const STRUMENTI = [
         const rilevata = ev ? dataRitiro(r.evasione_rilevata_il, ordini, ev) : r.evasione_rilevata_il;
         const stato = statoRichiesta({ ...r, evasione_rilevata_il: rilevata || null });
         const salvato = r.esito || statoRichiesta(r);
-        const g = giorni(r.scadenza);
+        // Il termine che vale nella To-Do List (15/10/2026): corretto a mano
+        // dall'amministratore (scadenza_manuale), se c'e', se no quello ricavato
+        // dalla nota del foglio (termineRichiesta, richiesteEct.ts). Letto da
+        // r.scadenza, EcoTyna diceva «scaduta» una richiesta che la pagina dice
+        // nei tempi. Corretto a mano, la riga lo dice col termine del foglio.
+        const termine = termineRichiesta(r);
+        const g = giorni(termine.termine);
         // Un ordine senza fine trasporto conta solo se non c'e' anche una sua
         // riga terminata con la data: allora e' ritirato lo stesso.
         const ordiniSenzaFine = senzaFine ? ordini.filter(id => senzaFine.has(id) && !terminati.has(id)) : [];
@@ -2778,7 +2784,8 @@ export const STRUMENTI = [
           // Una richiesta degli anni prima chiusa quest'anno lo dice (seconda revisione del 15/10/2026).
           ...(chiuseQuestAnno.has(r) ? { chiusa_nel: anno } : {}),
           pdr: r.pdr_nome, provincia: r.provincia, classe: r.classe,
-          ordini, stato, scadenza: soloData(r.scadenza),
+          ordini, stato, scadenza: soloData(termine.termine),
+          ...(termine.corretto_a_mano ? { scadenza_corretta_a_mano: true, scadenza_dal_foglio: termine.dal_foglio } : {}),
           giorni_alla_scadenza: g,
           scaduta: stato === 'aperta' && g !== null && g < 0,
           immesso_il: soloData(r.ordine_immesso_il), evaso_il: soloData(r.evaso_il || rilevata),
@@ -2801,6 +2808,7 @@ export const STRUMENTI = [
       const diverse = tutte.filter(r => r.stato_nella_pagina).length;
       const senzaFineTot = tutte.filter(r => r.ordini_terminati_senza_fine_trasporto).length;
       const conDateTot = tutte.filter(r => r.ordini_con_date_obbligatorie_da_sistemare).length;
+      const termineAMano = tutte.filter(r => r.scadenza_corretta_a_mano).length;
       // Il ricontrollo automatico della pagina (caricamento delle primarie,
       // apertura da parte dell'amministratore) lavora solo sull'anno in corso:
       // per un anno passato la pagina non si riallinea da sola.
@@ -2840,6 +2848,7 @@ export const STRUMENTI = [
           ...(statoNonLetto ? { avviso_caricamenti: 'Non sono riuscita a leggere lo stato dei caricamenti: i ritiri sono ricontrollati sui terminati di adesso, ma se le primarie si stavano ricaricando potrebbero non essere definitivi.' } : {}),
           ...(diverse ? { avviso_pagina: `${diverse} ${diverse === 1 ? 'richiesta ha' : 'richieste hanno'} qui uno stato diverso da quello salvato nella To-Do List ("stato_nella_pagina"): vale quello ricontrollato adesso; ${riallineo}` } : {}),
           ...(senzaFineTot ? { avviso_senza_fine_trasporto: `${senzaFineTot} ${senzaFineTot === 1 ? 'richiesta ha' : 'richieste hanno'} ordini terminati senza data di fine trasporto: non contano come ritirati finche' la data non si corregge nel file del portale e si ricarica.` } : {}),
+          ...(termineAMano ? { nota_termini_corretti: `${termineAMano} ${termineAMano === 1 ? 'richiesta ha' : 'richieste hanno'} il termine corretto a mano nella To-Do List ("scadenza_corretta_a_mano"): vale quello, anche per dire se e' scaduta; il termine ricavato dalla nota del foglio e' in "scadenza_dal_foglio".` } : {}),
           ...(conDateTot ? { avviso_date_obbligatorie: `${conDateTot} ${conDateTot === 1 ? 'richiesta ha' : 'richieste hanno'} ordini terminati con date obbligatorie (immissione, inizio o fine trasporto) mancanti o incoerenti, detti in "ordini_con_date_obbligatorie_da_sistemare": vanno corretti nel file del portale e ricaricati.` } : {}),
         },
       };
