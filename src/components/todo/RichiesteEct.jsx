@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, CheckSquare, Square, AlertTriangle, Search, Upload } from 'lucide-react';
-import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine, testoOrdiniDateDaSistemare, testoAvanzamentoRichiesta } from '@/lib/richiesteEct';
+import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine, testoOrdiniDateDaSistemare, testoAvanzamentoRichiesta, richiesteDellaTodo, annoRichiesta } from '@/lib/richiesteEct';
+import { fetchAllClient } from '@/lib/fetchAllClient';
 import { dividiRichieste, esitoDellaPagina } from '@/lib/todoSezioni';
 import RichiesteCompletate from '@/components/todo/RichiesteCompletate';
 
 // Richieste del consorzio arrivate via email: ci chiedono di anticipare certi
-// ritiri. L'ID ordine non sta nella richiesta e lo riconosce il gestionale fra
-// gli assegnati; quando quell'ordine risulta terminato l'evasione si propone da
-// sola e la spunta la mette chi poi risponde alla mail.
+// ritiri. L'ID ordine lo porta il foglio quando e' scritto nella colonna «numero
+// d'ordine» (dal 09/10/2026: vale come scritto a mano), altrimenti lo riconosce il
+// gestionale fra gli assegnati; quando quell'ordine risulta terminato l'evasione
+// si propone da sola e la spunta la mette chi poi risponde alla mail.
 //
 // DA FARE E COMPLETATE (richiesta dell'utente del 12/10/2026: «gli ordini della
 // 'to-do list' quando sono completati vanno spostati nella sezione completati e
@@ -73,6 +75,8 @@ function DettaglioOrdini({ richiesta, ids }) {
 
 // Una richiesta a cui manca l'ID ordine: ne' riconosciuto ne' scritto a mano.
 const senzaOrdine = (r) => !r.id_ordine && !r.id_ordine_manuale;
+// L'anno di una richiesta: quello salvato, o quello della sua mail.
+const annoDellaRiga = (r) => Number(r && r.anno) || annoRichiesta(r);
 
 function Scadenza({ r, esito }) {
   if (!r.scadenza) return <span className="text-muted-foreground">—</span>;
@@ -99,10 +103,20 @@ export default function RichiesteEct({ isAdmin }) {
     setCaricamento(true);
     setErrore('');
     try {
-      // l'anno di lavoro e' quello italiano, come "oggi" per le scadenze
+      // L'anno di lavoro e' quello italiano, come "oggi" per le scadenze. Si
+      // leggevano solo le richieste di quell'anno: il 1° gennaio una richiesta di
+      // dicembre ancora aperta, o evasa e non ancora risposta, spariva dalla
+      // pagina, che non ha un selettore d'anno (prova del cambio d'anno,
+      // 15/10/2026, difetto 2). Adesso una lettura sola di tutte - sono poche
+      // decine l'anno - e restano quelle dell'anno piu' quelle degli anni prima
+      // non ancora chiuse (richiesteDaSeguire): la regola della dashboard e del
+      // ricalcolo dopo le primarie. Le chiuse restano nel loro anno, tranne
+      // quelle chiuse quest'anno (richiesteDellaTodo, revisione del 15/10/2026):
+      // una richiesta di dicembre spuntata a gennaio resta fra le completate, e
+      // la spunta si puo' togliere.
       const anno = Number(OGGI().slice(0, 4));
-      const r = await base44.entities.RichiestaEct.filter({ anno }, '-mail_inviata_il', 500);
-      setRighe(r);
+      const tutte = await fetchAllClient(base44.entities.RichiestaEct, null, '-mail_inviata_il');
+      setRighe(richiesteDellaTodo(tutte, anno));
     } catch (e) {
       setErrore(e?.message || String(e));
     } finally {
@@ -227,8 +241,10 @@ export default function RichiesteEct({ isAdmin }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground max-w-3xl">
-        Le richieste che il consorzio ci manda per email, fuori dal portale, per anticipare certi ritiri. L&apos;ID ordine non c&apos;è
-        nella richiesta: lo riconosce il gestionale fra gli assegnati, dal nome del produttore e dalla data di immissione.
+        Le richieste che il consorzio ci manda per email, fuori dal portale, per anticipare certi ritiri. Se il foglio porta il
+        numero d&apos;ordine vale quello, come scritto a mano; altrimenti lo riconosce il gestionale fra gli assegnati, dal nome del
+        produttore e dalla data di immissione. Una richiesta dell&apos;anno prima resta qui finché non si chiude, e se si chiude
+        quest&apos;anno resta fra le completate.
         Quando quell&apos;ordine compare fra i terminati la richiesta si chiude da sola ed esce dalla tabella: la trovi fra le
         <strong> completate</strong>, in fondo, con la data del ritiro da comunicare al consorzio, e la spunta la metti tu quando
         hai risposto alla mail. Sull&apos;ID ordine puoi scrivere, e correggere, anche più di un ordine separati da virgola: resta
@@ -264,6 +280,31 @@ export default function RichiesteEct({ isAdmin }) {
           {esitoImport.da_confermare?.length > 0 && (
             <p className="text-emerald-800">
               Risultano ritirate e aspettano la tua spunta: {esitoImport.da_confermare.map(x => `${x.pdr} (${String(x.evasa_il).split('-').reverse().join('/')})`).join(', ')}. Le trovi fra le completate.
+            </p>
+          )}
+          {/* L'ID ordine scritto nel foglio vale come scritto a mano (15/10/2026);
+              uno gia' nel gestionale resta, e se il foglio ne dice un altro si
+              dice. Un ID del foglio che non si trova fra gli ordini caricati non
+              si prende, e si dice anche questo (revisione del 15/10/2026). */}
+          {esitoImport.id_dal_foglio > 0 && (
+            <p className="text-muted-foreground">
+              ID ordine preso dal foglio per {esitoImport.id_dal_foglio === 1 ? 'una richiesta' : `${esitoImport.id_dal_foglio} richieste`}: vale come scritto a mano.
+            </p>
+          )}
+          {esitoImport.id_del_foglio_non_trovati?.length > 0 && (
+            <p className="text-amber-800">
+              {esitoImport.id_del_foglio_non_trovati.length === 1 ? 'Per una richiesta il foglio dice' : `Per ${esitoImport.id_del_foglio_non_trovati.length} richieste il foglio dice`} un
+              ID ordine che non si trova fra gli ordini caricati, e non è stato preso: {esitoImport.id_del_foglio_non_trovati.map(x => `${x.pdr} (${x.non_trovati})`).join(', ')}.
+              Intanto vale il riconoscimento del gestionale. Se l&apos;ID è scritto male correggilo nel foglio; se l&apos;ordine è
+              nuovo, si prende ricaricando il foglio dopo il caricamento delle primarie.
+            </p>
+          )}
+          {esitoImport.id_diversi_dal_foglio?.length > 0 && (
+            <p className="text-amber-800">
+              {esitoImport.id_diversi_dal_foglio.length === 1 ? 'Per una richiesta il foglio dice' : `Per ${esitoImport.id_diversi_dal_foglio.length} richieste il foglio dice`} un ID ordine
+              diverso da quello già nel gestionale (scritto a mano, o preso dal foglio a un caricamento di prima), che resta:{' '}
+              {esitoImport.id_diversi_dal_foglio.map(x => `${x.pdr} (foglio ${x.foglio}, gestionale ${x.gestionale}${x.gestionale_trovato === false ? ', che non si trova fra gli ordini caricati' : ''})`).join(', ')}.
+              Se è giusto quello del foglio, correggilo qui sull&apos;ID ordine.
             </p>
           )}
           {esitoImport.spostate > 0 && (
@@ -372,6 +413,12 @@ export default function RichiesteEct({ isAdmin }) {
                   <tr key={r.id} className="border-b last:border-b-0 align-top">
                     <td className="px-3 py-2 sticky left-0 bg-card">
                       <span className="font-medium">{r.pdr_nome}</span>
+                      {/* Una richiesta di un anno prima ancora da chiudere lo dice
+                          (prova del cambio d'anno, 15/10/2026): a gennaio quelle di
+                          dicembre restano qui finche' non si chiudono. */}
+                      {annoDellaRiga(r) && annoDellaRiga(r) !== Number(OGGI().slice(0, 4)) && (
+                        <span className="block text-[11px] text-amber-800">richiesta del {annoDellaRiga(r)}</span>
+                      )}
                       {r.nota && <span className="block text-[11px] text-muted-foreground">{r.nota}</span>}
                     </td>
                     <td className="px-2 py-2">{r.provincia || '—'}</td>

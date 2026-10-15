@@ -217,5 +217,68 @@ console.log('3. LA TO-DO LIST MANDA IL NUMERO AL MENU, SENZA LETTURE');
   }
 }
 
+// 4. «SCADUTO» DAL GIORNO DOPO, SUL GIORNO ITALIANO (prova del cambio d'anno,
+// 15/10/2026, difetto 34). La scadenza arriva dal campo data della pagina come
+// 'AAAA-MM-GG'; ElencoAttivita la confrontava con new Date(): la mezzanotte UTC e'
+// l'una di notte in Italia, e un'attivita' con scadenza 31/12/2026 si diceva
+// «Scaduto» gia' alle 01:30 del 31/12. Qui l'elenco vero, montato con React
+// finto, e la riga da fare disegnata a orologio fermo.
+console.log('4. LA TO-DO LIST: «SCADUTO» DAL GIORNO DOPO LA SCADENZA');
+{
+  const finestraPrima = globalThis.window;
+  globalThis.window = { self: 1, top: 1, matchMedia: () => ({ matches: false, addListener() {}, removeListener() {} }), confirm: () => true, alert: () => {} };
+  const DataVera = Date;
+  const alle = (iso, f) => {
+    const ms = DataVera.parse(iso);
+    globalThis.Date = class extends DataVera { constructor(...a) { if (a.length) super(...a); else super(ms); } static now() { return ms; } };
+    try { return f(); } finally { globalThis.Date = DataVera; }
+  };
+  try {
+    const p = await caricaPagina('components/todo/ElencoAttivita');
+    const attivita = [
+      { id: 's1', titolo: 'Leggere le giacenze dei piazzali al 31/12', stato: 'aperto', priorita: 'alta', data_scadenza: '2026-12-31' },
+      { id: 's2', titolo: 'Rinnovo contratti: invio ai fornitori', stato: 'aperto', priorita: 'media', data_scadenza: '2027-01-02' },
+    ];
+    // Le righe da fare, disegnate a quell'ora: { id: «Scaduto» c'e'? }
+    const scadute = (iso) => alle(iso, () => {
+      const r = p.monta(p.Componente, { todos: attivita, filtro: 'tutti', isAdmin: true, onSpunta() {}, onCiclo() {}, onElimina() {}, onSalvaOrdine() {} });
+      const righe = trova(r.albero, el => typeof el.type === 'function' && el.type.name === 'RigaDaFare');
+      const esito = Object.fromEntries(righe.map(el => [el.props.todo.id, /Scaduto/.test(testo(el.type(el.props)))]));
+      r.smonta();
+      return esito;
+    });
+    const casi = [
+      ['2026-12-30T22:30:00Z', '30/12/2026 23:30', { s1: false, s2: false }],
+      ['2026-12-31T00:30:00Z', '31/12/2026 01:30', { s1: false, s2: false }],
+      ['2026-12-31T22:30:00Z', '31/12/2026 23:30', { s1: false, s2: false }],
+      ['2026-12-31T23:30:00Z', '01/01/2027 00:30', { s1: true, s2: false }],
+      ['2027-01-01T23:30:00Z', '02/01/2027 00:30', { s1: true, s2: false }],
+      ['2027-01-02T09:00:00Z', '02/01/2027 10:00', { s1: true, s2: false }],
+      ['2027-01-02T23:30:00Z', '03/01/2027 00:30', { s1: true, s2: true }],
+    ];
+    for (const [iso, italiano, atteso] of casi) {
+      const visto = scadute(iso);
+      verifica(`alle ${italiano} italiane: scadenza 31/12/2026 ${atteso.s1 ? 'scaduta' : 'non scaduta'}, 02/01/2027 ${atteso.s2 ? 'scaduta' : 'non scaduta'}`, J(visto) === J(atteso), J(visto));
+    }
+    verifica('la regola e\' un confronto fra giorni, provabile da sola', typeof p.modulo.eScaduta === 'function'
+      && p.modulo.eScaduta({ data_scadenza: '2026-12-31' }, '2026-12-31') === false && p.modulo.eScaduta({ data_scadenza: '2026-12-31' }, '2027-01-01') === true
+      && p.modulo.eScaduta({ data_scadenza: '' }, '2027-01-01') === false && p.modulo.eScaduta({}, '2027-01-01') === false);
+    const dettagli = alle('2027-01-02T09:00:00Z', () => {
+      const r = p.monta(p.Componente, { todos: [{ id: 'x', titolo: 'Fattura', stato: 'aperto', data_scadenza: '2027-01-05' }], filtro: 'tutti', isAdmin: false, onSpunta() {}, onCiclo() {}, onElimina() {}, onSalvaOrdine() {} });
+      const riga = trova(r.albero, el => typeof el.type === 'function' && el.type.name === 'RigaDaFare')[0];
+      const fuori = riga ? riga.type(riga.props) : null;
+      const det = fuori ? trova(fuori, el => typeof el.type === 'function' && el.type.name === 'Dettagli')[0] : null;
+      r.smonta();
+      return det ? testo(det.type(det.props)) : '';
+    });
+    verifica('la scadenza si scrive gg/mm/aaaa', /Scadenza: 05\/01\/2027/.test(dettagli), dettagli);
+  } catch (e) {
+    verifica('l\'elenco delle attivita\' si monta', false, String(e && e.stack).slice(0, 400));
+  } finally {
+    globalThis.Date = DataVera;
+    globalThis.window = finestraPrima;
+  }
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

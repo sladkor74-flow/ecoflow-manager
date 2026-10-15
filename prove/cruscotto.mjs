@@ -485,12 +485,14 @@ console.log('I MESI DELL\'ATTIVA A GENNAIO E FEBBRAIO (chiusura dell\'audit, 11/
   verifica('il 15/01/2027 ci sono novembre e dicembre 2026, non ancora chiusi', gen.map(m => m.etichetta || m.mese).join(',') === 'Novembre 2026,Dicembre 2026', gen.map(m => m.etichetta || m.mese).join(','));
   verifica('ciascuno col suo anno', gen.length === 2 && gen.every(m => m.anno === 2026) && gen[1].elaborato === false && gen[0].elaborato === true && gen[0].chiuso === false, JSON.stringify(gen.map(m => [m.anno, m.mese, m.elaborato, m.chiuso])));
   const feb = statoMesiAttiva([...docs2026, ...['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2027, mese: 'Gennaio', tipologia: t, stato: 'elaborata' }))], [], 2027, '2027-02-10');
-  verifica('il 10/02/2027: novembre e dicembre 2026, e gennaio 2027', feb.map(m => m.etichetta || m.mese).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio', feb.map(m => m.etichetta || m.mese).join(','));
+  // Con mesi di due anni ogni mese porta il suo anno (prova del cambio d'anno,
+  // 15/10/2026, difetto 37): prima gennaio 2027 era «Gennaio».
+  verifica('il 10/02/2027: novembre e dicembre 2026, e gennaio 2027', feb.map(m => m.etichetta || m.mese).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio 2027', feb.map(m => m.etichetta || m.mese).join(','));
   // DA MARZO SPARIVANO DI NUOVO (revisione della chiusura, 11/10/2026): la
   // correzione valeva solo per gennaio e febbraio, e un dicembre mai elaborato
   // non diventa a posto perche' e' cominciato marzo. Restano finche' non si chiudono.
   const mar = statoMesiAttiva(docs2026, [], 2027, '2027-03-10');
-  verifica('il 10/03/2027 novembre e dicembre 2026, mai chiusi, ci sono ancora', mar.map(m => m.etichetta || m.mese).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio,Febbraio', mar.map(m => m.etichetta || m.mese).join(','));
+  verifica('il 10/03/2027 novembre e dicembre 2026, mai chiusi, ci sono ancora', mar.map(m => m.etichetta || m.mese).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio 2027,Febbraio 2027', mar.map(m => m.etichetta || m.mese).join(','));
   const ott = statoMesiAttiva(docs2026, [], 2027, '2027-10-11');
   verifica('e anche a ottobre 2027, finche\' qualcuno non li chiude', ott.slice(0, 2).map(m => m.etichetta).join(',') === 'Novembre 2026,Dicembre 2026' && ott.length === 2 + 9, ott.map(m => m.etichetta || m.mese).join(','));
   const tuttiChiusi = [...chiusi, ...['Novembre', 'Dicembre'].flatMap(m => ['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2026, mese: m, tipologia: t, stato: 'chiusa' })))];
@@ -519,7 +521,7 @@ console.log('I MESI DELL\'ATTIVA A GENNAIO E FEBBRAIO (chiusura dell\'audit, 11/
   // Il caso dello scenario della revisione, sulla dashboard intera: il 01/03/2027.
   const r1m = cruscotto({ oggi: '2027-03-01', anno: 2027, adessoMs: Date.parse('2027-03-01T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: [...docs2026, ...['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2027, mese: 'Gennaio', tipologia: t, stato: 'elaborata' }))], prefatture: [], richiesteEct: [] });
   const v1m = r1m.da_gestire.find(v => /non ancora elaborat/.test(v.titolo));
-  verifica('il 01/03/2027 la dashboard dice ancora «Dicembre 2026» da elaborare', r1m.mesi_attiva.map(m => m.etichetta).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio,Febbraio' && v1m && /Dicembre 2026/.test(v1m.dettaglio), r1m.da_gestire.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
+  verifica('il 01/03/2027 la dashboard dice ancora «Dicembre 2026» da elaborare', r1m.mesi_attiva.map(m => m.etichetta).join(',') === 'Novembre 2026,Dicembre 2026,Gennaio 2027,Febbraio 2027' && v1m && /Dicembre 2026/.test(v1m.dettaglio), r1m.da_gestire.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
   const p1m = r1m.da_gestire.find(v => /Prefattura Ecotyre non caricata/.test(v.titolo));
   verifica('e la prefattura di novembre 2026 ancora da caricare', p1m && /Novembre 2026/.test(p1m.titolo), p1m && p1m.titolo);
   const r = cruscotto({ oggi: '2027-01-15', anno: 2027, adessoMs: Date.parse('2027-01-15T08:00:00Z'), tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: docs2026, prefatture: [], richiesteEct: [] });
@@ -769,6 +771,55 @@ console.log('IL PROMEMORIA DELLA COPIA DI SICUREZZA IN «DA GESTIRE» (chiusura 
   verifica('una lettura sola, di una riga, la piu\' recente, e solo per l\'amministratore', (src.match(/CopiaSicurezza\./g) || []).length === 1
     && /eAmministratore\(user\)\s*\?\s*svc\.CopiaSicurezza\.list\('-created_date', 1\)\.catch\(\(\) => null\)\s*:\s*Promise\.resolve\(null\)/.test(src)
     && /amministratore: eAmministratore\(user\),/.test(src));
+}
+
+// LA PROVA DEL CAMBIO D'ANNO (15/10/2026). Due difetti di «Da gestire»:
+//  - 37: il 10/02/2027 i mesi dell'attiva da elaborare erano «Ottobre 2026,
+//    Novembre 2026, Dicembre 2026, Gennaio» (statoMesiAttiva);
+//  - 2: dal 1° gennaio le richieste del consorzio di dicembre ancora aperte, o
+//    evase e non ancora risposte, sparivano (cruscottoOperativo leggeva solo le
+//    richieste dell'anno di oggi).
+console.log('IL CAMBIO D\'ANNO IN «DA GESTIRE» (15/10/2026)');
+{
+  const finoA = (n) => ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'].slice(0, n);
+  const docsAttiva = finoA(9).flatMap(m => ['RETE', 'ACI', 'EXTRA_RACCOLTA'].map(t => ({ tipo: 'ATTIVA', anno: 2026, mese: m, tipologia: t, stato: 'elaborata' })));
+  const vuoto = { tipiFile: [], uploadLogs: [], alertAperti: [], assegnatiRete: [], assegnatiAci: [], documenti: docsAttiva, prefatture: finoA(9).map(m => ({ anno: 2026, mese: m })), richiesteEct: [] };
+  const daElaborare = (oggi, anno) => {
+    const r = cruscotto({ ...vuoto, oggi, anno, adessoMs: Date.parse(`${oggi}T08:00:00Z`) });
+    const v = r.da_gestire.find(x => x.chiave === 'attiva:da-elaborare');
+    return { voce: v ? `${v.titolo}: ${v.dettaglio}` : '', mesi: r.mesi_attiva.filter(m => !m.elaborato).map(m => m.etichetta).join(', ') };
+  };
+  const feb = daElaborare('2027-02-10', 2027);
+  verifica('10/02/2027: «Ottobre 2026, Novembre 2026, Dicembre 2026, Gennaio 2027», ognuno col suo anno', feb.voce === '4 mesi finiti non ancora elaborati: Ottobre 2026, Novembre 2026, Dicembre 2026, Gennaio 2027' && feb.mesi === 'Ottobre 2026, Novembre 2026, Dicembre 2026, Gennaio 2027', J2(feb));
+  const dic = daElaborare('2026-12-28', 2026);
+  verifica('28/12/2026, mesi tutti del 2026: senza anno, come prima', dic.voce === '2 mesi finiti non ancora elaborati: Ottobre, Novembre', J2(dic));
+  const gen = daElaborare('2027-01-05', 2027);
+  verifica('05/01/2027, mesi tutti del 2026 guardando il 2027: col loro anno, come prima', gen.voce === '3 mesi finiti non ancora elaborati: Ottobre 2026, Novembre 2026, Dicembre 2026', J2(gen));
+
+  // Le richieste del consorzio di dicembre, sulla funzione vera: una aperta col
+  // termine del 30/12/2026, una evasa il 22/12 e non ancora risposta; e due che
+  // non devono contare, una evasa e risposta e una annullata.
+  const RICHIESTE = [
+    { id: 'ect1', anno: 2026, pdr_nome: 'GOMMISTA ALFA', id_ordine: 'ET26990001', mail_inviata_il: '2026-12-14', scadenza: '2026-12-30', esito: 'aperta' },
+    { id: 'ect2', anno: 2026, pdr_nome: 'GOMMISTA BETA', id_ordine: 'ET26990002', mail_inviata_il: '2026-12-15', scadenza: '2026-12-31', esito: 'evasa', evasione_rilevata_il: '2026-12-22' },
+    { id: 'ect3', anno: 2026, pdr_nome: 'GOMMISTA GAMMA', id_ordine: 'ET26990003', mail_inviata_il: '2026-11-15', scadenza: '2026-11-30', esito: 'evasa', evasione_rilevata_il: '2026-11-22', evasione_confermata: true },
+    { id: 'ect4', anno: 2026, pdr_nome: 'GOMMISTA DELTA', mail_inviata_il: '2026-11-15', scadenza: '2026-11-30', esito: 'annullata', motivo_annullamento: 'cancellato per mancanza di pfu' },
+  ];
+  const vociEct = async (iso, anno) => {
+    const r = await alle(iso, () => chiama(funzioneCruscotto, { db: { RichiestaEct: RICHIESTE }, ruolo: 'user', corpo: anno ? { anno } : {} }));
+    return { stato: r.stato, voci: ((r.j && r.j.da_gestire) || []).filter(v => v.area === 'Richieste ECT').map(v => `${v.gravita}: ${v.titolo}`) };
+  };
+  const ATTESE = ['critico: 1 richieste del consorzio oltre il termine', 'info: 1 richieste si sono chiuse da sole e aspettano la risposta al consorzio'];
+  const ultimo = await vociEct('2026-12-31T22:30:00.000Z');
+  verifica('31/12/2026 alle 23:30: le due voci, come prima', ultimo.stato === 200 && J2(ultimo.voci) === J2(ATTESE), J2(ultimo));
+  const primo = await vociEct('2026-12-31T23:30:00.000Z');
+  verifica('01/01/2027 alle 00:30: le richieste di dicembre restano in «Da gestire»', primo.stato === 200 && J2(primo.voci) === J2(ATTESE), J2(primo));
+  const due = await vociEct('2027-01-02T09:00:00.000Z', 2027);
+  verifica('02/01/2027: restano, e quella evasa e risposta o annullata non conta', due.stato === 200 && J2(due.voci) === J2(ATTESE), J2(due));
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../base44/functions/cruscottoOperativo/entry.ts', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('una lettura sola delle richieste, senza filtro sull\'anno, filtrata con richiesteDaSeguire', (src.match(/RichiestaEct/g) || []).length === 1
+    && /fetchAll\(svc\.RichiestaEct\)\.then\(tutte => richiesteDaSeguire\(tutte, anno\)\)/.test(src));
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

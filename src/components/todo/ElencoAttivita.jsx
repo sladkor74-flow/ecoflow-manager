@@ -3,6 +3,7 @@ import { CheckSquare, Square, AlertCircle, CheckCircle2, Trash2 } from 'lucide-r
 import OrdiniAttivita from '@/components/todo/OrdiniAttivita';
 import SezioneCompletati from '@/components/todo/SezioneCompletati';
 import { dividiAttivita, daFareDelFiltro, completamentoAttivita, testoCompletamento, testoElencoVuoto } from '@/lib/todoSezioni';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 // LE ATTIVITA' DELLA TO-DO LIST: l'elenco da fare e, sotto, la sezione dei
 // completati (richiesta dell'utente del 12/10/2026). Prima un'attivita'
@@ -31,18 +32,32 @@ function Dettagli({ todo }) {
       {(todo.categoria || todo.data_scadenza) && (
         <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1 text-xs text-muted-foreground">
           {todo.categoria && <span>Categoria: {todo.categoria}</span>}
-          {todo.data_scadenza && <span>Scadenza: {new Date(todo.data_scadenza).toLocaleDateString('it-IT')}</span>}
+          {/* Il giorno scritto, gg/mm/aaaa: senza passare per Date, che lo leggerebbe in UTC (15/10/2026). */}
+          {todo.data_scadenza && <span>Scadenza: {String(todo.data_scadenza).slice(0, 10).split('-').reverse().join('/')}</span>}
         </div>
       )}
     </>
   );
 }
 
+/**
+ * SCADUTA SOLO DAL GIORNO DOPO, SUL GIORNO ITALIANO (prova del cambio d'anno,
+ * 15/10/2026, difetto 34). La scadenza arriva dal campo data della pagina come
+ * 'AAAA-MM-GG': `new Date('2026-12-31')` e' la mezzanotte UTC, l'una di notte in
+ * Italia, e l'attivita' si diceva «Scaduto» dall'una del giorno stesso. Adesso si
+ * confrontano due giorni: scaduta se oggi, in Italia, viene dopo il giorno della
+ * scadenza. `oggi` (AAAA-MM-GG) si passa per provarla; senza, e' oggi in Italia.
+ */
+export function eScaduta(todo, oggi = oggiRoma()) {
+  const giorno = String((todo && todo.data_scadenza) || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(giorno) && oggi > giorno;
+}
+
 /** Un'attivita' da fare: la spunta la completa, la targhetta dello stato la fa avanzare. */
 function RigaDaFare({ todo, isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine }) {
   const pr = PRIORITA[todo.priorita] || PRIORITA.media;
   const st = STATO[todo.stato] || STATO.aperto;
-  const isOverdue = todo.data_scadenza && new Date(todo.data_scadenza) < new Date();
+  const isOverdue = eScaduta(todo);
   return (
     <div className="border rounded-lg p-3 flex items-start gap-3" data-attivita={todo.id}>
       <button onClick={() => onSpunta(todo)} className="mt-0.5 flex-shrink-0" disabled={!isAdmin} aria-label="Segna come completata">

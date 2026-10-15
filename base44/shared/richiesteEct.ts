@@ -1,10 +1,11 @@
 // Richieste del consorzio arrivate via email, fuori dal portale.
 //
 // Ecotyre ci scrive per chiedere di anticipare certi ritiri: la richiesta vive in
-// una mail e nel foglio "Richieste ECT" del file di gestione, dove pero' l'ID
-// ordine non c'e'. Senza quello non si puo' sapere se il ritiro e' stato fatto,
-// percio' lo si riconosce fra gli assegnati dal nome del produttore e dalla data
-// di immissione dell'ordine - le due cose che la richiesta porta con se'.
+// una mail e nel foglio "Richieste ECT" del file di gestione. Senza l'ID ordine
+// non si puo' sapere se il ritiro e' stato fatto: dal 09/10/2026 il foglio ha la
+// colonna «numero d'ordine», e quando e' scritto vale come un ID scritto a mano;
+// altrimenti lo si riconosce fra gli assegnati dal nome del produttore e dalla
+// data di immissione dell'ordine - le due cose che la richiesta porta con se'.
 //
 // Quando quell'ordine compare fra i terminati, l'evasione si propone da sola: la
 // spunta la mette l'utente, perche' e' lui a rispondere alla mail del consorzio.
@@ -51,27 +52,76 @@ export function soloData(v) {
 }
 
 const ultimoDelMese = (anno, mese) => new Date(Date.UTC(anno, mese + 1, 0)).toISOString().slice(0, 10);
+const due = (n) => String(Number(n)).padStart(2, '0');
 
 /**
  * Entro quando il consorzio chiede il ritiro, leggendo la nota della richiesta:
  * "DA FARE ENTRO L'11/09" da' il giorno, "entro settembre" la fine del mese,
  * "entro meta' ottobre" il quindici. Se la nota non dice niente, niente scadenza.
+ *
+ * IL TERMINE SENZA ANNO SI LEGGE DALLA MAIL (prova del cambio d'anno, 15/10/2026,
+ * difetto 3). `riferimento` e' il giorno della mail della richiesta (AAAA-MM-GG):
+ * un giorno o un mese scritti senza anno sono il primo che non viene prima della
+ * mail. Mail del 18/12/2026 «DA FARE ENTRO IL 10/01» = 10/01/2027, «entro
+ * gennaio» = 31/01/2027; mail del 10/12/2026 «entro il 20/12» = 20/12/2026. Prima
+ * il caricamento passava un anno solo per tutto il foglio, il piu' alto fra le
+ * mail: a dicembre «entro il 10/01» diventava il 10/01 dello stesso anno, gia'
+ * passato, e la richiesta appena caricata era «in ritardo» di 345 giorni; a
+ * gennaio, col foglio che aveva anche le mail del nuovo anno, «entro il 20/12»
+ * diventava il 20/12 dell'anno dopo. Un anno scritto nella nota vale com'e'.
+ * Con un numero (un anno) al posto del giorno resta la regola di prima: l'anno
+ * dato, per chi non ha la mail.
+ *
+ * L'anno dopo vale solo entro sei mesi dalla mail (GIORNI_TERMINE_AVANTI): e' il
+ * passaggio di dicembre, una mail di fine anno per un ritiro di gennaio. Un
+ * termine gia' passato quando la mail e' partita - «entro l'11/09» in una mail
+ * del 12/09, scritta in ritardo o registrata col giorno sbagliato - resta
+ * nell'anno della mail, come prima: spostato all'anno dopo la richiesta
+ * sembrerebbe nei tempi per un anno intero, mentre cosi' la dashboard la dice
+ * oltre il termine e qualcuno la guarda.
  */
-export function scadenzaDaNota(nota, anno) {
+const GIORNI_TERMINE_AVANTI = 183;
+export function scadenzaDaNota(nota, riferimento) {
   const t = pulisci(nota).toLowerCase();
   if (!t) return null;
+  const mail = typeof riferimento === 'number' ? null : soloData(riferimento);
+  const anno = mail ? Number(mail.slice(0, 4)) : Number(riferimento);
+  if (!anno) return null;
+  // il giorno nell'anno della mail, o in quello dopo se cadrebbe prima della
+  // mail e l'anno dopo non lo porta oltre sei mesi
+  const nonPrima = (scrivi) => {
+    const stesso = scrivi(anno);
+    if (!mail || stesso >= mail) return stesso;
+    const dopo = scrivi(anno + 1);
+    return (Date.parse(dopo) - Date.parse(mail)) / 86400000 <= GIORNI_TERMINE_AVANTI ? dopo : stesso;
+  };
   const g = t.match(/(\d{1,2})[\/.](\d{1,2})(?:[\/.](\d{2,4}))?/);
   if (g) {
-    const a = g[3] ? (Number(g[3]) < 100 ? 2000 + Number(g[3]) : Number(g[3])) : anno;
-    return `${a}-${String(Number(g[2])).padStart(2, '0')}-${String(Number(g[1])).padStart(2, '0')}`;
+    if (g[3]) return `${Number(g[3]) < 100 ? 2000 + Number(g[3]) : Number(g[3])}-${due(g[2])}-${due(g[1])}`;
+    return nonPrima((a) => `${a}-${due(g[2])}-${due(g[1])}`);
   }
   // con piu' mesi citati - "settembre/ottobre" - vale il piu' lontano, che e' il
-  // termine ultimo di cui si e' parlato
+  // termine ultimo di cui si e' parlato: il giorno piu' avanti, cosi' anche
+  // «dicembre/gennaio» in una mail di dicembre finisce a gennaio dell'anno dopo
   const trovati = MESI_IT.map((m, i) => ({ i, pos: t.lastIndexOf(m) })).filter(x => x.pos >= 0);
   if (!trovati.length) return null;
-  const scelto = trovati.sort((a, b) => b.i - a.i)[0];
   const meta = /met[aà]/.test(t);
-  return meta ? `${anno}-${String(scelto.i + 1).padStart(2, '0')}-15` : ultimoDelMese(anno, scelto.i);
+  return trovati
+    .map(x => nonPrima((a) => (meta ? `${a}-${due(x.i + 1)}-15` : ultimoDelMese(a, x.i))))
+    .sort()
+    .reverse()[0];
+}
+
+/**
+ * L'anno di una richiesta: quello della sua mail, o dell'immissione dell'ordine
+ * se la mail manca (prova del cambio d'anno, 15/10/2026, difetto 3). Prima il
+ * caricamento dava a tutto il foglio un anno solo, il piu' alto fra le mail: a
+ * gennaio le richieste di dicembre rinascevano come richieste dell'anno nuovo,
+ * doppioni senza le spunte. null se la richiesta non ha nessuna delle due date.
+ */
+export function annoRichiesta(r) {
+  const d = soloData(r && r.mail_inviata_il) || soloData(r && r.ordine_immesso_il);
+  return d ? Number(d.slice(0, 4)) : null;
 }
 
 /** Il testo della colonna "ordine evaso" quando non e' una data spiega perche' non si evade. */
@@ -83,36 +133,124 @@ export function leggiEvaso(v) {
 }
 
 /**
+ * Le colonne del foglio com'era fino al 09/10/2026: produttore, provincia, ordine
+ * immesso, ordine evaso, trasportatore, mail, nota. Valgono quando l'intestazione
+ * non si riconosce.
+ */
+const COLONNE_DI_PRIMA = { nome: 0, provincia: 1, numero: -1, immesso: 2, evaso: 3, trasportatore: 4, mail: 5, nota: 6 };
+/** Fra quante righe in cima si cerca l'intestazione. */
+const RIGHE_INTESTAZIONE = 6;
+
+/**
+ * Dove sta ogni dato nel foglio, letto dall'intestazione (prova del cambio
+ * d'anno, 15/10/2026, difetto 10). Il foglio del 09/10/2026 ha una colonna in
+ * piu', «numero d'ordine», dopo la provincia: le colonne si leggevano per
+ * posizione, l'immissione cadeva sul numero d'ordine e ogni riga, senza una data
+ * di immissione, passava per intestazione. Il caricamento diceva «Il foglio
+ * Richieste ECT non contiene richieste» e non ne salvava nessuna; anche
+ * trasportatore, mail e nota si leggevano una colonna prima.
+ *
+ * L'intestazione sta sulle prime righe, fino a quella con «ordine immesso» (sopra
+ * c'e' «DATE», unita sulle due colonne delle date): per ogni colonna si mettono
+ * insieme le scritte delle righe d'intestazione e si cercano provincia, numero
+ * d'ordine, ordine immesso, ordine evaso, trasportatore e mail. La nota non ha
+ * titolo: e' la prima colonna senza titolo dopo le altre (o quella che si chiama
+ * nota). Senza «ordine immesso» in cima vale l'ordine di prima (COLONNE_DI_PRIMA).
+ * Restituisce { colonne, dati } con `dati` l'indice della prima riga dopo
+ * l'intestazione (0 quando l'intestazione non si riconosce).
+ */
+export function colonneFoglio(righe) {
+  const testo = (v) => pulisci(v).toLowerCase();
+  const lista = righe || [];
+  let fine = -1;
+  for (let i = 0; i < Math.min(lista.length, RIGHE_INTESTAZIONE); i++) {
+    if ((lista[i] || []).some(c => /immess/.test(testo(c)))) { fine = i; break; }
+  }
+  if (fine < 0) return { colonne: { ...COLONNE_DI_PRIMA }, dati: 0, dall_intestazione: false };
+  const testa = lista.slice(0, fine + 1);
+  const larghezza = Math.max(0, ...testa.map(r => (r || []).length));
+  const etichette = Array.from({ length: larghezza }, (_, c) => testa.map(r => testo((r || [])[c])).filter(Boolean).join(' '));
+  const cerca = (re, tranne = null) => etichette.findIndex(e => re.test(e) && !(tranne && tranne.test(e)));
+  const colonne = {
+    immesso: cerca(/immess/),
+    evaso: cerca(/evas/),
+    numero: cerca(/numero|id\s*ordine|n[°º.]\s*ordine/, /immess|evas/),
+    provincia: cerca(/\bprov/),
+    trasportatore: cerca(/trasport/),
+    mail: cerca(/mail/),
+    nome: cerca(/richiesta|produttore|punto di raccolta/),
+    nota: cerca(/\bnot[ae]\b/),
+  };
+  if (colonne.nome < 0) colonne.nome = 0;
+  if (colonne.nota < 0) {
+    let c = Math.max(...Object.values(colonne)) + 1;
+    while (c < larghezza && etichette[c]) c++;
+    colonne.nota = c;
+  }
+  return { colonne, dati: fine + 1, dall_intestazione: true };
+}
+
+/**
+ * Un ID ordine del portale: due-quattro lettere e almeno sei cifre (ET26084363,
+ * SEC26154852), la stessa forma che riconoscono la to-do list (todoOrdini.ts) e
+ * la prefattura (revisione del 15/10/2026).
+ */
+const FORMA_ORDINE = /^[A-Z]{2,4}\d{6,}$/;
+
+/**
+ * Gli ID ordine scritti in una cella del foglio, in maiuscolo e separati da
+ * virgola come quelli scritti a mano nella pagina. Una scritta che non ha la
+ * forma di un ID ordine («da chiedere», «ET2609») non vale.
+ */
+export function idOrdiniDelFoglio(v) {
+  const pezzi = String(v ?? '').toUpperCase().split(/[,;\s/]+/).map(x => x.trim()).filter(x => FORMA_ORDINE.test(x));
+  return [...new Set(pezzi)].join(', ');
+}
+
+/**
  * Le righe del foglio "Richieste ECT". L'intestazione sta sulle prime due righe
  * (la seconda distingue "ordine immesso" da "ordine evaso"), i dati dalla quarta.
+ * Le colonne si trovano dall'intestazione (colonneFoglio, 15/10/2026).
  *
  * `primaRiga` e' il numero di riga del foglio a cui corrisponde il primo
  * elemento dell'elenco: il foglio non comincia dalla riga 1 e sbagliarlo
  * perderebbe la prima richiesta e sfaserebbe tutti i riferimenti.
+ *
+ * L'ID ORDINE SCRITTO NEL FOGLIO (colonna «numero d'ordine», dal 09/10/2026) vale
+ * come un ID scritto a mano: torna in `id_ordine_foglio`, e il caricamento lo
+ * mette in id_ordine_manuale, che vince sempre sul riconoscimento automatico
+ * (listaOrdini), come nella to-do list - ma solo se i suoi ordini ci sono fra
+ * quelli caricati (importaRichiesteEct, revisione del 15/10/2026). Una riga con
+ * l'ID ma senza la data di immissione e' una richiesta lo stesso.
  */
 export function leggiFoglio(righe, primaRiga = 1) {
   const esito = [];
-  for (let i = 0; i < righe.length; i++) {
+  const { colonne: k, dati } = colonneFoglio(righe);
+  const cella = (r, i) => (i >= 0 ? r[i] : null);
+  for (let i = dati; i < righe.length; i++) {
     const r = righe[i] || [];
     const rigaExcel = primaRiga + i;
-    const nomeGrezzo = pulisci(r[0]);
+    const nomeGrezzo = pulisci(cella(r, k.nome));
     if (!nomeGrezzo) continue;
     if (/^richiesta\s+ect$/i.test(nomeGrezzo)) continue;
-    // Le intestazioni non portano una data di immissione: e' cosi' che si
-    // distinguono dalle richieste, senza contare le righe.
-    if (!soloData(r[2])) continue;
+    const immesso = soloData(cella(r, k.immesso));
+    const idFoglio = idOrdiniDelFoglio(cella(r, k.numero));
+    // Le intestazioni non portano una data di immissione ne' un ID: e' cosi' che
+    // si distinguono dalle richieste, anche quando l'intestazione non si
+    // riconosce e le righe non si contano.
+    if (!immesso && !idFoglio) continue;
     const { nome, classe } = nomeEClasse(nomeGrezzo);
-    const immesso = soloData(r[2]);
-    const { evaso_il, motivo } = leggiEvaso(r[3]);
+    const { evaso_il, motivo } = leggiEvaso(cella(r, k.evaso));
     esito.push({
       riga_excel: rigaExcel,
       pdr_nome: nome,
       classe,
-      provincia: pulisci(r[1]).toUpperCase(),
+      provincia: pulisci(cella(r, k.provincia)).toUpperCase(),
       ordine_immesso_il: immesso,
-      trasportatore: pulisci(r[4]),
-      mail_inviata_il: soloData(r[5]),
-      nota: pulisci(r[6]),
+      id_ordine_foglio: idFoglio,
+      trasportatore: pulisci(cella(r, k.trasportatore)),
+      mail_inviata_il: soloData(cella(r, k.mail)),
+      nota: pulisci(cella(r, k.nota)),
       evaso_il,
       motivo_annullamento: motivo,
     });
@@ -272,6 +410,97 @@ export function daRicalcolare(r) {
   if (!r) return false;
   if (r.esito === 'evasa' || r.esito === 'annullata') return chiusaDalPortale(r);
   return true;
+}
+
+/**
+ * Una richiesta non ancora chiusa per chi lavora: ancora da ritirare (aperta, o
+ * la «da_confermare» di prima del 29/09/2026), oppure evasa ma senza la spunta,
+ * cioe' ancora da rispondere al consorzio. L'esito e' quello salvato, come lo
+ * legge la dashboard; senza, statoRichiesta.
+ */
+export function ancoraDaSeguire(r) {
+  if (!r) return false;
+  const esito = r.esito || statoRichiesta(r);
+  return esito === 'aperta' || esito === 'da_confermare' || (esito === 'evasa' && !r.evasione_confermata);
+}
+
+/**
+ * LE RICHIESTE DA SEGUIRE NELL'ANNO `anno` (prova del cambio d'anno, 15/10/2026,
+ * difetto 2): quelle dell'anno, tutte, piu' quelle degli anni prima non ancora
+ * chiuse (ancoraDaSeguire). Dashboard, To-Do List e ricalcolo dopo le primarie
+ * leggevano solo le richieste dell'anno di oggi: il 1° gennaio una richiesta di
+ * dicembre ancora aperta, o evasa e non ancora risposta, spariva da tutti e tre,
+ * e il suo ritiro di gennaio non si riconosceva piu' (restava «aperta» per
+ * sempre). Nel foglio vero le richieste restano aperte da uno a tre mesi. Le
+ * chiuse restano nel loro anno. L'archivio e' piccolo (48-64 richieste l'anno):
+ * chi chiama lo legge con una lettura sola, senza filtro sull'anno, e filtra qui.
+ * L'anno di una richiesta e' quello salvato; senza, quello della sua mail
+ * (annoRichiesta); una richiesta senza anno si tiene.
+ */
+export function richiesteDaSeguire(richieste, anno) {
+  const a = Number(anno);
+  return (richieste || []).filter(r => {
+    if (!r) return false;
+    const suo = Number(r.anno) || annoRichiesta(r);
+    if (!suo || !a || suo === a) return true;
+    return suo < a && ancoraDaSeguire(r);
+  });
+}
+
+/**
+ * RIAPERTA DAL PORTALE: una richiesta che il portale aveva chiuso cancellandone
+ * gli ordini (chiusaDalPortale) e che ha di nuovo, nell'archivio di adesso, uno
+ * di quegli ordini cancellati riassegnato o gia' ritirato. `stato` e' quello di
+ * statoOrdini (todoOrdini.ts): `presenti` gli ID nell'archivio, `cancellati`
+ * quelli che il portale da' ancora cancellati.
+ *
+ * Serve al ricalcolo dopo le primarie per le richieste degli ANNI PRIMA
+ * (revisione del 15/10/2026): richiesteDaSeguire le lascia nel loro anno, e una
+ * richiesta di dicembre annullata perche' il suo ordine risultava cancellato, con
+ * l'ordine riassegnato e ritirato a gennaio, restava «annullata» per sempre;
+ * dentro l'anno la stessa richiesta si riapriva (daRicalcolare). Per gli anni
+ * prima conta solo questa prova in positivo, non il ricalcolo intero: il file
+ * del portale porta gli ordini cancellati solo per un po' (lo storico che il
+ * caricamento conserva e' quello dei terminati), e un ordine cancellato uscito
+ * dall'archivio sarebbe «sconosciuto», che statoRichiesta legge come aperta. Una
+ * richiesta di due anni prima tornerebbe da sola fra quelle da ritirare.
+ */
+export function riapertaDalPortale(r, stato) {
+  if (!chiusaDalPortale(r) || !stato) return false;
+  const o = ordiniSalvatiRichiesta(r);
+  if (!o) return false;
+  const presenti = stato.presenti || new Set();
+  const cancellati = stato.cancellati || new Map();
+  return o.cancellati.some(v => presenti.has(v.id_ordine) && !cancellati.has(v.id_ordine));
+}
+
+/**
+ * Chiusa nell'anno `anno`: spuntata quell'anno (evasione_confermata_il), o chiusa
+ * dal portale con un ordine visto cancellato quell'anno (visto_il). Per le altre
+ * chiusure non c'e' un giorno.
+ */
+export function chiusaNellAnno(r, anno) {
+  if (!r || ancoraDaSeguire(r)) return false;
+  const a = String(anno);
+  if (r.evasione_confermata && String(r.evasione_confermata_il || '').slice(0, 4) === a) return true;
+  const o = chiusaDalPortale(r) ? ordiniSalvatiRichiesta(r) : null;
+  return !!o && o.cancellati.some(v => String(v.visto_il || '').slice(0, 4) === a);
+}
+
+/**
+ * LE RICHIESTE DELLA TO-DO LIST nell'anno `anno` (revisione del 15/10/2026): quelle
+ * da seguire (richiesteDaSeguire), piu' quelle degli anni prima che si sono
+ * chiuse quest'anno (chiusaNellAnno). Con la sola richiesteDaSeguire una
+ * richiesta di dicembre spuntata a gennaio spariva dalla pagina appena spuntata:
+ * fra le completate non c'era piu', e la spunta - messa magari per sbaglio - non
+ * si poteva piu' togliere da nessuna parte, perche' la pagina non ha un selettore
+ * d'anno. Adesso resta fra le completate per tutto l'anno in cui si e' chiusa,
+ * come quelle dell'anno. La dashboard e il ricalcolo dopo le primarie non ne
+ * hanno bisogno: una chiusa non e' da fare.
+ */
+export function richiesteDellaTodo(richieste, anno) {
+  const daSeguire = new Set(richiesteDaSeguire(richieste, anno));
+  return (richieste || []).filter(r => daSeguire.has(r) || chiusaNellAnno(r, anno));
 }
 
 /**
@@ -486,14 +715,31 @@ export const chiaveRichiesta = (r, conMail = true) =>
  * immissione). Fra piu' candidate uguali - due ordini dello stesso produttore
  * lo stesso giorno - vince quella che somiglia di piu' per nota, trasportatore e
  * posizione nel foglio. Restituisce, per ogni riga, la richiesta o null.
+ *
+ * Dal 15/10/2026 (prova del cambio d'anno) il foglio porta anche l'ID ordine
+ * (`id_ordine_foglio`): fra due gemelle vince quella con lo stesso ordine. E il
+ * terzo passaggio, quello per riga e produttore, vale solo fra richieste dello
+ * stesso anno (annoRichiesta): il foglio dell'anno nuovo ricomincia dalle prime
+ * righe, e un produttore che torna alla stessa riga non e' la richiesta
+ * dell'anno prima con la data corretta.
  */
 export function abbinaRichieste(righe, esistenti) {
   const libere = new Set(esistenti || []);
+  const stessoOrdine = (r, e) => {
+    const suoi = String((r && r.id_ordine_foglio) || '').split(/[,;\s]+/).filter(Boolean);
+    const loro = new Set(listaOrdini(e));
+    return suoi.length > 0 && suoi.every(id => loro.has(id));
+  };
   const somiglianza = (r, e) =>
+    (stessoOrdine(r, e) ? 8 : 0) +
     (pulisci(r.nota) === pulisci(e.nota) ? 4 : 0) +
     (pulisci(r.trasportatore).toUpperCase() === pulisci(e.trasportatore).toUpperCase() ? 2 : 0) +
     (pulisci(r.provincia).toUpperCase() === pulisci(e.provincia).toUpperCase() ? 1 : 0) +
     (r.riga_excel && r.riga_excel === e.riga_excel ? 1 : 0);
+  const stessoAnno = (r, e) => {
+    const a = annoRichiesta(r), b = annoRichiesta(e);
+    return !a || !b || a === b;
+  };
   const esito = new Array((righe || []).length).fill(null);
   const passata = (criterio) => {
     (righe || []).forEach((r, i) => {
@@ -509,6 +755,6 @@ export function abbinaRichieste(righe, esistenti) {
   };
   passata((r, e) => chiaveRichiesta(r) === chiaveRichiesta(e));
   passata((r, e) => chiaveRichiesta(r, false) === chiaveRichiesta(e, false));
-  passata((r, e) => !!r.riga_excel && r.riga_excel === e.riga_excel && chiaveNome(r.pdr_nome) === chiaveNome(e.pdr_nome));
+  passata((r, e) => !!r.riga_excel && r.riga_excel === e.riga_excel && chiaveNome(r.pdr_nome) === chiaveNome(e.pdr_nome) && stessoAnno(r, e));
   return esito;
 }

@@ -169,7 +169,8 @@ export function statoMesiAttiva(documenti, prefatture, anno, oggi) {
     return {
       mese: nome,
       anno: a,
-      // Il nome a video: col suo anno quando non e' quello che si guarda.
+      // Il nome a video: col suo anno quando non e' quello che si guarda (e con
+      // mesi di due anni nell'elenco sempre, qui sotto).
       etichetta: a === annoNum ? nome : `${nome} ${a}`,
       elaborato: docs.length > 0,
       stato: statoDi(docs),
@@ -199,6 +200,13 @@ export function statoMesiAttiva(documenti, prefatture, anno, oggi) {
     for (const x of mesiPrima.slice(primo)) if (!x.chiuso) mesi.push(x);
   }
   for (let m = 0; m <= ultimoFinito; m++) mesi.push(meseDi(annoNum, m));
+  // CON MESI DI PIU' ANNI, OGNI MESE COL SUO ANNO (prova del cambio d'anno,
+  // 15/10/2026, difetto 37). Il 10/02/2027 «Da gestire» scriveva «Ottobre 2026,
+  // Novembre 2026, Dicembre 2026, Gennaio»: il mese dell'anno guardato era senza
+  // anno in mezzo a quelli dell'anno prima. Quando l'elenco ha mesi di due anni
+  // tutte le etichette portano l'anno (le stesse servono a «Prefattura non
+  // caricata»); con i mesi di un anno solo resta com'era.
+  if (new Set(mesi.map(x => x.anno)).size > 1) for (const x of mesi) x.etichetta = `${x.mese} ${x.anno}`;
   return mesi;
 }
 

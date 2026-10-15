@@ -7,7 +7,7 @@ import { ARCHIVI_PRIMARIE, DATE_PRIMARIE, archivioPrimaria, dataPrimaria, record
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
 import { fetchAll, RIGHE_PER_PAGINA, ultimaPagina } from "../../shared/fetchAll.ts";
 import { allineaDalPortale } from "../../shared/agganciaDichiarazioni.ts";
-import { evasioneOrdini, listaOrdini, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare, daRicalcolare, ordiniEdEsitoRichiesta } from "../../shared/richiesteEct.ts";
+import { evasioneOrdini, listaOrdini, riconosciOrdine, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare, daRicalcolare, ordiniEdEsitoRichiesta, richiesteDaSeguire, chiusaDalPortale, riapertaDalPortale } from "../../shared/richiesteEct.ts";
 import { statoOrdini } from "../../shared/todoOrdini.ts";
 import { annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti, dataItaliana } from "../../shared/reportSettimanali.ts";
@@ -468,17 +468,40 @@ function dataRitiro(salvata, ids, ev, terminati, presenti) {
 // gia' spuntata), o in parte evasa, da un ordine con la fine trasporto ma con un'altra data
 // obbligatoria che manca o non torna si dice anche lei
 // (ordini_con_date_da_sistemare, regola dell'utente del 22/09/2026).
+//
+// LE RICHIESTE DEGLI ANNI PRIMA ANCORA APERTE (prova del cambio d'anno,
+// 15/10/2026, difetto 2). Si leggevano solo quelle dell'anno di oggi: il ritiro
+// dell'08/01 di una richiesta di dicembre non si riconosceva piu', e la richiesta
+// restava «aperta» per sempre. Adesso si leggono tutte, con una lettura sola
+// (sono poche decine l'anno), e si guardano quelle dell'anno piu' quelle degli
+// anni prima non ancora chiuse (richiesteDaSeguire, richiesteEct.ts): la stessa
+// regola della dashboard e della To-Do List.
+//
+// E QUELLE DEGLI ANNI PRIMA CHE IL PORTALE HA RIAPERTO (revisione del 15/10/2026).
+// Una richiesta di dicembre annullata perche' il suo ordine risultava cancellato
+// (chiusaDalPortale) restava fuori: a gennaio il portale riassegnava l'ordine con
+// lo stesso ID, il ritiro si faceva, e la richiesta restava «annullata» per
+// sempre, senza risposta al consorzio. Dentro l'anno la stessa richiesta si
+// riapre (daRicalcolare). Degli anni prima si riguardano solo quelle con un
+// ordine cancellato di nuovo nell'archivio, riassegnato o ritirato
+// (riapertaDalPortale): un ordine cancellato uscito dal file del portale non
+// riapre niente.
 async function riconosciRitiriEct(base44) {
   const svc = base44.asServiceRole.entities;
   const anno = Number(oggiRoma().slice(0, 4));
-  const tutte = await fetchAll(svc.RichiestaEct, { anno });
+  const archivioRichieste = await fetchAll(svc.RichiestaEct);
+  const tutte = richiesteDaSeguire(archivioRichieste, anno);
   // Le aperte, e quelle che ha chiuso il portale cancellandone gli ordini: il
   // portale le puo' riaprire riassegnando l'ordine (daRicalcolare, 14/10/2026).
   const richieste = tutte.filter(daRicalcolare);
   // Le evase gia' spuntate non si toccano: si guardano solo per le date. Un'evasa
   // in parte e' gia' fra quelle da ricalcolare, e le sue date si dicono li'.
   const evase = tutte.filter(r => r.esito === 'evasa' && !daRicalcolare(r));
-  if (!richieste.length && !evase.length) return { controllate: 0, aggiornate: 0, da_confermare: [], terminati_senza_fine: [], ordini_con_date_da_sistemare: [] };
+  // Degli anni prima, le chiuse dal portale: si guardano dopo aver letto gli
+  // archivi, e restano solo quelle che il portale ha riaperto.
+  const seguite = new Set(tutte);
+  const chiuseDalPortalePrima = archivioRichieste.filter(r => !seguite.has(r) && chiusaDalPortale(r));
+  if (!richieste.length && !evase.length && !chiuseDalPortalePrima.length) return { controllate: 0, aggiornate: 0, da_confermare: [], terminati_senza_fine: [], ordini_con_date_da_sistemare: [] };
 
   // Gli stessi archivi del caricamento delle richieste: gli assegnati e tutte le
   // primarie, perche' l'ordine della richiesta puo' essere gia' terminato.
@@ -495,6 +518,7 @@ async function riconosciRitiriEct(base44) {
   // diverse sullo stesso ordine.
   const statoTuttiGliOrdini = statoOrdini([...rete, ...aci], [...assRete, ...assAci]);
   const presenti = new Set(ordini.map(o => String(o.id_ordine || '').trim()).filter(Boolean));
+  richieste.push(...chiuseDalPortalePrima.filter(r => riapertaDalPortale(r, statoTuttiGliOrdini)));
 
   let aggiornate = 0;
   const daConfermare = [];

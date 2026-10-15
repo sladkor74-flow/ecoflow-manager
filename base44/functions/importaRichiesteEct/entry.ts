@@ -5,7 +5,7 @@ import { annotaFileDaRimuovere, voceDaRimuovere } from "../../shared/fileDaRimuo
 import { urlScaricabile, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { leggiFoglio, riconosciOrdine, scadenzaDaNota, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare, ordiniEdEsitoRichiesta } from "../../shared/richiesteEct.ts";
+import { leggiFoglio, riconosciOrdine, scadenzaDaNota, listaOrdini, evasioneOrdini, abbinaRichieste, ritiriTerminati, idOrdineDaSalvare, ordiniConDateDaSistemare, ordiniEdEsitoRichiesta, annoRichiesta } from "../../shared/richiesteEct.ts";
 import { statoOrdini } from "../../shared/todoOrdini.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
@@ -22,7 +22,37 @@ import { statoCaricamenti } from "../../shared/reportSettimanali.ts";
 // (abbinaRichieste), non dal numero di riga del foglio: ordinare il foglio o
 // inserirci una riga non deve spostare le spunte su altre richieste.
 //
-// Payload: { file_uri, anno? }
+// OGNI RICHIESTA HA IL SUO ANNO (prova del cambio d'anno, 15/10/2026, difetto
+// 3). Prima il foglio intero prendeva un anno solo, il piu' alto fra le mail, e
+// le richieste salvate si cercavano solo in quello: ricaricato a gennaio, con le
+// mail di dicembre e una di gennaio, il foglio rifaceva le richieste di dicembre
+// come richieste dell'anno nuovo - doppioni senza le spunte, «entro il 20/12»
+// diventato il 20/12 dell'anno dopo - e caricato a dicembre dava a «entro il
+// 10/01» un 10/01 gia' passato. Adesso l'anno di una richiesta e' quello della sua
+// mail (o dell'immissione, se la mail manca: annoRichiesta), il termine senza
+// anno e' il primo che non viene prima della mail (scadenzaDaNota), e le
+// richieste salvate si leggono tutte, con una lettura sola (l'archivio e'
+// piccolo), e si abbinano quelle degli anni che il foglio porta.
+//
+// L'ID ORDINE DEL FOGLIO (colonna «numero d'ordine», dal 09/10/2026: prova del
+// cambio d'anno, difetto 10) vale come scritto a mano: va in id_ordine_manuale,
+// che vince sempre sul riconoscimento automatico. Un ID gia' scritto a mano nel
+// gestionale resta il suo, come le spunte: se il foglio ne dice un altro, la
+// risposta lo elenca (id_diversi_dal_foglio) e la pagina lo dice.
+//
+// SOLO UN ID CHE C'E' FRA GLI ORDINI CARICATI (revisione del 15/10/2026). Un ID
+// scritto male nel foglio - una cifra in meno - una volta preso restava per
+// sempre: dal caricamento dopo valeva come scritto a mano nel gestionale, la
+// correzione fatta nel foglio non passava piu' e la richiesta aspettava un ordine
+// che non esiste. Il gestionale non sa da dove viene un id_ordine_manuale (non
+// c'e' un campo che lo dica), quindi l'ID del foglio si prende solo se tutti i
+// suoi ordini sono fra gli assegnati o le primarie: se no non si prende, intanto
+// vale il riconoscimento automatico e la risposta lo dice
+// (id_del_foglio_non_trovati). Un ordine nuovo non ancora caricato si prende al
+// caricamento del foglio dopo quello delle primarie.
+//
+// Payload: { file_uri, anno? } (anno vale solo per una riga senza mail ne'
+// immissione)
 const FOGLIO = 'Richieste ECT';
 
 export default async function(req) {
@@ -63,10 +93,15 @@ export default async function(req) {
     const righe = leggiFoglio(griglia, primaRiga);
     if (!righe.length) return Response.json({ error: 'Il foglio ' + FOGLIO + ' non contiene richieste' }, { status: 400 });
 
-    // L'anno e' quello delle mail della richiesta, che e' l'anno di lavoro.
-    // (le date del foglio sono gia' giorni di calendario: il taglio va bene)
-    const anni = righe.map(r => r.mail_inviata_il || r.ordine_immesso_il).filter(Boolean).map(d => Number(d.slice(0, 4)));
-    const annoNum = Number(anno) || (anni.length ? Math.max(...anni) : Number(oggiRoma().slice(0, 4)));
+    // L'anno di ogni richiesta e' quello della sua mail, o dell'immissione se la
+    // mail manca (annoRichiesta; le date del foglio sono gia' giorni di
+    // calendario). Solo per una riga senza nessuna delle due vale l'anno chiesto,
+    // o quello di oggi.
+    const annoDiRiserva = Number(anno) || Number(oggiRoma().slice(0, 4));
+    const annoDi = (r) => annoRichiesta(r) || annoDiRiserva;
+    const anniFoglio = new Set(righe.map(annoDi));
+    const annoNum = Math.max(...anniFoglio);
+    const anniInOrdine = [...anniFoglio].sort((a, b) => a - b);
 
     // Gli ordini si cercano fra primarie e assegnati: se il file delle primarie si
     // sta riscrivendo, o un caricamento l'ha lasciato a meta', ID e ritiri letti
@@ -84,13 +119,19 @@ export default async function(req) {
     }
 
     const svc = base44.asServiceRole.entities;
-    const [assRete, assAci, rete, aci, esistenti] = await Promise.all([
+    const [assRete, assAci, rete, aci, archivioRichieste] = await Promise.all([
       fetchAll(svc.Assegnato),
       fetchAll(svc.AssegnatoAci),
       fetchAll(svc.PrimariaRete),
       fetchAll(svc.PrimariaAci),
-      fetchAll(svc.RichiestaEct, { anno: annoNum }),
+      // Tutte, con una lettura sola: sono poche decine l'anno.
+      fetchAll(svc.RichiestaEct),
     ]);
+    // Si abbinano le richieste degli anni che il foglio porta: per l'anno salvato
+    // o per quello della loro mail (una salvata prima del 15/10/2026 poteva avere
+    // l'anno piu' alto del foglio di allora). Le altre restano come sono, e non
+    // si contano fra quelle tolte dal foglio.
+    const esistenti = archivioRichieste.filter(e => anniFoglio.has(Number(e.anno)) || anniFoglio.has(annoRichiesta(e)));
     const ordini = [...assRete, ...assAci, ...rete, ...aci];
     const presenti = new Set(ordini.map(o => String(o.id_ordine || '').trim()).filter(Boolean));
 
@@ -116,10 +157,13 @@ export default async function(req) {
 
     const abbinate = abbinaRichieste(righe, esistenti);
 
-    let creati = 0, aggiornati = 0, invariati = 0, spostate = 0;
+    let creati = 0, aggiornati = 0, invariati = 0, spostate = 0, idDalFoglio = 0;
     const daConfermare = [];
     const terminatiSenzaFine = [];
     const conDate = [];
+    const idDiversi = [];
+    const idNonTrovati = [];
+    const nonCaricati = (testo) => listaOrdini({ id_ordine_manuale: testo }).filter(id => !presenti.has(id));
     for (let i = 0; i < righe.length; i++) {
       const r = righe[i];
       const gia = abbinate[i];
@@ -128,8 +172,25 @@ export default async function(req) {
       const ric = idOrdineDaSalvare(gia, riconosciOrdine(r, ordini));
       if (gia && gia.riga_excel !== r.riga_excel) spostate++;
       // Gli ID scritti a mano restano e vincono: una richiesta puo' coprire piu'
-      // ordini, e l'evasione si propone solo quando sono tutti ritirati.
-      const ids = listaOrdini({ id_ordine_manuale: gia && gia.id_ordine_manuale, id_ordine: ric.id_ordine });
+      // ordini, e l'evasione si propone solo quando sono tutti ritirati. Quello
+      // del foglio vale come scritto a mano quando nel gestionale non ce n'e' uno
+      // (15/10/2026); se ce n'e' uno diverso resta quello, e si dice.
+      // L'ID del foglio si prende solo se i suoi ordini ci sono TUTTI fra quelli
+      // caricati (revisione del 15/10/2026): preso a meta', la richiesta si
+      // chiuderebbe col ritiro di un ordine solo.
+      const aMano = String((gia && gia.id_ordine_manuale) || '').trim();
+      const idFoglio = r.id_ordine_foglio || '';
+      const fuoriArchivio = nonCaricati(idFoglio);
+      const dalFoglio = idFoglio && !fuoriArchivio.length ? idFoglio : '';
+      const manuale = aMano || dalFoglio;
+      if (!aMano && dalFoglio) idDalFoglio++;
+      if (!aMano && idFoglio && fuoriArchivio.length) idNonTrovati.push({ pdr: r.pdr_nome, foglio: idFoglio, non_trovati: fuoriArchivio.join(', ') });
+      if (aMano && idFoglio && listaOrdini({ id_ordine_manuale: aMano }).join(', ') !== listaOrdini({ id_ordine_manuale: idFoglio }).join(', ')) {
+        // Si dice anche se quello del gestionale si trova fra gli ordini: uno che
+        // non c'e' e' probabilmente quello sbagliato.
+        idDiversi.push({ pdr: r.pdr_nome, foglio: idFoglio, gestionale: aMano, gestionale_trovato: nonCaricati(aMano).length === 0, foglio_trovato: fuoriArchivio.length === 0 });
+      }
+      const ids = listaOrdini({ id_ordine_manuale: manuale, id_ordine: ric.id_ordine });
       const ev = evasioneOrdini(ids, terminati);
       // Come nel ricalcolo dopo le primarie (importaBlocco, dataRitiro): un
       // ritiro gia' rilevato si toglie solo se l'archivio dice che un ordine
@@ -143,8 +204,11 @@ export default async function(req) {
       // foglio, o un secondo ID non ancora ritirato, altrimenti lasciava la
       // richiesta "da confermare" sulla data vecchia, con meno ordini evasi che
       // ordini.
+      // Il termine senza anno e' il primo che non viene prima della mail; senza
+      // la mail, il primo che non viene prima dell'immissione; senza nessuna
+      // delle due, l'anno della riga.
       const campi = {
-        anno: annoNum,
+        anno: annoDi(r),
         riga_excel: r.riga_excel,
         pdr_nome: r.pdr_nome,
         classe: r.classe,
@@ -153,7 +217,7 @@ export default async function(req) {
         trasportatore: r.trasportatore,
         mail_inviata_il: r.mail_inviata_il || null,
         nota: r.nota,
-        scadenza: scadenzaDaNota(r.nota, annoNum) || null,
+        scadenza: scadenzaDaNota(r.nota, r.mail_inviata_il || r.ordine_immesso_il || annoDi(r)) || null,
         evaso_il: r.evaso_il || null,
         motivo_annullamento: r.motivo_annullamento,
         id_ordine: ric.id_ordine,
@@ -162,11 +226,14 @@ export default async function(req) {
         evasione_rilevata_il: rilevata || null,
         ordini_totali: ev.totali,
         ordini_evasi: ev.evasi,
+        // L'ID del foglio si scrive solo dove nel gestionale non c'e' un ID a
+        // mano: quello che c'e' non si tocca.
+        ...(!aMano && manuale ? { id_ordine_manuale: manuale } : {}),
       };
       // Lo stato dei suoi ordini e poi l'esito, con la stessa funzione del
       // ricalcolo dopo le primarie (ordiniEdEsitoRichiesta): il giorno in cui un
       // ordine si e' visto cancellato si porta avanti dal salvato.
-      const salvato = { ordini_stato_json: gia ? gia.ordini_stato_json : null, id_ordine_manuale: gia ? gia.id_ordine_manuale : '', evasione_confermata: gia ? !!gia.evasione_confermata : false };
+      const salvato = { ordini_stato_json: gia ? gia.ordini_stato_json : null, id_ordine_manuale: manuale, evasione_confermata: gia ? !!gia.evasione_confermata : false };
       Object.assign(campi, ordiniEdEsitoRichiesta(salvato, campi, ids, statoTuttiGliOrdini, oggi));
 
       if (!gia) { await svc.RichiestaEct.create(campi); creati++; }
@@ -211,16 +278,23 @@ export default async function(req) {
       record: { file_uri, file_url },
       motivo: 'foglio letto per il caricamento: nessun record ne conserva l\'indirizzo',
       cosa: 'Foglio delle Richieste ECT',
-      descrizione: `Caricamento delle richieste ECT dell'anno ${annoNum}`,
+      descrizione: `Caricamento delle richieste ECT ${anniInOrdine.length > 1 ? `degli anni ${anniInOrdine.slice(0, -1).join(', ')} e ${annoNum}` : `dell'anno ${annoNum}`}`,
       oggi: oggiRoma(),
     })]);
 
     return Response.json({
-      ok: true, anno: annoNum, righe_lette: righe.length,
+      // anno: il piu' recente del foglio, come prima; anni: tutti quelli che porta.
+      ok: true, anno: annoNum, anni: anniInOrdine, righe_lette: righe.length,
       file_tolto: fileTolto.riuscita ? true : fileTolto.come,
       annotato_nel_registro: registro.annotati,
       creati, aggiornati, invariati, orfane, spostate,
       riconosciuti: righe.filter(r => riconosciOrdine(r, ordini).id_ordine_stato === 'trovato').length,
+      // Gli ID ordine presi dal foglio, quelli che il foglio dice diversi da uno
+      // gia' nel gestionale (che resta), e quelli non presi perche' i loro ordini
+      // non sono fra quelli caricati.
+      id_dal_foglio: idDalFoglio,
+      id_diversi_dal_foglio: idDiversi,
+      id_del_foglio_non_trovati: idNonTrovati,
       da_confermare: daConfermare,
       terminati_senza_fine: terminatiSenzaFine,
       ordini_con_date_da_sistemare: conDate,

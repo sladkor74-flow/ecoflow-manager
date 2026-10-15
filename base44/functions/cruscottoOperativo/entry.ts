@@ -11,6 +11,7 @@ import { annoNuovoDaMostrare } from "../../shared/inizializzazioneAnno.ts";
 import { leggiFotografia } from "../../shared/indicatoriGiorno.ts";
 import { vociPresidi } from "../../shared/presidi.ts";
 import { leggiEseguiti } from "../../shared/ordiniEseguitiLettura.ts";
+import { richiesteDaSeguire } from "../../shared/richiesteEct.ts";
 
 // Il cruscotto della dashboard: l'elenco unico delle cose da gestire, l'arretrato
 // per canale, la freschezza dei dati, gli alert aperti, lo stato dei mesi della
@@ -53,6 +54,13 @@ import { leggiEseguiti } from "../../shared/ordiniEseguitiLettura.ts";
 // lettura sola, di una riga, e solo quando chiede lui. A chi non e'
 // amministratore non si legge e non arriva niente: la copia la scarica solo lui.
 // Una lettura che cade vale null, e la voce non c'e' (non e' «mai fatta»).
+// LE RICHIESTE DEL CONSORZIO DI DICEMBRE A GENNAIO (prova del cambio d'anno,
+// 15/10/2026, difetto 2). Si leggevano solo quelle dell'anno: dal 1° gennaio una
+// richiesta di dicembre ancora aperta, o evasa e non ancora risposta, spariva da
+// «Da gestire». Adesso si leggono tutte, con una lettura sola (sono poche decine
+// l'anno), e restano quelle dell'anno piu' quelle degli anni prima non ancora
+// chiuse (richiesteDaSeguire, richiesteEct.ts): la stessa regola della To-Do List
+// e del ricalcolo dopo le primarie.
 // Payload: { anno? }
 const TIPI_FILE = ['primarie', 'secondarie', 'terziarie', 'ordini_non_dichiarati', 'dichiarazioni_trattamento', 'pdr'];
 
@@ -78,7 +86,7 @@ export default async function(req) {
       Promise.all(anniAttiva.map(a => svc.DocumentoFatturazione.filter({ tipo: 'ATTIVA', anno: a }))).then(x => x.flat()),
       svc.PrefatturaEcotyre.filter({ anno }).catch(() => []),
       svc.RiepilogoQualifica.filter({ anno }, '-created_date', 1).catch(() => []),
-      fetchAll(svc.RichiestaEct, { anno }).catch(() => []),
+      fetchAll(svc.RichiestaEct).then(tutte => richiesteDaSeguire(tutte, anno)).catch(() => []),
       // I controlli delle sedi operative: poche centinaia di righe, una per
       // punto di raccolta con ordini. Serve sapere quante aspettano una decisione.
       fetchAll(svc.VerificaSedePdr, { superata: false }).catch(() => []),
