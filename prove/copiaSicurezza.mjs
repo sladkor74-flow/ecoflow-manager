@@ -454,6 +454,18 @@ await sezione('8. LA PAGINA VERA: IL PULSANTE ALL\'AMMINISTRATORE, A NESSUN ALTR
   verifica('nessun riferimento visibile alla piattaforma', !/base44/i.test(parole));
   const pulsante = () => trova(m.albero, el => el.type && el.type.__finto === 'Button' && /Scarica la copia di sicurezza/.test(testo(el)))[0];
   verifica('il pulsante «Scarica la copia di sicurezza»', !!pulsante());
+  // La copia finisce quando il file e' compresso, e la compressione va col tempo
+  // vero (CompressionStream lavora fuori dal filo di node, l'orologio finto non
+  // la tocca): si aspetta fino a un minuto vero, non un numero fisso di giri. Coi
+  // 400 giri di prima sul PC bastava, sul runner di GitHub no: la pagina restava
+  // a «Preparo il file compresso» e la copia finiva dopo, dentro la prova della
+  // copia monca (15/10/2026).
+  const finoAllaFine = async (montata) => {
+    const fine = performance.now() + 60000;
+    const finita = () => trova(montata.albero, el => el.type === 'p' && /Copia scaricata|non è riuscita/.test(testo(el))).length > 0;
+    while (!finita() && performance.now() < fine) await aspetta(20);
+    return finita();
+  };
   // Il giro del pulsante col tempo finto: le pause della copia passano subito.
   const scaricati = [];
   globalThis.document = { body: { appendChild() {} }, querySelector: () => ({ getAttribute: () => '/assets/index-prova.js' }), createElement: () => ({ click() { scaricati.push({ nome: this.download, blob: resolveObjectURL(this.href) }); }, remove() {} }) };
@@ -467,7 +479,7 @@ await sezione('8. LA PAGINA VERA: IL PULSANTE ALL\'AMMINISTRATORE, A NESSUN ALTR
     p.props.onClick();
     await aspetta(5);
     verifica('durante la copia il pulsante e\' spento e c\'e\' «Annulla»', pulsante().props.disabled === true && trova(m.albero, el => el.type && el.type.__finto === 'Button' && /Annulla/.test(testo(el))).length === 1);
-    for (let i = 0; i < 400 && !trova(m.albero, el => el.type === 'p' && /Copia scaricata|non è riuscita/.test(testo(el))).length; i++) await aspetta(20);
+    verifica('la copia arriva in fondo entro un minuto vero', await finoAllaFine(m), testo(m.albero).replace(/\s+/g, ' ').slice(-120));
   } finally {
     Date.now = veri.now;
     globalThis.setTimeout = veri.setTimeout;
@@ -516,7 +528,7 @@ await sezione('8. LA PAGINA VERA: IL PULSANTE ALL\'AMMINISTRATORE, A NESSUN ALTR
   try {
     const p3 = trova(m3.albero, el => el.type && el.type.__finto === 'Button' && /Scarica la copia di sicurezza/.test(testo(el)))[0];
     p3.props.onClick();
-    for (let i = 0; i < 400 && !trova(m3.albero, el => el.type === 'p' && /Copia scaricata|non è riuscita/.test(testo(el))).length; i++) await aspetta(20);
+    verifica('monca: la copia arriva in fondo entro un minuto vero', await finoAllaFine(m3), testo(m3.albero).replace(/\s+/g, ' ').slice(-120));
   } finally {
     Date.now = veri3.now;
     globalThis.setTimeout = veri3.setTimeout;
