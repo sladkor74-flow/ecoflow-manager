@@ -145,7 +145,10 @@ const innorec = elenco.siti.find(s => s.sito === 'innorec');
 verifica('il piazzale ha le sue voci', nappi && nappi.voci.length === 5 && nappi.per_canale.RETE.n === 4);
 verifica('l\'impianto ha le sue terziarie', innorec && innorec.voci.length === 2 && innorec.voci.every(v => v.tipo === 'terziaria' && v.ruolo === 'imp'));
 verifica('ogni voce porta peso, classe e id ordine', nappi.voci.every(v => typeof v.kg === 'number' && v.classe && 'id_ordine' in v));
-verifica('e il perche\' sta scritto', nappi.voci.find(v => v.id_ordine === 'SEC25121800').perche.includes('chiuso a portale il 2026-01-07'));
+// Le date dei testi sono gg/mm/aaaa (15/10/2026, prova generale del cambio
+// d'anno, difetto 31): i campi restano ISO.
+verifica('e il perche\' sta scritto, con le date all\'italiana', nappi.voci.find(v => v.id_ordine === 'SEC25121800').perche.includes('chiuso a portale il 07/01/2026'));
+verifica('mentre i campi restano ISO', nappi.voci.find(v => v.id_ordine === 'SEC25121800').chiuso_il === '2026-01-07' && /^\d{4}-\d{2}-\d{2}$/.test(nappi.voci.find(v => v.id_ordine === 'SEC25121800').finito_il));
 
 console.log('CHI E\' INSIEME IMPIANTO E PIAZZALE RESTA DIVISO');
 // Irigom e T-Cycle hanno due giacenze, lette in due modi diversi: quello che
@@ -165,7 +168,7 @@ const richieste = cosaChiedereAlPortale({ anno: 2025, piazzali, impianti, lettur
 verifica('una richiesta per piazzale e una per impianto', richieste.length === 3);
 verifica('al piazzale si chiede il saldo per classe', richieste[0].tipo === 'piazzale' && JSON.stringify(richieste[0].campi) === JSON.stringify(['P', 'M', 'G1', 'G2', 'ACI']) && richieste[0].stato === 'da_chiedere');
 verifica('e si dice dove si legge', richieste[0].dove.includes("Unita' Locali di Stoccaggio"));
-verifica('all\'impianto si chiede il file degli ordini non dichiarati', richieste[1].tipo === 'impianto' && richieste[1].cosa.includes('2025-12-31'));
+verifica('all\'impianto si chiede il file degli ordini non dichiarati', richieste[1].tipo === 'impianto' && richieste[1].cosa.includes('File degli ordini non dichiarati al 31/12/2025'), richieste[1].cosa);
 verifica('accanto alla richiesta c\'e\' quanto pende di dicembre', richieste[0].dicembre.n === 5 && richieste[1].dicembre.n === 2);
 verifica('una lettura gia\' inserita si vede', cosaChiedereAlPortale({ anno: 2025, piazzali, impianti, letture: { 'nappi sud': { P: 1 } } })[0].stato === 'inserita');
 
@@ -413,7 +416,29 @@ verifica('ma nell\'elenco ci sono, col loro peso e il loro motivo',
 }
 verifica('il riepilogo le conta a parte', dossier.riepilogo.voci_per_classe === 4 && dossier.riepilogo.voci_senza_classe === 3 && dossier.riepilogo.voci_dicembre === 7,
   JSON.stringify([dossier.riepilogo.voci_per_classe, dossier.riepilogo.voci_senza_classe]));
-verifica('la lettera di un altro 31 dicembre si segnala', dossier.avvisi.some(a => a.tipo === 'lettera_altro_anno' && a.testo.includes('2024-12-31')));
+verifica('la lettera di un altro 31 dicembre si segnala', dossier.avvisi.some(a => a.tipo === 'lettera_altro_anno' && a.testo.includes('al 31/12/2024, non al 31/12/2025')));
+// NESSUN TESTO DEL DOSSIER HA UNA DATA AAAA-MM-GG (15/10/2026, difetto 31): le
+// frasi le legge l'amministratore nella pagina, nel PDF e nel foglio Excel. Si
+// guardano tutti i testi - le richieste, i blocchi, il perche' delle voci, gli
+// avvisi, le note - e mai i campi (finito_il, chiuso_il, giorno, al), che
+// restano ISO.
+{
+  const TESTI = new Set(['testo', 'perche', 'cosa', 'dove', 'motivo', 'nota', 'note']);
+  const trovati = [];
+  const visita = (x, dove = '') => {
+    if (Array.isArray(x)) { x.forEach((y, i) => visita(y, `${dove}[${i}]`)); return; }
+    if (!x || typeof x !== 'object') return;
+    for (const [k, v] of Object.entries(x)) {
+      if (typeof v === 'string' && TESTI.has(k) && /\d{4}-\d{2}-\d{2}/.test(v)) trovati.push(`${dove}.${k}: ${v}`);
+      else if (v && typeof v === 'object') visita(v, `${dove}.${k}`);
+    }
+  };
+  visita(dossier);
+  visita(cosaChiedereAlPortale({ anno: 2025, piazzali, impianti, letture: {}, letture_impianti: {}, elenco }));
+  verifica('nessun testo del dossier ha una data AAAA-MM-GG', trovati.length === 0, JSON.stringify(trovati.slice(0, 5)));
+  verifica('e i campi restano ISO: il giorno della chiusura, la fine trasporto e la chiusura a portale',
+    dossier.giorno === '2025-12-31' && dossier.elenco_dicembre.voci.every(v => /^\d{4}-\d{2}-\d{2}$/.test(v.finito_il) && (!v.chiuso_il || /^\d{4}-\d{2}-\d{2}$/.test(v.chiuso_il))));
+}
 verifica('gli impianti ci sono anche senza lettura', dossier.impianti.length === 2 && dossier.riepilogo.impianti_letti === 1);
 // Un impianto non piu' contrattualizzato svuota la giacenza dell'anno prima:
 // non si esclude mai (regola dell'utente, 23/09/2026).
@@ -524,6 +549,17 @@ verifica('senza nessuna lettura non c\'e\' ancora, e lo si dice', senzaAncora.ve
 // non c'e': se l'ancora e' la chiusura stessa, non c'e' niente prima di lei.
 const soloChiusura = confrontoPiazzale({ chiave: 'solo', nome: 'SOLO', rilevazioni: [], movimenti: MOV_PROVA }, { anno: 2025, lettura: { P: 3000 }, voci: [] });
 verifica('e la chiusura non si confronta con se stessa', soloChiusura.verifica_da_salvare.ancora.senza_ancora === true);
+
+// LA PAGINA DICE I NUMERI SOTTO ZERO (revisione del 15/10/2026): la proposta
+// calcolata sotto zero col suo perche', e le aperture rifiutate, anche nella
+// conferma del salvataggio. Le regole stanno in prove/aperture2027.mjs e
+// prove/provaDel2Gennaio.mjs; qui che la pagina le mostri.
+{
+  const { readFileSync } = await import('node:fs');
+  const pagina = readFileSync(qui('../src/components/giacenze/ChiusuraAnno.jsx'), 'utf8').replace(/\r/g, '');
+  verifica('la pagina dice la proposta sotto zero e che non si propone', /x && x\.negativa/.test(pagina) && /sotto zero, non si propone/.test(pagina));
+  verifica('e le aperture rifiutate, col motivo, anche nella conferma del salvataggio', /aperture\.rifiutate \|\| \[\]/.test(pagina) && /Non si scrivono, perché il numero è sotto zero/.test(pagina));
+}
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -32,7 +32,7 @@
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { VOCI_INVARIANTI, FONTI, verificaInvarianti, unisciInvarianti, fontiDelleVoci, TOLLERANZA_CENTESIMO_T, riportaRotte, motiviNonVerificate } from '../base44/shared/invarianti.ts';
+import { VOCI_INVARIANTI, FONTI, verificaInvarianti, unisciInvarianti, fontiDelleVoci, TOLLERANZA_CENTESIMO_T, riportaRotte, motiviNonVerificate, anniDaControllare, unisciAnni } from '../base44/shared/invarianti.ts';
 import { vociPresidi } from '../base44/shared/presidi.ts';
 
 const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
@@ -113,10 +113,13 @@ console.log('1b. UN PIAZZALE CHE LE DICHIARAZIONI NON ELENCANO NON E\' UNO ZERO'
   // piazzale Nappi Sud e 0 agli altri piazzali. Si leggeva, in rosso,
   // «25,88 t nelle Giacenze, 0,00 t nelle Dichiarazioni»: uno zero che nessun
   // modulo scrive.
+  // L'impianto che le Dichiarazioni non elencano fa caso anche lui dal
+  // 15/10/2026 (difetto 12, sezione 1e): qui si guardano i piazzali, e
+  // l'impianto c'e' con la giacenza a zero.
   const G = { righe: [
     { sito: 'Nappi Sud Srl A Socio Unico', tipo_destinazione: 'stoc', giacenza_rete_t: 25.88, giacenza_aci_t: 0, giacenza_extra_t: null },
     { sito: 'GATIM S.R.L.', tipo_destinazione: 'stoc', giacenza_rete_t: 0, giacenza_aci_t: 0, giacenza_extra_t: null },
-    { sito: 'Irigom S.r.l.', tipo_destinazione: 'imp', giacenza_portale_t: 652.84, giacenza_aci_t: 0, giacenza_extra_t: 0 },
+    { sito: 'Irigom S.r.l.', tipo_destinazione: 'imp', giacenza_portale_t: 0, giacenza_aci_t: 0, giacenza_extra_t: 0 },
   ] };
   const vuote = { siti: [], stoccaggi: [] };
   const a = VOCI_INVARIANTI[0].verifica({ giacenze: G, dichiarazioni: vuote });
@@ -155,6 +158,57 @@ console.log('1b. UN PIAZZALE CHE LE DICHIARAZIONI NON ELENCANO NON E\' UNO ZERO'
   verifica('(a) un piazzale che tutti e due elencano non si conta due volte', VOCI_INVARIANTI[0].verifica({ giacenze: { righe: [{ sito: 'Piazzale Nuovo S.r.l.', tipo_destinazione: 'stoc', giacenza_rete_t: 0, giacenza_aci_t: 40, giacenza_extra_t: null }] }, dichiarazioni: soloD }).ok === true);
   const ds = vociPresidi({ indicatore: { giorno: '2026-10-11', invarianti_json: JSON.stringify(verificaInvarianti({ giacenze: { righe: [] }, dichiarazioni: soloD }, { voci: [VOCI_INVARIANTI[0]], giorno: '2026-10-11', anno: 2026 })) }, oggi: '2026-10-11', adessoMs: Date.parse('2026-10-11T08:00:00Z') });
   verifica('nella dashboard: «Giacenze —, Dichiarazioni 40,00 t»', ds.length === 1 && ds[0].titolo === "Un'identità fra moduli si è rotta: Giacenze —, Dichiarazioni 40,00 t" && /Un modulo dice un numero e l'altro non lo dice/.test(ds[0].dettaglio), J(ds));
+}
+
+console.log('1e. UN IMPIANTO CHE UN MODULO SOLO ELENCA NON SI SALTA (15/10/2026)');
+{
+  // La prova generale del cambio d'anno (difetto 12): il 05/01/2027, senza la
+  // copia d'anno, le Giacenze avevano cinque impianti con una giacenza (Tecnogum
+  // 1.833,43 t, Irigom 652,84 t...) e le Dichiarazioni nessuno, e la notte
+  // segnalava solo il piazzale. Ora un impianto con una giacenza che un modulo
+  // solo elenca e' un caso, dalle due parti, come il piazzale.
+  const G = { righe: [
+    { sito: 'Irigom S.r.l.', tipo_destinazione: 'imp', giacenza_portale_t: 652.84, giacenza_aci_t: null, giacenza_extra_t: 0 },
+    { sito: 'TECNOGUM SRL', tipo_destinazione: 'imp', giacenza_portale_t: null, giacenza_aci_t: 0, giacenza_extra_t: 0 },
+    { sito: 'GREEN TYRE PROJECT SRL', tipo_destinazione: 'stoc', giacenza_rete_t: 0, giacenza_aci_t: 0, giacenza_extra_t: null },
+    { sito: 'GATIM S.R.L.', tipo_destinazione: 'stoc', giacenza_rete_t: 0, giacenza_aci_t: 0, giacenza_extra_t: null },
+  ] };
+  const vuote = { siti: [], stoccaggi: [] };
+  const a = VOCI_INVARIANTI[0].verifica({ giacenze: G, dichiarazioni: vuote });
+  verifica("(a) l'impianto con una giacenza solo nelle Giacenze e' un caso, col numero che manca", a.ok === false && a.casi.length === 1 && a.casi[0].sito === 'Irigom S.r.l.' && a.a === 652.84 && a.b === null && a.casi[0].ruolo === 'imp', J(a));
+  verifica("(a) e lo dice: «nelle Dichiarazioni l'impianto non compare»", a.dettaglio === "Irigom S.r.l., rete: 652,84 t nelle Giacenze, mentre nelle Dichiarazioni l'impianto non compare", a.dettaglio);
+  verifica("(a) Tecnogum (rete «—», ACI 0) e i piazzali a 0 di Green Tyre e GATIM non sono casi", a.confronti === 1, String(a.confronti));
+  const soloD = { siti: [{ sito: 'ALFA RECYCLING SRL', chiave: 'alfa recycling', tipo_destinazione: 'imp', giacenza_portale_t: 12, giacenze_canale: [{ canale: 'RETE', giacenza_t: 12 }, { canale: 'ACI', giacenza_t: 0 }, { canale: 'EXTRA_RACCOLTA', giacenza_t: null }] }], stoccaggi: [] };
+  const b = VOCI_INVARIANTI[0].verifica({ giacenze: { righe: [] }, dichiarazioni: soloD });
+  verifica("(a) e dall'altra parte: un impianto che solo le Dichiarazioni elencano", b.ok === false && b.casi.length === 1 && b.a === null && b.b === 12 && /nelle Giacenze l'impianto non compare/.test(b.dettaglio), J(b));
+  const tutti = VOCI_INVARIANTI[0].verifica({ giacenze: { righe: [{ sito: 'Alfa Recycling S.r.l.', tipo_destinazione: 'imp', giacenza_portale_t: 12, giacenza_aci_t: 0, giacenza_extra_t: null }] }, dichiarazioni: soloD });
+  verifica("(a) un impianto che tutti e due elencano si confronta come sempre", tutti.ok === true && tutti.confronti === 3, J(tutti));
+}
+
+console.log("1f. A GENNAIO E FEBBRAIO SI CONTROLLA ANCHE L'ANNO PRIMA (15/10/2026)");
+{
+  // La prova generale del cambio d'anno (difetto 27): il 31/12/2026 la notte
+  // trovava «Irigom, ACI: 20,00 t nelle Giacenze, 12,00 t nelle Dichiarazioni»;
+  // dall'01/01/2027 controllava solo il 2027 e la voce spariva, mentre sul 2026 i
+  // due moduli dicevano ancora 20 e 12.
+  verifica("gli anni: il 31/12 l'anno solo, a gennaio e febbraio anche quello prima, dal 1° marzo l'anno solo",
+    J(anniDaControllare('2026-12-31')) === J([2026]) && J(anniDaControllare('2027-01-01')) === J([2026, 2027]) && J(anniDaControllare('2027-02-28')) === J([2026, 2027]) && J(anniDaControllare('2027-03-01')) === J([2027]));
+  const rotto = { righe: [{ sito: 'Irigom S.r.l.', tipo_destinazione: 'imp', giacenza_portale_t: 600, giacenza_aci_t: 20, giacenza_extra_t: 0 }] };
+  const dichRotto = { siti: [{ sito: 'Irigom S.r.l.', chiave: 'irigom', tipo_destinazione: 'imp', giacenza_portale_t: 600, giacenze_canale: [{ canale: 'ACI', giacenza_t: 12 }, { canale: 'EXTRA_RACCOLTA', giacenza_t: 0 }] }], stoccaggi: [] };
+  const buono = { righe: [{ ...rotto.righe[0], giacenza_aci_t: 12 }] };
+  const v = [VOCI_INVARIANTI[0]];
+  const e26 = verificaInvarianti({ giacenze: rotto, dichiarazioni: dichRotto }, { voci: v, giorno: '2027-01-01', anno: 2026 });
+  const e27 = verificaInvarianti({ giacenze: buono, dichiarazioni: dichRotto }, { voci: v, giorno: '2027-01-01', anno: 2027 });
+  const u = unisciAnni([{ anno: 2026, esito: e26 }, { anno: 2027, esito: e27 }]);
+  verifica("l'01/01/2027 col 2026 rotto la voce resta, e dice «2026»", u.esito === 'rotte' && u.anno === 2027 && J(u.anni) === J([2026, 2027]) && voce(u, 'giacenze_uguali').dettaglio === 'Irigom S.r.l., ACI: 20,00 t nelle Giacenze, 12,00 t nelle Dichiarazioni'.replace(/^/, '2026: '), J(u));
+  verifica('ogni caso porta il suo anno', voce(u, 'giacenze_uguali').casi.every(c => c.anno === 2026), J(voce(u, 'giacenze_uguali').casi));
+  verifica('e la nota della riga lo dice', /^Un'identità fra moduli si è rotta: 2026: Irigom S\.r\.l\., ACI/.test(u.nota), u.nota);
+  const tuttiBuoni = unisciAnni([{ anno: 2026, esito: e27 }, { anno: 2027, esito: e27 }]);
+  verifica('tutti e due a posto: in linea, coi confronti dei due anni', tuttiBuoni.esito === 'in_linea' && voce(tuttiBuoni, 'giacenze_uguali').confronti === 2 * voce(e27, 'giacenze_uguali').confronti, J(tuttiBuoni));
+  verifica('un anno solo: l\'esito di sempre, senza l\'anno davanti', unisciAnni([{ anno: 2026, esito: e26 }]) === e26 && !/^2026: /.test(voce(e26, 'giacenze_uguali').dettaglio));
+  const muto = verificaInvarianti({}, { voci: v, errori: { giacenze: 'tempo scaduto' }, giorno: '2027-01-01', anno: 2026 });
+  const conMuto = unisciAnni([{ anno: 2026, esito: muto }, { anno: 2027, esito: e27 }]);
+  verifica("un anno che non risponde: la voce non e' verificata, e il motivo dice l'anno", conMuto.esito === 'non_verificate' && /^2026: le Giacenze non hanno risposto/.test(voce(conMuto, 'giacenze_uguali').motivo || ''), J(voce(conMuto, 'giacenze_uguali')));
 }
 
 console.log('1c. IL MOTIVO DI UNA VOCE NON VERIFICATA, IN ITALIANO');
@@ -408,7 +462,8 @@ const GUASTI = {
   // dall'anno prima trattato come un aggancio caduto nel mese sbagliato.
   riga_da_dichiarare: { 'shared/usciteDichiarate.ts': { in: 'riepilogoDichiarazioni', cambio: ['if (q > c) { if (i === 0) oltrePrima += q - c; else fuoriMese += q - c; q = c; }', 'if (q > c) { fuoriMese += q - c; q = c; }'] } },
   // Le Giacenze che contano due volte il dichiarato ACI di un impianto.
-  giacenze_uguali: { 'functions/calcolaGiacenze/entry.ts': { in: 'calcolaGiacenze', cambio: ["giacenza_aci_t = aperturaAci + conferito_aci_t + secondarie_aci_in_t - dichiaratoCanale(ns, 'ACI');", "giacenza_aci_t = aperturaAci + conferito_aci_t + secondarie_aci_in_t - 2 * dichiaratoCanale(ns, 'ACI');"] } },
+  // Dal 15/10/2026 l'apertura e' aperturaDelSito, che puo' dire «—» (difetto 6).
+  giacenze_uguali: { 'functions/calcolaGiacenze/entry.ts': { in: 'calcolaGiacenze', cambio: ["giacenza_aci_t = aperturaAci.netta_t + conferito_aci_t + secondarie_aci_in_t - dichiaratoCanale(ns, 'ACI');", "giacenza_aci_t = aperturaAci.netta_t + conferito_aci_t + secondarie_aci_in_t - 2 * dichiaratoCanale(ns, 'ACI');"] } },
   // La dashboard che conta le primarie di ogni anno.
   raccolto_rete: { 'functions/getDashboardRaccolta/entry.ts': { in: 'getDashboardRaccolta', cambio: ['const reteAnno = rete.filter(r => anni.includes(getAnno(r)));', 'const reteAnno = rete;'] } },
 };
@@ -435,6 +490,25 @@ for (const [id, guasti] of Object.entries(GUASTI)) {
   verifica(`${id}: il controllo e' riuscito (ha trovato il difetto, non e' un guasto suo)`, battito(n) && battito(n).ultimo_esito === 'riuscito', J(battito(n)));
 }
 await carica();
+
+console.log("3b. IL 2026 SI GUARDA ANCORA A GENNAIO, CON LE FUNZIONI VERE (15/10/2026)");
+{
+  // Il difetto dell'ACI di Alfa rimesso nel codice: il 2026 resta rotto. Il
+  // 31/12/2026 la notte lo trova come sempre; l'01/01/2027 lo trova ancora, e
+  // dice l'anno; dal 1° marzo il 2026 non si guarda piu'.
+  await carica(GUASTI.giacenze_uguali);
+  const giorno = (iso) => { const db = archivio(); db.IndicatoreGiorno = [{ id: 'ig', giorno: iso.slice(0, 10), anno: Number(iso.slice(0, 4)), esito: 'in_linea', nota: '' }]; return db; };
+  const ilGiorno = async (iso, ora) => { const n = await notte({ db: giorno(iso), ora: OraVera.parse(ora) }); return { n, e: scritto(n) }; };
+  const dic = await ilGiorno('2026-12-31', '2026-12-31T04:00:00Z');
+  const gen = await ilGiorno('2027-01-01', '2027-01-01T04:00:00Z');
+  const mar = await ilGiorno('2027-03-01', '2027-03-01T04:00:00Z');
+  const g = (x) => voce(x.e || {}, 'giacenze_uguali');
+  verifica('il 31/12/2026: rotta, come sempre, senza l\'anno davanti', g(dic).ok === false && g(dic).dettaglio === 'ALFA RECYCLING SRL, ACI: 1,00 t nelle Giacenze, 3,00 t nelle Dichiarazioni' && dic.n.invocate.length === 3, J([g(dic), dic.n.invocate]));
+  verifica("l'01/01/2027: la voce resta, e dice «2026»", gen.e && gen.e.esito === 'rotte' && g(gen).ok === false && /^2026: ALFA RECYCLING SRL, ACI: 1,00 t nelle Giacenze, 3,00 t nelle Dichiarazioni/.test(g(gen).dettaglio) && J(gen.e.anni) === J([2026, 2027]), J([gen.e && gen.e.esito, g(gen)]));
+  verifica("a gennaio le fonti si chiedono per tutti e due gli anni: sei chiamate", gen.n.invocate.length === 6, J(gen.n.invocate));
+  verifica("dal 1° marzo il 2026 non si guarda piu'", mar.e && g(mar).ok !== false && !/2026/.test(g(mar).dettaglio || '') && mar.n.invocate.length === 3, J([g(mar), mar.n.invocate]));
+  await carica();
+}
 
 console.log('4. LE PRUDENZE');
 {

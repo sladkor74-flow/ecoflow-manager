@@ -4,7 +4,7 @@ import { fetchAll, perPagina } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { giornoRoma, annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { formulariDelFile, ruoloDellaRiga, giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, inizioAggiunti, finiDelleSecondarie, giornoDelCarico, nellAttesaDellAnno } from "../../shared/giacenzaPortale.ts";
+import { formulariDelFile, ruoloDellaRiga, giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, inizioAggiunti, finiDelleSecondarie, giornoDelCarico, nellAttesaDellAnno, sitiDellAnno } from "../../shared/giacenzaPortale.ts";
 import { eTerminato } from "../../shared/movimenti.ts";
 import { carichiNonNelFile, riconciliazioneDaDichiarare, scalaDichiaratoDopo, contoPerMese } from "../../shared/riconciliazioneDaDichiarare.ts";
 
@@ -229,13 +229,22 @@ export default async function(req) {
     let primarieFinestra = [], secondarieFinestra = [], giacenzeSito = [], dichiarazioniSito = [], reportRecente = [];
     if (servonoICarichi) {
       try {
-        [primarieFinestra, secondarieFinestra, giacenzeSito, dichiarazioniSito, reportRecente] = await Promise.all([
+        let sitiTutti = [];
+        [primarieFinestra, secondarieFinestra, sitiTutti, dichiarazioniSito, reportRecente] = await Promise.all([
           finestra ? fetchAll(svc.PrimariaRete, finestra.filtro) : Promise.resolve([]),
           finestra ? fetchAll(svc.Secondaria, finestra.filtro) : Promise.resolve([]),
-          fetchAll(svc.GiacenzaSito, { anno: carichiDel !== null ? carichiDel : annoDiOggi }),
+          // I SITI DELL'ANNO, E QUELLI DELL'ANNO PRIMA CHE LA RIGA NON L'HANNO
+          // ANCORA (15/10/2026, prova generale del cambio d'anno, difetto 11;
+          // decisione dell'utente del 15/10/2026, D3): una lettura sola, come
+          // prima, ma di tutti gli anni (l'archivio ha qualche riga per anno), e la
+          // regola delle Giacenze e delle Dichiarazioni (sitiDellAnno). Il 02/01/2027,
+          // senza la riga 2027 di Tecnogum, l'elenco dava 320 righe per 1.833.430 kg
+          // a un impianto che la rete non ce la dichiara.
+          fetchAll(svc.GiacenzaSito),
           carichiDel === null ? fetchAll(svc.DichiarazioneSito) : Promise.resolve([]),
           finestra ? fetchAll(svc.DichiarazioneTrattamento, { data_dichiarazione: { $gte: finestra.giorno } }) : Promise.resolve([]),
         ]);
+        giacenzeSito = sitiDellAnno(sitiTutti, carichiDel !== null ? carichiDel : annoDiOggi, { chiaveDi: norm, annoDiOggi }).righe;
       } catch (e) {
         erroreCarichi = motivo(e);
         primarieFinestra = []; secondarieFinestra = []; giacenzeSito = []; dichiarazioniSito = []; reportRecente = [];
@@ -485,7 +494,7 @@ export default async function(req) {
       || giacenzeSito.some(g => norm(g.sito) === ns && (String(g.tipo_destinazione || '').toLowerCase().trim() || 'imp') !== 'stoc')
       || dopoPerSito.has(ns);
     // La riga di un sito, di TUTTO il sito: i filtri dell'elenco non la cambiano.
-    const rigaDelSito = (ns) => {
+    const rigaDelSitoSola = (ns) => {
       const sue = righeTutte.filter(x => x.chiave === ns && dellAnnoDeiCarichi(x));
       const fileImp = sue.filter(x => x.nel_file && x.ruolo === 'imp');
       const stoc = sue.filter(x => x.ruolo === 'stoc');
@@ -505,6 +514,16 @@ export default async function(req) {
       // pulsante di quell'anno. Niente giacenza (null): e' la lettura del 31/12.
       if (carichiDel !== null) return { ...base, ...diche, carichi_del: carichiDel, dichiarato_dopo_kg: null, giacenza_kg: null };
       return { ...base, ...diche };
+    };
+    // UN SITO PORTATO DALL'ANNO PRIMA LO DICE (revisione del 15/10/2026;
+    // decisione dell'utente del 15/10/2026, D3): finche' la riga dell'anno non
+    // c'e', «dichiara la rete» viene dall'anno prima, da confermare sul
+    // contratto. La riga di riconciliazione lo porta, come le Giacenze e le
+    // Dichiarazioni.
+    const rigaDelSito = (ns) => {
+      const x = rigaDelSitoSola(ns);
+      const p = giacenzeSito.find(g => norm(g.sito) === ns && g.portata_dal);
+      return p ? { ...x, portata_dal: p.portata_dal, nota_portata: p.nota_portata } : x;
     };
     let riconciliazione = null;
     let riconciliazione_siti = null;

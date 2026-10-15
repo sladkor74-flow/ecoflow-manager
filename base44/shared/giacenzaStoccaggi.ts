@@ -559,6 +559,159 @@ export function puntiDiPartenza(rilevazioni, chiaveDi) {
   return esito;
 }
 
+// --- I carichi dell'anno chiuso arrivati dopo la chiusura (15/10/2026) ---
+//
+// La prova generale del cambio d'anno (difetto 5): la sera del 31/12 il
+// gestionale non ha i carichi finiti il 29, 30 e 31 dicembre che il portale
+// chiude a gennaio, perche' l'archivio delle primarie e' quello dei TERMINATI
+// (sul 2026 il 93,4% dei carichi si chiude a portale uno o piu' giorni dopo la
+// fine del trasporto). La chiusura salvata quella sera non li puo' rettificare,
+// e quando arrivano nessuno li portava nell'apertura dell'anno dopo: T.R.S. 0
+// contro 9 t a portale per tutto il 2027, Nappi Sud 35,88 t invece di 45,88, e
+// la lettura vera del 15/01 risultava lei «non torna». Ora la rettifica di
+// dicembre non si congela al salvataggio: si rifa' leggendo. La chiusura scrive
+// con la fotografia l'istante del salvataggio e quali movimenti dell'elenco di
+// dicembre ha gia' visto (rettificati o decisi); leggendo, si aggiungono gli
+// ingressi e si tolgono le uscite dei movimenti con fine trasporto nell'anno
+// chiuso, chiusi a portale dopo il giorno della fotografia e non ancora visti.
+// Le decisioni per classe gia' prese restano: riguardano solo i movimenti visti.
+// La prima chiusura vera e' quella del 31/12/2026: una fotografia senza
+// l'istante del salvataggio resta com'e'.
+
+/** La chiave con cui la chiusura ricorda un movimento gia' visto: verso e numero d'ordine. */
+export const chiaveMovimentoChiusura = (m) => `${m && m.verso === 'uscita' ? 'uscita' : 'ingresso'}|${String((m && (m.id_ordine || m.numero_fir)) || '').trim()}`;
+
+/**
+ * Quello che la chiusura ha scritto: il giorno della fotografia e i movimenti
+ * visti (`voci`); per l'apertura di un impianto anche quelli dell'ACI
+ * (`voci_aci`), che non viene da una fotografia del portale.
+ */
+export function leggiRettificate(testo) {
+  let x = testo;
+  if (typeof x === 'string') { try { x = JSON.parse(x); } catch { x = null; } }
+  return {
+    fotografia_del: String((x && x.fotografia_del) || '').slice(0, 10),
+    voci: Array.isArray(x && x.voci) ? x.voci.map(String) : [],
+    voci_aci: Array.isArray(x && x.voci_aci) ? x.voci_aci.map(String) : [],
+  };
+}
+
+/** Il testo da scrivere con la fotografia: il giorno e le chiavi dei movimenti visti (e dell'ACI, per un impianto). */
+export const scriviRettificate = (fotografiaDel, movimenti, movimentiAci = null) => JSON.stringify({
+  fotografia_del: String(fotografiaDel || '').slice(0, 10),
+  voci: [...new Set((movimenti || []).map(chiaveMovimentoChiusura))].sort(),
+  ...(movimentiAci ? { voci_aci: [...new Set(movimentiAci.map(chiaveMovimentoChiusura))].sort() } : {}),
+});
+
+/**
+ * Un movimento che potrebbe essere arrivato dopo una chiusura: finito a
+ * dicembre, o chiuso a portale in un anno dopo quello della fine trasporto. Chi
+ * raccoglie i movimenti tiene solo questi: gli altri la fotografia li ha.
+ */
+export const forseDopoLaChiusura = (m) => !!m && !!m.finito_il
+  && (m.finito_il.slice(5, 7) === '12' || (!!m.chiuso_il && m.chiuso_il.slice(0, 4) > m.finito_il.slice(0, 4)));
+
+/**
+ * I movimenti dell'anno chiuso che la fotografia del 31/12 non poteva avere e
+ * che la chiusura non ha visto: fine trasporto nell'anno (giorno italiano),
+ * chiusi a portale dopo il giorno della fotografia, non fra quelli che la
+ * chiusura ha gia' rettificato o deciso. Un movimento senza la chiusura a
+ * portale non si sa se c'e': resta fuori, come la regola di elencoDicembre lo
+ * metterebbe fra i «non ancora chiusi».
+ *
+ * L'ACI di un impianto non ha una fotografia del portale: il numero da cui
+ * riparte e' quello che il gestionale calcola al 31/12 (decisione dell'utente
+ * del 15/10/2026, D2), coi movimenti che aveva quando la chiusura e' stata
+ * salvata. Li' (`senzaFotografia`) conta solo se la chiusura il movimento l'ha
+ * contato: si aggiunge quello che potrebbe essere arrivato dopo
+ * (forseDopoLaChiusura) e non e' fra le voci gia' contate.
+ *
+ * @param {array} movimenti  in forma compatta (movimentoStoccaggio, movimentoChiusura)
+ * @param {object} p { al: 'AAAA-12-31', fotografia_del, voci, senzaFotografia }
+ */
+export function arrivatiDopoLaChiusura(movimenti, { al = '', fotografia_del = '', voci = [], senzaFotografia = false } = {}) {
+  const fine = String(al || '').slice(0, 10);
+  if (!/^\d{4}-12-31$/.test(fine)) return [];
+  const inizio = `${fine.slice(0, 4)}-01-01`;
+  const foto = String(fotografia_del || '').slice(0, 10) || fine;
+  const visti = new Set(voci || []);
+  return (movimenti || []).filter(m => m && m.finito_il && m.finito_il >= inizio && m.finito_il <= fine
+    && !!m.chiuso_il && (senzaFotografia ? forseDopoLaChiusura(m) : m.chiuso_il > foto)
+    && !visti.has(chiaveMovimentoChiusura(m)));
+}
+
+/**
+ * I MOVIMENTI DEI PIAZZALI CHE UNA CHIUSURA FORSE NON HA VISTO (15/10/2026):
+ * chi legge le rilevazioni (Giacenze, Dichiarazioni, chiusura dell'anno) passa
+ * ogni movimento con la risposta di ingressoMovimento, e qui si tengono solo gli
+ * arrivi a un piazzale e le partenze da un piazzale, di rete e ACI, terminati,
+ * che potrebbero essere dopo una chiusura (forseDopoLaChiusura): pochi. Il canale
+ * e la classe li decide il materiale (canaleEClasse), come per il saldo del
+ * piazzale. Serve a rilevazioniDopoLaChiusura.
+ */
+export function movimentiDopoLaChiusura() {
+  const per = new Map(); // chiave del piazzale -> movimenti in forma compatta
+  const metti = (ns, m) => {
+    if (!ns || !forseDopoLaChiusura(m)) return;
+    if (!per.has(ns)) per.set(ns, []);
+    per.get(ns).push(m);
+  };
+  return {
+    segna(r, d) {
+      if (!r || !d || String(r.stato || '').trim().toLowerCase() !== 'terminato') return;
+      if (d.canale !== 'RETE' && d.canale !== 'ACI') return;
+      const { canale, classe } = canaleEClasse(r, { aci: d.canale === 'ACI' });
+      if (d.arrivo && d.arrivo.ruolo === 'stoc') metti(d.arrivo.chiave, movimentoStoccaggio(r, { canale, verso: 'ingresso', classe }));
+      if (d.partenza && d.partenza.ruolo === 'stoc') metti(d.partenza.chiave, movimentoStoccaggio(r, { canale, verso: 'uscita', classe }));
+    },
+    di(ns) { return per.get(ns) || []; },
+  };
+}
+
+/** Vero se fra le rilevazioni c'e' una fotografia salvata dalla chiusura: solo allora servono i movimenti qui sopra. */
+export const ciSonoFotografieDellaChiusura = (rilevazioni) => (rilevazioni || []).some(r => r && r.chiusura_salvata_il);
+
+/**
+ * La fotografia del 31/12 salvata dalla chiusura, con i carichi arrivati dopo
+ * (arrivatiDopoLaChiusura): le classi spostate dagli ingressi e dalle uscite di
+ * rete e ACI, ciascuno nella sua classe. L'extra raccolta a portale non c'e' e
+ * resta fuori. Un movimento senza una classe riconosciuta non si mette in una
+ * classe a caso: si dice (`arrivati_senza_classe`). Una rilevazione che non e'
+ * una fotografia della chiusura (senza `chiusura_salvata_il`) torna com'e'.
+ * La copia ha `arrivati_dopo_la_chiusura`, la lista dei movimenti aggiunti, e
+ * `classi_salvate`, quelle scritte dalla chiusura: si vedono, non si nascondono.
+ *
+ * @param {object} rec        il record GiacenzaStoccaggio
+ * @param {array}  movimenti  i movimenti del piazzale, in forma compatta
+ */
+export function letturaDellaChiusura(rec, movimenti) {
+  if (!rec || !rec.chiusura_salvata_il) return rec;
+  const al = momentoRilevazione(rec);
+  const { fotografia_del, voci } = leggiRettificate(rec.chiusura_rettificate_json);
+  const arrivati = arrivatiDopoLaChiusura((movimenti || []).filter(m => m && CLASSI_DI_CANALE[m.canale]), { al, fotografia_del, voci });
+  if (!arrivati.length) return rec;
+  const campo = { P: 'class1_kg', M: 'class2_kg', G1: 'class3_kg', G2: 'class4_kg', ACI: 'class9_kg' };
+  const copia = { ...rec, classi_salvate: classiDiRilevazione(rec), arrivati_dopo_la_chiusura: [], arrivati_senza_classe: [] };
+  for (const m of arrivati) {
+    const k = campo[m.classe];
+    if (!k || !CLASSI_DI_CANALE[m.canale].includes(m.classe)) { copia.arrivati_senza_classe.push(m); continue; }
+    copia[k] = (Number(copia[k]) || 0) + (m.verso === 'uscita' ? -1 : 1) * (Math.round(Number(m.kg) || 0));
+    copia.arrivati_dopo_la_chiusura.push({ id_ordine: m.id_ordine, numero_fir: m.numero_fir, verso: m.verso, canale: m.canale, classe: m.classe, kg: m.kg, finito_il: m.finito_il, chiuso_il: m.chiuso_il });
+  }
+  return copia;
+}
+
+/**
+ * Tutte le rilevazioni, con le fotografie della chiusura lette coi carichi
+ * arrivati dopo. `movimentiDi(chiave)` da' i movimenti del piazzale (solo quelli
+ * forseDopoLaChiusura bastano). Le altre rilevazioni tornano identiche, nello
+ * stesso ordine: chi le usa (puntoDiPartenza, ancoraDellAnno, verificaRilevazione)
+ * non si accorge di niente, se non del numero giusto.
+ */
+export function rilevazioniDopoLaChiusura(rilevazioni, movimentiDi, chiaveDi) {
+  return (rilevazioni || []).map(r => (r && r.chiusura_salvata_il ? letturaDellaChiusura(r, movimentiDi(chiaveDi(r.sito)) || []) : r));
+}
+
 // UN PIAZZALE SENZA NESSUNA LETTURA NON HA UNA GIACENZA, IN TUTTI E DUE I MODULI
 // (chiusura dell'audit, 11/10/2026). Alla stessa domanda c'erano tre risposte: le
 // Giacenze scrivevano 0, cioe' «piazzale vuoto», accanto a un testo che diceva

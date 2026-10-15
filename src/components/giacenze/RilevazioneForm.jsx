@@ -7,15 +7,27 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
+// IL GIORNO PROPOSTO E' QUELLO ITALIANO (15/10/2026, prova generale del cambio
+// d'anno, difetto 29). Si proponeva il giorno UTC: l'01/01/2027 alle 00:30 il
+// modulo diceva 31/12/2026, e la lettura del portale di quel momento, salvata
+// col giorno proposto, diventava l'ultima rilevazione del 31/12 al posto della
+// fotografia della chiusura (25,88 t invece di 35,88 su Nappi Sud).
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return oggiRoma();
 }
+
+// La fotografia del 31/12 salvata dalla chiusura dell'anno: ha l'istante del
+// salvataggio, o la nota che la chiusura scrive.
+const eFotografiaDellaChiusura = (r) => !!r && (!!r.chiusura_salvata_il || /^Chiusura \d{4}, fotografia del/.test(String(r.note || '')));
 
 export default function RilevazioneForm({ open, onClose, precompilato, sitiSuggeriti, unitaPerSito, onSaved }) {
   const { toast } = useToast();
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
+  // C'e' gia' la fotografia della chiusura per questo piazzale e questo 31/12?
+  const [fotoChiusura, setFotoChiusura] = useState(null);
 
   useEffect(() => {
     if (open) {
@@ -37,6 +49,26 @@ export default function RilevazioneForm({ open, onClose, precompilato, sitiSugge
   }, [open, precompilato]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // UNA LETTURA DEL 31/12 SOSTITUIREBBE LA FOTOGRAFIA DELLA CHIUSURA (15/10/2026,
+  // difetto 29): a parita' di giorno vale l'ultima registrata, e la fotografia
+  // salvata dalla chiusura - con la rettifica di dicembre dentro - non sarebbe
+  // piu' il punto da cui riparte l'anno dopo. Si avvisa prima di salvare, e solo
+  // quando il giorno scelto e' un 31 dicembre: una lettura sola, a richiesta.
+  useEffect(() => {
+    const giorno = String(form.data_rilevazione || '').slice(0, 10);
+    const sito = normalizzaRagioneSociale(form.sito || '');
+    if (!open || !sito || !/-12-31$/.test(giorno)) { setFotoChiusura(null); return undefined; }
+    let attivo = true;
+    base44.entities.GiacenzaStoccaggio.filter({ data_rilevazione: giorno })
+      .then((righe) => {
+        if (!attivo) return;
+        const foto = (righe || []).find(r => normalizzaRagioneSociale(r.sito || '') === sito && eFotografiaDellaChiusura(r));
+        setFotoChiusura(foto ? { giorno } : null);
+      })
+      .catch(() => { if (attivo) setFotoChiusura(null); });
+    return () => { attivo = false; };
+  }, [open, form.sito, form.data_rilevazione]);
 
   // L'UNITA' LOCALE SI RIPRENDE DA SOLA (06/10/2026).
   //
@@ -124,6 +156,11 @@ export default function RilevazioneForm({ open, onClose, precompilato, sitiSugge
           <div className="col-span-2">
             <Label>Data rilevazione</Label>
             <Input type="date" value={form.data_rilevazione || ''} onChange={e => set('data_rilevazione', e.target.value)} />
+            {fotoChiusura && (
+              <p className="mt-1 text-xs text-amber-800" data-avviso="fotografia-chiusura">
+                Per questo piazzale c&apos;e&apos; gia&apos; la fotografia della chiusura del {fotoChiusura.giorno.split('-').reverse().join('/')}: una rilevazione dello stesso giorno la sostituirebbe come punto da cui riparte l&apos;anno dopo, senza la rettifica di dicembre. Se la lettura e&apos; di oggi, scrivi la data di oggi.
+              </p>
+            )}
           </div>
           <div><Label>P (kg)</Label><Input type="number" value={form.class1_kg ?? 0} onChange={e => set('class1_kg', e.target.value)} /></div>
           <div><Label>M (kg)</Label><Input type="number" value={form.class2_kg ?? 0} onChange={e => set('class2_kg', e.target.value)} /></div>

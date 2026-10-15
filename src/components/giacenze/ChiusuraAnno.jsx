@@ -329,10 +329,16 @@ function ApertureImpianti({ aperture }) {
   if (!aperture) return null;
   const t = (v) => (v === undefined || v === null ? '—' : `${Number(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} t`);
   const scritte = aperture.scritte || null;
-  const righe = scritte || (aperture.piano || []).map(x => ({ sito: x.sito, azione: x.azione, rete_t: x.dati.giacenza_riferimento_t, aci_t: x.dati.giacenza_riferimento_aci_t }));
+  const righe = scritte || (aperture.piano || []).map(x => ({ sito: x.sito, azione: x.azione, rete_t: x.dati.giacenza_riferimento_t, aci_t: x.dati.giacenza_riferimento_aci_t, senza_apertura: !!x.senza_apertura }));
   const senza = aperture.senza_lettura || [];
   const gia = aperture.gia_scritte || [];
-  if (!righe.length && !senza.length && !gia.length) return null;
+  // I NUMERI DIVERSI DALLA PROPOSTA (15/10/2026, prova generale del cambio
+  // d'anno, difetto 4): non si scrivono finche' non si confermano, e qui si dice
+  // perche', impianto per impianto.
+  const daConfermare = aperture.da_confermare || [];
+  // E i numeri sotto zero, che non si scrivono mai (revisione del 15/10/2026).
+  const rifiutate = aperture.rifiutate || [];
+  if (!righe.length && !senza.length && !gia.length && !daConfermare.length && !rifiutate.length) return null;
   return (
     <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs space-y-1">
       <p className="font-medium">
@@ -342,42 +348,86 @@ function ApertureImpianti({ aperture }) {
       {righe.length > 0 && (
         <ul className="pl-4 list-disc">
           {righe.map(r => (
-            <li key={r.sito}>{r.sito}: rete {t(r.rete_t)}, ACI {t(r.aci_t)}{r.azione === 'crea' ? ' (riga nuova dell’anno)' : ''}</li>
+            <li key={r.sito}>{r.senza_apertura
+              ? <>{r.sito}: riga nuova dell’anno senza apertura (ruolo e «dichiara la rete» dall’anno che si chiude)</>
+              : <>{r.sito}: rete {t(r.rete_t)}, ACI {t(r.aci_t)}{r.azione === 'crea' ? ' (riga nuova dell’anno)' : ''}</>}</li>
           ))}
         </ul>
       )}
       {(aperture.non_scritte || []).map(x => <p key={x.sito} className="text-red-700">{x.sito}: {x.motivo}</p>)}
       {gia.map(x => <p key={x.sito} className="text-muted-foreground">{x.sito}: {x.motivo}.</p>)}
+      {daConfermare.map(x => (
+        <p key={x.sito} className="text-amber-800">
+          {x.sito}: non si scrive finché non confermi {x.scarti.length === 1 ? 'il numero' : 'i numeri'} nella tabella qui sopra — {x.scarti.map(s => `${s.canale === 'ACI' ? 'ACI' : 'rete'} ${formatKg(s.letto_kg)} kg contro ${formatKg(s.proposta_kg)} kg proposti (${s.motivo})`).join('; ')}.
+        </p>
+      ))}
+      {rifiutate.map(x => <p key={x.sito} className="text-red-700">{x.sito}: non si scrive — {x.motivo}.</p>)}
       {senza.length > 0 && (
         <p className="text-amber-800">
-          Senza lettura, quindi senza apertura: {senza.join(', ')}. Ripartirebbero da zero mentre il portale si porta dietro la loro giacenza.
+          {/* Dal 15/10/2026 (difetto 6) un'apertura mai scritta non riparte da
+              zero: Giacenze e Dichiarazioni dicono «—» col perche'. Chi la rete
+              non la dichiara (Tecnogum) non sta in questo elenco. */}
+          Senza lettura, quindi senza apertura: {senza.join(', ')}. La loro riga dell&apos;anno nasce lo stesso, ma Giacenze e Dichiarazioni diranno «—» finché l&apos;apertura non si scrive: non vuol dire zero.
         </p>
       )}
     </div>
   );
 }
 
-function LettureImpianti({ impianti, letture, onCambia }) {
+// LE CASELLE DEGLI IMPIANTI CON LA PROPOSTA DEL GESTIONALE (15/10/2026, prova
+// generale del cambio d'anno, difetti 4 e 6; decisione dell'utente del
+// 15/10/2026, D2). Accanto a ogni casella la proposta: per la rete la parte
+// dell'impianto del file del 31/12 come il gestionale l'ha caricato (le righe col
+// suo id, piu' i carichi che il file non ha, meno il dichiarato dopo), per l'ACI
+// la giacenza che il gestionale calcola al 31/12, con la lettera di Ecotyre e lo
+// scarto. Le caselle vuote la prendono all'apertura della scheda; un numero
+// diverso dice lo scarto col motivo e si salva solo spuntando «confermo».
+// Chi la rete non la dichiara (Tecnogum) ha solo l'ACI.
+// Una giacenza sotto zero al 31/12 non si propone (revisione del 15/10/2026): la
+// colonna dice il numero calcolato e perche' la casella resta vuota.
+function LettureImpianti({ impianti, letture, onCambia, conferme = new Set(), onConferma }) {
+  const proposta = (v, x) => (x && x.negativa
+    ? <span className="text-red-700 cursor-help" title={x.perche || ''}>{kgSegno(x.calcolata_kg)}: sotto zero, non si propone</span>
+    : v === null || v === undefined ? '—' : `${formatKg(v)} kg`);
+  const scarto = (i, canale) => (canale === 'ACI' ? i.scarto_proposta_aci_kg : i.scarto_proposta_kg);
+  const motivo = (i, canale) => (canale === 'ACI' ? i.motivo_scarto_aci : i.motivo_scarto);
   return (
     <div className="overflow-x-auto border rounded-md">
       <table className="w-full text-xs">
         <thead className="bg-muted/50">
           <tr className="text-left">
-            {['Impianto', 'PFU di rete non dichiarato (kg)', 'ACI (kg)', 'Lettera: PFU', 'Lettera: ACI', 'Scarto rete', 'Scarto ACI'].map(h => <th key={h} className="px-2 py-1.5 font-semibold">{h}</th>)}
+            {['Impianto', 'Rete proposta', 'PFU di rete non dichiarato (kg)', 'ACI proposta', 'ACI (kg)', 'Lettera: PFU', 'Lettera: ACI', 'Scarto rete', 'Scarto ACI', 'Diverso dalla proposta'].map(h => <th key={h} className="px-2 py-1.5 font-semibold">{h}</th>)}
           </tr>
         </thead>
         <tbody>
           {impianti.map(i => {
             const l = letture[i.chiave] || {};
+            const diversi = ['RETE', 'ACI'].filter(c => scarto(i, c));
             return (
-              <tr key={i.chiave} className="border-t">
+              <tr key={i.chiave} className="border-t align-top">
                 <td className="px-2 py-1.5 font-medium whitespace-nowrap">{i.nome}</td>
-                <td className="px-1 py-1"><Input type="number" inputMode="numeric" className="h-7 text-xs text-right tabular-nums w-28" value={l.pfu_kg ?? ''} onChange={(e) => onCambia(i.chiave, 'pfu_kg', e.target.value)} /></td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground" title={i.proposta && i.proposta.rete && i.proposta.rete.id_impianto && i.proposta.rete.id_impianto.length ? `righe con id destinazione ${i.proposta.rete.id_impianto.join(', ')}` : ''}>
+                  {i.dichiara_rete === false ? 'non dovuta' : proposta(i.proposta_kg, i.proposta && i.proposta.rete)}
+                </td>
+                <td className="px-1 py-1">
+                  {i.dichiara_rete === false
+                    ? <span className="text-[11px] text-muted-foreground">la rete non ce la dichiara: non si legge</span>
+                    : <Input type="number" inputMode="numeric" className="h-7 text-xs text-right tabular-nums w-28" value={l.pfu_kg ?? ''} onChange={(e) => onCambia(i.chiave, 'pfu_kg', e.target.value)} />}
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{proposta(i.proposta_aci_kg, i.proposta && i.proposta.aci)}</td>
                 <td className="px-1 py-1"><Input type="number" inputMode="numeric" className="h-7 text-xs text-right tabular-nums w-28" value={l.aci_kg ?? ''} onChange={(e) => onCambia(i.chiave, 'aci_kg', e.target.value)} /></td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{i.lettera ? kg(i.lettera.pfu_kg) : '—'}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{i.lettera ? kg(i.lettera.aci_kg) : '—'}</td>
                 <td className={`px-2 py-1.5 text-right tabular-nums ${i.scarto_kg ? 'font-semibold text-amber-700' : 'text-muted-foreground'}`}>{i.scarto_kg === null ? '—' : kgSegno(i.scarto_kg)}</td>
                 <td className={`px-2 py-1.5 text-right tabular-nums ${i.scarto_aci_kg ? 'font-semibold text-amber-700' : 'text-muted-foreground'}`}>{i.scarto_aci_kg === null ? '—' : kgSegno(i.scarto_aci_kg)}</td>
+                <td className="px-2 py-1.5 text-[11px]">
+                  {diversi.length === 0 ? <span className="text-muted-foreground">—</span> : diversi.map(c => (
+                    <label key={c} className="flex items-start gap-1 text-amber-800">
+                      <input type="checkbox" className="mt-0.5" checked={conferme.has(`${i.chiave}|${c}`)} onChange={(e) => onConferma && onConferma(`${i.chiave}|${c}`, e.target.checked)} />
+                      <span>{c === 'ACI' ? 'ACI' : 'rete'} {kgSegno(scarto(i, c))}: {motivo(i, c)}. Confermo il numero scritto</span>
+                    </label>
+                  ))}
+                </td>
               </tr>
             );
           })}
@@ -511,7 +561,7 @@ export async function scaricaDossierChiusura(dossier) {
   // 1. Il riepilogo e gli avvisi
   const r = wb.addWorksheet(`Chiusura ${dossier.anno}`, { views: [{ showGridLines: false }] });
   r.columns = [{ width: 52 }, { width: 18 }, { width: 90 }];
-  r.addRow([`Chiusura dell'anno ${dossier.anno} · fotografia del ${dossier.giorno}`]).font = { bold: true, size: 14 };
+  r.addRow([`Chiusura dell'anno ${dossier.anno} · fotografia del ${giorno(dossier.giorno)}`]).font = { bold: true, size: 14 };
   r.addRow([]);
   const voce = (a, b, nota = '') => { const riga = r.addRow([a, b, nota]); if (typeof b === 'number') riga.getCell(2).numFmt = '#,##0'; riga.getCell(3).alignment = { wrapText: true }; return riga; };
   voce('Piazzali da fotografare', dossier.riepilogo.piazzali, 'da qui ripartiranno le giacenze dell\'anno dopo');
@@ -542,8 +592,9 @@ export async function scaricaDossierChiusura(dossier) {
   intesta(e, ['Sito', 'Ruolo', 'Movimento', 'Canale', 'ID ordine', 'Formulario', 'Classe', 'Verso', 'Peso (kg)', 'Fine trasporto', 'Chiuso a portale', 'Controparte', 'Decisione', 'Perche\'']);
   const decisioneDi = (v) => decisioneDiVoce(dossier, v);
   const scriviVoce = (ws, v, quando) => {
+    // Le date si scrivono gg/mm/aaaa, come nelle frasi (15/10/2026, difetto 31).
     const riga = ws.addRow([v.nome, v.ruolo === 'stoc' ? 'piazzale' : 'impianto', v.tipo, nomeCanale(v.canale), v.id_ordine, v.numero_fir, v.classe || 'senza classe',
-      v.verso === 'uscita' ? 'uscita' : 'entrata', v.verso === 'uscita' ? -v.kg : v.kg, v.finito_il, v.chiuso_il || 'non ancora', v.controparte, quando, v.perche]);
+      v.verso === 'uscita' ? 'uscita' : 'entrata', v.verso === 'uscita' ? -v.kg : v.kg, giorno(v.finito_il), v.chiuso_il ? giorno(v.chiuso_il) : 'non ancora', v.controparte, quando, v.perche]);
     numeri(riga, [9]);
     if (quando === 'da decidere') riempi(riga.getCell(13), GIALLO);
     return riga;
@@ -581,13 +632,14 @@ export async function scaricaDossierChiusura(dossier) {
   if (dossier.lettera) {
     const l = wb.addWorksheet('Lettera');
     l.columns = [{ width: 30 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }];
-    l.addRow([`Lettera delle giacenze${dossier.lettera.al ? ` al ${dossier.lettera.al}` : ''}`]).font = { bold: true, size: 12 };
+    l.addRow([`Lettera delle giacenze${dossier.lettera.al ? ` al ${giorno(dossier.lettera.al)}` : ''}`]).font = { bold: true, size: 12 };
     l.addRow([]);
-    intesta(l, ['Impianto', 'Letto a portale (kg)', 'Lettera EER 16.01.03 PFU (kg)', 'Scarto (kg)', 'ACI letto (kg)', 'Lettera ACI (kg)', 'Scarto ACI (kg)', 'CSS-C (kg)', 'EER 19.12.04 ciabattato (kg)']);
+    // Con la proposta del gestionale accanto (15/10/2026, difetti 4 e 6).
+    intesta(l, ['Impianto', 'Letto a portale (kg)', 'Lettera EER 16.01.03 PFU (kg)', 'Scarto (kg)', 'ACI letto (kg)', 'Lettera ACI (kg)', 'Scarto ACI (kg)', 'CSS-C (kg)', 'EER 19.12.04 ciabattato (kg)', 'Rete proposta (kg)', 'ACI proposta (kg)']);
     for (const i of dossier.impianti) {
       const riga = l.addRow([i.nome, i.lettura_kg, i.lettera ? i.lettera.pfu_kg : null, i.scarto_kg, i.lettura_aci_kg, i.lettera ? i.lettera.aci_kg : null, i.scarto_aci_kg,
-        i.lettera ? i.lettera.cssc_kg : null, i.lettera ? i.lettera.ciabattato_kg : null]);
-      numeri(riga, [2, 3, 5, 6, 8, 9]);
+        i.lettera ? i.lettera.cssc_kg : null, i.lettera ? i.lettera.ciabattato_kg : null, i.proposta_kg ?? null, i.proposta_aci_kg ?? null]);
+      numeri(riga, [2, 3, 5, 6, 8, 9, 10, 11]);
       scarto(riga, 4); scarto(riga, 7);
     }
     l.addRow([]);
@@ -628,11 +680,14 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
   const [daAggiornare, setDaAggiornare] = useState(false);
   const [conferma, setConferma] = useState(false);
   const [sostituisci, setSostituisci] = useState(false);
+  // I numeri degli impianti diversi dalla proposta, confermati: 'chiave|RETE', 'chiave|ACI'.
+  const [conferme, setConferme] = useState(() => new Set());
 
   const chiama = async (azione, corpo = {}) => {
     const res = await base44.functions.invoke('chiusuraAnno', {
       anno, azione,
       letture, decisioni, letture_impianti: lettureImpianti, lettera_fogli: letteraFogli,
+      conferme: [...conferme],
       ...corpo,
     });
     return res.data;
@@ -644,6 +699,9 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
       const dati = await chiama('prepara', corpo);
       if (dati && dati.error) throw new Error(dati.error);
       setDossier(dati);
+      // Le caselle vuote degli impianti prendono la proposta del gestionale
+      // (proponi, all'apertura della scheda): si vedono e si possono cambiare.
+      if (dati && dati.letture_impianti_usate) setLettureImpianti(dati.letture_impianti_usate);
       setDaAggiornare(false);
     } catch (e) {
       toast({ title: 'Non si e\' riusciti a preparare la chiusura', description: motivoErrore(e), variant: 'destructive' });
@@ -653,8 +711,8 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
 
   // Cambiando anno si riparte da capo: le letture sono di quell'anno.
   useEffect(() => {
-    setLetture({}); setLettureImpianti({}); setDecisioni({}); setLetteraFogli(null); setSostituisci(false);
-    carica({ letture: {}, decisioni: {}, letture_impianti: {}, lettera_fogli: null });
+    setLetture({}); setLettureImpianti({}); setDecisioni({}); setLetteraFogli(null); setSostituisci(false); setConferme(new Set());
+    carica({ letture: {}, decisioni: {}, letture_impianti: {}, lettera_fogli: null, conferme: [], proponi: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anno]);
 
@@ -664,6 +722,10 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
   };
   const cambiaLetturaImpianto = (chiave, campo, valore) => {
     setLettureImpianti(l => ({ ...l, [chiave]: { ...(l[chiave] || {}), [campo]: valore === '' ? undefined : Number(valore) } }));
+    setDaAggiornare(true);
+  };
+  const confermaNumero = (chiave, si) => {
+    setConferme(c => { const n = new Set(c); if (si) n.add(chiave); else n.delete(chiave); return n; });
     setDaAggiornare(true);
   };
   const decidi = (chiave, scelta) => {
@@ -703,7 +765,7 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
       const apertureNo = (dati.aperture && dati.aperture.non_scritte) || [];
       toast({
         title: salvati || aperture.length
-          ? [salvati ? `${salvati} ${salvati === 1 ? 'fotografia salvata' : 'fotografie salvate'} al ${dossier.giorno}` : '', aperture.length ? `${aperture.length} ${aperture.length === 1 ? 'apertura scritta' : 'aperture scritte'} per il ${dati.aperture.anno}` : ''].filter(Boolean).join(' · ')
+          ? [salvati ? `${salvati} ${salvati === 1 ? 'fotografia salvata' : 'fotografie salvate'} al ${giorno(dossier.giorno)}` : '', aperture.length ? `${aperture.length} ${aperture.length === 1 ? 'apertura scritta' : 'aperture scritte'} per il ${dati.aperture.anno}` : ''].filter(Boolean).join(' · ')
           : 'Niente salvato',
         // Il testo dice quello che e' successo: «e impianti» solo se un'apertura si e'
         // scritta davvero (revisione del 10/10/2026).
@@ -813,7 +875,7 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
       <Riquadro titolo={`Le letture del ${giorno(dossier.giorno)}`} icona={Camera} sottotitolo="Per ogni piazzale il saldo per classe; per ogni impianto il peso non ancora dichiarato del file degli ordini.">
         <div className="space-y-3">
           <LetturePiazzali piazzali={dossier.piazzali} letture={letture} onCambia={cambiaLettura} />
-          <LettureImpianti impianti={dossier.impianti} letture={lettureImpianti} onCambia={cambiaLetturaImpianto} />
+          <LettureImpianti impianti={dossier.impianti} letture={lettureImpianti} onCambia={cambiaLetturaImpianto} conferme={conferme} onConferma={confermaNumero} />
           <ApertureImpianti aperture={dossier.aperture} />
           <div className="flex flex-wrap items-center gap-2">
             <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
@@ -858,7 +920,17 @@ export default function ChiusuraAnno({ anno, isAdmin, onSaved }) {
                   ))}
                 </ul>
                 {apertureDaScrivere.length > 0 && (
-                  <p className="text-xs">Si scrivono le aperture del {dossier.anno + 1}: {apertureDaScrivere.map(x => `${x.sito} (rete ${formatKg(Math.round((Number(x.dati.giacenza_riferimento_t) || 0) * 1000))} kg${x.dati.giacenza_riferimento_aci_t !== undefined ? `, ACI ${formatKg(Math.round((Number(x.dati.giacenza_riferimento_aci_t) || 0) * 1000))} kg` : ''})`).join(' · ')}.</p>
+                  // Una casella vuota resta vuota: la rete o l'ACI senza numero si
+                  // dicono «senza», non «0 kg» (15/10/2026, difetto 6).
+                  <p className="text-xs">Si scrivono le aperture del {dossier.anno + 1}: {apertureDaScrivere.map(x => (x.senza_apertura
+                    ? `${x.sito} (riga nuova senza apertura)`
+                    : `${x.sito} (rete ${x.dati.giacenza_riferimento_t !== undefined ? `${formatKg(Math.round(Number(x.dati.giacenza_riferimento_t) * 1000))} kg` : 'senza lettura'}, ACI ${x.dati.giacenza_riferimento_aci_t !== undefined ? `${formatKg(Math.round(Number(x.dati.giacenza_riferimento_aci_t) * 1000))} kg` : 'senza lettura'})`)).join(' · ')}.</p>
+                )}
+                {((dossier.aperture && dossier.aperture.da_confermare) || []).length > 0 && (
+                  <p className="text-xs text-amber-800">Non si scrivono, perché il numero è diverso dalla proposta e non è confermato: {dossier.aperture.da_confermare.map(x => x.sito).join(' · ')}.</p>
+                )}
+                {((dossier.aperture && dossier.aperture.rifiutate) || []).length > 0 && (
+                  <p className="text-xs text-red-700">Non si scrivono, perché il numero è sotto zero: {dossier.aperture.rifiutate.map(x => x.sito).join(' · ')}.</p>
                 )}
                 {apertureDaCambiare.length > 0 && (
                   <p className="text-xs">Hanno gia&apos; un&apos;apertura e si cambiano solo con la sostituzione: {apertureDaCambiare.map(x => x.sito).join(' · ')}.</p>

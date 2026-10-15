@@ -241,6 +241,53 @@ console.log('I MESI ANCORA APERTI, PER LA CHIUSURA DEL MESE (12/10/2026)');
   verifica('con i mesi aperti scritti dal guardiano, la chiusura di settembre non vede un rosso falso su un arrivo di ottobre', p.stato === 'fatto' && /niente da dichiarare fino a settembre/.test(p.voci[0] && p.voci[0].testo), JSON.stringify(p.voci));
 }
 
+// IL CONTO DELLA NOTTE NON SCENDE IL 1° GENNAIO (15/10/2026, prova generale del
+// cambio d'anno, difetto 12). Il 31/12/2026 la notte confrontava 6 siti col
+// portale; l'01/01/2027 5, perche' le Dichiarazioni del 2027 non elencavano il
+// piazzale di Nappi Sud finche' non aveva un movimento dell'anno, e la nota non
+// diceva perche'. Qui la funzione vera, con la chiusura scritta: un impianto con
+// l'apertura del 31/12 e il piazzale con la sua fotografia. E senza la chiusura,
+// il conto scende ma la nota dice quanti siti sono usciti e perche'.
+console.log('IL CONTO DELLA NOTTE NON SCENDE IL 1° GENNAIO, E SE SCENDE LA NOTA DICE PERCHE\'');
+{
+  const { caricaFunzione, chiama } = await import('./dati/bancoFunzioni.mjs');
+  const riepilogo = await caricaFunzione('riepilogoDichiarazioni');
+  const OraVera = Date;
+  const conOra = async (iso, f) => {
+    const ms = OraVera.parse(iso);
+    globalThis.Date = class extends OraVera { constructor(...a) { if (a.length) super(...a); else super(ms); } static now() { return ms; } };
+    try { return await f(); } finally { globalThis.Date = OraVera; }
+  };
+  const IRI = 'IRIGOM SRL', NAP = 'NAPPI SUD SRL';
+  const g8 = (giorno) => `${giorno}T08:00:00Z`;
+  const prim = (id, dest, kg, giorno, td = 'imp') => ({ id: 'p' + id, id_ordine: id, numero_fir: 'F' + id, classe: 'P - fino a 35 kg', prodotto: '.class1', destinazione: dest, tipo_destinazione: td, stato: 'terminato', peso_effettivo: kg, trasporto_finito_il: g8(giorno), ordine_chiuso_il: g8(giorno) });
+  const archivio = ({ chiusura }) => ({
+    GiacenzaSito: [
+      { id: 's1', sito: IRI, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: true, tipologia_trattamento: 'Frantumazione' },
+      { id: 's2', sito: NAP, tipo_destinazione: 'stoc', anno: 2026 },
+      ...(chiusura ? [{ id: 's3', sito: IRI, tipo_destinazione: 'imp', anno: 2027, dichiara_rete: true, giacenza_riferimento_t: 30, giacenza_riferimento_aci_t: 0, apertura_del: '2026-12-31' }] : []),
+    ],
+    GiacenzaStoccaggio: [
+      { id: 'g1', sito: NAP, data_rilevazione: '2025-12-31', class1_kg: 40000, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0, created_date: '2026-01-02T09:00:00Z' },
+      ...(chiusura ? [{ id: 'g2', sito: NAP, data_rilevazione: '2026-12-31', class1_kg: 50000, class2_kg: 0, class3_kg: 0, class4_kg: 0, class9_kg: 0, created_date: '2026-12-31T22:30:00Z' }] : []),
+    ],
+    PrimariaRete: [prim('ET26IRI1', IRI, 30000, '2026-11-10'), prim('ET26NAP1', NAP, 10000, '2026-11-12', 'stoc')],
+    OrdineNonDichiarato: [{ id: 'o1', ordine_primaria: 'ET26IRI1', destinazione: IRI, prodotto: '.class1', peso_non_dichiarato_kg: 30000, fine_trasporto: '2026-11-10', created_date: '2026-12-30T07:00:00Z' }],
+    IndicatoreGiorno: [],
+  });
+  const nota = async (iso, db) => {
+    const r = await conOra(iso, () => chiama(riepilogo, { db, corpo: { registra: true } }));
+    return (r.j.fotografia && r.j.fotografia.nota) || '';
+  };
+  const conChiusura = archivio({ chiusura: true });
+  const sera = await nota('2026-12-31T04:00:00Z', conChiusura);
+  const capodanno = await nota('2027-01-01T04:00:00Z', conChiusura);
+  verifica('il 31/12/2026: due siti col confronto, l\'impianto e il piazzale', /quadrano \(2\)/.test(sera), sera);
+  verifica("l'01/01/2027, con la chiusura scritta e nessun movimento del 2027: ancora due, il piazzale non sparisce", /quadrano \(2\)/.test(capodanno) && !/senza l'apertura/.test(capodanno), capodanno);
+  const senza = await nota('2027-01-01T04:00:00Z', archivio({ chiusura: false }));
+  verifica("senza la chiusura il conto scende, e la nota dice chi e' uscito e perche'", /quadrano \(1\)/.test(senza) && /Un impianto e' senza l'apertura del 31\/12\/2026, fuori dal confronto col portale: IRIGOM SRL/.test(senza) && !/si scost/.test(senza), senza);
+}
+
 console.log('LE TRE PRUDENZE DELLA SCRITTURA');
 {
   const f = sorgente('base44/functions/riepilogoDichiarazioni/entry.ts');

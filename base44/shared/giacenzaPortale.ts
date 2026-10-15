@@ -26,6 +26,7 @@
 import { giornoRoma } from "./giornoItaliano.ts";
 import { eTerminato, dateDaSistemare, dateMancanti, dateIncoerenti, testoDate, giornoMovimento, annoOrdine, MESI_MOVIMENTI } from "./movimenti.ts";
 import { eAci } from "./canaleSecondaria.ts";
+import { movimentoStoccaggio, forseDopoLaChiusura, arrivatiDopoLaChiusura, leggiRettificate } from "./giacenzaStoccaggi.ts";
 
 /** Il giorno della fotografia: quello dell'ultimo file degli ordini non dichiarati caricato. */
 export function giornoFotografia(nonDichiarati) {
@@ -123,29 +124,291 @@ export function dichiaratoDopoLaFotografia(dichiarazioniSito, foto, chiaveDi, pr
  * prima. Solo per le aperture con il giorno (apertura_del): una giacenza di
  * riferimento scritta a mano non e' una lettura, e resta quella.
  *
+ * UN'APERTURA MAI LETTA NON VALE ZERO (15/10/2026, prova generale del cambio
+ * d'anno, difetto 6). Il campo vuoto si leggeva 0: Gatim aveva 5 t di ACI di
+ * dicembre non dichiarate al 31/12/2026, la casella ACI della chiusura restava
+ * vuota (a portale l'ACI non c'e') e il 2027 partiva da 0, poi da -5 t quando a
+ * gennaio arrivava la dichiarazione di dicembre; e con l'anno copiato ma la
+ * chiusura non ancora salvata ogni impianto ripartiva da zero, e la notte diceva
+ * «4 impianti si scostano dal portale». Ora un campo mai scritto (vuoto, null,
+ * '') su un impianto il cui anno ha l'anno prima nel gestionale - le righe
+ * copiate, quelle scritte dalla chiusura o portate dall'anno prima - e' «—»:
+ * netta_t null, col perche'. Uno zero letto (scritto, con apertura_del) resta
+ * zero. Il 2026 non cambia: il 2025 nel gestionale non c'e', e un campo vuoto
+ * del 2026 vale zero come prima; e una giacenza scritta a mano resta quella.
+ * La rete di chi non la dichiara (dichiara_rete falso) non manca mai: non ha una
+ * giacenza di rete da cui ripartire.
+ *
+ * SOLO PER UN SITO CHE L'ANNO PRIMA C'ERA; E UNO ZERO SENZA IL GIORNO NON E' UNA
+ * LETTURA (revisione del 15/10/2026). La regola valeva per ogni riga di un anno
+ * che ha l'anno prima nel gestionale: un impianto NUOVO del 2027, aggiunto da
+ * Giacenze › Siti, aveva l'ACI «—» per tutto l'anno col perche' «si scrive
+ * salvando la chiusura», ma la chiusura del 2026 non lo elenca (nel 2026 non
+ * c'era) e la scheda Siti una casella ACI non ce l'ha. Un sito nuovo non ha
+ * niente da cui ripartire: il suo campo vuoto vale zero, come prima. Ora
+ * «manca» vale per chi l'anno prima c'era: aveva la sua riga, o la riga
+ * dell'anno l'ha scritta la chiusura (annoPrimaNelGestionale, anche una
+ * funzione della riga: haLAnnoPrima di sitiDellAnno). E per lui uno
+ * zero senza apertura_del non e' una lettura: la scheda Siti, a ogni modifica di
+ * una riga, scrive giacenza_riferimento_t 0 dove il campo non c'era
+ * (TargetManager.jsx, save), e bastava correggere la tipologia di Irigom 2027
+ * perche' la notte tornasse a dire «IRIGOM SRL -600,00 t». Lo zero letto lo
+ * scrive la chiusura, col giorno; una giacenza scritta a mano diversa da zero
+ * resta quella.
+ *
+ * E I CARICHI DELL'ANNO CHIUSO ARRIVATI DOPO LA CHIUSURA (15/10/2026, difetto
+ * 5). Un'apertura salvata dalla chiusura (apertura_salvata_il) si legge con i
+ * carichi arrivati all'impianto che quella sera il gestionale non aveva:
+ * fine trasporto nell'anno chiuso, chiusi a portale dopo la fotografia, non fra
+ * quelli che la chiusura ha visto (arrivatiDopoLaChiusura, giacenzaStoccaggi.ts).
+ * Quella sera non erano terminati, quindi il file del 31/12 non li aveva: si
+ * aggiungono alla lettura (arrivati_dopo_t), e la loro dichiarazione, quando
+ * arriva, si toglie come le altre dell'anno chiuso.
+ *
  * @param {object} riga              la riga GiacenzaSito dell'anno
  * @param {string} canale            'RETE' o 'ACI'
  * @param {array}  dichiarazioniSito tutte le DichiarazioneSito, di tutti gli anni
  * @param {function} chiaveDi        il normalizzatore dei nomi
- * @returns {{ lorda_t, dichiarato_dopo_t, netta_t, senza_data }} senza_data: le
- *   dichiarazioni caricate di cui non si sa il giorno, che non si sottraggono
+ * @param {object} opzioni
+ *   annoPrimaNelGestionale  vero, o una funzione della riga che lo dice, se il
+ *                           sito l'anno prima aveva la sua riga e l'anno e'
+ *                           cominciato (sitiDellAnno, haLAnnoPrima): un campo
+ *                           vuoto, o uno zero senza il giorno, allora manca
+ *   arrivi                  (chiave, canale) -> i carichi arrivati all'impianto
+ *                           che forse la chiusura non ha visto (arriviDopoLaChiusura)
+ * @returns {{ lorda_t, dichiarato_dopo_t, netta_t, senza_data, arrivati_dopo_t?, arrivati_dopo?, manca?, perche? }}
+ *   senza_data: le dichiarazioni caricate di cui non si sa il giorno, che non si
+ *   sottraggono; manca e perche' quando il campo non e' mai stato scritto
  */
-export function aperturaNetta(riga, canale, dichiarazioniSito, chiaveDi) {
+export function aperturaNetta(riga, canale, dichiarazioniSito, chiaveDi, { annoPrimaNelGestionale = false, arrivi = null } = {}) {
   const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
-  const lorda = Number(canale === 'ACI' ? riga && riga.giacenza_riferimento_aci_t : riga && riga.giacenza_riferimento_t) || 0;
+  const grezzo = canale === 'ACI' ? riga && riga.giacenza_riferimento_aci_t : riga && riga.giacenza_riferimento_t;
+  const scritto = grezzo !== undefined && grezzo !== null && grezzo !== '';
   const del_ = String((riga && riga.apertura_del) || '').slice(0, 10);
+  const impianto = !!riga && String(riga.tipo_destinazione || 'imp').toLowerCase().trim() !== 'stoc';
+  const nonDovuta = canale !== 'ACI' && !!riga && riga.dichiara_rete === false;
+  const conAnnoPrima = typeof annoPrimaNelGestionale === 'function' ? !!annoPrimaNelGestionale(riga) : !!annoPrimaNelGestionale;
+  const zeroSenzaGiorno = scritto && !del_ && Number(grezzo) === 0;
+  if (impianto && !nonDovuta && ((!scritto && (del_ || conAnnoPrima)) || (zeroSenzaGiorno && conAnnoPrima))) {
+    return { lorda_t: null, dichiarato_dopo_t: 0, netta_t: null, senza_data: 0, manca: true, perche: percheSenzaApertura(riga, canale) };
+  }
+  const lorda = Number(grezzo) || 0;
   if (!del_) return { lorda_t: t3(lorda), dichiarato_dopo_t: 0, netta_t: t3(lorda), senza_data: 0 };
   const ns = chiaveDi(riga.sito);
   const anno = Number(riga.anno);
+  // Da quale giorno si toglie il dichiarato: dal giorno della lettura. Ma se la
+  // rete e' stata letta su un file del portale scaricato dopo il 31/12 (una
+  // chiusura salvata a gennaio, 15/10/2026), le dichiarazioni caricate fra il
+  // 31/12 e quel file il file non le conta gia' piu': si toglie dal giorno del
+  // file, per non toglierle due volte. L'ACI a portale non c'e': vale il 31/12.
+  const rett = riga.apertura_salvata_il ? leggiRettificate(riga.apertura_rettificate_json) : { fotografia_del: '', voci: [], voci_aci: [] };
+  const dal = canale === 'RETE' && rett.fotografia_del > del_ ? rett.fotografia_del : del_;
   let kg = 0, senzaData = 0;
   for (const d of dichiarazioniSito || []) {
     if ((d.canale || 'RETE') !== canale || !d.caricata_inviata) continue;
     if (!(Number(d.anno) < anno) || chiaveDi(d.sito) !== ns) continue;
     const il = String(d.caricata_il || '').slice(0, 10);
     if (!il) { senzaData++; continue; }
-    if (il > del_) kg += Number(d.quantita_kg) || 0;
+    if (il > dal) kg += Number(d.quantita_kg) || 0;
   }
-  return { lorda_t: t3(lorda), dichiarato_dopo_t: t3(kg / 1000), netta_t: t3(lorda - kg / 1000), senza_data: senzaData };
+  // I carichi arrivati dopo la chiusura: solo su un'apertura salvata dalla
+  // chiusura, che dice quando e che cosa ha gia' visto. La rete viene da un file
+  // del portale (chiusi a portale dopo quel file); l'ACI dal conto del
+  // gestionale (quelli che la chiusura non ha contato).
+  let arrivatiKg = 0, arrivatiN = 0;
+  if (riga.apertura_salvata_il && typeof arrivi === 'function') {
+    const quali = canale === 'ACI'
+      ? { al: del_, voci: rett.voci_aci, senzaFotografia: true }
+      : { al: del_, fotografia_del: rett.fotografia_del, voci: rett.voci };
+    for (const m of arrivatiDopoLaChiusura(arrivi(ns, canale), quali)) {
+      arrivatiKg += Math.round(Number(m.kg) || 0);
+      arrivatiN++;
+    }
+  }
+  return {
+    lorda_t: t3(lorda), dichiarato_dopo_t: t3(kg / 1000), netta_t: t3(lorda + arrivatiKg / 1000 - kg / 1000), senza_data: senzaData,
+    ...(arrivatiN ? { arrivati_dopo_t: t3(arrivatiKg / 1000), arrivati_dopo: arrivatiN } : {}),
+  };
+}
+
+// PERCHE' UN'APERTURA NON C'E' (15/10/2026). Le stesse parole nelle Giacenze e
+// nelle Dichiarazioni: lo dice aperturaNetta, e i due moduli le riportano.
+export const PERCHE_SENZA_APERTURA = (anno) => `Manca l'apertura del 31/12/${Number(anno) - 1}: si scrive salvando la chiusura dell'anno nelle Giacenze (scheda Chiusura anno). Finche' manca, la giacenza non si calcola, e non vuol dire zero.`;
+export const PERCHE_ACI_NON_LETTA = (anno) => `L'ACI di questo impianto non e' stata letta nella chiusura del ${Number(anno) - 1}: senza quella apertura la giacenza ACI non si calcola, e non vuol dire zero. Si scrive dalla scheda Chiusura anno delle Giacenze.`;
+export const PERCHE_RETE_NON_LETTA = (anno) => `La rete di questo impianto non e' stata letta nella chiusura del ${Number(anno) - 1}: senza quella apertura la giacenza calcolata non si fa, e non vuol dire zero. Si scrive dalla scheda Chiusura anno delle Giacenze.`;
+function percheSenzaApertura(riga, canale) {
+  const anno = Number(riga && riga.anno);
+  if (!(riga && riga.apertura_del)) return PERCHE_SENZA_APERTURA(anno);
+  return canale === 'ACI' ? PERCHE_ACI_NON_LETTA(anno) : PERCHE_RETE_NON_LETTA(anno);
+}
+
+/**
+ * L'APERTURA DI UN SITO SU UN CANALE, DA TUTTE LE SUE RIGHE DELL'ANNO
+ * (15/10/2026): la somma delle aperture nette, oppure «—» se una riga non l'ha
+ * mai avuta (aperturaNetta, `manca`). Le Giacenze e le Dichiarazioni la chiedono
+ * qui, cosi' il perche' e il numero sono gli stessi nei due moduli. Senza righe
+ * l'apertura e' zero, come prima: un sito nuovo non ha niente da cui ripartire.
+ *
+ * @returns {{ netta_t, lorda_t, dichiarato_dopo_t, arrivati_dopo_t, arrivati_dopo, manca, perche }}
+ */
+export function aperturaDelSito(righe, canale, dichiarazioniSito, chiaveDi, opzioni = {}) {
+  const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
+  const pezzi = (righe || []).map(x => aperturaNetta(x, canale, dichiarazioniSito, chiaveDi, opzioni));
+  const manca = pezzi.find(x => x.manca) || null;
+  if (manca) return { netta_t: null, lorda_t: null, dichiarato_dopo_t: 0, arrivati_dopo_t: 0, arrivati_dopo: 0, manca: true, perche: manca.perche };
+  return {
+    netta_t: t3(pezzi.reduce((s, x) => s + x.netta_t, 0)),
+    lorda_t: t3(pezzi.reduce((s, x) => s + x.lorda_t, 0)),
+    dichiarato_dopo_t: t3(pezzi.reduce((s, x) => s + x.dichiarato_dopo_t, 0)),
+    arrivati_dopo_t: t3(pezzi.reduce((s, x) => s + (x.arrivati_dopo_t || 0), 0)),
+    arrivati_dopo: pezzi.reduce((s, x) => s + (x.arrivati_dopo || 0), 0),
+    manca: false, perche: null,
+  };
+}
+
+/**
+ * LA NOTA DELLA NOTTE PER GLI IMPIANTI SENZA APERTURA (15/10/2026, difetti 6 e
+ * 12). Un impianto senza l'apertura del 31/12 non ha una giacenza calcolata, e
+ * non si scosta dal portale: non si sa. La quadratura della notte lo diceva
+ * «si scosta» («4 impianti si scostano dal portale: Irigom S.r.l. -652,84 t»), o
+ * lo contava fra quelli che quadrano. Qui la frase a parte, coi nomi: «4
+ * impianti senza l'apertura del 31/12/2026, fuori dal confronto: ...». '' se
+ * non ce ne sono.
+ *
+ * L'ACI, che a portale non ha un confronto, si dice in una frase sua: senza la
+ * sua apertura la giacenza ACI e' «—» in tutti e due i moduli, e un'identita'
+ * non la puo' trovare (difetto 6: le 5 t di Gatim sparite dal 02/01 al 15/01).
+ *
+ * @param {array} siti  i siti del riepilogo: `senza_apertura` e' l'elenco dei canali senza apertura
+ * @param {number} anno l'anno guardato
+ */
+export function notaSenzaApertura(siti, anno) {
+  const chi = (canale) => (siti || [])
+    .filter(s => s && s.tipo_destinazione !== 'stoc' && Array.isArray(s.senza_apertura) && s.senza_apertura.includes(canale))
+    .map(s => s.sito || '').sort((a, b) => a.localeCompare(b, 'it'));
+  const elenco = (nomi) => nomi.slice(0, 3).join(', ') + (nomi.length > 3 ? ` e altri ${nomi.length - 3}` : '');
+  const al = `31/12/${Number(anno) - 1}`;
+  const rete = chi('RETE'), aci = chi('ACI');
+  const frasi = [];
+  if (rete.length) frasi.push(`${rete.length === 1 ? "Un impianto e' senza" : `${rete.length} impianti sono senza`} l'apertura del ${al}, fuori dal confronto col portale: ${elenco(rete)}.`);
+  if (aci.length) frasi.push(`${aci.length === 1 ? "L'ACI di un impianto e' senza" : `L'ACI di ${aci.length} impianti e' senza`} l'apertura del ${al}: ${elenco(aci)}.`);
+  if (frasi.length) frasi.push("Si scrive salvando la chiusura dell'anno nelle Giacenze.");
+  return frasi.join(' ');
+}
+
+/**
+ * I SITI PORTATI DALL'ANNO PRIMA, DETTI (revisione del 15/10/2026; decisione
+ * dell'utente del 15/10/2026, D3). sitiDellAnno porta avanti ruolo, tipologia e
+ * «dichiara la rete» di chi la riga dell'anno non l'ha ancora, segnati «da
+ * confermare sul contratto»: ma lo sapeva solo la riga interna, e nessuna
+ * risposta lo diceva. Qui l'elenco per le risposte delle tre funzioni
+ * (siti_portati) e la frase per la nota della notte, coi nomi: chi legge sa che
+ * cosa va confermato, e che la copia d'anno non e' ancora fatta. '' e [] se non
+ * ce ne sono.
+ *
+ * @param {array} portate le righe portate (sitiDellAnno().portate)
+ * @param {number} anno   l'anno guardato
+ */
+export function sitiPortati(portate, anno) {
+  const elenco = (portate || []).filter(Boolean).map(p => ({
+    sito: p.sito, ruolo: p.tipo_destinazione === 'stoc' ? 'stoc' : 'imp', dal: p.portata_dal, nota: p.nota_portata || NOTA_PORTATA(anno),
+    ...(p.dichiara_rete === false ? { dichiara_rete: false } : {}),
+  })).sort((a, b) => String(a.sito).localeCompare(String(b.sito), 'it') || a.ruolo.localeCompare(b.ruolo));
+  if (!elenco.length) return { elenco, nota: '' };
+  const a = Number(anno);
+  const nomi = elenco.map(p => `${p.sito}${p.ruolo === 'stoc' ? ' (piazzale)' : ''}${p.dichiara_rete === false ? ' (non dichiara la rete)' : ''}`);
+  const detti = nomi.slice(0, 4).join(', ') + (nomi.length > 4 ? ` e altri ${nomi.length - 4}` : '');
+  const nota = `${elenco.length === 1 ? `Un sito non ha ancora la riga del ${a}: e' portato` : `${elenco.length} siti non hanno ancora la riga del ${a}: sono portati`} dal ${a - 1}, da confermare sul contratto ${a} (${detti}). La riga la scrivono la copia d'anno o la chiusura.`;
+  return { elenco, nota };
+}
+
+/**
+ * I SITI DI UN ANNO, E QUELLI DELL'ANNO PRIMA CHE LA RIGA NON L'HANNO ANCORA
+ * (15/10/2026, prova generale del cambio d'anno, difetti 11 e 12).
+ *
+ * Chi sa che Tecnogum la rete non ce la dichiara e' la sua riga GiacenzaSito
+ * dell'anno (dichiara_rete). Per il 2027 la scrivono la copia d'anno o la
+ * chiusura: finche' nessuna delle due c'e', Tecnogum sembrava un impianto che
+ * dichiara la rete (1.833,43 t a portale, 320 ordini, e ogni notte «TECNOGUM
+ * SRL -1.833,43 t»), e le Dichiarazioni non elencavano nessun impianto. Ora un
+ * sito dell'anno prima senza la riga dell'anno si porta avanti: ruolo,
+ * tipologia e dichiara_rete dall'ultima riga dell'anno prima, nient'altro (ne'
+ * aperture ne' target), e la riga lo dice (portata_dal, nota_portata: «dal
+ * 2026, da confermare sul contratto 2027»). Decisione dell'utente del
+ * 15/10/2026 (D3, «ok per i tuoi consigli»): dal 1° gennaio Tecnogum continua a
+ * non dichiarare la rete, portato avanti dal 2026 e segnato da confermare sul
+ * contratto 2027, senza aspettare la copia d'anno.
+ *
+ * Vale per un anno cominciato: l'anno dopo guardato prima del 1° gennaio resta
+ * la fotografia di oggi, come prima. Una regola sola, chiesta da calcolaGiacenze,
+ * riepilogoDichiarazioni e getOrdiniDaDichiarare.
+ *
+ * CHI L'ANNO PRIMA C'ERA (revisione del 15/10/2026): haLAnnoPrima(riga) dice se
+ * il sito della riga, con lo stesso ruolo, aveva una riga l'anno prima, o se la
+ * riga l'ha scritta la chiusura dell'anno prima, in un anno cominciato. E' la
+ * condizione per cui un'apertura mai scritta manca (aperturaNetta): un impianto
+ * nuovo dell'anno non ha niente da cui ripartire.
+ *
+ * @param {array}  giacenzeSito  le righe GiacenzaSito (almeno dell'anno e dell'anno prima)
+ * @param {number} anno
+ * @param {object} opzioni { chiaveDi, annoDiOggi }
+ * @returns {{ righe, dellAnno, portate, annoPrimaNelGestionale, haLAnnoPrima }}
+ *   righe: quelle dell'anno piu' le portate; annoPrimaNelGestionale: vero se
+ *   l'anno prima ha righe e l'anno e' cominciato; haLAnnoPrima: la stessa cosa,
+ *   sito per sito
+ */
+export function sitiDellAnno(giacenzeSito, anno, { chiaveDi = (s) => String(s || '').trim().toLowerCase(), annoDiOggi = null } = {}) {
+  const a = Number(anno);
+  const dellAnno = (giacenzeSito || []).filter(g => g && Number(g.anno) === a);
+  const prima = (giacenzeSito || []).filter(g => g && Number(g.anno) === a - 1);
+  const cominciato = annoDiOggi === null || annoDiOggi === undefined || a <= Number(annoDiOggi);
+  if (!prima.length || !cominciato) return { righe: dellAnno, dellAnno, portate: [], annoPrimaNelGestionale: false, haLAnnoPrima: () => false };
+  const ruolo = (g) => (String(g.tipo_destinazione || '').toLowerCase().trim() === 'stoc' ? 'stoc' : 'imp');
+  const diPrima = new Set(prima.map(g => `${chiaveDi(g.sito)}|${ruolo(g)}`));
+  // O la riga l'ha scritta la chiusura dell'anno prima (la nota «dalla chiusura
+  // del 31/12/...», rigaDellaChiusura): l'impianto quell'anno c'era, coi suoi
+  // movimenti, anche senza la riga dell'anno prima (INNOREC sui dati veri).
+  const dallaChiusura = (g) => /dalla chiusura del/.test(String((g && g.note) || ''));
+  const haLAnnoPrima = (g) => !!g && !!chiaveDi(g.sito) && (diPrima.has(`${chiaveDi(g.sito)}|${ruolo(g)}`) || dallaChiusura(g));
+  const gia = new Set(dellAnno.map(g => `${chiaveDi(g.sito)}|${ruolo(g)}`));
+  const portate = [];
+  for (const g of prima) {
+    const k = `${chiaveDi(g.sito)}|${ruolo(g)}`;
+    if (!chiaveDi(g.sito) || gia.has(k)) continue;
+    gia.add(k);
+    const riga = {
+      sito: g.sito, tipo_destinazione: ruolo(g), anno: a,
+      dichiara_rete: g.dichiara_rete, tipologia_trattamento: g.tipologia_trattamento,
+      portata_dal: a - 1, nota_portata: NOTA_PORTATA(a),
+    };
+    for (const c of Object.keys(riga)) if (riga[c] === undefined) delete riga[c];
+    portate.push(riga);
+  }
+  return { righe: [...dellAnno, ...portate], dellAnno, portate, annoPrimaNelGestionale: true, haLAnnoPrima };
+}
+export const NOTA_PORTATA = (anno) => `dal ${Number(anno) - 1}, da confermare sul contratto ${Number(anno)}`;
+
+/**
+ * I CARICHI ARRIVATI A UN IMPIANTO CHE LA CHIUSURA FORSE NON HA VISTO
+ * (15/10/2026, difetto 5): per aperturaNetta. Chi chiama passa ogni movimento con
+ * la risposta di ingressoMovimento (Giacenze e Dichiarazioni, la stessa regola);
+ * si tengono solo gli arrivi all'impianto di rete e ACI, terminati, che
+ * potrebbero essere dopo una chiusura (forseDopoLaChiusura): pochi.
+ */
+export function arriviDopoLaChiusura() {
+  const per = new Map(); // 'chiave|canale' -> movimenti in forma compatta
+  return {
+    segna(r, d) {
+      if (!r || !d || !d.arrivo || d.arrivo.ruolo === 'stoc' || !eTerminato(r)) return;
+      if (d.canale !== 'RETE' && d.canale !== 'ACI') return;
+      const m = movimentoStoccaggio(r, { canale: d.canale, verso: 'ingresso', classe: d.canale === 'ACI' ? 'ACI' : '' });
+      if (!forseDopoLaChiusura(m)) return;
+      const k = `${d.arrivo.chiave}|${d.canale}`;
+      if (!per.has(k)) per.set(k, []);
+      per.get(k).push(m);
+    },
+    di(ns, canale) { return per.get(`${ns}|${canale}`) || []; },
+  };
 }
 
 /**
@@ -163,11 +426,16 @@ export function aperturaNetta(riga, canale, dichiarazioniSito, chiaveDi) {
  * chiedono qui. Una giacenza di riferimento scritta a mano, senza il giorno,
  * non e' una lettura.
  *
+ * E i carichi dell'anno chiuso arrivati dopo la chiusura (15/10/2026, difetto
+ * 5): la lettura del 31/12 si legge con loro (`arrivi`, come aperturaNetta), e
+ * il 2026 guardato dal 2027 quadra come la sera del 31/12. Si dicono
+ * (`arrivati_dopo_t`).
+ *
  * @param {array} giacenzeAnnoDopo  le righe GiacenzaSito dell'anno dopo
- * @param {object} opzioni { chiave, canale ('RETE'|'ACI'), anno, dichiarazioni (tutte le DichiarazioneSito), chiaveDi }
- * @returns {{ letta_t, dichiarato_dopo_t, netta_t } | null} null se la chiusura non l'ha salvata
+ * @param {object} opzioni { chiave, canale ('RETE'|'ACI'), anno, dichiarazioni (tutte le DichiarazioneSito), chiaveDi, arrivi }
+ * @returns {{ letta_t, dichiarato_dopo_t, netta_t, arrivati_dopo_t } | null} null se la chiusura non l'ha salvata
  */
-export function letturaDelTrentuno(giacenzeAnnoDopo, { chiave, canale = 'RETE', anno, dichiarazioni = [], chiaveDi = (s) => String(s || '').trim().toLowerCase() } = {}) {
+export function letturaDelTrentuno(giacenzeAnnoDopo, { chiave, canale = 'RETE', anno, dichiarazioni = [], chiaveDi = (s) => String(s || '').trim().toLowerCase(), arrivi = null } = {}) {
   const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
   const fineAnno = `${anno}-12-31`;
   const campo = canale === 'ACI' ? 'giacenza_riferimento_aci_t' : 'giacenza_riferimento_t';
@@ -175,11 +443,12 @@ export function letturaDelTrentuno(giacenzeAnnoDopo, { chiave, canale = 'RETE', 
     && (String(x.tipo_destinazione || '').toLowerCase().trim() || 'imp') === 'imp'
     && String(x.apertura_del || '').slice(0, 10) === fineAnno && x[campo] !== undefined && x[campo] !== null && x[campo] !== '');
   if (!righe.length) return null;
-  const pezzi = righe.map(x => aperturaNetta(x, canale, dichiarazioni, chiaveDi));
+  const pezzi = righe.map(x => aperturaNetta(x, canale, dichiarazioni, chiaveDi, { arrivi }));
   return {
     letta_t: t3(pezzi.reduce((s, x) => s + x.lorda_t, 0)),
     dichiarato_dopo_t: t3(pezzi.reduce((s, x) => s + x.dichiarato_dopo_t, 0)),
     netta_t: t3(pezzi.reduce((s, x) => s + x.netta_t, 0)),
+    arrivati_dopo_t: t3(pezzi.reduce((s, x) => s + (x.arrivati_dopo_t || 0), 0)),
   };
 }
 

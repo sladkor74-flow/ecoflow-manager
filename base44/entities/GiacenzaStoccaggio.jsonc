@@ -50,6 +50,22 @@
       "default": 0,
       "description": "PFU Autodemolizione, canale ACI"
     },
+    // LA FOTOGRAFIA DELLA CHIUSURA DELL'ANNO (15/10/2026, prova generale del
+    // cambio d'anno, difetto 5). La rilevazione del 31/12 salvata dalla chiusura
+    // porta l'istante del salvataggio e i movimenti dell'elenco di dicembre che la
+    // chiusura ha gia' visto: i carichi finiti a dicembre e chiusi a portale dopo,
+    // che quella sera il gestionale non aveva, si aggiungono leggendo
+    // (letturaDellaChiusura in shared/giacenzaStoccaggi.ts). Una rilevazione
+    // scritta a mano non ha questi campi, e resta com'e'.
+    "chiusura_salvata_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "L'istante in cui la chiusura dell'anno ha salvato questa fotografia. Vuoto: una rilevazione scritta a mano"
+    },
+    "chiusura_rettificate_json": {
+      "type": "string",
+      "description": "JSON scritto dalla chiusura: { fotografia_del, voci }. Il giorno della lettura del portale e i movimenti dell'elenco di dicembre gia' rettificati o decisi"
+    },
     "note": {
       "type": "string"
     }

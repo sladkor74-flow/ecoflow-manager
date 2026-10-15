@@ -20,7 +20,7 @@
 // La parte piu' importante di questa prova e' l'ORDINE: chiusura e copia d'anno
 // si possono fare in tutti e due i modi, e nessuno dei due deve rompere l'altro.
 // npm run prove
-import { apertureDegliImpianti, rigaDellaChiusura } from '../base44/shared/chiusuraAnno.ts';
+import { apertureDegliImpianti, rigaDellaChiusura, proposteDegliImpianti } from '../base44/shared/chiusuraAnno.ts';
 import { listaAnno, confermaTariffa, tariffeDaConfermare, copiaTariffa } from '../base44/shared/inizializzazioneAnno.ts';
 import { pianoCopiaAnno, daConfermare, notaCopia } from '../base44/shared/annoTarget.ts';
 import { normalizzaRagioneSociale as n } from '../base44/shared/normalizzaRagioneSociale.ts';
@@ -64,13 +64,85 @@ console.log('LA CHIUSURA SCRIVE LE APERTURE DEGLI IMPIANTI');
   verifica('i piazzali non c\'entrano: hanno la loro fotografia', !a.piano.some(x => /NAPPI/.test(x.sito)));
 }
 
-console.log('SI SCRIVE SOLO QUELLO CHE E\' STATO LETTO');
+console.log('SI SCRIVE SOLO QUELLO CHE STA NELLE CASELLE');
 {
+  // Dal 15/10/2026 (difetto 11) chi non ha la lettura ha lo stesso la sua riga
+  // dell'anno dopo, senza nessun campo d'apertura: Giacenze e Dichiarazioni
+  // dicono «—» col perche', mai un numero dedotto. E Tecnogum, che la rete non
+  // la dichiara, la lettura di rete non la deve: non e' fra i «senza lettura».
   const a = apertureDegliImpianti({ anno: 2026, impianti: IMPIANTI, letture_impianti: { [n('Irigom S.r.l.')]: { pfu_kg: 652840 } }, siti: SITI_2026, chiave: n });
-  verifica('chi non ha la lettura non riceve un numero dedotto', a.piano.length === 1 && a.senza_lettura.length === 2);
-  verifica('e si dice chi e\'', a.senza_lettura.includes('TECNOGUM SRL') && a.senza_lettura.includes('T-CYCLE INDUSTRIES SRL'));
+  const conApertura = a.piano.filter(x => !x.senza_apertura);
+  const senzaApertura = a.piano.filter(x => x.senza_apertura);
+  verifica('chi non ha la lettura non riceve un numero dedotto', conApertura.length === 1 && senzaApertura.length === 2
+    && senzaApertura.every(x => !('apertura_del' in x.dati) && !('giacenza_riferimento_t' in x.dati) && !('giacenza_riferimento_aci_t' in x.dati)), JSON.stringify(a.piano));
+  verifica("e si dice chi e', senza Tecnogum che la rete non la dichiara", a.senza_lettura.length === 1 && a.senza_lettura.includes('T-CYCLE INDUSTRIES SRL'), JSON.stringify(a.senza_lettura));
   const vuote = apertureDegliImpianti({ anno: 2026, impianti: IMPIANTI, letture_impianti: { [n('Irigom S.r.l.')]: { pfu_kg: '', aci_kg: null } }, siti: SITI_2026, chiave: n });
-  verifica('una casella vuota non e\' uno zero', vuote.piano.length === 0 && vuote.senza_lettura.length === 3);
+  verifica('una casella vuota non e\' uno zero', vuote.piano.every(x => x.senza_apertura) && vuote.senza_lettura.length === 2, JSON.stringify(vuote));
+}
+
+// TECNOGUM NEL 2027 SENZA LETTURA (15/10/2026, prova generale del cambio d'anno,
+// difetto 11; decisione dell'utente del 15/10/2026, D3). La rete non la dichiara
+// e l'ACI a portale non c'e': la chiusura non creava la sua riga 2027, e dal 1°
+// gennaio Tecnogum tornava un impianto che dichiara la rete.
+console.log("LA RIGA DELL'ANNO DOPO NASCE ANCHE SENZA LETTURA, E LA COPIA D'ANNO LA RICONOSCE");
+{
+  const a = apertureDegliImpianti({ anno: 2026, impianti: IMPIANTI, letture_impianti: {}, siti: SITI_2026, chiave: n });
+  const te = a.piano.find(x => x.sito === 'TECNOGUM SRL');
+  verifica('Tecnogum 2027: riga nuova, «non dichiara la rete» dal 2026, nessun campo d\'apertura', te && te.azione === 'crea' && te.senza_apertura && te.dati.dichiara_rete === false && te.dati.anno === 2027 && !('apertura_del' in te.dati), JSON.stringify(te));
+  verifica("e la nota dice da dove viene: «copiato dal 2026, da confermare · dalla chiusura del 31/12/2026»", te && te.dati.note === 'copiato dal 2026, da confermare · dalla chiusura del 31/12/2026', te && te.dati.note);
+  const create = a.piano.map((x, i) => ({ id: 'z' + i, ...x.dati }));
+  verifica('sono righe della chiusura, «da confermare»', create.every(daConfermare) && create.every(rigaDellaChiusura));
+  const piano = pianoCopiaAnno({ anno: 2027, sorgente: { siti: SITI_2026 }, esistenti: { siti: create }, chiave: n });
+  const creati = piano.siti.map(s => `${s.sito}|${s.tipo_destinazione}`).sort();
+  verifica("la copia d'anno le riconosce come sue: completa i piazzali e non rifa' gli impianti", creati.includes('NAPPI SUD SRL|stoc') && !creati.some(x => x.endsWith('|imp')) && !piano.saltati.siti_gia_compilati, JSON.stringify([creati, piano.saltati]));
+  // Rifare la chiusura senza letture non crea una seconda riga.
+  const ancora = apertureDegliImpianti({ anno: 2026, impianti: IMPIANTI, letture_impianti: {}, siti: [...SITI_2026, ...create], chiave: n });
+  verifica('rifarla non crea doppioni', ancora.piano.length === 0, JSON.stringify(ancora.piano));
+}
+
+// LA PROPOSTA DELLA RETE: LA PARTE DELL'IMPIANTO DEL FILE (15/10/2026, prova
+// generale del cambio d'anno, difetto 4). Sotto la stessa ragione sociale il file
+// di T-Cycle ha 118 righe dell'impianto (id 38449, 364.800 kg) e 72 del suo
+// piazzale (id 38490, 181.299 kg, partite verso Tecnogum). Scritto il totale,
+// l'apertura 2027 era 546,099 t e ogni notte «T-CYCLE INDUSTRIES SRL +181,299 t».
+console.log("LA CHIUSURA PROPONE LA PARTE DELL'IMPIANTO DEL FILE, E UN NUMERO DIVERSO SI SALVA SOLO CONFERMATO");
+{
+  const TC = 'T-CYCLE INDUSTRIES SRL';
+  const g = (giorno) => `${giorno}T08:00:00Z`;
+  const prim = (id, kg, td, giorno = '2026-12-10') => ({ id_ordine: id, numero_fir: 'F' + id, classe: 'P - fino a 35 kg', prodotto: '.class1', destinazione: TC, tipo_destinazione: td, stato: 'terminato', peso_effettivo: kg, trasporto_finito_il: g(giorno), ordine_chiuso_il: g(giorno) });
+  const primarie = [prim('IMP1', 200000, 'imp'), prim('IMP2', 164800, 'imp'), prim('STO1', 100000, 'stoc'), prim('STO2', 81299, 'stoc')];
+  const riga = (id, kg, idDest) => ({ ordine_primaria: id, destinazione: TC, prodotto: '.class1', peso_non_dichiarato_kg: kg, id_destinazione: idDest, fine_trasporto: '2026-12-10', created_date: '2026-12-31T07:00:00Z' });
+  const file = [riga('IMP1', 200000, 38449), riga('IMP2', 164800, 38449), riga('STO1', 100000, 38490), riga('STO2', 81299, 38490)];
+  const impianti = [{ chiave: n(TC), nome: TC }];
+  const proposte = proposteDegliImpianti({ anno: 2026, impianti, nonDichiarati: file, primarieRete: primarie, giacenzeSito: SITI_2026, chiaveDi: n });
+  const p = proposte[n(TC)];
+  verifica('la proposta e\' 364.800 kg, le righe dell\'impianto, non i 546.099 del file', p && p.rete.kg === 364800 && p.rete.file_righe === 2, JSON.stringify(p && p.rete));
+  verifica('dice l\'id da contare e le righe del piazzale', p && p.rete.id_impianto.join() === '38449' && p.rete.altro_ruolo.righe === 2 && p.rete.altro_ruolo.kg === 181299 && p.rete.altro_ruolo.id.join() === '38490', JSON.stringify(p && p.rete));
+  const scritto = apertureDegliImpianti({ anno: 2026, impianti, letture_impianti: { [n(TC)]: { pfu_kg: 546099, aci_kg: 0 } }, siti: SITI_2026, chiave: n, proposte });
+  verifica('il totale del file, diverso dalla proposta, non si scrive senza conferma', scritto.piano.length === 0 && scritto.da_confermare.length === 1, JSON.stringify(scritto));
+  const motivo = scritto.da_confermare[0] && scritto.da_confermare[0].scarti[0].motivo;
+  verifica('e lo scarto dice il motivo: le righe del piazzale, id 38490', /2 righe sono del piazzale, id 38490/.test(motivo || ''), motivo);
+  const confermato = apertureDegliImpianti({ anno: 2026, impianti, letture_impianti: { [n(TC)]: { pfu_kg: 546099, aci_kg: 0 } }, siti: SITI_2026, chiave: n, proposte, conferme: [`${n(TC)}|RETE`] });
+  verifica('confermato, si scrive com\'e\': l\'ultima parola resta all\'amministratore', confermato.piano.length === 1 && confermato.piano[0].dati.giacenza_riferimento_t === 546.099);
+  const accettata = apertureDegliImpianti({ anno: 2026, impianti, letture_impianti: { [n(TC)]: { pfu_kg: 364800, aci_kg: 0 } }, siti: SITI_2026, chiave: n, proposte, salvata_il: '2026-12-31T22:30:00.000Z' });
+  const dati = accettata.piano[0] && accettata.piano[0].dati;
+  verifica('accettata la proposta, l\'apertura 2027 e\' 364,80 t', dati && dati.giacenza_riferimento_t === 364.8 && dati.giacenza_riferimento_aci_t === 0, JSON.stringify(dati));
+  verifica("e al salvataggio porta l'istante e il file da cui viene (per i carichi che arriveranno dopo)", dati && dati.apertura_salvata_il === '2026-12-31T22:30:00.000Z' && JSON.parse(dati.apertura_rettificate_json).fotografia_del === '2026-12-31', JSON.stringify(dati));
+  // L'ACI: la giacenza che il gestionale calcola al 31/12 (decisione dell'utente del 15/10/2026, D2).
+  const aci = [{ id_ordine: 'ACI1', numero_fir: 'FA1', classe: 'PFU Autodemolizione', prodotto: '.class9', destinazione: TC, tipo_destinazione: 'imp', stato: 'terminato', peso_effettivo: 5000, trasporto_finito_il: g('2026-12-20'), ordine_chiuso_il: g('2026-12-21') }];
+  const dichAci = [{ sito: TC, anno: 2026, mese: 'Novembre', canale: 'ACI', provenienza: 'primaria', quantita_kg: 1000, caricata_inviata: true, caricata_il: '2026-12-10' },
+    { sito: TC, anno: 2026, mese: 'Dicembre', canale: 'ACI', provenienza: 'primaria', quantita_kg: 5000, caricata_inviata: true, caricata_il: '2027-01-15' }];
+  const conAci = proposteDegliImpianti({ anno: 2026, impianti, nonDichiarati: file, primarieRete: primarie, primarieAci: aci, dichiarazioniSito: dichAci, giacenzeSito: SITI_2026, chiaveDi: n });
+  verifica("l'ACI proposta: 5.000 arrivati meno i 1.000 dichiarati entro il 31/12 (dicembre, caricato a gennaio, lo toglie l'apertura netta)",
+    conAci[n(TC)].aci.kg === 4000 && conAci[n(TC)].aci.arrivi_kg === 5000 && conAci[n(TC)].aci.dichiarato_kg === 1000, JSON.stringify(conAci[n(TC)].aci));
+  // UNA GIACENZA SOTTO ZERO NON SI PROPONE, E UN NUMERO SOTTO ZERO NON SI SCRIVE
+  // (revisione del 15/10/2026): dichiarati 7.000 kg su 5.000 arrivati, -2.000.
+  const troppo = proposteDegliImpianti({ anno: 2026, impianti, nonDichiarati: file, primarieRete: primarie, primarieAci: aci,
+    dichiarazioniSito: [{ sito: TC, anno: 2026, mese: 'Dicembre', canale: 'ACI', provenienza: 'primaria', quantita_kg: 7000, caricata_inviata: true, caricata_il: '2026-12-22' }], giacenzeSito: SITI_2026, chiaveDi: n });
+  verifica("l'ACI calcolata sotto zero non e' una proposta: kg null, e il numero si dice", troppo[n(TC)].aci.kg === null && troppo[n(TC)].aci.negativa === true && troppo[n(TC)].aci.calcolata_kg === -2000, JSON.stringify(troppo[n(TC)].aci));
+  const negativa = apertureDegliImpianti({ anno: 2026, impianti, letture_impianti: { [n(TC)]: { pfu_kg: 364800, aci_kg: -2000 } }, siti: SITI_2026, chiave: n, proposte, conferme: [`${n(TC)}|ACI`] });
+  verifica("scritta a mano sotto zero, anche confermata, non si scrive: resta fra le rifiutate col motivo",
+    negativa.piano.length === 0 && negativa.rifiutate.length === 1 && /ACI -2\.000 kg: una giacenza sotto zero non esiste/.test(negativa.rifiutate[0].motivo), JSON.stringify(negativa));
 }
 
 console.log('SE LA RIGA DEL 2027 C\'E\' GIA\', SI AGGIORNA');

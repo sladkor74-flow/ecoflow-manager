@@ -123,6 +123,15 @@ export const VOCI_INVARIANTI = [
     // con una giacenza (non 0, non «—»). Sui dati veri dell'11/10/2026 le
     // Dichiarazioni elencano tre piazzali, tutti anche nelle Giacenze: niente
     // cambia, e i confronti restano 27.
+    //
+    // E GLI IMPIANTI COME I PIAZZALI (15/10/2026, prova generale del cambio
+    // d'anno, difetto 12). Un impianto che un modulo solo elencava non si
+    // confrontava: il 05/01/2027, senza la copia d'anno, le Giacenze avevano
+    // cinque impianti con una giacenza (Tecnogum 1.833,43 t, Irigom 652,84 t...)
+    // e le Dichiarazioni nessuno, e la notte segnalava solo il piazzale. Ora un
+    // impianto con una giacenza (non 0, non «—») che l'altro modulo non elenca e'
+    // un caso, dalle due parti, come il piazzale. Sui dati veri dell'11/10/2026
+    // i sei impianti sono in tutti e due i moduli: i confronti non cambiano.
     verifica({ giacenze: G, dichiarazioni: D }) {
       const tol = this.tolleranza;
       const impiantiD = new Map((D.siti || []).filter(s => s.tipo_destinazione !== 'stoc').map(s => [s.chiave, s]));
@@ -153,11 +162,28 @@ export const VOCI_INVARIANTI = [
           }
         } else {
           const d = impiantiD.get(k);
-          if (!d) continue;
+          if (!d) {
+            for (const [canale, a] of [['RETE', g.giacenza_portale_t], ['ACI', g.giacenza_aci_t], ['EXTRA_RACCOLTA', g.giacenza_extra_t]]) {
+              if (vuoto(a) || Math.abs(num(a)) <= tol) continue;
+              confronti++;
+              casi.push({ sito: g.sito, ruolo: 'imp', canale, a: t3(a), b: null, scarto: Math.abs(num(a)), assente: true });
+            }
+            continue;
+          }
           const gc = (canale) => (d.giacenze_canale || []).find(c => c.canale === canale) || {};
           confronta(g.sito, 'imp', 'RETE', g.giacenza_portale_t, d.giacenza_portale_t);
           confronta(g.sito, 'imp', 'ACI', g.giacenza_aci_t, gc('ACI').giacenza_t);
           confronta(g.sito, 'imp', 'EXTRA_RACCOLTA', g.giacenza_extra_t, gc('EXTRA_RACCOLTA').giacenza_t);
+        }
+      }
+      const impiantiG = new Set((G.righe || []).filter(g => g.tipo_destinazione !== 'stoc').map(g => normalizzaRagioneSociale(g.sito)));
+      for (const [k, d] of impiantiD) {
+        if (impiantiG.has(k || normalizzaRagioneSociale(d.sito || ''))) continue;
+        const gc = (canale) => (d.giacenze_canale || []).find(c => c.canale === canale) || {};
+        for (const [canale, b] of [['RETE', d.giacenza_portale_t], ['ACI', gc('ACI').giacenza_t], ['EXTRA_RACCOLTA', gc('EXTRA_RACCOLTA').giacenza_t]]) {
+          if (vuoto(b) || Math.abs(num(b)) <= tol) continue;
+          confronti++;
+          casi.push({ sito: d.sito || k, ruolo: 'imp', canale, a: null, b: t3(b), scarto: Math.abs(num(b)), assente: true, assente_in: 'Giacenze' });
         }
       }
       const piazzaliG = new Set((G.righe || []).filter(g => g.tipo_destinazione === 'stoc').map(g => normalizzaRagioneSociale(g.sito)));
@@ -170,11 +196,12 @@ export const VOCI_INVARIANTI = [
           casi.push({ sito: d.sito || k, ruolo: 'stoc', canale: x.canale, a: null, b: t3(b), scarto: Math.abs(num(b)), assente: true, assente_in: 'Giacenze' });
         }
       }
+      const chi = (c) => (c.ruolo === 'stoc' ? 'il piazzale' : "l'impianto");
       return esitoDaCasi(casi, confronti, ['Giacenze', 'Dichiarazioni'],
         (c) => (c.assente_in === 'Giacenze'
-          ? `${c.sito} (piazzale), ${NOME_CANALE[c.canale]}: ${tt(c.b)} nelle Dichiarazioni, mentre nelle Giacenze il piazzale non compare`
+          ? `${c.sito}${c.ruolo === 'stoc' ? ' (piazzale)' : ''}, ${NOME_CANALE[c.canale]}: ${tt(c.b)} nelle Dichiarazioni, mentre nelle Giacenze ${chi(c)} non compare`
           : `${c.sito}${c.ruolo === 'stoc' ? ' (piazzale)' : ''}, ${NOME_CANALE[c.canale]}: ${tt(c.a)} nelle Giacenze, `
-            + (c.assente ? 'mentre nelle Dichiarazioni il piazzale non compare' : `${tt(c.b)} nelle Dichiarazioni`)));
+            + (c.assente ? `mentre nelle Dichiarazioni ${chi(c)} non compare` : `${tt(c.b)} nelle Dichiarazioni`)));
     },
   },
   {
@@ -441,6 +468,78 @@ export function riportaRotte(nuovo, precedenti = []) {
   });
   if (!riportate) return nuovo;
   return { ...nuovo, esito: esitoDi(voci), nota: notaInvarianti(voci), voci };
+}
+
+/**
+ * QUALI ANNI SI CONTROLLANO STANOTTE (15/10/2026, prova generale del cambio
+ * d'anno, difetto 27). Il controllo guardava solo l'anno in corso: il 31/12/2026
+ * trovava «Irigom, ACI: 20,00 t nelle Giacenze, 12,00 t nelle Dichiarazioni», e
+ * dall'01/01/2027 la voce spariva mentre sul 2026 i due moduli dicevano ancora
+ * 20 e 12. A gennaio e febbraio il 2026 si sta ancora chiudendo - dichiarazioni
+ * e carichi di dicembre - e si controlla anche lui, con le stesse fonti (tre
+ * chiamate in piu' per notte, due mesi l'anno). Fuori da quei due mesi solo
+ * l'anno in corso, come prima.
+ *
+ * @param {string} oggi  il giorno italiano, 'AAAA-MM-GG'
+ * @returns {number[]} gli anni, dal piu' vecchio
+ */
+export function anniDaControllare(oggi) {
+  const g = String(oggi || '').slice(0, 10);
+  const anno = Number(g.slice(0, 4));
+  const mese = Number(g.slice(5, 7));
+  return mese === 1 || mese === 2 ? [anno - 1, anno] : [anno];
+}
+
+/**
+ * I DUE ANNI IN UNA FOTOGRAFIA SOLA (15/10/2026, difetto 27). La riga del giorno
+ * e' una: ogni voce del catalogo vi compare una volta, coi casi dei due anni
+ * insieme, e ogni caso dice il suo anno («2026: Irigom S.r.l., ACI: ...»).
+ * - rotta se e' rotta in uno dei due anni (anche se l'altro non si e' potuto
+ *   verificare: quello che si e' visto rotto e' rotto);
+ * - non verificata se nessun anno l'ha trovata rotta e uno non si e' potuto
+ *   verificare, col motivo e l'anno;
+ * - in linea solo se torna in tutti e due.
+ * Con un anno solo l'esito e' quello di sempre, senza l'anno davanti.
+ *
+ * @param {Array<{ anno: number, esito: object }>} esiti  verificaInvarianti per anno, dal piu' vecchio
+ */
+export function unisciAnni(esiti) {
+  const lista = (esiti || []).filter(e => e && e.esito);
+  if (lista.length <= 1) return lista.length ? lista[0].esito : null;
+  const ultimo = lista[lista.length - 1].esito;
+  const ordine = [];
+  const per = new Map();
+  for (const { anno, esito } of lista) {
+    for (const v of esito.voci || []) {
+      if (!per.has(v.id)) { per.set(v.id, []); ordine.push(v.id); }
+      per.get(v.id).push({ anno, v });
+    }
+  }
+  const conAnno = (anno, testo) => (testo ? `${anno}: ${testo}` : '');
+  const voci = ordine.map((id) => {
+    const anni = per.get(id);
+    const base = anni[anni.length - 1].v;
+    const verificate = anni.filter(x => x.v.verificata);
+    const nonVerificate = anni.filter(x => !x.v.verificata);
+    const motivo = nonVerificate.map(x => conAnno(x.anno, x.v.motivo)).filter(Boolean).join('; ');
+    const comune = { anni: anni.map(x => x.anno), confronti: verificate.reduce((t, x) => t + (Number(x.v.confronti) || 0), 0) };
+    const rotte = verificate.filter(x => x.v.ok === false);
+    if (rotte.length) {
+      const prima = rotte[0];
+      return {
+        ...base, ...comune, verificata: true, ok: false,
+        a: prima.v.a, b: prima.v.b, moduli: prima.v.moduli, tolleranza: prima.v.tolleranza,
+        dettaglio: rotte.map(x => conAnno(x.anno, x.v.dettaglio)).join('; '),
+        casi: rotte.flatMap(x => (x.v.casi || []).map(c => ({ anno: x.anno, ...c }))).slice(0, MAX_CASI),
+        ...(motivo ? { non_verificate_anni: motivo } : {}),
+      };
+    }
+    if (nonVerificate.length) {
+      return { ...base, ...comune, verificata: false, ok: null, motivo };
+    }
+    return { ...base, ...comune, verificata: true, ok: true, dettaglio: '', casi: [] };
+  });
+  return { ...ultimo, anni: lista.map(e => e.anno), esito: esitoDi(voci), nota: notaInvarianti(voci), voci };
 }
 
 /** Rilegge l'esito scritto: un JSON rotto o assente non rompe niente. */

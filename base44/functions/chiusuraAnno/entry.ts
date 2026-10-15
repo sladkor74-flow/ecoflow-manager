@@ -6,13 +6,21 @@ import { eAci } from "../../shared/canaleSecondaria.ts";
 import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { formatoKg } from "../../shared/formato.ts";
 import { utenteCorrente, rispostaSolaLettura } from "../../shared/permessi.ts";
-import { momentoRilevazione, canaleEClasse, classePfu } from "../../shared/giacenzaStoccaggi.ts";
+import { momentoRilevazione, canaleEClasse, classePfu, movimentiDopoLaChiusura, scriviRettificate } from "../../shared/giacenzaStoccaggi.ts";
+import { sitiDellAnno, arriviDopoLaChiusura } from "../../shared/giacenzaPortale.ts";
+import { ingressoMovimento } from "../../shared/ingressoMovimento.ts";
 import {
-  giornoChiusura, GRUPPO_TERZIARIE, movimentoChiusura,
-  leggiLetteraGiacenze, preparaChiusura, apertureDegliImpianti, sitiDellaChiusura,
+  giornoChiusura, giornoScritto, GRUPPO_TERZIARIE, movimentoChiusura, vociDelSito,
+  leggiLetteraGiacenze, preparaChiusura, apertureDegliImpianti, sitiDellaChiusura, proposteDegliImpianti,
+  arrivatiDopoLaChiusuraDellAnno,
 } from "../../shared/chiusuraAnno.ts";
 import { controlloCaricamenti, TIPI_RINVIO } from "../../shared/statoArchivi.ts";
 import { traccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
+
+// Gli archivi in piu' che la chiusura legge per le proposte degli impianti
+// (15/10/2026, difetti 4 e 6): il file degli ordini non dichiarati e il report
+// delle dichiarazioni, coi nomi del registro dei caricamenti (TIPI_GIACENZE).
+const TIPI_PROPOSTE = ['ordini_non_dichiarati', 'dichiarazioni_trattamento'];
 
 // La chiusura dell'anno: prepara la fotografia del 31 dicembre da cui
 // ripartiranno le giacenze dell'anno dopo, e la salva.
@@ -30,7 +38,12 @@ import { traccia, utenteDellaRichiesta, unisciTracce } from "../../shared/tracci
 //
 // Corpo della richiesta:
 //   { anno, azione, fotografia_del, letture, decisioni, letture_impianti,
-//     lettera_fogli, siti, sostituisci }
+//     lettera_fogli, siti, sostituisci, proponi, conferme }
+//   proponi   (solo 'prepara') le caselle degli impianti vuote prendono la
+//             proposta del gestionale, e la risposta le restituisce
+//             (letture_impianti_usate): la pagina le mette nelle caselle
+//   conferme  'chiave|RETE' o 'chiave|ACI': i numeri scritti diversi dalla
+//             proposta, confermati (15/10/2026, difetto 4)
 export default async function (req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -53,11 +66,17 @@ export default async function (req) {
     // salvataggio risponde 409 «rinviato» col motivo e non scrive niente, come
     // gia' fanno verifiche, quadrature e alert; preparare il dossier si puo'
     // sempre, perche' non scrive. Qui contano tutti e tre i file dei movimenti,
-    // perche' la chiusura li legge tutti (TIPI_RINVIO, 11/10/2026). Lo stato si
-    // legge prima e dopo aver letto gli archivi: un caricamento che parte mentre
-    // si legge, con una lettura sola, non si vedrebbe (controlloCaricamenti,
+    // perche' la chiusura li legge tutti (TIPI_RINVIO, 11/10/2026). E dal
+    // 15/10/2026 anche il file degli ordini non dichiarati e il report delle
+    // dichiarazioni, da cui vengono le proposte degli impianti (difetti 4 e 6):
+    // un archivio che la chiusura legge la ferma, uno che non legge no
+    // (prove/rinvioCaricamenti.mjs). I tipi restano quelli di TIPI_RINVIO.chiusura
+    // (shared/statoArchivi.ts), piu' i due delle proposte (TIPI_PROPOSTE): quando
+    // TIPI_RINVIO.chiusura li avra', l'unione non cambia niente. Lo stato si legge
+    // prima e dopo aver letto gli archivi: un caricamento che parte mentre si
+    // legge, con una lettura sola, non si vedrebbe (controlloCaricamenti,
     // shared/statoArchivi.ts).
-    const controllo = azione === 'salva' ? await controlloCaricamenti(base44, `la chiusura del ${anno}`, TIPI_RINVIO.chiusura) : null;
+    const controllo = azione === 'salva' ? await controlloCaricamenti(base44, `la chiusura del ${anno}`, [...new Set([...TIPI_RINVIO.chiusura, ...TIPI_PROPOSTE])]) : null;
     if (controllo && controllo.rinvio) return controllo.rinvio;
 
     const norm = normalizzaRagioneSociale;
@@ -67,17 +86,32 @@ export default async function (req) {
     const tipoStoc = (r) => tdNorm(r.tipo_destinazione) === 'stoc';
     const eSecondariaExtra = (r) => String(r.tipo_movimento || '').toLowerCase().trim() === 'secondaria';
 
-    const [reteAll, aciAll, extraAll, secAll, terzAll, rilevazioni, giacenzeSito, sitiAnnoDopo] = await Promise.all([
+    // LE PROPOSTE DEGLI IMPIANTI (15/10/2026, prova generale del cambio d'anno,
+    // difetti 4 e 6): la rete come il gestionale ha caricato il file degli ordini
+    // non dichiarati, l'ACI come la calcola al 31/12. Servono il file, il report
+    // delle dichiarazioni (che cosa il portale conosce) e le dichiarazioni
+    // mensili: tre archivi in piu', letti una volta con gli altri. I siti si
+    // leggono tutti, una volta: l'anno, l'anno dopo (dove vanno le aperture) e
+    // l'anno prima (un sito portato avanti, sitiDellAnno).
+    const [reteAll, aciAll, extraAll, secAll, terzAll, rilevazioni, sitiTutti, nonDichiarati, reportDichiarazioni, dichiarazioniSito] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
       fetchAll(base44.asServiceRole.entities.PrimariaAci),
       fetchAll(base44.asServiceRole.entities.ExtraRaccolta),
       fetchAll(base44.asServiceRole.entities.Secondaria),
       fetchAll(base44.asServiceRole.entities.Terziaria),
       fetchAll(base44.asServiceRole.entities.GiacenzaStoccaggio),
-      fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno }),
-      // Le righe dell'anno dopo: e' li' che vanno le aperture degli impianti.
-      fetchAll(base44.asServiceRole.entities.GiacenzaSito, { anno: anno + 1 }),
+      fetchAll(base44.asServiceRole.entities.GiacenzaSito),
+      fetchAll(base44.asServiceRole.entities.OrdineNonDichiarato),
+      fetchAll(base44.asServiceRole.entities.DichiarazioneTrattamento, null, 'id'),
+      fetchAll(base44.asServiceRole.entities.DichiarazioneSito),
     ]);
+    const giacenzeSito = sitiTutti.filter(g => Number(g.anno) === anno);
+    // Le righe dell'anno dopo: e' li' che vanno le aperture degli impianti.
+    const sitiAnnoDopo = sitiTutti.filter(g => Number(g.anno) === anno + 1);
+    // Chi la rete non la dichiara, anche se la riga dell'anno manca e si porta
+    // avanti dall'anno prima (decisione dell'utente del 15/10/2026, D3).
+    const sitiChiusi = sitiDellAnno(sitiTutti, anno, { chiaveDi: normalizzaRagioneSociale, annoDiOggi: anno });
+    const nonDichiaraRete = new Set(sitiChiusi.righe.filter(g => g.dichiara_rete === false).map(g => normalizzaRagioneSociale(g.sito)));
 
     // --- I nomi da mostrare: la forma piu' completa fra quelle degli archivi ---
     const nomi = new Map();
@@ -191,7 +225,7 @@ export default async function (req) {
         piazzali.push({ chiave: ns, nome, rilevazioni: rilevPer.get(ns) || [], movimenti: comeStoc ? comeStoc.movimenti : [] });
       }
       if (entrano.impianti.has(ns)) {
-        impianti.push({ chiave: ns, nome, movimenti: comeImp ? comeImp.movimenti : [] });
+        impianti.push({ chiave: ns, nome, movimenti: comeImp ? comeImp.movimenti : [], ...(nonDichiaraRete.has(ns) ? { dichiara_rete: false } : {}) });
       }
     }
     const perNome = (a, b) => a.nome.localeCompare(b.nome);
@@ -202,14 +236,48 @@ export default async function (req) {
     // condiviso, cosi' la prova la puo' rifare sul file vero.
     const lettera = body.lettera_fogli ? leggiLetteraGiacenze(body.lettera_fogli) : null;
 
+    // LE PROPOSTE, E LE CASELLE CHE LE PRENDONO (15/10/2026). La rete di un
+    // impianto e' la sua parte del file come il gestionale l'ha caricato, l'ACI
+    // la giacenza che calcola al 31/12 (decisione dell'utente del 15/10/2026,
+    // D2): la pagina le mette nelle caselle vuote (proponi) e le salva
+    // l'amministratore quando le ha viste. Al salvataggio contano solo le
+    // caselle come arrivano: una vuota resta vuota.
+    const proposte = proposteDegliImpianti({
+      anno, impianti, nonDichiarati, reportDichiarazioni, primarieRete: reteAll, primarieAci: aciAll, secondarie: secAll,
+      dichiarazioniSito, giacenzeSito: sitiTutti, chiaveDi: norm,
+    });
+    const lettureImpianti = { ...(body.letture_impianti || {}) };
+    const vuota = (v) => v === undefined || v === null || v === '';
+    // Solo per la chiusura che si sta facendo: l'anno in corso, o quello appena
+    // finito a gennaio e febbraio. Una chiusura vecchia - il 2025 guardato
+    // nell'ottobre 2026 - non riempie le caselle da se': salvarla per sbaglio
+    // riscriverebbe le aperture di un anno gia' aperto a mano. Le proposte si
+    // vedono lo stesso, accanto alle caselle.
+    const oggi = oggiRoma();
+    const annoDiOggi = Number(oggi.slice(0, 4));
+    const chiusuraDiAdesso = anno >= annoDiOggi || (anno === annoDiOggi - 1 && Number(oggi.slice(5, 7)) <= 2);
+    if (azione === 'prepara' && body.proponi === true && chiusuraDiAdesso) {
+      for (const i of impianti) {
+        const l = lettureImpianti[i.chiave] || {};
+        if (!vuota(l.pfu_kg) || !vuota(l.aci_kg)) continue;
+        const p = proposte[i.chiave];
+        if (!p) continue;
+        const proposta = {};
+        if (!p.rete.non_dovuta && p.rete.kg !== null) proposta.pfu_kg = p.rete.kg;
+        if (p.aci.kg !== null) proposta.aci_kg = p.aci.kg;
+        if (Object.keys(proposta).length) lettureImpianti[i.chiave] = proposta;
+      }
+    }
+
     const dossier = preparaChiusura({
       anno,
       fotografia_del: String(body.fotografia_del || '').slice(0, 10),
       piazzali, impianti,
       letture: body.letture || {},
       decisioni: body.decisioni || {},
-      letture_impianti: body.letture_impianti || {},
+      letture_impianti: lettureImpianti,
       lettera,
+      proposte,
     });
 
     // LE APERTURE DEGLI IMPIANTI DELL'ANNO DOPO (10/10/2026). Le letture del 31/12
@@ -217,12 +285,36 @@ export default async function (req) {
     // cui ogni impianto riparte. Gia' nella preparazione si mostra che cosa si
     // scrivera', cosi' chi salva lo vede prima. La regola sta in
     // shared/chiusuraAnno.ts (apertureDegliImpianti), con le sue prove.
+    const salvataIl = azione === 'salva' ? new Date().toISOString() : '';
     const aperture = apertureDegliImpianti({
-      anno, impianti: dossier.impianti || impianti, letture_impianti: body.letture_impianti || {},
-      siti: [...giacenzeSito, ...sitiAnnoDopo], chiave: norm, sostituisci: !!body.sostituisci,
+      anno, impianti: dossier.impianti || impianti, letture_impianti: lettureImpianti,
+      siti: sitiTutti, chiave: norm, sostituisci: !!body.sostituisci,
+      proposte, conferme: Array.isArray(body.conferme) ? body.conferme : [], salvata_il: salvataIl,
     });
 
-    if (azione === 'prepara') return Response.json({ ...dossier, aperture, puo_salvare: puoScrivere });
+    // I CARICHI DI DICEMBRE ARRIVATI DOPO LA CHIUSURA (15/10/2026, difetto 5):
+    // entrano da soli nell'apertura dell'anno dopo, e la scheda lo dice
+    // all'amministratore. I movimenti sono gia' letti: nessuna lettura in piu'.
+    if (azione === 'prepara') {
+      const movPiazzali = movimentiDopoLaChiusura();
+      const arrivi = arriviDopoLaChiusura();
+      for (const [lista, archivio] of [[reteAll, 'PrimariaRete'], [aciAll, 'PrimariaAci'], [secAll, 'Secondaria']]) {
+        for (const r of lista) {
+          const d = ingressoMovimento(r, archivio, norm);
+          movPiazzali.segna(r, d);
+          arrivi.segna(r, d);
+        }
+      }
+      const arrivati = arrivatiDopoLaChiusuraDellAnno({
+        anno, rilevazioni, righeAnnoDopo: sitiAnnoDopo, piazzali: (k) => movPiazzali.di(k), arrivi: (k, c) => arrivi.di(k, c),
+        dichiarazioni: dichiarazioniSito, chiaveDi: norm, nomeDi,
+      });
+      if (arrivati.avviso) dossier.avvisi.push(arrivati.avviso);
+      return Response.json({
+        ...dossier, aperture, puo_salvare: puoScrivere, arrivati_dopo_la_chiusura: arrivati.voci,
+        ...(body.proponi === true && chiusuraDiAdesso ? { letture_impianti_usate: lettureImpianti } : {}),
+      });
+    }
 
     const rinvio = await controllo.dopo();
     if (rinvio) return rinvio;
@@ -237,7 +329,7 @@ export default async function (req) {
       if (soloQuesti.size && !soloQuesti.has(c.sito)) continue;
       if (!c.pronto) { saltati.push({ sito: c.nome, motivo: c.blocchi.map(b => b.testo).join(' ') }); continue; }
       if (c.gia_salvata && !body.sostituisci) {
-        saltati.push({ sito: c.nome, motivo: `C'e' gia' una fotografia del ${c.giorno}: per rifarla serve la conferma di sostituzione.` });
+        saltati.push({ sito: c.nome, motivo: `C'e' gia' una fotografia del ${giornoScritto(c.giorno)}: per rifarla serve la conferma di sostituzione.` });
         continue;
       }
       const precedente = (rilevPer.get(c.sito) || [])
@@ -253,7 +345,7 @@ export default async function (req) {
         : voci.join('; '));
       const rettifiche = rett.applicate.map(a => `${a.id_ordine || a.numero_fir} ${a.effetto_kg > 0 ? '+' : ''}${formatoKg(a.effetto_kg)} kg in ${a.classe}${a.classe_del_portale ? ` (il portale lo aveva in ${a.classe_del_portale})` : ''}`);
       const note = [
-        `Chiusura ${anno}, fotografia del ${c.giorno} salvata da ${user.email || 'amministratore'} il ${oggiRoma()}.`,
+        `Chiusura ${anno}, fotografia del ${giornoScritto(c.giorno)} salvata da ${user.email || 'amministratore'} il ${giornoScritto(oggiRoma())}.`,
         `Lettura del portale: P ${formatoKg(rett.lettura.P)}, M ${formatoKg(rett.lettura.M)}, G1 ${formatoKg(rett.lettura.G1)}, G2 ${formatoKg(rett.lettura.G2)}, ACI ${formatoKg(rett.lettura.ACI)} kg.`,
         rettifiche.length
           ? `Rettificata con l'elenco di dicembre (${rettifiche.length} ${rettifiche.length === 1 ? 'movimento' : 'movimenti'} che il portale non aveva ancora chiuso): ${elenca(rettifiche)}.`
@@ -276,6 +368,15 @@ export default async function (req) {
           class3_kg: c.da_salvare.G1,
           class4_kg: c.da_salvare.G2,
           class9_kg: c.da_salvare.ACI,
+          // L'istante del salvataggio e le voci dell'elenco di dicembre gia' viste
+          // (rettificate, decise, o lasciate com'erano: gli aperti di prima): i
+          // carichi di dicembre chiusi a portale dopo questa sera si aggiungono
+          // leggendo, una volta sola (letturaDellaChiusura, 15/10/2026, difetto 5).
+          chiusura_salvata_il: salvataIl,
+          chiusura_rettificate_json: scriviRettificate(dossier.fotografia_del || c.giorno, (() => {
+            const s = vociDelSito(dossier.elenco_dicembre, c.sito, 'stoc');
+            return s ? [...s.voci, ...s.aperti_prima] : [];
+          })()),
           note,
         });
         salvati.push({ sito: c.nome, id: creato && creato.id, classi: c.da_salvare, sostituisce: c.gia_salvata });
@@ -296,7 +397,7 @@ export default async function (req) {
       try {
         const scritta = await traccia(base44.asServiceRole.entities, 'GiacenzaSito', x.azione === 'aggiorna' ? x.id : null, x.dati, comeScrive);
         tracce.push(scritta.traccia);
-        apertureScritte.push({ sito: x.sito, azione: x.azione, rete_t: x.dati.giacenza_riferimento_t, aci_t: x.dati.giacenza_riferimento_aci_t });
+        apertureScritte.push({ sito: x.sito, azione: x.azione, rete_t: x.dati.giacenza_riferimento_t, aci_t: x.dati.giacenza_riferimento_aci_t, ...(x.senza_apertura ? { senza_apertura: true } : {}) });
       } catch (e) {
         apertureNonScritte.push({ sito: x.sito, motivo: `Non si e' riusciti a scrivere l'apertura: ${e && e.message ? e.message : e}` });
       }

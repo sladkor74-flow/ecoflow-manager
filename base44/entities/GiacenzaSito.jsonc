@@ -47,6 +47,21 @@
       "format": "date",
       "description": "Il giorno delle letture da cui vengono le giacenze di riferimento (il 31/12 dell'anno prima), scritto dalla chiusura. Vuoto: l'apertura non e' stata scritta da una chiusura"
     },
+    // QUANDO LA CHIUSURA L'HA SALVATA, E CHE COSA AVEVA GIA' VISTO (15/10/2026,
+    // prova generale del cambio d'anno, difetto 5). La sera del 31/12 il
+    // gestionale non ha i carichi finiti a fine dicembre che il portale chiude a
+    // gennaio: arrivano dopo, e l'apertura li deve contenere. Con l'istante del
+    // salvataggio e i movimenti gia' contati, Giacenze e Dichiarazioni li
+    // aggiungono leggendo (aperturaNetta), senza contarli due volte.
+    "apertura_salvata_il": {
+      "type": "string",
+      "format": "date-time",
+      "description": "L'istante in cui la chiusura dell'anno prima ha salvato l'apertura. Vuoto: apertura scritta a mano o prima del 15/10/2026"
+    },
+    "apertura_rettificate_json": {
+      "type": "string",
+      "description": "JSON scritto dalla chiusura: { fotografia_del, voci, voci_aci }. Il giorno del file degli ordini non dichiarati da cui viene la rete, e i movimenti dell'anno chiuso che la chiusura aveva gia' contato: quelli arrivati dopo si aggiungono leggendo"
+    },
     "dichiara_rete": {
       "type": "boolean",
       "default": true,

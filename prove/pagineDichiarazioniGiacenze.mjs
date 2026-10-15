@@ -20,6 +20,7 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { caricaLibPagine } from './dati/libPagine.mjs';
+import { caricaPagina, clienteFinto, trova, aspetta } from './dati/paginaFinta.mjs';
 
 const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
 const sorgente = (p) => readFileSync(qui('../' + p), 'utf8').replace(/\r/g, '');
@@ -184,7 +185,9 @@ console.log('IL NOME DEL GRUPPO DELLE TERZIARIE E\' UNO SOLO');
 {
   const c = sorgente('base44/shared/chiusuraAnno.ts');
   verifica('la chiusura non ne ha una sua copia: lo prende da shared/giacenzaPortale.ts',
-    !/export const GRUPPO_TERZIARIE\s*=/.test(c) && c.includes('import { GRUPPO_TERZIARIE } from "./giacenzaPortale.ts";'));
+    // Dal 15/10/2026 la chiusura prende dallo stesso modulo anche le regole delle
+    // proposte: l'import di giacenzaPortale.ts ha piu' nomi, GRUPPO_TERZIARIE fra loro.
+    !/export const GRUPPO_TERZIARIE\s*=/.test(c) && /import \{[^}]*\bGRUPPO_TERZIARIE\b[^}]*\} from "\.\/giacenzaPortale\.ts";/.test(c));
   const chiusura = await import('../base44/shared/chiusuraAnno.ts');
   const portale = await import('../base44/shared/giacenzaPortale.ts');
   verifica('e chi lo prende dalla chiusura trova lo stesso valore', chiusura.GRUPPO_TERZIARIE === portale.GRUPPO_TERZIARIE && chiusura.GRUPPO_TERZIARIE === 'TERZIARIE');
@@ -197,6 +200,46 @@ console.log("L'APERTURA SCRITTA DI UN PIAZZALE CONTA SOLO SENZA LETTURE, E LA SC
     t.includes("form.tipo_destinazione === 'stoc' ? 'Apertura di rete (t), solo senza rilevazioni' : 'Giacenza di riferimento (t)'") && t.includes('{NOTA_APERTURA_PIAZZALE}'));
   verifica("nell'elenco un piazzale con letture mostra l'apertura dall'ancora, quella delle Giacenze",
     t.includes("s.tipo_destinazione === 'stoc' && tgt(s)?.data_rilevazione ?") && t.includes('{fmt(tgt(s).giacenza_riferimento_t)}'));
+}
+
+// LA NUOVA RILEVAZIONE PROPONE IL GIORNO ITALIANO (15/10/2026, prova generale del
+// cambio d'anno, difetto 29). L'01/01/2027 alle 00:30 il modulo proponeva il
+// 31/12/2026 (il giorno UTC), e la lettura del portale di quel momento,
+// salvata col giorno proposto, prendeva il posto della fotografia della
+// chiusura: il 2026 di Nappi Sud a 25,88 t invece di 35,88. Il modulo vero,
+// montato col banco delle pagine, con l'orologio fermo.
+console.log('LA NUOVA RILEVAZIONE DEI PIAZZALI PROPONE IL GIORNO ITALIANO, E AVVISA SUL 31/12 DELLA CHIUSURA');
+{
+  const OraVera2 = Date;
+  const ferma = (iso) => { const ms = OraVera2.parse(iso); globalThis.Date = class extends OraVera2 { constructor(...a) { if (a.length) super(...a); else super(ms); } static now() { return ms; } }; };
+  const { Componente, monta } = await caricaPagina('components/giacenze/RilevazioneForm.jsx');
+  const fotoChiusura = { id: 'f1', sito: 'NAPPI SUD SRL', data_rilevazione: '2026-12-31', class1_kg: 31400, chiusura_salvata_il: '2026-12-31T22:30:00.000Z', note: 'Chiusura 2026, fotografia del 31/12/2026 salvata da prova il 31/12/2026.' };
+  const props = { open: true, onClose() {}, precompilato: { sito: 'NAPPI SUD SRL' }, sitiSuggeriti: [], unitaPerSito: new Map(), onSaved() {} };
+  const giornoProposto = async (iso, archivi = {}) => {
+    const c = clienteFinto({ archivi });
+    globalThis.__CLIENTE_FINTO = c.cliente;
+    ferma(iso);
+    try {
+      const r = monta(Componente, props);
+      await aspetta();
+      const campo = trova(r.albero, el => el.props && el.props.type === 'date')[0];
+      const avviso = trova(r.albero, el => el.props && el.props['data-avviso'] === 'fotografia-chiusura').length > 0;
+      return { r, campo, avviso, c };
+    } finally { globalThis.Date = OraVera2; }
+  };
+  const mezzanotte = await giornoProposto('2026-12-31T23:30:00Z');
+  verifica("l'01/01/2027 alle 00:30 italiane propone l'01/01/2027, non il 31/12/2026", mezzanotte.campo && mezzanotte.campo.props.value === '2027-01-01', mezzanotte.campo && mezzanotte.campo.props.value);
+  const sera = await giornoProposto('2026-12-31T22:30:00Z');
+  verifica('il 31/12/2026 alle 23:30 italiane propone il 31/12/2026', sera.campo && sera.campo.props.value === '2026-12-31', sera.campo && sera.campo.props.value);
+  // Il 31/12 con la fotografia della chiusura gia' salvata: l'avviso, prima di salvare.
+  const conFoto = await giornoProposto('2026-12-31T22:30:00Z', { GiacenzaStoccaggio: [fotoChiusura] });
+  verifica('sul 31/12, con la fotografia della chiusura gia\' salvata, il modulo avvisa che la sostituirebbe', conFoto.avviso === true);
+  verifica('e per saperlo legge una volta le rilevazioni di quel giorno', conFoto.c.letture('GiacenzaStoccaggio').length === 1 && conFoto.c.letture('GiacenzaStoccaggio')[0].filtro.data_rilevazione === '2026-12-31', JSON.stringify(conFoto.c.letture('GiacenzaStoccaggio')));
+  const senzaFoto = await giornoProposto('2026-12-31T22:30:00Z', { GiacenzaStoccaggio: [{ ...fotoChiusura, chiusura_salvata_il: undefined, note: 'lettura a mano' }] });
+  verifica('una rilevazione del 31/12 scritta a mano non e\' la fotografia della chiusura: niente avviso', senzaFoto.avviso === false);
+  verifica('un altro giorno non legge niente', mezzanotte.c.letture('GiacenzaStoccaggio').length === 0);
+  for (const x of [mezzanotte, sera, conFoto, senzaFoto]) x.r.smonta();
+  delete globalThis.__CLIENTE_FINTO;
 }
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

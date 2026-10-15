@@ -6,8 +6,8 @@ import { annoRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
 import { normalizzaRagioneSociale } from "../../shared/normalizzaRagioneSociale.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
-import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza, kgReteDiRilevazione, kgAciDiRilevazione, PERCHE_PIAZZALE_SENZA_LETTURA, PERCHE_PIAZZALE_SENZA_INIZIO } from "../../shared/giacenzaStoccaggi.ts";
-import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaNetta, nostraRiga, formulariDaSistemare, avvisoSenzaFine, ORDINE_GRUPPI, PERCHE_SENZA_FOTOGRAFIA, giornoAlPiazzale, nellAttesaDellAnno, finiDelleSecondarie, giornoAllImpianto, letturaDelTrentuno, PERCHE_SENZA_LETTURA_DEL_TRENTUNO, annoPrimaDelGestionale, PERCHE_ANNO_PRIMA_DEL_GESTIONALE, partenzeDegliStoccaggi, attesaChiusaPerNoi, totaleDellaColonna } from "../../shared/giacenzaPortale.ts";
+import { momentoRilevazione, dopoLaRilevazione, movimentoStoccaggio, verificaRilevazione, saldoMovimentiInArchivio, riconciliazionePiazzale, ancoraDellAnno, annoDellaLettura, puntoDiPartenza, anomaliaRilevazione, classePfu, canaleEClasse, ordiniDellaGiacenza, kgReteDiRilevazione, kgAciDiRilevazione, PERCHE_PIAZZALE_SENZA_LETTURA, PERCHE_PIAZZALE_SENZA_INIZIO, movimentiDopoLaChiusura, rilevazioniDopoLaChiusura, ciSonoFotografieDellaChiusura } from "../../shared/giacenzaStoccaggi.ts";
+import { giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, aperturaDelSito, nostraRiga, formulariDaSistemare, avvisoSenzaFine, ORDINE_GRUPPI, PERCHE_SENZA_FOTOGRAFIA, giornoAlPiazzale, nellAttesaDellAnno, finiDelleSecondarie, giornoAllImpianto, letturaDelTrentuno, PERCHE_SENZA_LETTURA_DEL_TRENTUNO, annoPrimaDelGestionale, PERCHE_ANNO_PRIMA_DEL_GESTIONALE, partenzeDegliStoccaggi, attesaChiusaPerNoi, totaleDellaColonna, sitiDellAnno, arriviDopoLaChiusura, sitiPortati } from "../../shared/giacenzaPortale.ts";
 import { ingressoMovimento } from "../../shared/ingressoMovimento.ts";
 import { carichiNonNelFile } from "../../shared/riconciliazioneDaDichiarare.ts";
 import { leggiDichiarazioni } from "../../shared/dichiarazioniImpianti.ts";
@@ -91,7 +91,7 @@ export default async function(req) {
     // stesso ordine del filtro per anno: fetchAll ordina tutte e due le letture
     // allo stesso modo, e filtrare non sposta niente. Ogni archivio si legge una
     // volta per chiamata (prove/velocitaGiacenze.mjs).
-    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSitoTutte, giacenzeStoccaggio, dichiarazioniSito, impiantiTarget, targetRaccoglitori, targetMensili] = await Promise.all([
+    const [nonDichiarati, dichiarazioni, reteAll, aciAll, extraAll, secAll, terzAll, giacenzeSitoTutte, giacenzeStoccaggioLette, dichiarazioniSito, impiantiTarget, targetRaccoglitori, targetMensili] = await Promise.all([
       fetchAll(base44.asServiceRole.entities.OrdineNonDichiarato),
       fetchAll(base44.asServiceRole.entities.DichiarazioneTrattamento),
       fetchAll(base44.asServiceRole.entities.PrimariaRete),
@@ -109,8 +109,40 @@ export default async function(req) {
       fetchAll(base44.asServiceRole.entities.TargetMensile),
     ]);
     // L'anno e' un numero obbligatorio di GiacenzaSito: lo stesso confronto del filtro.
-    const giacenzeSito = giacenzeSitoTutte.filter(g => g.anno === annoNum);
+    // I SITI DELL'ANNO, E QUELLI DELL'ANNO PRIMA CHE LA RIGA NON L'HANNO ANCORA
+    // (15/10/2026, prova generale del cambio d'anno, difetti 11 e 12; decisione
+    // dell'utente del 15/10/2026, D3). Dal 1° gennaio, finche' ne' la copia
+    // d'anno ne' la chiusura hanno scritto la riga del 2027, un sito del 2026 si
+    // porta avanti con ruolo, tipologia e dichiara_rete (sitiDellAnno, la regola
+    // anche delle Dichiarazioni e dell'elenco «Da dichiarare»): Tecnogum non torna
+    // dichiarante della rete. E un'apertura mai scritta, in un anno che ha l'anno
+    // prima nel gestionale, e' «—» col perche', non zero (aperturaNetta).
+    // L'anno prima del gestionale si giudica sulle righe dell'anno sole, come prima.
+    const sitiAnno = sitiDellAnno(giacenzeSitoTutte, annoNum, { chiaveDi: norm, annoDiOggi: annoCorrenteRoma() });
+    const giacenzeSito = sitiAnno.righe;
     const giacenzeAnnoDopo = annoTargetChiuso ? giacenzeSitoTutte.filter(g => g.anno === annoNum + 1) : [];
+    // I CARICHI DELL'ANNO CHIUSO ARRIVATI DOPO LA CHIUSURA (15/10/2026, difetto
+    // 5). La chiusura salvata la sera del 31/12 non ha i carichi finiti a fine
+    // dicembre che il portale chiude a gennaio: le sue fotografie (piazzali) e le
+    // sue aperture (impianti) si leggono con quelli arrivati dopo, come se la
+    // chiusura fosse stata salvata dopo di loro. Si raccolgono solo i movimenti
+    // che possono esserlo (finiti a dicembre o chiusi a portale l'anno dopo), e
+    // solo se una chiusura salvata c'e': sugli archivi di oggi niente cambia.
+    const servonoGliArrivi = ciSonoFotografieDellaChiusura(giacenzeStoccaggioLette) || giacenzeSitoTutte.some(g => g && g.apertura_salvata_il);
+    const arriviPiazzali = movimentiDopoLaChiusura();
+    const arriviImpianti = arriviDopoLaChiusura();
+    if (servonoGliArrivi) {
+      for (const [lista, archivio] of [[reteAll, 'PrimariaRete'], [aciAll, 'PrimariaAci'], [secAll, 'Secondaria']]) {
+        for (const r of lista) {
+          const d = ingressoMovimento(r, archivio, norm);
+          arriviPiazzali.segna(r, d);
+          arriviImpianti.segna(r, d);
+        }
+      }
+    }
+    const giacenzeStoccaggio = servonoGliArrivi ? rilevazioniDopoLaChiusura(giacenzeStoccaggioLette, (k) => arriviPiazzali.di(k), norm) : giacenzeStoccaggioLette;
+    const opzioniAperture = { annoPrimaNelGestionale: sitiAnno.haLAnnoPrima, arrivi: (k, c) => arriviImpianti.di(k, c) };
+    const righeDelSito = (ns, td) => giacenzeSito.filter(x => norm(x.sito) === ns && (tdNorm(x.tipo_destinazione) || 'imp') === td);
     // Gli impianti di Target & Status di quell'anno con un target: compaiono anche
     // senza movimenti, come prima quelli con il target scritto in Giacenze.
     const impiantiConTarget = recordDellAnno(impiantiTarget, annoNum)
@@ -251,7 +283,7 @@ export default async function(req) {
     // anno chiuso che qui non e' mai stato aperto, senza siti ne' dichiarazioni.
     // La giacenza dei suoi impianti non si ricostruisce, e tutti e due i moduli
     // lo dicono con lo stesso perche' (annoPrimaDelGestionale).
-    const primaDelGestionale = annoPrimaDelGestionale({ anno: annoNum, annoDiOggi, sitiDellAnno: giacenzeSito });
+    const primaDelGestionale = annoPrimaDelGestionale({ anno: annoNum, annoDiOggi, sitiDellAnno: sitiAnno.dellAnno });
     const fineAnnoChiuso = `${annoNum}-12-31`;
     // Il giorno in cui un carico passato da uno stoccaggio e' arrivato
     // all'impianto: la fine della sua secondaria (giornoAllImpianto, il giorno del
@@ -1028,10 +1060,12 @@ export default async function(req) {
         // caricate dopo. Qui si scriveva la fotografia di oggi su qualunque anno.
         // Senza la lettura «—» col perche'; chi la rete non la dichiara resta «—»
         // col suo. Le classi della fotografia di oggi non sono di quel giorno.
-        const lettura = nonDichiaraRete.has(ns) ? null : letturaDelTrentuno(giacenzeAnnoDopo, { chiave: ns, canale: 'RETE', anno: annoNum, dichiarazioni: dichiarazioniSito, chiaveDi: norm });
+        const lettura = nonDichiaraRete.has(ns) ? null : letturaDelTrentuno(giacenzeAnnoDopo, { chiave: ns, canale: 'RETE', anno: annoNum, dichiarazioni: dichiarazioniSito, chiaveDi: norm, arrivi: opzioniAperture.arrivi });
         giacenza_portale_t = lettura ? lettura.netta_t : null;
         giacenza_rete_t = giacenza_portale_t;
-        fotografia = { del: lettura ? fineAnnoChiuso : null, lettura_del_trentuno: true, foto_t: lettura ? lettura.letta_t : 0, aggiunti: 0, aggiunti_t: 0, dichiarato_dopo_t: lettura ? lettura.dichiarato_dopo_t : 0, rete_non_dichiarata: nonDichiaraRete.has(ns) };
+        // I carichi di dicembre arrivati dopo la chiusura sono dentro la lettura
+        // (15/10/2026, difetto 5): si dicono, solo se ci sono.
+        fotografia = { del: lettura ? fineAnnoChiuso : null, lettura_del_trentuno: true, foto_t: lettura ? lettura.letta_t : 0, aggiunti: 0, aggiunti_t: 0, dichiarato_dopo_t: lettura ? lettura.dichiarato_dopo_t : 0, rete_non_dichiarata: nonDichiaraRete.has(ns), ...(lettura && lettura.arrivati_dopo_t ? { arrivati_dopo_la_chiusura_t: lettura.arrivati_dopo_t } : {}) };
         if (!lettura && !nonDichiaraRete.has(ns)) perche_senza_giacenza = PERCHE_SENZA_LETTURA_DEL_TRENTUNO(annoNum);
         aggiornata_al = lettura ? fineAnnoChiuso : null;
       } else {
@@ -1133,8 +1167,17 @@ export default async function(req) {
       } else if (td === 'imp') {
         // Al netto delle dichiarazioni dell'anno chiuso caricate dopo la lettura del
         // 31/12 (aperturaNetta, 10/10/2026): lo stesso conto del modulo Dichiarazioni.
-        const aperturaAci = g ? aperturaNetta(g, 'ACI', dichiarazioniSito, norm).netta_t : 0;
-        giacenza_aci_t = aperturaAci + conferito_aci_t + secondarie_aci_in_t - dichiaratoCanale(ns, 'ACI');
+        // UN'APERTURA ACI MAI LETTA NON VALE ZERO (15/10/2026, difetto 6): Gatim,
+        // 5 t di ACI al 31/12/2026 e la casella della chiusura vuota, ripartiva da
+        // 0 il 02/01 e da -5 t il 15/01. Ora la giacenza ACI e' «—» col perche',
+        // le stesse parole delle Dichiarazioni (aperturaDelSito).
+        const aperturaAci = aperturaDelSito(righeDelSito(ns, 'imp'), 'ACI', dichiarazioniSito, norm, opzioniAperture);
+        if (aperturaAci.manca) {
+          giacenza_aci_t = null;
+          perche_canali = { ...(perche_canali || {}), ACI: aperturaAci.perche };
+        } else {
+          giacenza_aci_t = aperturaAci.netta_t + conferito_aci_t + secondarie_aci_in_t - dichiaratoCanale(ns, 'ACI');
+        }
         // Le secondarie di extra arrivate qui entrano nella giacenza come quelle
         // ACI: fuori dal conferito, la giacenza resta quella di prima.
         giacenza_extra_t = conferito_extra_t + secondarie_extra_in_t - dichiaratoCanale(ns, 'EXTRA_RACCOLTA');
@@ -1165,7 +1208,8 @@ export default async function(req) {
       // deve dire lo stesso numero che il modulo Dichiarazioni usa come apertura.
       // Per un piazzale con almeno una lettura e' l'ancora portata al 31/12
       // (aperturaPiazzale): il campo scritto conta solo per chi letture non ne ha.
-      const aperturaRete = g ? aperturaNetta(g, 'RETE', dichiarazioniSito, norm) : null;
+      // Un'apertura di rete mai scritta (15/10/2026) e' «—» anche qui, col perche'.
+      const aperturaRete = g ? aperturaDelSito(righeDelSito(ns, td), 'RETE', dichiarazioniSito, norm, opzioniAperture) : null;
       const aperturaLetta = td === 'stoc' ? aperturaPiazzale(ns, 'RETE') : null;
       const giacenza_riferimento_t = aperturaLetta !== null ? aperturaLetta : aperturaRete ? aperturaRete.netta_t : 0;
       const tipologia_trattamento = g?.tipologia_trattamento || '';
@@ -1245,6 +1289,10 @@ export default async function(req) {
         giacenza_negativa: giacenza_portale_t !== null && giacenza_portale_t < 0,
         giacenza_rete_t: giacenza_rete_t !== null ? r2(giacenza_rete_t) : null,
         rete_non_dovuta: td === 'imp' && nonDichiaraRete.has(ns),
+        // Un sito portato dall'anno prima lo dice (revisione del 15/10/2026;
+        // decisione dell'utente del 15/10/2026, D3): ruolo e «dichiara la rete»
+        // sono dell'anno prima, da confermare sul contratto. Solo se lo e'.
+        ...(g && g.portata_dal ? { portata_dal: g.portata_dal, nota_portata: g.nota_portata } : {}),
         giacenza_aci_t: giacenza_aci_t !== null ? r2(giacenza_aci_t) : null,
         giacenza_extra_t: giacenza_extra_t !== null ? r2(giacenza_extra_t) : null,
         // Perche' la giacenza di rete e' null: il file del portale mai caricato
@@ -1320,7 +1368,11 @@ export default async function(req) {
         target_primarie_ripartite_t: r2(tgt.target_primarie_ripartite_t),
         target_primarie_ripartizione: tgt.ripartizione.map(x => ({ raccoglitore: x.raccoglitore, regione: x.regione, t: r2(x.t), previsto: !!x.stimato })),
         target_totale_t: r2(target_totale_t),
-        giacenza_riferimento_t: r2(giacenza_riferimento_t),
+        giacenza_riferimento_t: giacenza_riferimento_t === null ? null : r2(giacenza_riferimento_t),
+        // Perche' l'apertura non c'e' (15/10/2026): solo quando manca.
+        ...(giacenza_riferimento_t === null && aperturaRete && aperturaRete.perche ? { perche_apertura: aperturaRete.perche } : {}),
+        // I carichi di dicembre arrivati dopo la chiusura e entrati nell'apertura (15/10/2026, difetto 5): solo se ci sono.
+        ...(td === 'imp' && aperturaRete && aperturaRete.arrivati_dopo ? { apertura_arrivati_dopo: aperturaRete.arrivati_dopo, apertura_arrivati_dopo_t: aperturaRete.arrivati_dopo_t } : {}),
         tipologia_trattamento,
         residuo_t: residuo_t !== null ? r2(residuo_t) : null,
         percentuale_target: percentuale_target !== null ? r2(percentuale_target) : null,
@@ -1489,8 +1541,11 @@ export default async function(req) {
     // Stesso portale dei gruppi: un senza fine di un altro anno che il portale
     // conosce e' contato anche qui (22/09/2026).
     totali.date_da_sistemare = daSistemare.perCanale(portaleConosce);
+    // I siti portati dall'anno prima, da confermare (revisione del 15/10/2026,
+    // D3): l'elenco e la frase, le stesse delle Dichiarazioni. Solo se ci sono.
+    const portati = sitiPortati(sitiAnno.portate, annoNum);
 
-    return Response.json({ anno: annoNum, righe, totali, anomalie });
+    return Response.json({ anno: annoNum, righe, totali, anomalie, ...(portati.elenco.length ? { siti_portati: portati.elenco, nota_siti_portati: portati.nota } : {}) });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

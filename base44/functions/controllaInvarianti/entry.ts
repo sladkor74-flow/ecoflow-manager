@@ -4,7 +4,7 @@ import { oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eAmministratore, rispostaSolaLettura } from "../../shared/permessi.ts";
 import { TIPI_GIACENZE } from "../../shared/registroCaricamenti.ts";
 import { controlloCaricamenti } from "../../shared/statoArchivi.ts";
-import { VOCI_INVARIANTI, FONTI, fontiDelleVoci, verificaInvarianti, unisciInvarianti, leggiInvarianti, riportaRotte, eRotta, motiviNonVerificate } from "../../shared/invarianti.ts";
+import { VOCI_INVARIANTI, FONTI, fontiDelleVoci, verificaInvarianti, unisciInvarianti, leggiInvarianti, riportaRotte, eRotta, motiviNonVerificate, anniDaControllare, unisciAnni } from "../../shared/invarianti.ts";
 import { conBattito, messaggioErrore } from "../../shared/battito.ts";
 
 // IL CONTROLLO DELLE IDENTITA' FRA MODULI (chiusura dell'audit, 11/10/2026).
@@ -22,7 +22,12 @@ import { conBattito, messaggioErrore } from "../../shared/battito.ts";
 //   funzione risponde «sola lettura» senza chiedere niente a nessuno, perche' le
 //   tre funzioni che chiama rileggono tutti gli archivi dei movimenti;
 // - nessun anno negli argomenti: vale quello in corso, cosi' il 1° gennaio passa
-//   da se';
+//   da se'; e a gennaio e febbraio anche l'anno prima, che si sta ancora
+//   chiudendo (15/10/2026, prova generale del cambio d'anno, difetto 27: dal
+//   01/01/2027 un'identita' rotta del 2026 spariva mentre i due moduli dicevano
+//   ancora due numeri diversi). La fotografia resta una per giorno, coi casi dei
+//   due anni insieme, e ogni caso dice il suo anno (anniDaControllare,
+//   unisciAnni in shared/invarianti.ts);
 // - con un caricamento in corso, interrotto o non riuscito di un archivio che
 //   quei moduli leggono (TIPI_GIACENZE) non si confronta niente: due moduli letti
 //   su un archivio a meta' direbbero numeri diversi che non lo sono. Risponde 409
@@ -70,11 +75,14 @@ async function controlla(req) {
 
     // I numeri dalle funzioni vere, tutte insieme: una che non risponde non ferma
     // le altre, e le voci che ne avevano bisogno restano non verificate col motivo.
+    // A gennaio e febbraio gli anni sono due: le stesse fonti, per ciascuno.
     const fonti = fontiDelleVoci(chieste);
-    const risposte = await Promise.allSettled(fonti.map(f => base44.functions.invoke(FONTI[f].funzione, FONTI[f].corpo(anno))));
-    const dati = {};
-    const errori = {};
-    fonti.forEach((f, i) => {
+    const anni = anniDaControllare(oggi);
+    const chiamate = anni.flatMap(a => fonti.map(f => ({ a, f })));
+    const risposte = await Promise.allSettled(chiamate.map(({ a, f }) => base44.functions.invoke(FONTI[f].funzione, FONTI[f].corpo(a))));
+    const perAnno = new Map(anni.map(a => [a, { dati: {}, errori: {} }]));
+    chiamate.forEach(({ a, f }, i) => {
+      const { dati, errori } = perAnno.get(a);
       const r = risposte[i];
       if (r.status !== 'fulfilled') { errori[f] = messaggioErrore(r.reason); return; }
       const d = r.value && r.value.data !== undefined ? r.value.data : r.value;
@@ -85,7 +93,11 @@ async function controlla(req) {
     const rinvio = await controllo.dopo();
     if (rinvio) return rinvio;
 
-    const nuovo = verificaInvarianti(dati, { errori, voci: chieste, giorno: oggi, anno, il: new Date().toISOString() });
+    const il = new Date().toISOString();
+    const nuovo = unisciAnni(anni.map(a => ({
+      anno: a,
+      esito: verificaInvarianti(perAnno.get(a).dati, { errori: perAnno.get(a).errori, voci: chieste, giorno: oggi, anno: a, il }),
+    })));
     const giaScritto = leggiInvarianti(righe[0].invarianti_json);
     let esito = unisciInvarianti(giaScritto, nuovo);
     // UNA ROTTA NON SPARISCE PERCHE' STANOTTE NON SI E' POTUTA RIVERIFICARE
