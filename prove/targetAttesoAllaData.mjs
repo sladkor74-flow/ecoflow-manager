@@ -18,6 +18,13 @@
 //    chiamano «Residuo dell'anno» e «Scarto del mese sull'atteso».
 // 5. Il codice morto (getTargetDashboard, TargetDashboard.jsx, TARGET_ANNUO_TON)
 //    non c'e' piu'.
+// 6. Prova generale del cambio d'anno (15/10/2026): Target & Status misura ogni
+//    anno sul suo giorno della misura (giornoDellaMisura). Il 05/01/2027, coi
+//    dati fermi al 30/12/2026, il 2027 scriveva «Atteso al 30/12 (t)» con 0,00 e
+//    lo scarto +0,00 in verde in tutte le regioni, e il 2026 «Atteso al 30/12».
+//    Ora il 2027 senza ritiri suoi dice «—» col perche', e il 2026, chiuso, si
+//    misura al 31/12. La pagina vera, montata (prove/dati/paginaFinta.mjs), e la
+//    tabella vera, disegnata (prove/dati/disegnaComponente.mjs).
 // npm run prove
 import { readFileSync, existsSync } from 'node:fs';
 import { build } from 'esbuild';
@@ -47,7 +54,17 @@ verifica('il profilo riportato all\'annuo: i pesi sommano 1', vicino(A.profiloMe
 verifica('i giorni coperti: fino all\'ultimo dato, mai oltre oggi', A.giorniCopertiNelMese(2026, 9, '2026-10-07', '2026-10-10') === 7 && A.giorniCopertiNelMese(2026, 9, '2026-10-12', '2026-10-10') === 10
   && A.giorniCopertiNelMese(2026, 8, '2026-10-07') === 30 && A.giorniCopertiNelMese(2026, 10, '2026-10-07') === 0 && A.giorniCopertiNelMese(2026, 9, '') === 0);
 verifica('la quota attesa al 07/10 col profilo del contratto', vicino(A.quotaAttesa(contratto2026, 2026, '2026-10-07'), quota('2026-10-07')), String(A.quotaAttesa(contratto2026, 2026, '2026-10-07')));
-verifica('un anno finito vale tutto, uno futuro niente, senza dati non si sa', A.quotaAttesa(contratto2026, 2025, '2026-01-03') === 1 && A.quotaAttesa(contratto2026, 2027, '2026-12-31') === 0 && A.quotaAttesa(contratto2026, 2026, '') === null);
+verifica('un anno finito vale tutto, senza dati non si sa', A.quotaAttesa(contratto2026, 2025, '2026-01-03') === 1 && A.quotaAttesa(contratto2026, 2026, '') === null);
+// Un anno coi dati fermi all'anno prima (il 2027 il 05/01/2027 coi ritiri fino
+// al 22/12/2026) non ha ancora un ritiro: l'atteso non c'e', non e' zero, come
+// in giornoDellaMisura (ritocco dopo la revisione del 15/10/2026). Prima la
+// quota era 0, e chi non passava dal giorno della misura, il contesto di
+// EcoTyna, scriveva «quota attesa a oggi 0%» e «atteso a oggi 0,00 t».
+verifica('un anno coi dati fermi all\'anno prima: quota e atteso null, non zero, anche per regione',
+  A.quotaAttesa(contratto2026, 2027, '2026-12-22') === null && A.quotaAttesa(contratto2026, 2027, '2026-12-31') === null
+  && A.attesoAllaData(contratto2026, 2027, '2026-12-22').atteso_t === null && A.attesoDellaRegione(contratto2026, 2027, '2026-12-22', 'Campania').atteso_t === null,
+  J([A.quotaAttesa(contratto2026, 2027, '2026-12-22'), A.attesoAllaData(contratto2026, 2027, '2026-12-22'), A.attesoDellaRegione(contratto2026, 2027, '2026-12-22', 'Campania')]));
+verifica('controprova: il primo giorno dell\'anno coi suoi dati la quota c\'e\', e piccola', A.quotaAttesa(contratto2026, 2026, '2026-01-01') > 0 && A.quotaAttesa(contratto2026, 2026, '2026-01-01') < 0.01);
 const at = A.attesoAllaData(contratto2026, 2026, '2026-10-07');
 verifica('l\'atteso alla data', vicino(at.atteso_t, 11550 * quota('2026-10-07')) && at.giorno === '2026-10-07' && at.target_t === 11550, J(at));
 verifica('senza target niente atteso inventato', A.attesoAllaData(null, 2027, '2026-10-07').atteso_t === null && A.attesoAllaData(contratto2026, 2026, '2026-10-07', 5000).atteso_t !== null);
@@ -162,7 +179,8 @@ verifica('la classifica dei raccoglitori della dashboard lo dice', /da_confermar
   let esito;
   try { esito = await motore({ modulo: 'primarie_rete' }); } finally { globalThis.Date = DataVera; }
   const scostamenti = globalThis.__SCRITTE_ATTESO.filter(x => x.nome === 'Alert' && x.r && x.r.regola_id === 'rs').map(x => x.r.record_id);
-  verifica('motore degli alert: lo scostamento grave si misura sul target confermato, non su quello copiato', J(scostamenti) === J(['BETA SRL|Campania|Gennaio']), J([scostamenti, esito && esito.error]));
+  // dal 15/10/2026 il record_id porta l'anno del target (prove/alertCambioAnno.mjs, sezione 15)
+  verifica('motore degli alert: lo scostamento grave si misura sul target confermato, non su quello copiato', J(scostamenti) === J(['BETA SRL|Campania|Gennaio 2026']), J([scostamenti, esito && esito.error]));
 }
 
 console.log("4. TARGET & STATUS: L'ATTESO SUI DATI, LE CARD COL SEGNO SPIEGATO");
@@ -183,6 +201,93 @@ verifica('getTargetDashboard e TargetDashboard.jsx sono tolti', !existsSync(qui(
 const gdr = senzaCommenti(sorgente('base44/functions/getDashboardRaccolta/entry.ts'));
 verifica('la Dashboard non ha piu\' costanti sue', !/TARGET_ANNUO\s*=|RISERVA_REGIONI|11550|4400/.test(gdr) && !/list\('-created_date', 50\)/.test(gdr));
 verifica('TARGET_ANNUO_TON non c\'e\' piu\'', !/export const TARGET_ANNUO_TON/.test(sorgente('base44/shared/primarieReteAnalytics.ts')));
+
+console.log("6. TARGET & STATUS AL CAMBIO D'ANNO: OGNI ANNO SUL SUO GIORNO DELLA MISURA");
+{
+  const { caricaPagina, clienteFinto, aspetta, trova, nomeDi } = await import('./dati/paginaFinta.mjs');
+  const { disegnaComponente, testoDi } = await import('./dati/disegnaComponente.mjs');
+  const { computeRaccoltoData } = await import('../base44/shared/raccoltoCalculator.ts');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  // La regola: il 31/12 per un anno chiuso (anche con l'ultimo ritiro al 22/12),
+  const gm = typeof A.giornoDellaMisura === 'function' ? A.giornoDellaMisura : () => undefined;
+  // niente per l'anno in corso senza ritiri suoi, altrimenti il giorno dei dati.
+  verifica('giornoDellaMisura: il 2026 guardato il 05/01/2027 con l\'ultimo ritiro al 22/12 e\' al 31/12', gm(2026, '2026-12-22', '2027-01-05') === '2026-12-31' && gm(2026, '2026-12-22', '2027-01-01') === '2026-12-31', gm(2026, '2026-12-22', '2027-01-05'));
+  verifica('il 2027 senza ritiri suoi non ha giorno, e senza dati nessuno', gm(2027, '2026-12-30', '2027-01-05') === '' && gm(2026, '', '2027-01-05') === '');
+  verifica('controprova: l\'anno in corso si misura all\'ultimo ritiro (il 2026 il 15/10/2026, il 2027 il 15/01/2027)', gm(2026, '2026-10-08', '2026-10-15') === '2026-10-08' && gm(2027, '2027-01-14', '2027-01-15') === '2027-01-14');
+  verifica('senza oggi la regola di prima: chiuso solo col giorno dei dati dell\'anno dopo', gm(2025, '2026-10-08') === '2025-12-31' && gm(2026, '2026-12-22') === '2026-12-22');
+
+  // La pagina vera, coi soli accesso e indirizzo sostituiti (come in
+  // prove/aggiornamentoDopoVariazione.mjs): l'Andamento legge il raccolto, le
+  // ultime fini trasporto, i target e il contratto dal client finto.
+  const cartella = mkdtempSync(join(tmpdir(), 'misura-anno-'));
+  let s = sorgente('src/pages/TargetStatus.jsx');
+  const STUB = [
+    ["import { useAuth } from '@/lib/AuthContext';", "const useAuth = () => ({ user: { role: 'admin', email: 'prova' } });"],
+    ["import { useSearchParams } from 'react-router-dom';", "const useSearchParams = () => [new URLSearchParams(globalThis.__INDIRIZZO || ''), () => {}];"],
+  ];
+  for (const [da, a] of STUB) { verifica(`TargetStatus.jsx: ${da.slice(0, 40)}`, s.includes(da)); s = s.replace(da, a); }
+  writeFileSync(join(cartella, 'TargetStatus.jsx'), s);
+  const pagina = await caricaPagina('pages/TargetStatus', { file: join(cartella, 'TargetStatus.jsx') });
+  const tabellaRegioni = await disegnaComponente('src/pages/TargetStatus.jsx', 'AndamentoRegioni');
+  const carte = await disegnaComponente('src/components/target-status/KpiCards.jsx');
+
+  let k = 0;
+  const ritiro = (prov, kg, giorno) => ({ id: 'r' + String(++k).padStart(4, '0'), id_ordine: 'ET' + k, stato: 'terminato', provincia: prov, trasportatore: 'ALFA SRL', destinazione: 'IRIGOM SRL', peso_effettivo: kg,
+    ordine_immesso_il: giorno + 'T07:00:00Z', trasporto_iniziato_il: giorno + 'T08:00:00Z', trasporto_finito_il: giorno + 'T10:00:00Z' });
+  const RITIRI_2026 = [];
+  for (let m = 1; m <= 12; m++) { RITIRI_2026.push(ritiro('NA', 300000, `2026-${String(m).padStart(2, '0')}-15`)); RITIRI_2026.push(ritiro('BA', 400000, `2026-${String(m).padStart(2, '0')}-16`)); }
+  RITIRI_2026.push(ritiro('BA', 8000, '2026-12-30'));
+  const REGIONI = JSON.stringify([{ regione: 'Campania', target_t: 5000 }, { regione: 'Puglia', target_t: 6550 }]);
+  const C26 = { id: 'k26', anno: 2026, target_annuo_t: 11550, regioni_json: REGIONI, target_mensile_json: JSON.stringify(PROFILO), updated_date: '2026-06-01T10:00:00' };
+  const C27 = { id: 'k27', anno: 2027, target_annuo_t: 11600, regioni_json: REGIONI, target_mensile_json: JSON.stringify(PROFILO), updated_date: '2027-01-08T10:00:00',
+    storico_json: JSON.stringify([{ il: '2026-12-28T10:00:00Z', nota: 'copiato dal 2026, da confermare' }, { il: '2027-01-08T10:00:00Z', nota: 'confermato' }]) };
+  const TARGET_27 = [{ id: 'tm27', raccoglitore: 'ALFA SRL', regione: 'Campania', mese: 'Gennaio', anno: 2027, target: 100 }];
+  const daServer = (righe) => { const e = { list: async (_o, l = 1e9, sk = 0) => righe.slice(sk, sk + l), filter: async (_f, _o, l = 1e9, sk = 0) => righe.slice(sk, sk + l) }; return { asServiceRole: { entities: { PrimariaRete: e, PrimariaAci: { list: async () => [], filter: async () => [] } } } }; };
+  // La pagina chiede le ultime 5 fini trasporto ordinate dalla piu' recente: il
+  // client finto non ordina, e allora l'archivio gliele da' gia' in ordine.
+  const inOrdine = (righe) => [...righe].sort((x, y) => String(y.trasporto_finito_il).localeCompare(String(x.trasporto_finito_il)));
+  const apri = async (iso, anno, ritiri, mensili = []) => {
+    const DataVera = Date;
+    const istante = DataVera.parse(iso);
+    globalThis.Date = class extends DataVera { constructor(...a) { super(...(a.length ? a : [istante])); } static now() { return istante; } };
+    try {
+      const c = clienteFinto({ funzioni: { computeRaccolto: async (p) => computeRaccoltoData(daServer(ritiri), p.filters || {}) }, archivi: { PrimariaRete: inOrdine(ritiri), CommessaEcotyre: [C26, C27], TargetMensile: mensili, TargetRaccoglitore: [] } });
+      globalThis.__CLIENTE_FINTO = c.cliente;
+      globalThis.__INDIRIZZO = `tab=andamento&anno=${anno}`;
+      const T = pagina.monta(pagina.Componente, {});
+      await aspetta(80);
+      const props = (nome) => (trova(T.albero, x => nomeDi(x) === nome)[0] || { props: {} }).props;
+      const esito = { errori: T.errori.map(String), regioni: props('AndamentoRegioni'), kpis: props('KpiCards').kpis || {} };
+      try { esito.tabella = esito.regioni.commessa ? testoDi(tabellaRegioni(esito.regioni)) : ''; } catch (e) { esito.tabella = 'la tabella non si disegna: ' + e.message; }
+      try { esito.carte = Object.keys(esito.kpis).length ? testoDi(carte({ kpis: esito.kpis, anno })) : ''; } catch (e) { esito.carte = 'le card non si disegnano: ' + e.message; }
+      T.smonta();
+      return esito;
+    } finally { globalThis.Date = DataVera; }
+  };
+
+  // Il 05/01/2027: l'archivio arriva al 30/12/2026, nessun ritiro del 2027.
+  const p27 = await apri('2027-01-05T10:00:00Z', 2027, RITIRI_2026, TARGET_27);
+  verifica('05/01/2027, pagina del 2027: si apre senza errori', p27.errori.length === 0 && !!p27.regioni.commessa, J([p27.errori, Object.keys(p27.regioni)]));
+  verifica('la tabella per regione riceve nessun giorno della misura, e l\'ultimo ritiro per dire perche\'', p27.regioni.giornoDati === '' && p27.regioni.ultimoRitiro === '2026-12-30', J([p27.regioni.giornoDati, p27.regioni.ultimoRitiro]));
+  verifica('e scrive «Atteso (t)» con «—», non «Atteso al 30/12» con 0,00 e +0,00', /Atteso \(t\)/.test(p27.tabella) && !/Atteso al 30\/12/.test(p27.tabella) && !/\+0,00/.test(p27.tabella)
+    && /Campania — 5\.000,00 0,00 0,0% — —/.test(p27.tabella) && /nessun ritiro del 2027 è ancora terminato \(non è zero\)/.test(p27.tabella), p27.tabella.slice(0, 700));
+  verifica('la card dello scarto del mese: nessun atteso, col perche\'', p27.kpis.scartoMese === null && p27.kpis.attesoMese === null && p27.kpis.giornoDati === '' && /nessun ritiro del 2027 è ancora terminato/.test(p27.carte), J([p27.kpis.scartoMese, p27.kpis.giornoDati, p27.carte.slice(-400)]));
+
+  const p26 = await apri('2027-01-05T10:00:00Z', 2026, RITIRI_2026);
+  verifica('05/01/2027, pagina del 2026: misurata al 31/12, non all\'ultimo ritiro del 30/12', p26.errori.length === 0 && p26.regioni.giornoDati === '2026-12-31' && p26.kpis.giornoDati === '2026-12-31', J([p26.errori, p26.regioni.giornoDati, p26.kpis.giornoDati]));
+  verifica('«Atteso al 31/12», il contratto intero di ogni regione, e il 2026 detto chiuso', /Atteso al 31\/12 \(t\)/.test(p26.tabella) && /Campania — 5\.000,00 3\.600,00 72,0% 5\.000,00 -1\.400,00/.test(p26.tabella)
+    && /Il 2026 è chiuso: l'atteso è il contratto intero di ogni regione, al 31\/12/.test(p26.tabella), p26.tabella.slice(0, 900));
+  // Il 15/01/2027, arrivati i ritiri di gennaio, lo stesso anno dice gli stessi numeri.
+  const p26dopo = await apri('2027-01-15T10:00:00Z', 2026, [...RITIRI_2026, ritiro('NA', 9000, '2027-01-12')]);
+  verifica('il 15/01/2027, coi ritiri di gennaio, il 2026 dice la stessa tabella del 05/01', p26dopo.tabella === p26.tabella, `\n    05/01 ${p26.tabella.slice(0, 300)}\n    15/01 ${p26dopo.tabella.slice(0, 300)}`);
+  // Controprova: l'anno in corso resta misurato all'ultimo ritiro.
+  const ottobre = RITIRI_2026.filter(r => r.trasporto_finito_il < '2026-10-09');
+  const p26ott = await apri('2026-10-15T10:00:00Z', 2026, ottobre);
+  verifica('controprova: il 2026 guardato il 15/10/2026 si misura all\'ultimo ritiro (15/10 no, 16/09)', p26ott.regioni.giornoDati === '2026-09-16' && /Atteso al 16\/09 \(t\)/.test(p26ott.tabella) && !/è chiuso/.test(p26ott.tabella), J([p26ott.regioni.giornoDati, p26ott.tabella.slice(0, 300)]));
+  globalThis.__INDIRIZZO = '';
+}
 
 console.log('GLI SPECCHI NUOVI');
 const corpo = (p) => { const righe = sorgente(p).split('\n'); let i = 0; while (i < righe.length && (righe[i].startsWith('//') || righe[i].trim() === '')) i++; return righe.slice(i).filter(x => !/^import .* from /.test(x)).join('\n').trim(); };

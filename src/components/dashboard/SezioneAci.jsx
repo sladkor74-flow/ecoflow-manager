@@ -9,6 +9,14 @@ import { t, pct, intero } from '@/components/dashboard/formato';
 // indicativa, quindi la percentuale ha un colore neutro: non e' un obiettivo
 // mancato o raggiunto. Le regioni vengono dalla provincia, come in Target &
 // Status (CanaleAci), cosi' i numeri coincidono riga per riga.
+//
+// LA PREVISIONE COPIATA (prova generale del cambio d'anno, 15/10/2026): con il
+// contratto dell'anno copiato dall'anno prima e non ancora confermato
+// (quadro.aci.da_confermare, lo stesso daConfermare della rete) previsione e
+// budget sono quelli dell'anno prima. Il 15/01/2027 la sezione scriveva
+// «Previsione indicativa 650,00 t dal contratto ACI» e «Budget SMOCO dell'anno
+// 180,00 t» senza dirlo; ora lo dice accanto a ciascuno. L'anno prima e'
+// calcolato, mai scritto a mano.
 
 /** Le righe di un canale mese per mese: il raccolto, «—» per i mesi che i dati non coprono. */
 export function TabellaMesi({ mesi, etichetta = 'Raccolto' }) {
@@ -33,6 +41,8 @@ export function TabellaMesi({ mesi, etichetta = 'Raccolto' }) {
 export default function SezioneAci({ quadro, arretrato, annoInCorso, daGestire, onDaGestire }) {
   const aci = quadro.aci;
   const anno = quadro.anno;
+  const copiata = !!aci.da_confermare;
+  const annoPrima = Number(anno) - 1;
   return (
     <Sezione
       id="aci" icona={Factory}
@@ -54,9 +64,9 @@ export default function SezioneAci({ quadro, arretrato, annoInCorso, daGestire, 
       <div className="space-y-5">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <Cifra etichetta="Raccolto" valore={t(aci.raccolto_t)} sotto={`${intero(aci.ritiri)} ${aci.ritiri === 1 ? 'ritiro' : 'ritiri'} (ordini distinti)`} />
-          <Cifra etichetta="Previsione indicativa" valore={t(aci.previsione_t)} sotto={aci.previsione_t ? 'dal contratto ACI' : 'nessuna previsione nel contratto ACI'} />
+          <Cifra etichetta="Previsione indicativa" valore={t(aci.previsione_t)} sotto={!aci.previsione_t ? 'nessuna previsione nel contratto ACI' : copiata ? `copiata dal ${annoPrima}, da confermare` : 'dal contratto ACI'} />
           <Cifra etichetta="Della previsione" valore={pct(aci.pct_previsione)} />
-          <Cifra etichetta="Budget SMOCO dell'anno" valore={t(aci.budget_t)} sotto={aci.budget_t ? 'il budget scritto nel contratto' : 'nessun budget scritto'} />
+          <Cifra etichetta="Budget SMOCO dell'anno" valore={t(aci.budget_t)} sotto={!aci.budget_t ? 'nessun budget scritto' : copiata ? `copiato dal ${annoPrima}, da confermare` : 'il budget scritto nel contratto'} />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
@@ -87,6 +97,9 @@ export default function SezioneAci({ quadro, arretrato, annoInCorso, daGestire, 
                 </tr></tfoot>
               </Tabella>
             )}
+            {copiata && aci.previsione_t ? (
+              <p className="mt-2 text-xs text-amber-800">La previsione è copiata dal {annoPrima} con il contratto, da confermare nella scheda Commessa Ecotyre di Target &amp; Status: i contratti ACI sono annuali, senza tacito rinnovo.</p>
+            ) : null}
             <div className="mt-3">
               <Riquadro titolo="Ordini aperti ACI" link="/assegnati-aci" testoLink="Assegnati ACI">
                 <OrdiniAperti arretrato={annoInCorso ? arretrato : null} />

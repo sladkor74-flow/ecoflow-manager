@@ -73,6 +73,39 @@ const MISURA_SLA = "dall'immissione alla fine del trasporto";
 // La chiave di un alert: lo stesso record (o raccoglitore, provincia...) e la stessa regola.
 const chiaveAlert = (a) => `${a.record_id}|||${a.regola_id}`;
 
+// LO SCOSTAMENTO DAL TARGET HA L'ANNO NELLA CHIAVE (prova generale del cambio
+// d'anno, 15/10/2026). La chiave era raccoglitore|regione|mese, senza l'anno: il
+// 10/02/2027 lo scostamento di gennaio 2026, ignorato il 25/09/2026, bloccava
+// quello di gennaio 2027 (creati 0), e quello rimasto aperto si riscriveva coi
+// numeri del 2027 («target 100,00 t, raccolto 30,00 t, Δ -70,00 ton»), e i
+// numeri del 2026 sparivano. Ora record_id e chiave portano l'anno del target
+// e il testo lo dice («Gennaio 2027»): un alert per anno, e un ignorato vale
+// solo per il suo. Un alert scritto prima, senza l'anno, e' dell'anno italiano
+// di created_date, non di updated_date: un ignorato ha updated_date nel giorno
+// in cui lo si e' ignorato (come le province, decisioni dell'utente del
+// 13/10/2026). Nello stesso anno l'aperto di prima si riscrive col testo e il
+// record_id nuovi, senza doppioni.
+//
+// L'ANNO STA DOPO UNO SPAZIO, NON DOPO UNA BARRA (revisione del 15/10/2026): il
+// record_id e' raccoglitore|regione|mese anno («ALFA SRL|Puglia|Gennaio 2027»),
+// come lo dice il testo. Col primo rimedio era raccoglitore|regione|mese|anno,
+// identico a quello degli avvisi dei target del mese di checkTargetAlerts, che
+// cerca il «gia' aperto» fra tutti gli aperti di primarie_rete: il 10/02/2027
+// lo scostamento aperto di ALFA su gennaio 2027 bloccava la nascita di «Target
+// non raggiunto: ALFA SRL — Puglia (Gennaio 2027)» (creati 0), e un «Target a
+// rischio» di gennaio non diventava «non raggiunto» (aggiornati 0): mancavano
+// la voce del mese nel cruscotto e il collegamento all'Andamento. Con lo
+// spazio i due record_id non coincidono mai.
+const scostamentoConAnno = (recordId) => /\|\S+ \d{4}$/.test(String(recordId || ''));
+/** L'anno del target di un alert di scostamento: quello nel record_id, o per i testi di prima l'anno italiano di created_date. */
+function annoDelloScostamento(a) {
+  const id = String(a.record_id || '');
+  if (scostamentoConAnno(id)) return Number(id.slice(-4));
+  return annoRoma(a.created_date || a.updated_date) || null;
+}
+/** La chiave di un alert di scostamento, con l'anno anche per quelli scritti senza. */
+const chiaveDelloScostamento = (a) => (scostamentoConAnno(a.record_id) ? chiaveAlert(a) : `${a.record_id} ${annoDelloScostamento(a) || ''}|||${a.regola_id}`);
+
 // Registra una condizione presente oggi nei dati, col testo calcolato adesso. Se
 // la stessa chiave compare due volte vale la prima, come per l'alert che si crea.
 const segna = (attuali, key, alert) => { if (!attuali.has(key)) attuali.set(key, alert); };
@@ -135,9 +168,12 @@ const MESI_ANNO = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
 //   aperto, com'e', finche' qualcuno non lo risolve o lo ignora. Cosi' la fine
 //   di febbraio, o il cambio d'anno, non fanno sparire niente.
 // - i controlli che si misurano su un anno intero e la cui chiave non porta
-//   l'anno (mix classi, ritardo SLA, scostamento dal target: raccoglitore,
-//   trasportatore, raccoglitore|regione|mese) restano sull'anno in corso, e un
-//   loro alert scritto l'ultima volta in un anno prima resta aperto.
+//   l'anno (mix classi, ritardo SLA: raccoglitore, trasportatore) restano
+//   sull'anno in corso, e un loro alert scritto l'ultima volta in un anno prima
+//   resta aperto. Lo scostamento dal target si misura anche lui sull'anno in
+//   corso, ma dal 15/10/2026 la sua chiave porta l'anno del target
+//   (raccoglitore|regione|mese anno, vedi chiaveDelloScostamento): un suo alert
+//   di un anno prima resta aperto, e quello dell'anno nuovo nasce accanto.
 // - la chiusura dell'anno delle Giacenze non fa da confine: scrive le
 //   rilevazioni del 31/12 sito per sito, dice che la giacenza e' fotografata e
 //   non che i formulari sono giusti, e leggerla costerebbe una richiesta a ogni
@@ -296,11 +332,16 @@ async function motoreAlert(req) {
     // Tutti gli alert aperti del modulo, pagina per pagina: senza, il controllo dei
     // doppioni vedeva solo i primi e a ogni caricamento li ricreava.
     const existingAlerts = await fetchAll(base44.asServiceRole.entities.Alert, { modulo, stato: 'aperto' }, 'created_date');
-    const existingKeys = new Set(existingAlerts.map(chiaveAlert));
+    // La chiave di un alert gia' scritto: per lo scostamento dal target con
+    // l'anno, anche per quelli di prima che non l'hanno (15/10/2026, vedi
+    // chiaveDelloScostamento).
+    const regoleScostamentoId = new Set(regole.filter(r => r.tipo_regola === 'scostamento_target').map(r => r.id));
+    const chiaveDi = (a) => (regoleScostamentoId.has(a.regola_id) ? chiaveDelloScostamento(a) : chiaveAlert(a));
+    const existingKeys = new Set(existingAlerts.map(chiaveDi));
     // L'alert aperto di ciascuna chiave, il piu' vecchio (gli altri sono doppioni
     // e si chiudono sotto): e' quello di cui si aggiorna il testo.
     const apertiPerChiave = new Map();
-    for (const a of existingAlerts) if (!apertiPerChiave.has(chiaveAlert(a))) apertiPerChiave.set(chiaveAlert(a), a);
+    for (const a of existingAlerts) if (!apertiPerChiave.has(chiaveDi(a))) apertiPerChiave.set(chiaveDi(a), a);
     // Un alert che l'amministratore ha ignorato e' una decisione presa: la stessa
     // condizione sullo stesso record non si ripropone. Prima si guardavano solo
     // gli aperti, e al giro dopo l'alert ignorato rinasceva come nuovo.
@@ -342,7 +383,8 @@ async function motoreAlert(req) {
         provinceIgnorate.get(chiaveAlert(a)).add(coppia.fine);
         continue;
       }
-      existingKeys.add(chiaveAlert(a));
+      // lo scostamento ignorato vale per il suo anno (chiaveDelloScostamento)
+      existingKeys.add(chiaveDi(a));
     }
     // L'alert nuovo di una provincia sulla coppia di mesi (lo stesso ultimo mese)
     // di un suo alert ignorato: la decisione vale ancora, e non nasce. Il testo
@@ -539,8 +581,11 @@ async function motoreAlert(req) {
       // trasporto: il cruscotto li legge da li', senza rileggere gli archivi.
       const conteggi = nuovo.quanti !== undefined ? { quanti: nuovo.quanti, senza_fine: nuovo.senza_fine, canale: nuovo.canale } : null;
       const conteggiCambiati = !!conteggi && (a.quanti !== conteggi.quanti || a.senza_fine !== conteggi.senza_fine || (a.canale || '') !== (conteggi.canale || ''));
-      if ((a.titolo || '') !== (nuovo.titolo || '') || (a.descrizione || '') !== (nuovo.descrizione || '') || (a.severita || '') !== (nuovo.severita || '') || conteggiCambiati) {
-        daAggiornare.push({ id: a.id, titolo: nuovo.titolo, descrizione: nuovo.descrizione, severita: nuovo.severita, ...(conteggi || {}) });
+      // il record_id cambia solo per lo scostamento scritto prima senza l'anno
+      // (15/10/2026): nello stesso anno l'aperto prende quello con l'anno
+      const recordCambiato = (a.record_id || '') !== (nuovo.record_id || '');
+      if ((a.titolo || '') !== (nuovo.titolo || '') || (a.descrizione || '') !== (nuovo.descrizione || '') || (a.severita || '') !== (nuovo.severita || '') || conteggiCambiati || recordCambiato) {
+        daAggiornare.push({ id: a.id, titolo: nuovo.titolo, descrizione: nuovo.descrizione, severita: nuovo.severita, ...(conteggi || {}), ...(recordCambiato ? { record_id: nuovo.record_id } : {}) });
       }
     }
     let aggiornati = 0;
@@ -570,7 +615,7 @@ async function motoreAlert(req) {
     let restanoAperti = 0;
     for (const a of existingAlerts) {
       if (!idRegole.has(a.regola_id)) continue;
-      const key = chiaveAlert(a);
+      const key = chiaveDi(a);
       if (!attuali.has(key)) {
         const genere = idDate.has(a.regola_id) ? 'date' : String(a.regola_id || '').startsWith(REGOLA_ROTTA) ? 'rotta' : tipoDi.get(a.regola_id);
         const perimetro = perimetroDellAlert(a, genere, contesto);
@@ -665,9 +710,12 @@ function anniDeiRecord(tutti) {
  *   12/10 valevano sempre come controllate, ma la matrice dell'anno prima
  *   guarda solo novembre e dicembre, e solo a gennaio e febbraio.
  * - mix, SLA e scostamento: si misurano solo sull'anno in corso e non hanno un
- *   record dietro. L'anno e' quello dell'ultima volta che il motore ha scritto
- *   l'alert (lo riscrive coi numeri nuovi finche' la condizione c'e'): scritto
- *   in un anno prima, parla di quell'anno e resta aperto.
+ *   record dietro. Per mix e SLA l'anno e' quello dell'ultima volta che il
+ *   motore ha scritto l'alert (lo riscrive coi numeri nuovi finche' la
+ *   condizione c'e'): scritto in un anno prima, parla di quell'anno e resta
+ *   aperto. Lo scostamento parla dell'anno del suo target, scritto nel
+ *   record_id, o per i testi di prima l'anno di created_date
+ *   (annoDelloScostamento, 15/10/2026).
  * - regole sul singolo formulario e rotte: l'anno e' quello del record,
  *   ricavato dall'archivio (fine trasporto, giorno italiano). Fuori dagli anni
  *   controllati resta aperto. Se il record non e' piu' fra i terminati con la
@@ -689,7 +737,9 @@ function perimetroDellAlert(a, genere, { modulo, anno, anniControllati, anniDeiR
     return { controllato: true, nota: `condizione non presente nei dati ${anno}` };
   }
   if (REGOLE_DELL_ANNO.has(genere)) {
-    const scritto = annoRoma(a.updated_date || a.created_date);
+    // lo scostamento parla dell'anno del suo target (15/10/2026); mix e SLA
+    // dell'anno in cui il motore li ha scritti l'ultima volta
+    const scritto = genere === 'scostamento_target' ? annoDelloScostamento(a) : annoRoma(a.updated_date || a.created_date);
     return { controllato: !scritto || scritto === anno, nota: `condizione non presente nei dati ${anno}` };
   }
   const id = String(a.record_id || '').trim();
@@ -1061,15 +1111,19 @@ function checkAggregateRules(records, regole, existingKeys, targets = [], attual
       if (pctDelta < soglia) {
         for (const regola of regoleScostamento) {
           // Stessa chiave degli alert salvati (record_id|||regola): prima non coincideva
-          // e l'alert si ricreava a ogni giro.
-          const alertKey = `${racc}|${regione}|${mese}|||${regola.id}`;
+          // e l'alert si ricreava a ogni giro. Con l'anno del target (prova
+          // generale del cambio d'anno, 15/10/2026, vedi chiaveDelloScostamento),
+          // dopo uno spazio: con la barra coincideva con gli avvisi dei target di
+          // checkTargetAlerts e li bloccava (revisione del 15/10/2026).
+          const recordId = `${racc}|${regione}|${mese} ${annoTarget}`;
+          const alertKey = `${recordId}|||${regola.id}`;
           proponi(alertKey, {
-            titolo: regola.messaggio_alert || `Scostamento target grave: ${racc} - ${regione} - ${mese}`,
-            descrizione: `Raccoglitore "${racc}" (${regione}, ${mese}): target ${formatoTonnellate(targetVal)} t, raccolto ${formatoTonnellate(raccolto)} t, Δ ${formatoTonnellate(delta)} ton (${unDecimale(pctDelta)}%). Soglia: ${soglia}%.`,
+            titolo: regola.messaggio_alert || `Scostamento target grave: ${racc} - ${regione} - ${mese} ${annoTarget}`,
+            descrizione: `Raccoglitore "${racc}" (${regione}, ${mese} ${annoTarget}): target ${formatoTonnellate(targetVal)} t, raccolto ${formatoTonnellate(raccolto)} t, Δ ${formatoTonnellate(delta)} ton (${unDecimale(pctDelta)}%). Soglia: ${soglia}%.`,
             severita: regola.severita || 'critico',
             modulo: 'primarie_rete',
             entity_type: 'PrimariaRete',
-            record_id: `${racc}|${regione}|${mese}`,
+            record_id: recordId,
             regola_id: regola.id,
             regola_nome: regola.nome,
             stato: 'aperto',

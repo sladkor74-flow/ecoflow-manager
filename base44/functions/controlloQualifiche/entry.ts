@@ -108,11 +108,32 @@ async function controllaQualifiche(req) {
     // che parte mentre si legge, altrimenti, non si vedrebbe.
     const primaDiLeggere = await statoCaricamenti(base44);
 
-    const [{ soggetti, soggetti_da_date }, catalogo, documentiSalvati, avvisi, targetAnnui, targetMensili] = await Promise.all([
-      individuaSoggetti(base44, anno),
+    // IL CAMBIO D'ANNO (prova generale del 15/10/2026). Da gennaio a marzo:
+    // - i soggetti sono anche quelli che hanno lavorato nell'ultimo trimestre
+    //   dell'anno prima (individuaSoggetti con oggi, come i contratti con
+    //   da_ultimo_trimestre): il 01/01/2027 il controllo diceva 0 soggetti, i
+    //   contratti scaduti il 31/12 non si dicevano, e la CQC intestata a un
+    //   fornitore del 2026 era un «errore del catalogo» ogni giorno. Nessuna
+    //   lettura in piu': individuaSoggetti legge gia' gli archivi interi;
+    // - il registro dei promemoria e' anche quello dell'anno prima. Per le soglie
+    //   che si mandano una volta sola (ripetibile falso): l'Albo che scade il
+    //   15/03/2027 aveva la soglia dei 90 giorni registrata nel 2026 il 28/12, e
+    //   il 05/01/2027 ripartiva una seconda email «1 in scadenza». E per i
+    //   promemoria che si ripetono (mai ricevuto, scaduto, non conforme, da
+    //   verificare), revisione del 15/10/2026: il DURC mai ricevuto mandato
+    //   giovedi' 31/12/2026 ripartiva venerdi' 01/01/2027, il giorno dopo, invece
+    //   che dopo i sette giorni della ripetizione come dentro l'anno; conta
+    //   l'ultimo invio dell'anno prima. Le soglie arrivano al piu' a 90 giorni e la
+    //   ripetizione e' di una settimana, quindi dopo marzo niente dell'anno prima
+    //   puo' tornare: una lettura in piu', filtrata per anno, solo in quei tre
+    //   mesi. Il registro che si scrive resta quello dell'anno.
+    const primoTrimestre = oggi >= `${anno}-01-01` && oggi <= `${anno}-03-31`;
+    const [{ soggetti, soggetti_da_date }, catalogo, documentiSalvati, avvisi, avvisiAnnoPrima, targetAnnui, targetMensili] = await Promise.all([
+      individuaSoggetti(base44, anno, { oggi }),
       fetchAll(svc.TipoDocumentoQualifica),
       fetchAll(svc.DocumentoQualifica, { stato: 'attivo' }),
       fetchAll(svc.AvvisoQualifica, { anno }),
+      primoTrimestre ? fetchAll(svc.AvvisoQualifica, { anno: anno - 1 }) : Promise.resolve([]),
       fetchAll(svc.TargetRaccoglitore, { anno }),
       fetchAll(svc.TargetMensile, { anno }),
     ]);
@@ -145,8 +166,12 @@ async function controllaQualifiche(req) {
 
     const eventi = eventiDaSegnalare(valutati);
     const registro = new Map(avvisi.map(a => [a.chiave_evento, a]));
+    // i promemoria gia' mandati l'anno prima (solo da gennaio a marzo, vedi
+    // sopra): una soglia non riparte, un promemoria che si ripete aspetta i
+    // sette giorni dal suo ultimo invio, anche se era del 31/12
+    const registroAnnoPrima = new Map(avvisiAnnoPrima.map(a => [a.chiave_evento, a]));
     const daInviare = forza ? eventi : eventi.filter(e => {
-      const a = registro.get(e.chiave);
+      const a = registro.get(e.chiave) || registroAnnoPrima.get(e.chiave);
       if (!a) return true;
       if (!e.ripetibile) return false;
       const ultimo = String(a.ultimo_invio || '').slice(0, 10);

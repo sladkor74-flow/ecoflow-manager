@@ -59,6 +59,44 @@ export const giorniDelMese = (anno, meseIdx) => new Date(Date.UTC(Number(anno), 
  */
 export const giornoDeiDati = (ultimo, oggi = '') => (!ultimo ? '' : oggi && ultimo > oggi ? oggi : ultimo);
 
+// IL GIORNO DELLA MISURA DI UN ANNO (prova generale del cambio d'anno,
+// 15/10/2026). Il giorno dei dati e' l'ultima fine trasporto della rete, di
+// qualunque anno: per un anno chiuso valeva il 31/12 solo se il giorno dei dati
+// era gia' dell'anno dopo. Il 05/01/2027, con l'ultimo ritiro del 2026 al 22/12
+// (la pausa di Natale c'e' davvero: l'anno scorso dal 22/12/2025 al 05/01/2026)
+// e nessun ritiro del 2027 ancora terminato, dashboard, EcoTyna e riepilogo
+// della settimana misuravano il 2026, gia' chiuso, al 22/12 («Atteso al 22/12:
+// 11.274,709 t», «Proiezione a fine anno: 9.753,01 t»), e il 15/01, arrivati i
+// ritiri di gennaio, lo stesso anno al 31/12 (11.550 t, raccolto finale): due
+// misure dello stesso anno, e la prima andava nel riepilogo del lunedi'. E
+// Target & Status, sul 2027, scriveva «Atteso al 30/12» con 0,00 t e lo scarto
+// +0,00 in verde in tutte le regioni. Ora il giorno lo decide anche oggi:
+// - un anno prima di quello di oggi (giorno italiano) e' chiuso e si misura al
+//   31/12, qualunque sia l'ultimo ritiro caricato: atteso intero, quota 1, mesi
+//   interi, proiezione uguale al raccolto;
+// - un anno il cui giorno dei dati e' dell'anno prima (l'anno in corso senza
+//   ancora un ritiro) non ha giorno: l'atteso non c'e' («—»), non e' zero;
+// - altrimenti il giorno dei dati.
+// Senza nessun dato non c'e' giorno. oggi e' il giorno italiano 'AAAA-MM-GG'
+// che passa chi chiama; senza, vale la regola di prima (31/12 solo se il giorno
+// dei dati e' dell'anno dopo). La usano la dashboard (quadroCommessa.ts),
+// EcoTyna (contrattoRete.ts), l'Andamento di Target & Status e le sue card.
+
+/**
+ * Il giorno su cui si misura l'anno: 'AAAA-12-31' per un anno chiuso, il giorno
+ * dei dati per l'anno in corso, '' per un anno senza ancora un ritiro o senza
+ * dati. giornoDati e oggi sono giorni italiani 'AAAA-MM-GG'.
+ */
+export function giornoDellaMisura(anno, giornoDati, oggi = '') {
+  const a = Number(anno);
+  const g = String(giornoDati || '');
+  if (!g) return '';
+  const annoDati = Number(g.slice(0, 4));
+  const annoOggi = oggi ? Number(String(oggi).slice(0, 4)) : null;
+  if ((annoOggi !== null && a < annoOggi) || annoDati > a) return `${a}-12-31`;
+  return annoDati < a ? '' : g;
+}
+
 /**
  * Quanti giorni di un mese coprono i dati: fino all'ultimo giorno con un dato e
  * mai oltre oggi. Un mese tutto prima conta intero, uno tutto dopo zero.
@@ -166,8 +204,17 @@ function quotaDeiPesi(pesi, anno, giornoDati) {
   if (!giornoDati) return null;
   const a = Number(anno);
   const annoDati = Number(giornoDati.slice(0, 4));
-  if (annoDati > a) return 1;
-  if (annoDati < a) return 0;
+  // Al 31/12 l'anno e' tutto: 1 esatto, non la somma dei dodici pesi, che puo'
+  // fare 0,9999999999999999 (il giorno della misura di un anno chiuso, 15/10/2026).
+  if (annoDati > a || String(giornoDati) >= `${a}-12-31`) return 1;
+  // Un giorno dei dati dell'anno prima vuol dire che l'anno chiesto non ha
+  // ancora un ritiro: l'atteso non c'e' (null, «—»), non e' zero, la stessa
+  // regola di giornoDellaMisura (ritocco dopo la revisione del 15/10/2026). Qui
+  // si diceva 0: chi non passava dal giorno della misura, il contesto di
+  // EcoTyna, il 05/01/2027 coi dati fermi al 22/12/2026 scriveva «quota attesa
+  // a oggi 0%» e «atteso a oggi 0,00 t» per regione, mentre dashboard e Target &
+  // Status dicevano «—».
+  if (annoDati < a) return null;
   let q = 0;
   for (let i = 0; i < 12; i++) q += pesi[i] * frazioneDelMese(a, i, giornoDati);
   return Math.min(1, q);
@@ -176,7 +223,8 @@ function quotaDeiPesi(pesi, anno, giornoDati) {
 /**
  * La quota del target annuo attesa fino al giorno dei dati, fra 0 e 1: i mesi
  * coperti interi, il mese dei dati per i giorni coperti. null se non si sa fin
- * dove arrivano i dati (nessun dato).
+ * dove arrivano i dati (nessun dato) o se arrivano solo all'anno prima (nessun
+ * ritiro dell'anno ancora terminato).
  */
 export function quotaAttesa(commessa, anno, giornoDati) {
   return quotaDeiPesi(profiloMensile(commessa).pesi, anno, giornoDati);
@@ -187,8 +235,8 @@ export function quotaAttesa(commessa, anno, giornoDati) {
  * target annuo del contratto (targetAnnuoDellAnno) se chi chiama non ne passa
  * uno suo. Per una regione del contratto c'e' attesoDellaRegione: qui un target
  * passato prende la quota del totale, con le variazioni di tutte le regioni.
- * atteso_t e' null quando manca il target o il giorno dei dati: un atteso
- * inventato e' peggio di nessuno.
+ * atteso_t e' null quando manca il target o il giorno dei dati, o il giorno e'
+ * dell'anno prima: un atteso inventato e' peggio di nessuno.
  */
 export function attesoAllaData(commessa, anno, giornoDati, targetT = undefined) {
   const t = targetT === undefined ? targetAnnuoDellAnno(commessa, anno).t : targetT;

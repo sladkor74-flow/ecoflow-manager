@@ -69,6 +69,17 @@
 //    la coppia a zero torna quella ignorata, l'alert aperto si chiude invece di
 //    riscriversi con la coppia ignorata e restare aperto per sempre.
 //
+// Prova generale del cambio d'anno (15/10/2026):
+// 15. lo scostamento dal target ha l'anno nella chiave (raccoglitore|regione|
+//    mese anno) e nel testo: l'ignorato di gennaio 2026 non blocca gennaio 2027,
+//    e l'aperto del 2026 non si riscrive coi numeri del 2027. Gli alert di prima,
+//    senza l'anno, sono dell'anno di created_date.
+// 16. (revisione del 15/10/2026) il record_id dello scostamento non coincide con
+//    quello degli avvisi dei target di checkTargetAlerts (raccoglitore|regione|
+//    mese|anno): col primo rimedio, che aveva la barra prima dell'anno, lo
+//    scostamento aperto di gennaio 2027 bloccava la nascita di «Target non
+//    raggiunto ... (Gennaio 2027)» e l'aggiornamento di «Target a rischio».
+//
 // node prove/alertCambioAnno.mjs
 import { caricaFunzione, chiama } from './dati/bancoFunzioni.mjs';
 import { caricaLibPagine } from './dati/libPagine.mjs';
@@ -754,6 +765,116 @@ console.log("14. «IGNORA» SULLE PROVINCE VALE SOLO PER QUELLA COPPIA DI MESI")
   verifica('arrivato tardi un ritiro di marzo, la coppia e\' sempre agosto-settembre: non rinasce', conMarzo.stato === 200 && baAperti(conMarzo).length === 0, J(baAperti(conMarzo).map(a => a.descrizione)));
   const nov = await BAN('2026-11-15T10:00:00Z');
   verifica('a novembre, anche ottobre a zero, nasce l\'alert nuovo di BA', J(baAperti(nov).map(a => a.descrizione)) === J([MAI.replace('Settembre 2026', 'Ottobre 2026')]), J(baAperti(nov).map(a => a.descrizione)));
+}
+
+console.log("15. LO SCOSTAMENTO DAL TARGET HA L'ANNO NELLA CHIAVE");
+// Prova generale del cambio d'anno (15/10/2026). Una regola scostamento_target
+// accesa il 20/09/2026 misura i mesi conclusi del 2026 e apre lo scostamento di
+// gennaio 2026 di ALFA (80 t su 100, -20%). La chiave era
+// raccoglitore|regione|mese, senza l'anno: il 10/02/2027, con gennaio 2027 a -70%,
+// (a) l'ignorato del 25/09/2026 bloccava l'alert del 2027 (creati 0); (b)
+// l'aperto del 2026 si riscriveva coi numeri del 2027, e quelli del 2026
+// sparivano. Ora un alert per anno, ciascuno col suo anno nel testo; un
+// ignorato vale solo per il suo anno; un alert di prima, senza l'anno, e'
+// dell'anno di created_date (non di updated_date: un ignorato ha updated_date
+// nel giorno in cui lo si ignora).
+{
+  const REGOLA_SC = { id: 'sc', nome: 'Scostamento grave', modulo: 'primarie_rete', tipo_regola: 'scostamento_target', attiva: true, severita: 'critico', config: { soglia_pct: -15 }, created_date: '2026-09-20T10:00:00.000000', updated_date: '2026-09-20T10:00:00.000000' };
+  const daAlfa = (id, giorno, kg) => ritiro(id, giorno, kg, { trasportatore: 'ALFA SRL', provincia: 'BA', regione: 'Puglia' });
+  const confermato = J([{ il: '2026-12-28T10:00:00Z', nota: 'copiato dal 2026, da confermare' }, { il: '2027-01-08T10:00:00Z', nota: 'confermato' }]);
+  const TARGET = [
+    { id: 'g26', raccoglitore: 'ALFA SRL', regione: 'Puglia', mese: 'Gennaio', anno: 2026, target: 100 },
+    { id: 'g27', raccoglitore: 'ALFA SRL', regione: 'Puglia', mese: 'Gennaio', anno: 2027, target: 100, storico_json: confermato },
+  ];
+  const RITIRI = [daAlfa('ET26900001', '2026-01-15', 80000), daAlfa('ET27900001', '2027-01-12', 30000), daAlfa('ET27900002', '2027-02-09', 1000)];
+  const scost = (r) => (r.db.Alert || []).filter(a => a.regola_id === 'sc');
+  const fino = (g) => RITIRI.filter(x => x.trasporto_finito_il < g);
+
+  // 20/09/2026: la regola accesa misura gennaio 2026
+  const set = await gira('2026-09-20T10:00:00Z', { RegolaAlert: [REGOLA_SC], PrimariaRete: fino('2026-09-20'), TargetMensile: TARGET, Alert: [], UploadLog: [] });
+  const nato = scost(set)[0] || {};
+  verifica('20/09/2026: nasce lo scostamento di gennaio 2026, con l\'anno nel record e nel testo', set.stato === 200 && scost(set).length === 1 && nato.record_id === 'ALFA SRL|Puglia|Gennaio 2026'
+    && nato.titolo === 'Scostamento target grave: ALFA SRL - Puglia - Gennaio 2026' && /\(Puglia, Gennaio 2026\): target 100,00 t, raccolto 80,00 t, Δ -20,00 ton \(-20,0%\)/.test(nato.descrizione || ''), J([set.j.error, scost(set)]));
+  const natoIl = { ...nato, created_date: '2026-09-20T10:00:00.000000', updated_date: '2026-09-20T10:00:00.000000' };
+  const febbraio = (alert) => gira('2027-02-10T10:00:00Z', { RegolaAlert: [REGOLA_SC], PrimariaRete: RITIRI, TargetMensile: TARGET, Alert: alert, UploadLog: [] });
+
+  // (a) ignorato il 25/09/2026
+  const a = await febbraio([{ ...natoIl, stato: 'ignorato', updated_date: '2026-09-25T08:00:00.000000' }]);
+  const a27 = scost(a).filter(x => x.stato === 'aperto');
+  verifica('(a) 10/02/2027, gennaio 2026 ignorato: gennaio 2027 apre il suo alert', a.stato === 200 && a.j.alerts_creati === 1 && a27.length === 1 && a27[0].record_id === 'ALFA SRL|Puglia|Gennaio 2027'
+    && a27[0].titolo === 'Scostamento target grave: ALFA SRL - Puglia - Gennaio 2027' && /\(Puglia, Gennaio 2027\): target 100,00 t, raccolto 30,00 t, Δ -70,00 ton \(-70,0%\)/.test(a27[0].descrizione), J([a.j.error, a.j.alerts_creati, scost(a)]));
+  verifica('e l\'ignorato del 2026 resta ignorato, coi suoi numeri', scost(a).some(x => x.stato === 'ignorato' && /raccolto 80,00 t/.test(x.descrizione)), J(scost(a)));
+  // (b) rimasto aperto
+  const b = await febbraio([natoIl]);
+  const vecchio = (b.db.Alert || []).find(x => x.id === nato.id) || {};
+  verifica('(b) 10/02/2027, gennaio 2026 aperto: nasce gennaio 2027, e quello del 2026 tiene i suoi numeri', b.j.alerts_creati === 1 && vecchio.stato === 'aperto' && /raccolto 80,00 t/.test(vecchio.descrizione || '') && vecchio.record_id === 'ALFA SRL|Puglia|Gennaio 2026'
+    && scost(b).filter(x => x.stato === 'aperto').map(x => x.record_id).sort().join() === 'ALFA SRL|Puglia|Gennaio 2026,ALFA SRL|Puglia|Gennaio 2027', J([b.j.alerts_creati, b.j.alerts_aggiornati, scost(b)]));
+  verifica('e quello del 2026 si conta fra quelli di un anno che non si misura piu\'', b.j.alerts_anni_non_controllati === 1, J(b.j.alerts_anni_non_controllati));
+
+  // Gli alert scritti prima, senza l'anno nel record_id: valgono per l'anno di created_date.
+  const DI_PRIMA = { id: 'old', modulo: 'primarie_rete', entity_type: 'PrimariaRete', record_id: 'ALFA SRL|Puglia|Gennaio', regola_id: 'sc', regola_nome: 'Scostamento grave', titolo: 'Scostamento target grave: ALFA SRL - Puglia - Gennaio',
+    descrizione: 'Raccoglitore "ALFA SRL" (Puglia, Gennaio): target 100,00 t, raccolto 80,00 t, Δ -20,00 ton (-20,0%). Soglia: -15%.', severita: 'critico', created_date: '2026-09-20T10:00:00.000000', updated_date: '2026-09-20T10:00:00.000000' };
+  const ignoratoPrima = await febbraio([{ ...DI_PRIMA, stato: 'ignorato', updated_date: '2026-09-25T08:00:00.000000' }]);
+  verifica('un ignorato di prima, senza l\'anno, nato nel 2026: non blocca gennaio 2027', ignoratoPrima.j.alerts_creati === 1 && scost(ignoratoPrima).some(x => x.stato === 'aperto' && x.record_id === 'ALFA SRL|Puglia|Gennaio 2027'), J([ignoratoPrima.j.alerts_creati, scost(ignoratoPrima)]));
+  const ignoratoAGennaio = await febbraio([{ ...DI_PRIMA, stato: 'ignorato', updated_date: '2027-01-05T08:00:00.000000' }]);
+  verifica('anche se ignorato il 05/01/2027: conta created_date, non updated_date', ignoratoAGennaio.j.alerts_creati === 1, J([ignoratoAGennaio.j.alerts_creati, scost(ignoratoAGennaio)]));
+  const apertoPrima = await febbraio([{ ...DI_PRIMA, stato: 'aperto' }]);
+  const op = (apertoPrima.db.Alert || []).find(x => x.id === 'old') || {};
+  verifica('un aperto di prima, senza l\'anno: non si riscrive coi numeri del 2027, e il 2027 ha il suo', apertoPrima.j.alerts_creati === 1 && op.stato === 'aperto' && op.descrizione === DI_PRIMA.descrizione, J([apertoPrima.j.alerts_creati, op]));
+
+  // Controprova: nello stesso anno l'alert si aggiorna come prima, senza doppioni.
+  const ottobre = (alert) => gira('2026-10-11T10:00:00Z', { RegolaAlert: [REGOLA_SC], PrimariaRete: fino('2026-10-11'), TargetMensile: TARGET, Alert: alert, UploadLog: [] });
+  const stesso = await ottobre([{ ...natoIl, descrizione: 'testo di prima' }]);
+  verifica('controprova: l\'11/10/2026 l\'aperto del 2026 si riscrive, nessun doppione', stesso.j.alerts_creati === 0 && stesso.j.alerts_aggiornati === 1 && scost(stesso).length === 1 && /raccolto 80,00 t/.test(scost(stesso)[0].descrizione), J([stesso.j, scost(stesso)]));
+  const prima26 = await ottobre([{ ...DI_PRIMA, stato: 'aperto' }]);
+  const p = (prima26.db.Alert || []).find(x => x.id === 'old') || {};
+  verifica('controprova: l\'aperto di prima, nello stesso anno, prende record_id e testo con l\'anno, senza doppioni', prima26.j.alerts_creati === 0 && scost(prima26).length === 1
+    && p.record_id === 'ALFA SRL|Puglia|Gennaio 2026' && p.titolo === 'Scostamento target grave: ALFA SRL - Puglia - Gennaio 2026', J([prima26.j, scost(prima26)]));
+  const ign26 = await ottobre([{ ...natoIl, stato: 'ignorato', updated_date: '2026-09-25T08:00:00.000000' }]);
+  verifica('controprova: ignorato nel 2026, nel 2026 non rinasce', ign26.j.alerts_creati === 0 && !scost(ign26).some(x => x.stato === 'aperto'), J(scost(ign26)));
+  const ignPrima26 = await ottobre([{ ...DI_PRIMA, stato: 'ignorato', updated_date: '2026-09-25T08:00:00.000000' }]);
+  verifica('controprova: l\'ignorato di prima, senza l\'anno, nel suo anno blocca come prima', ignPrima26.j.alerts_creati === 0 && !scost(ignPrima26).some(x => x.stato === 'aperto'), J(scost(ignPrima26)));
+}
+
+console.log('16. LO SCOSTAMENTO NON BLOCCA GLI AVVISI DEI TARGET DEL MESE');
+// Revisione del 15/10/2026. Il primo rimedio scriveva il record_id dello
+// scostamento come raccoglitore|regione|mese|anno, lo stesso degli avvisi di
+// checkTargetAlerts, che cerca il «gia' aperto» fra tutti gli aperti di
+// primarie_rete: il 10/02/2027, aperto lo scostamento di ALFA su gennaio 2027,
+// alle 9 non nasceva «Target non raggiunto: ALFA SRL — Puglia (Gennaio 2027)»
+// (creati 0) e un «Target a rischio» di gennaio restava col testo di gennaio
+// (aggiornati 0). Ora l'anno sta dopo uno spazio e i due record non coincidono.
+// Si girano le due funzioni vere, una dopo l'altra, sullo stesso archivio.
+{
+  const controlloTarget = await caricaFunzione('checkTargetAlerts');
+  const REGOLA_SC = { id: 'sc', nome: 'Scostamento grave', modulo: 'primarie_rete', tipo_regola: 'scostamento_target', attiva: true, severita: 'critico', config: { soglia_pct: -15 } };
+  const confermato = J([{ il: '2026-12-28T10:00:00Z', nota: 'copiato dal 2026, da confermare' }, { il: '2027-01-08T10:00:00Z', nota: 'confermato' }]);
+  const TARGET = [{ id: 'g27', raccoglitore: 'ALFA SRL', regione: 'Puglia', mese: 'Gennaio', anno: 2027, target: 100, storico_json: confermato }];
+  const daAlfa = (id, giorno, kg) => ritiro(id, giorno, kg, { trasportatore: 'ALFA SRL', provincia: 'BA', regione: 'Puglia' });
+  const RITIRI = [daAlfa('ET27900001', '2027-01-12', 30000), daAlfa('ET27900002', '2027-02-09', 1000)];
+  const target = (db) => conOggi('2027-02-10T11:00:00Z', () => chiama(controlloTarget, { db: { ...db, UploadLog: [] }, corpo: {} }));
+  const delMese = (r) => (r.db.Alert || []).filter(a => a.entity_type === 'TargetMensile');
+
+  // Caso A: prima il motore (un caricamento), poi il controllo dei target delle 9.
+  const m = await gira('2027-02-10T10:00:00Z', { RegolaAlert: [REGOLA_SC], PrimariaRete: RITIRI, TargetMensile: TARGET, Alert: [], UploadLog: [] });
+  const sc = (m.db.Alert || []).filter(a => a.regola_id === 'sc');
+  verifica('il motore apre lo scostamento di gennaio 2027, con l\'anno dopo uno spazio', m.stato === 200 && sc.length === 1 && sc[0].record_id === 'ALFA SRL|Puglia|Gennaio 2027', J([m.j.error, sc]));
+  const t = await target(m.db);
+  const nonRaggiunto = delMese(t).filter(a => /^Target non raggiunto: ALFA SRL — Puglia \(Gennaio 2027\)/.test(a.titolo || ''));
+  verifica('alle 9 nasce lo stesso «Target non raggiunto ... (Gennaio 2027)»', t.stato === 200 && t.j.alerts_creati === 1 && nonRaggiunto.length === 1 && nonRaggiunto[0].record_id === 'ALFA SRL|Puglia|Gennaio|2027', J([t.j.error, t.j.alerts_creati, delMese(t)]));
+  verifica('e lo scostamento resta com\'era, aperto', (t.db.Alert || []).filter(a => a.regola_id === 'sc' && a.stato === 'aperto').length === 1, J(t.db.Alert));
+  // il giro dopo del motore non tocca l'avviso del mese, e non fa doppioni
+  const m2 = await gira('2027-02-10T12:00:00Z', { ...t.db, RegolaAlert: [REGOLA_SC], PrimariaRete: RITIRI, TargetMensile: TARGET, UploadLog: [] });
+  verifica('il giro dopo del motore non crea doppioni e lascia l\'avviso del mese com\'e\'', m2.j.alerts_creati === 0 && delMese(m2).length === 1 && delMese(m2)[0].stato === 'aperto' && delMese(m2)[0].titolo === nonRaggiunto[0].titolo, J([m2.j, delMese(m2)]));
+
+  // Caso B: l'avviso «a rischio» di gennaio era gia' aperto; il 10/02 il mese e' chiuso.
+  const aRischio = { id: 'tmA', modulo: 'primarie_rete', stato: 'aperto', entity_type: 'TargetMensile', record_id: 'ALFA SRL|Puglia|Gennaio|2027',
+    titolo: 'Target a rischio: ALFA SRL — Puglia (Gennaio 2027)', descrizione: 'testo di gennaio', severita: 'warning' };
+  const mb = await gira('2027-02-10T10:00:00Z', { RegolaAlert: [REGOLA_SC], PrimariaRete: RITIRI, TargetMensile: TARGET, Alert: [aRischio], UploadLog: [] });
+  const tb = await target(mb.db);
+  const tmA = (tb.db.Alert || []).find(a => a.id === 'tmA') || {};
+  verifica('l\'avviso «a rischio» di gennaio diventa «non raggiunto», col testo di adesso', tb.j.alerts_aggiornati === 1 && /^Target non raggiunto/.test(tmA.titolo || '') && tmA.descrizione !== 'testo di gennaio', J([tb.j.alerts_aggiornati, tmA]));
+  verifica('e il motore non l\'aveva toccato', ((mb.db.Alert || []).find(a => a.id === 'tmA') || {}).titolo === aRischio.titolo, J(mb.db.Alert));
 }
 
 console.log(`\n${ok} superate, ${ko} fallite`);

@@ -238,5 +238,70 @@ console.log('7. UN ANNO CHIUSO SI MISURA AL 31/12');
   verifica('il quadro porta il giorno della misura', q.giorno_misura === '2026-10-08');
 }
 
+// PROVA GENERALE DEL CAMBIO D'ANNO (15/10/2026). Il giorno della misura guarda
+// anche oggi: un anno prima di quello di oggi e' chiuso e si misura al 31/12,
+// qualunque sia l'ultimo ritiro caricato. La pausa di Natale c'e' davvero
+// (l'anno scorso dal 22/12/2025 al 05/01/2026): il 05/01/2027, con l'ultimo
+// ritiro del 2026 al 22/12 e nessun ritiro del 2027, la dashboard diceva per il
+// 2026 «Atteso al 22/12», la proiezione a fine anno su un anno finito e la
+// Campania a 4.295,127 t di atteso; il 15/01, arrivati i ritiri di gennaio, lo
+// stesso anno al 31/12. Due misure dello stesso anno, e la prima andava nel
+// riepilogo del lunedi'. Qui il conto della dashboard e di EcoTyna
+// (contrattoDellaRete, contrattoRete.ts), sugli stessi ritiri.
+console.log("8. IL CAMBIO D'ANNO: UN ANNO CHIUSO SI MISURA AL 31/12 ANCHE CON L'ULTIMO RITIRO AL 22/12");
+{
+  const { contrattoDellaRete } = await import('../base44/shared/contrattoRete.ts');
+  const c26 = { ...contratto, id: 'c26', regioni_json: J([{ regione: 'Campania', target_t: 4400 }, { regione: 'Puglia', target_t: 7150 }]), updated_date: '2026-06-01T10:00:00' };
+  const c27 = { ...c26, id: 'c27', anno: 2027, target_annuo_t: 11600, updated_date: '2026-12-20T10:00:00' };
+  // i ritiri del 2026 fino al 22/12, poi la pausa; quelli del 2027 dall'08/01
+  const R26 = [];
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, '0');
+    R26.push(prim('SMOCO SRL', 'NA', 290000, `2026-${mm}-10`), prim('PNEUSERVICE CONVERSANO SRL', 'BA', 480000, `2026-${mm}-12`));
+  }
+  R26.push(prim('SMOCO SRL', 'NA', 12345, '2026-12-22'));
+  const R27 = [prim('SMOCO SRL', 'NA', 30000, '2027-01-08'), prim('SMOCO SRL', 'NA', 20000, '2027-01-14')];
+  const conta = (oggi, righe) => contrattoDellaRete({ commesse: [c26, c27], anno: 2026, rete: righe, oggi });
+  const capodanno = conta('2027-01-01', R26);
+  const cinque = conta('2027-01-05', R26);
+  const quindici = conta('2027-01-15', [...R26, ...R27]);
+  verifica('il 05/01/2027 il 2026 e\' chiuso e il giorno della misura e\' il 31/12, non il 22/12', cinque.anno_chiuso === true && cinque.giorno_dati === '2026-12-22' && cinque.giorno_misura === '2026-12-31', J([cinque.anno_chiuso, cinque.giorno_dati, cinque.giorno_misura]));
+  verifica('l\'atteso e\' il target intero al 31/12, quota 1: 11.550 t', cinque.rete.atteso && cinque.rete.atteso.giorno === '2026-12-31' && cinque.rete.atteso.fine_anno === true && cinque.rete.atteso.quota === 1 && cinque.rete.atteso.atteso_t === 11550 && cinque.kpi.atteso.atteso_t === 11550, J([cinque.rete.atteso, cinque.kpi.atteso]));
+  verifica('la proiezione e\' il raccolto, finale; niente ritmo', cinque.rete.proiezione && cinque.rete.proiezione.finale === true && cinque.rete.proiezione.t === cinque.rete.raccolto_t && cinque.rete.ritmo === null, J([cinque.rete.proiezione, cinque.rete.raccolto_t]));
+  const camp = cinque.rete.regioni.find(r => r.regione === 'Campania') || {};
+  verifica('la Campania: atteso 4.400 t, il suo contratto intero', camp.atteso_t === 4400 && Math.abs(camp.scarto_t - (camp.raccolto_t - 4400)) < 1e-6, J(camp));
+  verifica('dicembre e\' coperto tutto: i mesi interi, anche per la classifica dei raccoglitori', cinque.rete.mesi[11].coperto === 1 && cinque.rete.mesi.every(m => !m.futuro), J(cinque.rete.mesi[11]));
+  const senzaGiornoDati = (x) => { const { giorno_dati: _g, ...resto } = x; return J({ ...resto, kpi: { ...resto.kpi, atteso: resto.kpi.atteso && { ...resto.kpi.atteso, giorno: undefined } } }); };
+  verifica('il 05/01/2027 e il 15/01/2027 dicono gli stessi numeri del 2026', senzaGiornoDati(cinque) === senzaGiornoDati(quindici), `\n    05/01 ${J(cinque.rete.atteso)} ${J(cinque.rete.proiezione)}\n    15/01 ${J(quindici.rete.atteso)} ${J(quindici.rete.proiezione)}`);
+  verifica('e cosi\' il 01/01/2027, prima ancora di un ritiro', senzaGiornoDati(capodanno) === senzaGiornoDati(cinque), J([capodanno.giorno_misura, capodanno.rete.atteso]));
+  // il 2027, nello stesso giorno, non ha ancora un ritiro: niente atteso, non zero
+  const c27oggi = contrattoDellaRete({ commesse: [c26, c27], anno: 2027, rete: R26, oggi: '2027-01-05' });
+  verifica('il 2027 il 05/01/2027, senza ritiri suoi: atteso null, nessun giorno della misura', c27oggi.giorno_misura === '' && c27oggi.rete.atteso === null && c27oggi.kpi.atteso === null && /Nessun ritiro del 2027/.test(c27oggi.rete.proiezione_perche)
+    && c27oggi.rete.regioni.every(r => r.atteso_t === null && r.scarto_t === null), J([c27oggi.giorno_misura, c27oggi.rete.atteso, c27oggi.rete.regioni]));
+  // controprova: l'anno in corso resta misurato all'ultimo ritiro
+  const dicembre = conta('2026-12-28', R26);
+  verifica('controprova: il 28/12/2026 il 2026 e\' l\'anno in corso, misurato al 22/12', dicembre.anno_chiuso === false && dicembre.giorno_misura === '2026-12-22' && dicembre.rete.atteso.giorno === '2026-12-22' && dicembre.rete.atteso.fine_anno === false
+    && dicembre.rete.proiezione && dicembre.rete.proiezione.finale === false && dicembre.rete.atteso.quota < 1, J([dicembre.giorno_misura, dicembre.rete.atteso, dicembre.rete.proiezione]));
+  const ottobre = conta('2026-10-15', R26.filter(r => r.trasporto_finito_il < '2026-10-11'));
+  verifica('controprova: il 15/10/2026 il 2026 si misura all\'ultimo ritiro (10/10)', ottobre.giorno_misura === '2026-10-10' && ottobre.rete.atteso.giorno === '2026-10-10' && !ottobre.rete.atteso.fine_anno, J([ottobre.giorno_misura, ottobre.rete.atteso]));
+}
+
+// LA PREVISIONE ACI COPIATA (prova generale del cambio d'anno, 15/10/2026).
+// Copiato l'anno, il contratto 2027 porta la previsione e i corrispettivi ACI
+// del 2026, annuali e senza tacito rinnovo: la rete lo diceva («copiato, da
+// confermare»), l'ACI no. quadro.aci.da_confermare e' lo stesso daConfermare
+// del contratto; le parole della pagina in prove/andamentoFiltriAnno.mjs.
+console.log('9. LA PREVISIONE ACI COPIATA DICE «DA CONFERMARE»');
+{
+  const copiato = { ...contratto, anno: 2027, storico_json: J([{ il: '2026-12-28T10:00:00Z', nota: 'copiato dal 2026, da confermare' }]) };
+  const confermato = { ...copiato, storico_json: J([...JSON.parse(copiato.storico_json), { il: '2027-01-08T10:00:00Z', nota: 'confermato' }]) };
+  const aci = (commessa) => Q.quadroAci({ anno: 2027, oggi: '2027-01-15', giornoDati: '2027-01-14', commessa, kpi: { raccolto_aci_anno: 4.2, previsione_aci: 650 }, aciAnno: [prim('X', 'BA', 4200, '2027-01-12')] });
+  const daCopia = aci(copiato);
+  verifica('il contratto copiato e non confermato: quadro.aci.da_confermare vero, coi numeri dell\'anno prima', daCopia.da_confermare === true && daCopia.previsione_t === 650 && daCopia.budget_t === 180, J(daCopia));
+  verifica('controprova: confermato, niente «da confermare»', aci(confermato).da_confermare === false && aci(contratto).da_confermare === false && aci(null).da_confermare === false);
+  const qq = Q.quadroCommessa({ anno: 2027, oggi: '2027-01-15', giornoDati: '2027-01-14', commessa: copiato, kpi: { ...kpiDi(copiato, 2027, '2027-01-14', 1), raccolto_aci_anno: 4.2, previsione_aci: 650 }, reteAnno: [], rete: [], aciAnno: [], extraAnno: [], mensili: [], annui: [] });
+  verifica('nel quadro intero l\'ACI lo dice come la rete', qq.aci.da_confermare === true && qq.rete.da_confermare === true, J([qq.aci.da_confermare, qq.rete.da_confermare]));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

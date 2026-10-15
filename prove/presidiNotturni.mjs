@@ -217,5 +217,169 @@ console.log('LE IDENTITA\' FRA MODULI');
   verifica('rotta un giorno prima: resta «stanotte», anche con l\'istante', / \(non riverificata stanotte\)$/.test((presidi([], { giorno: '2026-10-12', invarianti_json: JSON.stringify({ ...riportata, il: '2026-10-12T03:00:40.000Z' }) })[0] || {}).titolo || ''));
 }
 
+// IL CONTROLLO DELLA QUALIFICA DELLE 7:30 AL CAMBIO D'ANNO (prova generale del
+// cambio d'anno, 15/10/2026). Il lavoro ControlloQualificaFornitori gira dal
+// lunedi' al venerdi', quindi anche venerdi' 01/01/2027. Prima:
+// - i soggetti venivano solo dai terminati dell'anno: il 01/01 e il 04/01 0
+//   soggetti, i contratti di raccolta scaduti il 31/12/2026 non si dicevano, e la
+//   CQC intestata a C.L. SERVICE era «errore del catalogo» per email e in
+//   dashboard ogni giorno; ora da gennaio a marzo resta chi ha lavorato
+//   nell'ultimo trimestre dell'anno prima (da_ultimo_trimestre, come i contratti);
+// - il registro dei promemoria si leggeva per anno: la soglia dei 90 giorni
+//   dell'Albo che scade il 15/03/2027, mandata il 28/12/2026, ripartiva il
+//   05/01/2027; ora da gennaio a marzo si legge anche il registro dell'anno prima
+//   per le soglie che si mandano una volta sola;
+// - (revisione del 15/10/2026) un promemoria che si ripete, mandato il
+//   31/12/2026, ripartiva il 01/01/2027: ora aspetta i sette giorni anche li'.
+// La funzione vera, impacchettata con un SDK finto che registra le email.
+console.log("LA QUALIFICA AL CAMBIO D'ANNO: I SOGGETTI DELL'ULTIMO TRIMESTRE E I PROMEMORIA");
+{
+  const { build } = await import('esbuild');
+  const { fileURLToPath } = await import('node:url');
+  const { individuaSoggetti } = await import('../base44/shared/qualificaFornitori.ts');
+  const SDK = `
+const soddisfa = (r, f) => Object.entries(f || {}).every(([k, v]) => r[k] === v);
+const tab = (n) => (globalThis.__QDB[n] = globalThis.__QDB[n] || []);
+let progressivo = 0;
+const entita = (nome) => ({
+  list: async (_o, l = 1e9, s = 0) => tab(nome).slice(s, s + l).map(r => ({ ...r })),
+  filter: async (f, _o, l = 1e9, s = 0) => tab(nome).filter(r => soddisfa(r, f)).slice(s, s + l).map(r => ({ ...r })),
+  create: async (r) => { const x = { id: nome + '-' + (++progressivo), created_date: new Date().toISOString(), ...r }; tab(nome).push(x); return { ...x }; },
+  update: async (id, r) => { const t = tab(nome); const i = t.findIndex(x => x.id === id); if (i >= 0) t[i] = { ...t[i], ...r }; return { ...(t[i] || {}) }; },
+  bulkUpdate: async (rr) => rr, delete: async () => ({}),
+});
+const entities = new Proxy({}, { get: (_t, n) => entita(String(n)) });
+export function createClientFromRequest() {
+  return { auth: { me: async () => ({ role: 'admin', email: 'admin@prova' }) }, entities,
+    asServiceRole: { entities, functions: { invoke: async () => ({ data: {} }) }, integrations: { Core: { SendEmail: async (x) => { globalThis.__QEMAIL.push(x); return {}; } } } } };
+}`;
+  const pacchetto = await build({
+    entryPoints: [fileURLToPath(new URL('../base44/functions/controlloQualifiche/entry.ts', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
+    plugins: [{ name: 'sdk', setup(b) {
+      b.onResolve({ filter: /^npm:@base44\/sdk/ }, () => ({ path: 'sdk', namespace: 'sdk' }));
+      b.onLoad({ filter: /.*/, namespace: 'sdk' }, () => ({ contents: SDK, loader: 'js' }));
+    } }],
+  });
+  const controllo = await import('data:text/javascript;base64,' + Buffer.from(pacchetto.outputFiles[0].text).toString('base64'));
+  // le 7:30 di Roma di un giorno, col database che resta fra un giro e l'altro
+  const alle730 = async (giorno, db, corpo = {}) => {
+    const DataVera = Date;
+    const istante = DataVera.parse(`${giorno}T06:30:00Z`);
+    globalThis.Date = class extends DataVera { constructor(...a) { super(...(a.length ? a : [istante])); } static now() { return istante; } };
+    globalThis.__QDB = db; globalThis.__QEMAIL = [];
+    try {
+      const r = await controllo.default({ json: async () => corpo });
+      return { stato: r.status, j: await r.json(), email: globalThis.__QEMAIL };
+    } finally { globalThis.Date = DataVera; }
+  };
+  const ritiro = (id, chi, giorno, destinazione = 'IRIGOM SRL') => ({ id, id_ordine: id, stato: 'terminato', trasportatore: chi, destinazione, tipo_destinazione: 'imp', peso_effettivo: 5000,
+    ordine_immesso_il: giorno + 'T07:00:00Z', trasporto_iniziato_il: giorno + 'T08:00:00Z', trasporto_finito_il: giorno + 'T10:00:00Z' });
+  const CL = 'C.L. SERVICE S.R.L.';
+  const kCL = 'cl service';
+  const base = () => ({
+    // C.L. SERVICE lavora fino a novembre 2026, ECO.GEA ha smesso a maggio
+    PrimariaRete: [ritiro('ET1', CL, '2026-03-10'), ritiro('ET2', CL, '2026-11-20'), ritiro('ET3', 'ECO.GEA SRL', '2026-05-10')],
+    PrimariaAci: [], ExtraRaccolta: [], Secondaria: [], Fornitore: [], QualificaInclusione: [], UploadLog: [], AvvisoQualifica: [], RiepilogoQualifica: [], TargetRaccoglitore: [], TargetMensile: [],
+    User: [{ id: 'u1', role: 'admin', email: 'admin@prova' }],
+  });
+  const chiaveDi = (nome) => (nome === CL ? kCL : nome === 'ECO.GEA SRL' ? 'ecogea' : 'irigom');
+
+  // 1. i soggetti
+  {
+    const db = base();
+    const finto = { asServiceRole: { entities: new Proxy({}, { get: (_t, n) => ({ list: async (_o, l = 1e9, s = 0) => (db[n] || []).slice(s, s + l), filter: async (f, _o, l = 1e9, s = 0) => (db[n] || []).filter(r => Object.entries(f || {}).every(([k, v]) => r[k] === v)).slice(s, s + l) }) }) } };
+    const gennaio = await individuaSoggetti(finto, 2027, { oggi: '2027-01-01' });
+    const cl = gennaio.soggetti.find(s => s.chiave === kCL);
+    verifica('01/01/2027: C.L. SERVICE, che ha lavorato a novembre 2026, resta da qualificare, segnata da_ultimo_trimestre', !!cl && cl.da_ultimo_trimestre === true && J(cl.ruoli) === J(['raccolta']) && J(cl.ruoli_da_ultimo_trimestre) === J(['raccolta']), J(gennaio.soggetti));
+    verifica('ECO.GEA, ferma da maggio, no', !gennaio.soggetti.some(s => s.chiave === 'ecogea'), J(gennaio.soggetti.map(s => s.chiave)));
+    const marzo = await individuaSoggetti(finto, 2027, { oggi: '2027-03-31' });
+    const aprile = await individuaSoggetti(finto, 2027, { oggi: '2027-04-01' });
+    verifica('fino al 31/03 si', marzo.soggetti.some(s => s.chiave === kCL), J(marzo.soggetti.map(s => s.chiave)));
+    verifica('controprova: dal 01/04 solo i soggetti dell\'anno', aprile.soggetti.length === 0, J(aprile.soggetti));
+    verifica('controprova: senza oggi (i contratti) i soli movimenti dell\'anno, come prima', (await individuaSoggetti(finto, 2027)).soggetti.length === 0);
+    db.PrimariaRete.push(ritiro('ET4', CL, '2027-01-04'));
+    const conViaggio = await individuaSoggetti(finto, 2027, { oggi: '2027-01-05' });
+    const cl2 = conViaggio.soggetti.find(s => s.chiave === kCL) || {};
+    verifica('con un viaggio del 2027 non e\' piu\' «da ultimo trimestre»', !cl2.da_ultimo_trimestre && !cl2.ruoli_da_ultimo_trimestre, J(cl2));
+    db.QualificaInclusione.push({ id: 'esc', anno: 2027, soggetto_chiave: 'irigom', soggetto_nome: 'IRIGOM SRL', azione: 'escludi', motivo: 'prova' });
+    const escluso = await individuaSoggetti(finto, 2027, { oggi: '2027-01-05' });
+    verifica('un\'esclusione dell\'anno vale anche per chi viene dall\'ultimo trimestre', !escluso.soggetti.some(s => s.chiave === 'irigom') && escluso.esclusi.some(e => e.chiave === 'irigom'), J([escluso.soggetti.map(s => s.chiave), escluso.esclusi]));
+  }
+
+  // 2. il controllo delle 7:30, coi contratti di raccolta del 2026 e la CQC intestata a C.L. SERVICE
+  {
+    const db = base();
+    db.TipoDocumentoQualifica = [
+      { id: 'tq-contr', nome: 'Contratto di raccolta', categoria: 'contratto', si_applica_a: 'raccolta', tipo_scadenza: 'data', obbligatorio: true, preavviso_giorni: 30, attivo: true },
+      { id: 'tq-cqc', nome: 'CQC degli autisti', si_applica_a: '', solo_per_soggetti: [{ chiave: kCL, nome: CL }], tipo_scadenza: 'data', obbligatorio: true, preavviso_giorni: 30, attivo: true },
+    ];
+    db.DocumentoQualifica = [CL, 'ECO.GEA SRL'].map((nome, i) => ({ id: 'dq' + i, soggetto_chiave: chiaveDi(nome), soggetto_nome: nome, tipo_documento_id: 'tq-contr', stato: 'attivo', analisi_stato: 'completata', verificato_manualmente: true, data_emissione: '2026-01-02', data_scadenza: '2026-12-31', created_date: '2025-12-20T10:00:00' }));
+    db.DocumentoQualifica.push({ id: 'dq-cqc', soggetto_chiave: kCL, soggetto_nome: CL, tipo_documento_id: 'tq-cqc', stato: 'attivo', analisi_stato: 'completata', verificato_manualmente: true, data_emissione: '2024-03-01', data_scadenza: '2029-03-01', created_date: '2024-03-02T10:00:00' });
+    const capodanno = await alle730('2027-01-01', db, { invia_email: false });
+    const r = capodanno.j;
+    verifica('01/01/2027: il controllo del 2027 ha i soggetti dell\'ultimo trimestre, non 0', capodanno.stato === 200 && r.anno === 2027 && r.riepilogo.soggetti === 2, J([capodanno.stato, r.error, r.riepilogo]));
+    verifica('il contratto di raccolta di C.L. SERVICE scaduto il 31/12/2026 si dice dal 01/01', r.riepilogo.scaduti === 1, J(r.riepilogo));
+    verifica('e nessun «errore del catalogo» per la CQC di C.L. SERVICE', !(r.anomalie || []).some(a => a.gravita === 'errore'), J(r.anomalie));
+    const rq = (db.RiepilogoQualifica || []).find(x => x.anno === 2027) || {};
+    verifica('il riepilogo salvato del 2027 (dashboard, menu, passiva) dice lo stesso', rq.anomalie_catalogo === 0 && rq.scaduti === 1, J(rq));
+    const aprile = await alle730('2027-04-01', db, { invia_email: false });
+    verifica('controprova: dal 01/04/2027, senza viaggi del 2027, solo i soggetti dell\'anno: nessuno, e la CQC torna anomalia', aprile.j.riepilogo.soggetti === 0 && (aprile.j.anomalie || []).some(a => a.gravita === 'errore' && /CQC/.test(a.messaggio)), J([aprile.j.riepilogo, aprile.j.anomalie]));
+  }
+
+  // 3. lo stesso promemoria una volta sola, a cavallo dell'anno
+  {
+    const db = base();
+    db.TipoDocumentoQualifica = [
+      { id: 'tq-albo', nome: "Iscrizione all'Albo gestori ambientali", si_applica_a: 'raccolta', tipo_scadenza: 'data', obbligatorio: true, preavviso_giorni: 90, attivo: true },
+      { id: 'tq-durc', nome: 'DURC', si_applica_a: '', solo_per_soggetti: [{ chiave: kCL, nome: CL }], tipo_scadenza: 'data', obbligatorio: true, preavviso_giorni: 30, attivo: true },
+    ];
+    db.DocumentoQualifica = [
+      { id: 'dq-albo', soggetto_chiave: kCL, soggetto_nome: CL, tipo_documento_id: 'tq-albo', stato: 'attivo', analisi_stato: 'completata', verificato_manualmente: true, data_emissione: '2022-03-16', data_scadenza: '2027-03-15', created_date: '2022-03-20T10:00:00' },
+      // ECO.GEA lavora a dicembre: la sua iscrizione all'Albo non scade
+      { id: 'dq-albo2', soggetto_chiave: 'ecogea', soggetto_nome: 'ECO.GEA SRL', tipo_documento_id: 'tq-albo', stato: 'attivo', analisi_stato: 'completata', verificato_manualmente: true, data_emissione: '2022-03-16', data_scadenza: '2030-03-15', created_date: '2022-03-20T10:00:00' },
+    ];
+    const dicembre = await alle730('2026-12-28', db);
+    const registro = () => db.AvvisoQualifica.map(a => `${a.anno} ${a.chiave_evento}`).sort();
+    verifica('28/12/2026: la soglia dei 90 giorni dell\'Albo di C.L. SERVICE parte e si registra, col DURC mai ricevuto', dicembre.stato === 200 && dicembre.email.length === 1 && J(registro()) === J(['2026 mancante|cl service|tq-durc', '2026 scadenza|dq-albo|90']), J([dicembre.j.error, dicembre.j.da_inviare, registro()]));
+    // C.L. SERVICE lavora il 04/01/2027: e' fra i soggetti del 2027 comunque
+    db.PrimariaRete.push(ritiro('ET5', CL, '2027-01-04'));
+    const gennaio = await alle730('2027-01-05', db);
+    const oggetto = (gennaio.email[0] || {}).subject || '';
+    verifica('05/01/2027: la soglia dei 90 giorni non riparte', !/in scadenza/.test(oggetto) && !db.AvvisoQualifica.some(a => a.anno === 2027 && a.chiave_evento === 'scadenza|dq-albo|90'), J([oggetto, registro()]));
+    verifica('controprova: il DURC mai ricevuto (ripetibile) si ripete come prima', gennaio.email.length === 1 && /mai ricevut/.test(oggetto) && db.AvvisoQualifica.some(a => a.anno === 2027 && a.chiave_evento === 'mancante|cl service|tq-durc'), J([oggetto, registro()]));
+    const febbraio = await alle730('2027-02-13', db);
+    const ogg2 = (febbraio.email[0] || {}).subject || '';
+    verifica('controprova: la soglia nuova dei 30 giorni (13/02/2027) si manda', /1 in scadenza/.test(ogg2) && db.AvvisoQualifica.some(a => a.anno === 2027 && a.chiave_evento === 'scadenza|dq-albo|30'), J([ogg2, registro()]));
+  }
+
+  // 4. un promemoria che si ripete aspetta la settimana anche a cavallo
+  // dell'anno (revisione del 15/10/2026): il DURC di C.L. SERVICE mai ricevuto,
+  // mandato giovedi' 31/12/2026, ripartiva venerdi' 01/01/2027 («Qualifica
+  // fornitori 2027: 1 mai ricevuti»), mentre dentro l'anno il giorno dopo non
+  // riparte. Ora conta l'ultimo invio del registro dell'anno prima.
+  {
+    const conDurc = () => ({ ...base(), PrimariaRete: [ritiro('ET2', CL, '2026-11-20')],
+      TipoDocumentoQualifica: [{ id: 'tq-durc', nome: 'DURC', si_applica_a: '', solo_per_soggetti: [{ chiave: kCL, nome: CL }], tipo_scadenza: 'data', obbligatorio: true, preavviso_giorni: 30, attivo: true }],
+      DocumentoQualifica: [] });
+    const oggetti = (r) => r.email.map(e => e.subject).join(' / ');
+    const dentro = conDurc();
+    const d30 = await alle730('2026-12-30', dentro);
+    const d31 = await alle730('2026-12-31', dentro);
+    verifica('dentro l\'anno: mandato il 30/12/2026, il 31/12 non riparte', /mai ricevut/.test(oggetti(d30)) && d31.email.length === 0, J([oggetti(d30), oggetti(d31)]));
+    const cavallo = conDurc();
+    const c31 = await alle730('2026-12-31', cavallo);
+    const c01 = await alle730('2027-01-01', cavallo);
+    verifica('a cavallo: mandato il 31/12/2026, il 01/01/2027 non riparte', /2026: 1 mai ricevut/.test(oggetti(c31)) && c01.stato === 200 && c01.email.length === 0 && c01.j.da_inviare === 0, J([oggetti(c31), oggetti(c01), c01.j.error, c01.j.da_inviare]));
+    const c06 = await alle730('2027-01-06', cavallo);
+    verifica('e nemmeno il 06/01, sei giorni dopo', c06.email.length === 0, J(oggetti(c06)));
+    const c07 = await alle730('2027-01-07', cavallo);
+    verifica('controprova: il 07/01/2027, sette giorni dopo, riparte e si registra nel 2027', /2027: 1 mai ricevut/.test(oggetti(c07)) && cavallo.AvvisoQualifica.some(a => a.anno === 2027 && a.chiave_evento === 'mancante|cl service|tq-durc' && a.invii === 1), J([oggetti(c07), cavallo.AvvisoQualifica]));
+    verifica('e il registro del 2026 resta com\'era', cavallo.AvvisoQualifica.filter(a => a.anno === 2026).length === 1 && cavallo.AvvisoQualifica.find(a => a.anno === 2026).invii === 1, J(cavallo.AvvisoQualifica));
+    const c08 = await alle730('2027-01-08', cavallo);
+    verifica('controprova: dopo, conta il registro del 2027 (l\'08/01 non riparte)', c08.email.length === 0, J(oggetti(c08)));
+  }
+}
+
 console.log(`\n${ok} superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

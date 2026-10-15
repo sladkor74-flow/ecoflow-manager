@@ -21,7 +21,7 @@
 // Solo server, nessuno specchio: la pagina riceve i numeri fatti.
 import { periodoMovimento, chiaveOrdine, eTerminato, MESI_MOVIMENTI } from "./movimenti.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
-import { profiloMensile, quotaAttesa, frazioneDelMese, giorniDelMese, variazioniDelContratto } from "./attesoContratto.ts";
+import { profiloMensile, quotaAttesa, frazioneDelMese, giorniDelMese, variazioniDelContratto, giornoDellaMisura } from "./attesoContratto.ts";
 import { righeAndamento } from "./andamentoTarget.ts";
 import { daConfermare } from "./annoTarget.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
@@ -231,28 +231,36 @@ export function quadroRete({ anno, oggi, giornoDati, commessa, kpi, fonteTarget 
   const annoDati = giornoDati ? Number(giornoDati.slice(0, 4)) : null;
   const target = kpi.target === null || kpi.target === undefined ? null : Number(kpi.target);
   const raccolto = Number(kpi.raccolto_rete_anno) || 0;
+  // IL GIORNO DELLA MISURA (giornoDellaMisura di attesoContratto.ts, prova
+  // generale del cambio d'anno del 15/10/2026): un anno chiuso si misura al
+  // 31/12 anche quando l'ultimo ritiro caricato e' del 22/12 e quelli dell'anno
+  // nuovo non ci sono ancora; l'anno in corso senza ritiri suoi non ha giorno.
+  // Prima si guardava solo l'anno del giorno dei dati, e il 05/01/2027 il 2026
+  // era «Atteso al 22/12» con la «Proiezione a fine anno» su un anno finito.
+  const misura = giornoDellaMisura(a, giornoDati, oggi);
+  const chiuso = misura !== '' && ((annoDati !== null && annoDati > a) || a < Number(String(oggi).slice(0, 4)));
   // Il 2 gennaio, senza nessun ritiro dell'anno, il giorno dei dati e' nell'anno
   // prima: l'atteso non e' zero, non c'e' (la card scriveva «atteso al 31/12: 0,0%»).
-  const quota = annoDati === a ? quotaAttesa(commessa, a, giornoDati) : annoDati !== null && annoDati > a ? 1 : null;
-  // Per un anno chiuso l'atteso e' quello dell'anno intero, al 31/12: il giorno
-  // dei dati e' dell'anno dopo (revisione delle migliorie, 11/10/2026). Le
-  // etichette scrivevano «Atteso al 08/10» guardando il 2025, e si leggeva l'8
-  // ottobre 2025 su un numero che e' il target intero.
-  const atteso = kpi.atteso && annoDati !== null && annoDati >= a
-    ? { giorno: annoDati > a ? `${a}-12-31` : kpi.atteso.giorno, fine_anno: annoDati > a, quota, atteso_t: kpi.atteso.atteso_t, scarto_t: kpi.atteso.scarto_t, pct_atteso: kpi.atteso.pct }
+  const quota = misura ? quotaAttesa(commessa, a, misura) : null;
+  // Per un anno chiuso l'atteso e' quello dell'anno intero, al 31/12 (revisione
+  // delle migliorie, 11/10/2026). Le etichette scrivevano «Atteso al 08/10»
+  // guardando il 2025, e si leggeva l'8 ottobre 2025 su un numero che e' il
+  // target intero.
+  const atteso = kpi.atteso && misura
+    ? { giorno: misura, fine_anno: chiuso, quota, atteso_t: kpi.atteso.atteso_t, scarto_t: kpi.atteso.scarto_t, pct_atteso: kpi.atteso.pct }
     : null;
 
   // LA PROIEZIONE A FINE ANNO: se il resto dell'anno va come finora rispetto al
   // profilo del contratto, raccolto diviso la quota del profilo coperta dai dati.
   // Si da' quando i dati coprono gennaio e febbraio interi: prima, pochi giorni
   // moltiplicati per l'anno non vogliono dire niente. Un anno finito ha la sua
-  // proiezione: il raccolto.
+  // proiezione: il raccolto (anche se l'ultimo ritiro caricato e' del 22/12).
   const fineFebbraio = `${a}-02-${due(giorniDelMese(a, 1))}`;
   let proiezione = null, proiezionePerche = '';
   if (target === null) proiezionePerche = `Il contratto Ecotyre del ${a} non ha un target: non c'è niente da proiettare.`;
-  else if (annoDati === null || annoDati < a) proiezionePerche = `Nessun ritiro del ${a} ancora terminato.`;
-  else if (annoDati > a) proiezione = { t: t3(raccolto), pct_target: target ? (raccolto / target) * 100 : null, finale: true };
-  else if (giornoDati < fineFebbraio) proiezionePerche = 'Si dà da quando i dati coprono gennaio e febbraio interi: prima, pochi giorni moltiplicati per l\'anno non vogliono dire niente.';
+  else if (chiuso) proiezione = { t: t3(raccolto), pct_target: target ? (raccolto / target) * 100 : null, finale: true };
+  else if (!misura) proiezionePerche = `Nessun ritiro del ${a} ancora terminato.`;
+  else if (misura < fineFebbraio) proiezionePerche = 'Si dà da quando i dati coprono gennaio e febbraio interi: prima, pochi giorni moltiplicati per l\'anno non vogliono dire niente.';
   else if (quota && quota > 0) proiezione = { t: t3(raccolto / quota), pct_target: target ? (raccolto / quota / target) * 100 : null, finale: false };
 
   // IL RITMO CHE SERVE: quello che manca al target diviso i mesi che restano dopo
@@ -271,10 +279,12 @@ export function quadroRete({ anno, oggi, giornoDati, commessa, kpi, fonteTarget 
   }
 
   // MESE PER MESE: il target del profilo, il budget di SMOCO, il raccolto, e i
-  // progressivi. Un mese che i dati non coprono e senza raccolto e' futuro.
+  // progressivi. Un mese che i dati non coprono e senza raccolto e' futuro. I
+  // mesi coperti si contano fino al giorno della misura: per un anno chiuso
+  // tutti e dodici interi (15/10/2026).
   const profilo = profiloMensile(commessa);
   const budget = lista(commessa && commessa.budget_rete_json).map(Number);
-  const coperto = MESI_MOVIMENTI.map((_, i) => frazioneDelMese(a, i, giornoDati, oggi));
+  const coperto = MESI_MOVIMENTI.map((_, i) => frazioneDelMese(a, i, misura, oggi));
   const raccoltoMesi = perMese(reteAnno);
   let cumTarget = 0, cumRaccolto = 0;
   const mesi = mesiDelCanale(raccoltoMesi, coperto).map((m, i) => {
@@ -337,7 +347,8 @@ export function quadroRete({ anno, oggi, giornoDati, commessa, kpi, fonteTarget 
     mesi,
     regioni,
     fuori_contratto: { raccolto_t: t3(fuori.reduce((s, [, t]) => s + t, 0)), regioni: fuori.map(([regione, t]) => ({ regione, raccolto_t: t3(t) })) },
-    raccoglitori: raccoglitoriRete({ righe: rete, anno: a, giornoDati, oggi, mensili, annui }),
+    // la classifica sul giorno della misura: per un anno chiuso i mesi interi
+    raccoglitori: raccoglitoriRete({ righe: rete, anno: a, giornoDati: misura, oggi, mensili, annui }),
     // con le province del contratto dell'anno: una mai servita e' ferma anche lei
     // (revisione del 13/10/2026)
     province_ferme: provinceFerme(rete, a, oggi, provinceDelContratto(commessa, a)),
@@ -350,6 +361,8 @@ export function quadroRete({ anno, oggi, giornoDati, commessa, kpi, fonteTarget 
  * L'ACI: un canale a se', senza target. La previsione del contratto ACI e'
  * indicativa. Le regioni dalla provincia, come in Target & Status (CanaleAci),
  * cosi' i numeri coincidono riga per riga; il prezzo della tabella non esce.
+ * da_confermare: il contratto dell'anno e' copiato dall'anno prima e non e'
+ * ancora confermato, quindi previsione e budget sono quelli dell'anno prima.
  */
 export function quadroAci({ anno, oggi, giornoDati, commessa, kpi, aciAnno }) {
   const a = Number(anno);
@@ -368,9 +381,18 @@ export function quadroAci({ anno, oggi, giornoDati, commessa, kpi, aciAnno }) {
     return { regione, previsione_t: pv > 0 ? t3(pv) : null, raccolto_t: t3(fatto), pct: pv > 0 ? (fatto / pv) * 100 : null };
   }).filter((r, i, tutte) => tutte.findIndex(x => x.regione.toLowerCase() === r.regione.toLowerCase()) === i);
   const budget = lista(commessa && commessa.budget_aci_json).map(Number).filter(Number.isFinite).reduce((s, v) => s + v, 0);
-  const coperto = MESI_MOVIMENTI.map((_, i) => frazioneDelMese(a, i, giornoDati, oggi));
+  const coperto = MESI_MOVIMENTI.map((_, i) => frazioneDelMese(a, i, giornoDellaMisura(a, giornoDati, oggi), oggi));
   return {
     raccolto_t: kpi.raccolto_aci_anno,
+    // LA PREVISIONE ACI COPIATA (prova generale del cambio d'anno, 15/10/2026).
+    // Previsione, corrispettivi e budget dell'ACI stanno nel contratto
+    // dell'anno: copiato dall'anno prima e non ancora confermato, sono numeri
+    // dell'anno prima (i contratti ACI sono annuali, senza tacito rinnovo). Il
+    // 15/01/2027 la dashboard scriveva «Previsione indicativa 650,00 t dal
+    // contratto ACI» senza dirlo, mentre la rete diceva «copiato, da confermare».
+    // Lo stesso daConfermare della rete; lo leggono la sezione ACI della
+    // dashboard e il PDF della settimana.
+    da_confermare: daConfermare(commessa),
     previsione_t: prev > 0 ? prev : null,
     pct_previsione: prev > 0 ? (Number(kpi.raccolto_aci_anno) / prev) * 100 : null,
     ritiri: ordiniDistinti(aciAnno),
@@ -384,7 +406,7 @@ export function quadroAci({ anno, oggi, giornoDati, commessa, kpi, aciAnno }) {
 export function quadroExtra({ anno, oggi, giornoDati, kpi, extraAnno }) {
   const righe = (extraAnno || []).map(x => (x && x.r ? x.r : x));
   const giorni = righe.map(r => (periodoMovimento(r) || {}).giorno).filter(Boolean).sort();
-  const coperto = MESI_MOVIMENTI.map((_, i) => frazioneDelMese(Number(anno), i, giornoDati, oggi));
+  const coperto = MESI_MOVIMENTI.map((_, i) => frazioneDelMese(Number(anno), i, giornoDellaMisura(anno, giornoDati, oggi), oggi));
   return {
     interventi: ordiniDistinti(righe),
     raccolto_t: kpi.raccolto_extra_anno,
@@ -424,13 +446,12 @@ export function mesiAttivaAnnoPassato(documenti, prefatture, anno, oggi) {
  * Il giorno su cui si misurano atteso e target dell'anno scelto: il giorno dei
  * dati per l'anno in corso, il 31/12 per un anno chiuso (i suoi dati sono
  * completi), niente per un anno senza ancora un ritiro. Le etichette («Atteso
- * al ...», «sul loro target al ...») lo leggono da qui.
+ * al ...», «sul loro target al ...») lo leggono da qui. Dalla prova generale del
+ * cambio d'anno (15/10/2026) la regola e' giornoDellaMisura di
+ * attesoContratto.ts, che chiude l'anno anche guardando oggi: qui resta il
+ * nome, per chi lo importa da questo file.
  */
-export function giornoDellaMisura(anno, giornoDati) {
-  const a = Number(anno);
-  const annoDati = giornoDati ? Number(String(giornoDati).slice(0, 4)) : null;
-  return annoDati === null || annoDati < a ? '' : annoDati > a ? `${a}-12-31` : String(giornoDati);
-}
+export { giornoDellaMisura };
 
 /**
  * Il quadro intero di un anno. documenti e prefatture servono solo per un anno
@@ -444,7 +465,7 @@ export function quadroCommessa(d) {
     anno: a,
     oggi: d.oggi,
     giorno_dati: d.giornoDati || '',
-    giorno_misura: giornoDellaMisura(a, d.giornoDati),
+    giorno_misura: giornoDellaMisura(a, d.giornoDati, d.oggi),
     anno_chiuso: a < annoOggi,
     rete: quadroRete(d),
     aci: quadroAci(d),

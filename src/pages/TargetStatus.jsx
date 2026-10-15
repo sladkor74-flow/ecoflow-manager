@@ -19,8 +19,10 @@ import { fetchAllClient } from '@/lib/fetchAllClient';
 import { tonnellate, percentuale, anniTarget } from '@/lib/target';
 import { annoCorrenteRoma, annoChiuso, commessaDellAnno } from '@/lib/annoTarget';
 import { righeAndamento, targetMensiliValidi } from '@/lib/andamentoTarget';
+// i target copiati dell'anno, per la frase sopra la tabella per raccoglitore (15/10/2026)
+import { targetCopiatiDellAnno } from '@/lib/andamentoTarget';
 import { filtraRaccolto } from '@/lib/raccoltoFiltrato';
-import { targetAnnuoDellAnno, regioniDellAnno, attesoDellaRegione, profiloMensile, frazioneDelMese, giornoDeiDati, variazioniDelContratto } from '@/lib/attesoContratto';
+import { targetAnnuoDellAnno, regioniDellAnno, attesoDellaRegione, profiloMensile, frazioneDelMese, giornoDeiDati, giornoDellaMisura, variazioniDelContratto } from '@/lib/attesoContratto';
 import { oggiRoma, giornoRoma } from '@/lib/giornoItaliano';
 import { useTargetCambiati, testoRilettura, oraRoma } from '@/lib/eventiDati';
 import { Loader2, RefreshCw, Filter, X, Lock } from 'lucide-react';
@@ -78,7 +80,16 @@ const giornoMese = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}` : '');
 // variazione del consorzio conta intera nel suo mese e nella sua regione. Col
 // target della regione per la quota nazionale le 100 t di ottobre della Puglia
 // si spalmavano sul suo anno e cambiavano l'atteso delle altre regioni.
-function AndamentoRegioni({ raccolto, commessa, anno, giornoDati }) {
+// IL GIORNO DELLA MISURA (prova generale del cambio d'anno, 15/10/2026):
+// qui giornoDati e' il giorno della misura dell'anno (giornoDellaMisura,
+// src/lib/attesoContratto.js), che la pagina calcola, e non piu' l'ultima fine
+// trasporto di qualunque anno. Il 05/01/2027, coi dati fermi al 30/12/2026, il
+// 2027 scriveva «Atteso al 30/12 (t)» con 0,00 e lo scarto +0,00 in verde in
+// tutte le regioni, e il 2026 «Atteso al 30/12» invece del 31/12. Ora il 2027
+// senza ritiri suoi dice «—» col perche', e un anno chiuso si misura al 31/12.
+// ultimoRitiro (l'ultima fine trasporto caricata) serve solo a dire perche'
+// l'atteso manca.
+export function AndamentoRegioni({ raccolto, commessa, anno, giornoDati, ultimoRitiro = '' }) {
   const { righe: regioni, fonte } = regioniDellAnno(commessa, anno);
   if (!regioni.length) {
     return <p className="text-sm text-muted-foreground border rounded-lg px-4 py-3">Inserisci o importa il contratto del {anno} nella scheda Commessa Ecotyre per confrontare il raccolto di ogni regione con quanto richiesto.</p>;
@@ -100,6 +111,8 @@ function AndamentoRegioni({ raccolto, commessa, anno, giornoDati }) {
   const tot = { contratto: somma('contratto'), raccolto: somma('raccolto'), atteso: somma('atteso') };
   const scartoTot = tot.atteso === null ? null : tot.raccolto - tot.atteso;
   const conSegno = (v) => (v === null ? '—' : `${v >= 0 ? '+' : ''}${tonnellate(v)}`);
+  // un anno chiuso: l'atteso e' il contratto intero, al 31/12
+  const chiusoAl31 = !!giornoDati && giornoDati === `${anno}-12-31` && annoChiuso(anno);
   const colore = (v) => (v === null ? 'text-muted-foreground' : v >= 0 ? 'text-emerald-700' : 'text-red-600');
   return (
     <div className="border rounded-lg overflow-x-auto bg-card">
@@ -139,9 +152,13 @@ function AndamentoRegioni({ raccolto, commessa, anno, giornoDati }) {
       </table>
       <p className="px-3 py-2 text-xs text-muted-foreground border-t">
         Raccolto del solo canale RETE dai formulari terminati, per data di fine trasporto: l&apos;ACI è nella sezione Canale ACI.
-        {giornoDati
-          ? ` L'atteso è quanto il contratto di ogni regione chiede fino al ${giornoMese(giornoDati)}, il giorno fin dove arrivano i dati (l'ultima fine trasporto caricata, mai oltre oggi): i mesi finiti interi, quello in corso per i giorni coperti.`
-          : " L'atteso non si calcola: non c'è ancora nessun ritiro terminato con la fine trasporto."}
+        {chiusoAl31
+          ? ` Il ${anno} è chiuso: l'atteso è il contratto intero di ogni regione, al 31/12, qualunque sia l'ultimo ritiro caricato.`
+          : giornoDati
+            ? ` L'atteso è quanto il contratto di ogni regione chiede fino al ${giornoMese(giornoDati)}, il giorno fin dove arrivano i dati (l'ultima fine trasporto caricata, mai oltre oggi): i mesi finiti interi, quello in corso per i giorni coperti.`
+            : ultimoRitiro
+              ? ` L'atteso non si calcola: nessun ritiro del ${anno} è ancora terminato (non è zero).`
+              : " L'atteso non si calcola: non c'è ancora nessun ritiro terminato con la fine trasporto."}
         {profilo.rivisto
           ? ` Segue il target mensile del contratto, riportato all'annuo (il profilo scritto somma ${tonnellate(profilo.totale)} t).`
           : ' Il target mensile del contratto non è inserito: per ora in dodicesimi.'}
@@ -311,6 +328,10 @@ export default function TargetStatus() {
     if (!raccolto) return [];
     return righeAndamento({ mensili: targets, annui, raccolto: raccolto.by_raccoglitore, filtri: filters });
   }, [raccolto, targets, annui, filters]);
+  // I target dell'anno copiati dall'anno prima e non confermati, per la frase
+  // sopra la tabella per raccoglitore: la stessa del Report generale (prova
+  // generale del cambio d'anno, 15/10/2026).
+  const copiatiDellAnno = useMemo(() => targetCopiatiDellAnno({ mensili: targets, annui }), [targets, annui]);
 
   // La tabella per regione dell'Andamento. Del target mensile scritto due volte
   // (stesso raccoglitore, regione, impianto, ruolo e mese) vale l'ultimo
@@ -364,6 +385,13 @@ export default function TargetStatus() {
   // lo scarto e' quello dei mesi scelti, sulle righe filtrate, e la card dice
   // quali altri filtri valgono (12/10/2026).
   const hasFilters = Object.values(filters).some(v => (Array.isArray(v) ? v.length > 0 : v));
+  // Il giorno su cui si misura l'anno scelto (giornoDellaMisura, prova generale
+  // del cambio d'anno del 15/10/2026): il 31/12 per un anno chiuso, nessuno per
+  // l'anno in corso senza ancora un ritiro suo, altrimenti il giorno dei dati.
+  // Lo usano la tabella per regione e contratto e la card dello scarto del mese:
+  // il 05/01/2027 la card del 2027 contava l'atteso di gennaio sul 30/12/2026
+  // (zero) e scriveva lo scarto +0,00.
+  const giornoMisura = giornoDellaMisura(anno, giornoDati, oggiRoma());
   const kpis = useMemo(() => {
     const contratto = targetAnnuoDellAnno(commessa, anno);
     const raccoltoTotale = raccoltoAnno?.totale_raccolto || 0;
@@ -371,11 +399,15 @@ export default function TargetStatus() {
     let raccoltoMese = 0;
     let attesoMese = 0;
     let deltaMese = 0;
+    // i target dei mesi scelti copiati dall'anno prima e non confermati: l'atteso
+    // li conta, e la card lo dice (15/10/2026)
+    let copiatiMese = 0;
     for (const r of mergedData) {
       for (const m of r.mesi) {
         if (!mesiScelti.includes(m.mese)) continue;
+        if (m.daConfermare) copiatiMese++;
         raccoltoMese += m.raccolto;
-        attesoMese += m.target * frazioneDelMese(anno, MESI.indexOf(m.mese), giornoDati, oggiRoma());
+        attesoMese += m.target * frazioneDelMese(anno, MESI.indexOf(m.mese), giornoMisura, oggiRoma());
         deltaMese += m.delta;
       }
     }
@@ -388,17 +420,21 @@ export default function TargetStatus() {
       variazioni: contratto.fonte === 'contratto' ? variazioniPerLaCard(variazioniDelContratto(commessa).filter(v => v.in_vigore), contratto.t) : null,
       raccoltoTotale,
       residuoAnno: contratto.t === null ? null : contratto.t - raccoltoTotale,
-      scartoMese: giornoDati ? raccoltoMese - attesoMese : null,
-      attesoMese: giornoDati ? attesoMese : null,
+      scartoMese: giornoMisura ? raccoltoMese - attesoMese : null,
+      attesoMese: giornoMisura ? attesoMese : null,
       mesiScarto: mesiScelti,
+      targetCopiatiMese: copiatiMese,
       filtriScarto: ['regione', 'raccoglitore', 'impianto'].filter(k => (filters[k] || []).length > 0).map(k => `${k} ${filters[k].join(', ')}`),
       conFiltri: hasFilters,
-      giornoDati,
+      // il giorno della misura (l'etichetta della card) e l'ultimo ritiro
+      // caricato, che dice perche' l'atteso manca
+      giornoDati: giornoMisura,
+      ultimoRitiro: giornoDati,
       // per la presentazione (statusExports.js), con i nomi e il segno di prima
       leftoverTotale: contratto.t === null ? null : contratto.t - raccoltoTotale,
       deltaMeseCorrente: deltaMese,
     };
-  }, [mergedData, raccoltoAnno, filters, hasFilters, commessa, anno, giornoDati, meseDiOggi]);
+  }, [mergedData, raccoltoAnno, filters, hasFilters, commessa, anno, giornoDati, giornoMisura, meseDiOggi]);
   // Il riepilogo del PDF vuole un elenco di voci: gli si passava l'oggetto delle
   // card, e il PDF si fermava con un errore (11/10/2026).
   const riepilogoPdf = [
@@ -427,7 +463,8 @@ export default function TargetStatus() {
               <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 text-sm btn-secondario">
                 <RefreshCw className="w-4 h-4" /> Aggiorna
               </button>
-              <ExportButtons onExcel={() => exportExcel(anno)} onPDF={() => exportPDF(riepilogoPdf, mergedData, regioneData, impiantiData, anno)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData, anno)} />
+              {/* il conto dei target copiati dell'anno, per la frase dei file come quella sopra la tabella (revisione del 15/10/2026) */}
+              <ExportButtons onExcel={() => exportExcel(anno)} onPDF={() => exportPDF(riepilogoPdf, mergedData, regioneData, impiantiData, anno, copiatiDellAnno)} onPPT={() => exportPPT(kpis, mergedData, regioneData, impiantiData, anno, copiatiDellAnno)} />
             </>
           )}
         </div>
@@ -506,7 +543,7 @@ export default function TargetStatus() {
               <KpiCards kpis={kpis} anno={anno} />
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-3">Raccolta RETE per regione e contratto</h2>
-                <AndamentoRegioni raccolto={raccoltoAnno} commessa={commessa} anno={anno} giornoDati={giornoDati} />
+                <AndamentoRegioni raccolto={raccoltoAnno} commessa={commessa} anno={anno} giornoDati={giornoMisura} ultimoRitiro={giornoDati} />
               </div>
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Report generale</h2>
@@ -516,7 +553,7 @@ export default function TargetStatus() {
               <div>
                 <h2 className="text-lg font-heading font-semibold mb-1">Target e raccolto per raccoglitore</h2>
                 <p className="text-xs text-muted-foreground mb-3">Solo lettura: i target si modificano nella scheda Target raccoglitori.</p>
-                <TargetTable data={mergedData} />
+                <TargetTable data={mergedData} anno={anno} copiati={copiatiDellAnno} />
               </div>
               <TargetChart data={mergedData} mese={meseSelezionato} onMeseChange={setMeseSelezionato} />
               <div>

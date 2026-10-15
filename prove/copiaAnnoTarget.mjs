@@ -4,7 +4,9 @@
 //     conta soltanto; i collegamenti puntano ai nuovi impianti; ripetuta non
 //     crea doppioni;
 //   - portaTargetInTargetStatus: gli impianti che hanno il target solo nelle
-//     Giacenze lo ricevono in Target & Status, senza entrare nella predittivita'.
+//     Giacenze lo ricevono in Target & Status, senza entrare nella predittivita';
+//   - (prova generale del cambio d'anno, 15/10/2026) la copia porta il ruolo dei
+//     target dei raccoglitori, sull'annuo e sui mesi, e lo tiene nelle chiavi.
 //
 // Le funzioni si impacchettano con esbuild e un SDK finto che legge e scrive gli
 // archivi di globalThis.__ARCHIVI (come in predittivitaFunzioni.mjs). Il giorno
@@ -156,6 +158,52 @@ globalThis.__ARCHIVI.ImpiantoTargetSecondaria.push({ id: 'v25', nome_impianto: '
 r = await copia({ anno: 2026 });
 verifica('anno in corso compilato: dal 2025 non entra niente, e lo si dice', r.status === 200 && Object.values(r.body.conteggi).every(n => n === 0) && globalThis.__SCRITTI.length === 0
   && r.body.saltati.raccoglitori_gia_compilati === 1 && r.body.saltati.mensili_gia_compilati === 1 && r.body.saltati.siti_gia_compilati === 1 && r.body.saltati.impianti_gia_compilati === 1, J(r.body));
+
+// IL RUOLO DEI TARGET SI COPIA (prova generale del cambio d'anno, 15/10/2026).
+// La scheda Target raccoglitori scrive il ruolo sull'annuo e sui mesi (impianto
+// o piazzale di un sito a doppio ruolo) e lo tiene nell'identita' della riga. La
+// copia non lo portava: le primarie di T-Cycle, 1.050 t all'impianto e 250 t al
+// piazzale nel 2026, nel 2027 diventavano 1.300 t senza ruolo, e le Giacenze 2027
+// (targetPrimariePerRuolo) avrebbero sbagliato appena l'utente l'avesse scritto.
+{
+  const { targetPrimariePerRuolo } = await import('../base44/shared/annoTarget.ts');
+  const { normalizzaRagioneSociale } = await import('../base44/shared/normalizzaRagioneSociale.ts');
+  const st = J([{ il: '2026-10-05T10:00:00Z', da: 'Amministratore', nota: 'impianto: T-CYCLE INDUSTRIES SRL (piazzale)', prima: null }]);
+  prepara();
+  globalThis.__ARCHIVI.TargetRaccoglitore.push(
+    { id: 'rT1', raccoglitore: 'SMOCO S.r.l.', regione: 'Puglia', impianto: 'T-CYCLE INDUSTRIES SRL', ruolo: 'impianto', anno: 2026, target_tonnellate: 1050, storico_json: st },
+    { id: 'rT2', raccoglitore: 'ECO.GEA SRL', regione: 'Puglia', impianto: 'T-CYCLE INDUSTRIES SRL', ruolo: 'stoccaggio', anno: 2026, target_tonnellate: 250, storico_json: st },
+  );
+  globalThis.__ARCHIVI.TargetMensile.push(
+    { id: 'mT2', raccoglitore: 'ECO.GEA SRL', regione: 'Puglia', impianto: 'T-CYCLE INDUSTRIES SRL', ruolo: 'stoccaggio', mese: 'Gennaio', anno: 2026, target: 20, storico_json: st },
+  );
+  const T = (righe, anno) => targetPrimariePerRuolo(righe, 'T-CYCLE INDUSTRIES SRL', anno, normalizzaRagioneSociale);
+  verifica('il 2026: T-Cycle 1.050 t all\'impianto e 250 t al piazzale', J(T(globalThis.__ARCHIVI.TargetRaccoglitore, 2026)) === J({ imp: 1050, stoc: 250, senza: 0 }), J(T(globalThis.__ARCHIVI.TargetRaccoglitore, 2026)));
+  r = await copia({ anno: 2027 });
+  const A2 = globalThis.__ARCHIVI;
+  verifica('copiato il 28/12, il 2027 ha gli stessi ruoli: {imp 1.050, stoc 250, senza 0}', r.status === 200 && J(T(A2.TargetRaccoglitore, 2027)) === J({ imp: 1050, stoc: 250, senza: 0 }), J([r.body.conteggi, T(A2.TargetRaccoglitore, 2027)]));
+  const righe27 = A2.TargetRaccoglitore.filter(t => t.anno === 2027 && /T-CYCLE/.test(t.impianto || ''));
+  verifica('il ruolo e\' sulle righe annue del 2027', J(righe27.map(t => [t.raccoglitore, t.ruolo]).sort()) === J([['ECO.GEA SRL', 'stoccaggio'], ['SMOCO S.r.l.', 'impianto']]), J(righe27));
+  const gen27 = A2.TargetMensile.filter(t => t.anno === 2027 && t.raccoglitore === 'ECO.GEA SRL' && t.mese === 'Gennaio');
+  verifica('e sul mese di gennaio di ECO.GEA', gen27.length === 1 && gen27[0].ruolo === 'stoccaggio' && gen27[0].target === 20, J(gen27));
+  // controprova: le righe senza ruolo si copiano come prima, senza un ruolo inventato
+  const senzaRuolo = A2.TargetRaccoglitore.filter(t => t.anno === 2027 && t.raccoglitore === 'C.L. Service');
+  verifica('controprova: la riga senza ruolo si copia come prima, senza il campo', senzaRuolo.length === 1 && !('ruolo' in senzaRuolo[0]) && senzaRuolo[0].target_tonnellate === 300, J(senzaRuolo));
+  const scritti = globalThis.__SCRITTI.length;
+  r = await copia({ anno: 2027 });
+  verifica('controprova: ripetuta non fa doppioni, con o senza ruolo', globalThis.__SCRITTI.length === scritti && r.body.conteggi.raccoglitori === 0 && r.body.conteggi.mensili === 0 && r.body.saltati.raccoglitori_esistenti === 4, J([r.body.conteggi, r.body.saltati]));
+  // due righe verso lo stesso sito, una per ruolo, non sono un doppione:
+  // gia' nel 2027 quella dell'impianto, si copia quella del piazzale
+  prepara();
+  globalThis.__ARCHIVI.TargetRaccoglitore = [
+    { id: 'p1', raccoglitore: 'ECO.GEA SRL', regione: 'Puglia', impianto: 'T-CYCLE INDUSTRIES SRL', ruolo: 'impianto', anno: 2026, target_tonnellate: 100 },
+    { id: 'p2', raccoglitore: 'ECO.GEA SRL', regione: 'Puglia', impianto: 'T-CYCLE INDUSTRIES SRL', ruolo: 'stoccaggio', anno: 2026, target_tonnellate: 250 },
+    { id: 'p3', raccoglitore: 'ECO.GEA SRL', regione: 'Puglia', impianto: 'T-CYCLE INDUSTRIES SRL', ruolo: 'impianto', anno: 2027, target_tonnellate: 100, storico_json: J([{ il: '2026-12-28T10:00:00Z', nota: 'copiato dal 2026, da confermare' }]) },
+  ];
+  r = await copia({ anno: 2027 });
+  const eco27 = globalThis.__ARCHIVI.TargetRaccoglitore.filter(t => t.anno === 2027);
+  verifica('una copia interrotta: si completa il piazzale, l\'impianto non si raddoppia', eco27.length === 2 && J(eco27.map(t => t.ruolo).sort()) === J(['impianto', 'stoccaggio']) && r.body.saltati.raccoglitori_esistenti === 1, J([eco27, r.body.saltati]));
+}
 
 // --- portaTargetInTargetStatus
 const porta = await funzione('portaTargetInTargetStatus');

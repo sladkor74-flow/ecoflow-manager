@@ -21,6 +21,7 @@
 // Lo specchio per il browser e' src/lib/andamentoTarget.js (prove/specchi.mjs).
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { MESI_MOVIMENTI } from "./movimenti.ts";
+import { daConfermare } from "./annoTarget.ts";
 
 /**
  * Stesso raccoglitore fra il nome scritto nel target e quello del portale: nome
@@ -90,7 +91,20 @@ export function targetMensiliValidi(records) {
  * regione va alla riga con lo stesso nome, e se sono piu' d'una a quella con piu'
  * raccolto.
  *
- * @returns [{ raccoglitore, regione, targetAnnuo, raccoltoTotale, leftover, mesi: [{ mese, target, raccolto, delta }], nomi }]
+ * I TARGET COPIATI E NON CONFERMATI (prova generale del cambio d'anno,
+ * 15/10/2026). Un target copiato dall'anno prima e non ancora confermato
+ * (daConfermare di annoTarget.ts) non e' ancora un target deciso: la dashboard
+ * lo toglie dalla classifica e lo conta, checkTargetAlerts non apre avvisi su di
+ * lui. L'Andamento di Target & Status invece, il 15/01/2027 col contratto 2027
+ * confermato e i 147 target mensili e 14 annui dei raccoglitori ancora copiati,
+ * li mostrava con target, residuo e Δ come se fossero decisi. Ora ogni riga
+ * dice quali dei suoi target sono copiati: annuoDaConfermare (almeno uno dei
+ * target annui), in ogni mese daConfermare (almeno una riga del mese),
+ * targetCopiati e targetScritti (quante righe di target ha la riga e quante
+ * sono copiate). I numeri restano quelli scritti: chi mostra la riga dice
+ * «copiato, da confermare».
+ *
+ * @returns [{ raccoglitore, regione, targetAnnuo, raccoltoTotale, leftover, mesi: [{ mese, target, raccolto, delta, daConfermare }], nomi, annuoDaConfermare, targetCopiati, targetScritti }]
  *   leftover e' il residuo dell'anno, target annuo meno raccolto (negativo:
  *   target superato); il delta del mese e' target meno raccolto. I nomi dei campi
  *   restano quelli che leggono il PDF e la presentazione (statusExports.js).
@@ -100,7 +114,7 @@ export function righeAndamento({ mensili = [], annui = [], raccolto = [], filtri
   const righe = new Map();
   const riga = (nome, regione) => {
     const k = `${normalizzaRagioneSociale(nome || '')}|||${testo(regione)}`;
-    if (!righe.has(k)) righe.set(k, { raccoglitore: testo(nome), regione: testo(regione), target: {}, raccolto: {}, raccoltoTotale: 0, annuo: 0, nomi: new Set() });
+    if (!righe.has(k)) righe.set(k, { raccoglitore: testo(nome), regione: testo(regione), target: {}, raccolto: {}, raccoltoTotale: 0, annuo: 0, nomi: new Set(), mesiCopiati: new Set(), annuoCopiato: false, copiati: 0, scritti: 0 });
     const r = righe.get(k);
     if (testo(nome)) r.nomi.add(testo(nome));
     return r;
@@ -109,14 +123,19 @@ export function righeAndamento({ mensili = [], annui = [], raccolto = [], filtri
   // 1. le righe dei target: prima ci sono loro, poi il raccolto le cerca. Del
   // target scritto due volte conta l'ultimo modificato, come negli avvisi
   // (revisione del 13/10/2026)
+  // (e quali sono copiati dall'anno prima e non confermati, 15/10/2026)
+  const conta = (r, x) => { r.scritti++; if (daConfermare(x)) { r.copiati++; return true; } return false; };
   for (const t of targetMensiliValidi(mensili)) {
     const r = riga(t.raccoglitore, t.regione);
     r.target[t.mese] = (r.target[t.mese] || 0) + (t.non_raccoglie ? 0 : Number(t.target) || 0);
+    if (conta(r, t)) r.mesiCopiati.add(t.mese);
   }
   const senzaRegione = [];
   for (const a of annui) {
     if (!testo(a.regione)) { senzaRegione.push(a); continue; }
-    riga(a.raccoglitore, a.regione).annuo += Number(a.target_tonnellate) || 0;
+    const r = riga(a.raccoglitore, a.regione);
+    r.annuo += Number(a.target_tonnellate) || 0;
+    if (conta(r, a)) r.annuoCopiato = true;
   }
   const conTarget = [...righe.values()];
 
@@ -137,6 +156,7 @@ export function righeAndamento({ mensili = [], annui = [], raccolto = [], filtri
     if (!candidati.length) candidati = tutte.filter(r => stessoRaccoglitore(a.raccoglitore, r.raccoglitore));
     const dest = candidati.sort((x, y) => y.raccoltoTotale - x.raccoltoTotale)[0] || riga(a.raccoglitore, '');
     dest.annuo += Number(a.target_tonnellate) || 0;
+    if (conta(dest, a)) dest.annuoCopiato = true;
   }
 
   const fRegione = filtri.regione || [];
@@ -145,12 +165,71 @@ export function righeAndamento({ mensili = [], annui = [], raccolto = [], filtri
     const mesi = MESI_MOVIMENTI.map(m => {
       const target = r.target[m] || 0;
       const racc = r.raccolto[m] || 0;
-      return { mese: m, target, raccolto: racc, delta: target - racc };
+      return { mese: m, target, raccolto: racc, delta: target - racc, daConfermare: r.mesiCopiati.has(m) };
     });
-    return { raccoglitore: r.raccoglitore, regione: r.regione, targetAnnuo: r.annuo, raccoltoTotale: r.raccoltoTotale, leftover: r.annuo - r.raccoltoTotale, mesi, nomi: [...r.nomi] };
+    return {
+      raccoglitore: r.raccoglitore, regione: r.regione, targetAnnuo: r.annuo, raccoltoTotale: r.raccoltoTotale, leftover: r.annuo - r.raccoltoTotale, mesi, nomi: [...r.nomi],
+      annuoDaConfermare: r.annuoCopiato, targetCopiati: r.copiati, targetScritti: r.scritti,
+    };
   }).filter(row => {
     if (fRegione.length > 0 && !fRegione.includes(row.regione)) return false;
     if (fRaccoglitore.length > 0 && !row.nomi.some(n => fRaccoglitore.includes(n))) return false;
     return row.targetAnnuo || row.raccoltoTotale || row.mesi.some(m => m.target);
   }).sort((a, b) => a.regione.localeCompare(b.regione) || a.raccoglitore.localeCompare(b.raccoglitore));
+}
+
+/**
+ * Quanti target dell'anno sono copiati dall'anno prima e non ancora confermati
+ * (15/10/2026): { copiati, scritti }, contati sui record come li conta la scheda
+ * Target raccoglitori - i mensili validi (del mensile scritto due volte vale
+ * l'ultimo, targetMensiliValidi) e gli annui - anche quelli con target zero, che
+ * nelle righe dell'Andamento non hanno una riga. Per la frase sopra le tabelle
+ * «N target su M copiati dal 2026, da confermare in Target raccoglitori»: la
+ * stessa nella tabella per raccoglitore e nel Report generale.
+ */
+export function targetCopiatiDellAnno({ mensili = [], annui = [] } = {}) {
+  const tutti = [...targetMensiliValidi(mensili || []), ...(annui || [])];
+  return { copiati: tutti.filter(daConfermare).length, scritti: tutti.length };
+}
+
+/**
+ * Quanti target delle righe dell'Andamento sono copiati dall'anno prima e non
+ * ancora confermati (15/10/2026): { copiati, scritti, righe }, righe e' quante
+ * righe ne hanno almeno uno. Per la frase sopra le tabelle: «N target su M
+ * copiati dall'anno prima, da confermare in Target raccoglitori».
+ */
+export function targetCopiatiDelleRighe(righe) {
+  const elenco = righe || [];
+  return {
+    copiati: elenco.reduce((s, r) => s + (Number(r.targetCopiati) || 0), 0),
+    scritti: elenco.reduce((s, r) => s + (Number(r.targetScritti) || 0), 0),
+    righe: elenco.filter(r => Number(r.targetCopiati) > 0).length,
+  };
+}
+
+/**
+ * La frase sopra le tabelle dell'Andamento (revisione del 15/10/2026, prima in
+ * TargetTable.jsx): «147 target su 161 copiati dal 2026, da confermare in
+ * Target raccoglitori: si vedono, ma non sono ancora decisi.»; '' se non ce ne
+ * sono. Qui perche' la dicono uguale la tabella per raccoglitore, il Report
+ * generale e i file dell'Andamento (PDF e presentazione).
+ */
+export function fraseTargetCopiati({ copiati, scritti } = {}, anno) {
+  if (!copiati) return '';
+  const da = anno ? `dal ${Number(anno) - 1}` : "dall'anno prima";
+  return `${copiati} target su ${scritti} ${copiati === 1 ? 'copiato' : 'copiati'} ${da}, da confermare in Target raccoglitori: si vedono, ma non sono ancora decisi.`;
+}
+
+/**
+ * Il segno di una riga dell'Andamento coi target copiati (revisione del
+ * 15/10/2026): «copiato, da confermare» se lo sono tutti i suoi target, «N
+ * target copiati, da confermare» (o «1 target copiato, ...») se lo sono solo
+ * alcuni, '' se nessuno. Lo stesso nella tabella per raccoglitore e nei file
+ * dell'Andamento.
+ */
+export function segnoTargetCopiati(riga) {
+  const copiati = Number(riga && riga.targetCopiati) || 0;
+  if (!copiati) return '';
+  if (copiati === Number(riga.targetScritti)) return 'copiato, da confermare';
+  return `${copiati} target ${copiati === 1 ? 'copiato' : 'copiati'}, da confermare`;
 }

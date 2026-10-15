@@ -40,9 +40,11 @@
 // - la regione di un ritiro e' quella della dashboard: il campo regione, poi la
 //   provincia, poi «Altro» (regioneDellaDashboard);
 // - il giorno dei dati e' l'ultima fine trasporto di un terminato, mai oltre
-//   oggi (giornoDeiDati); l'atteso del totale e' attesoAllaData, quello di una
-//   regione attesoDellaRegione, con le variazioni del consorzio intere nel loro
-//   mese e nella loro regione;
+//   oggi (giornoDeiDati); ogni anno si misura sul suo giorno della misura
+//   (giornoDellaMisura: il 31/12 per un anno chiuso, nessuno per l'anno in corso
+//   senza ritiri suoi; 15/10/2026); l'atteso del totale e' attesoAllaData,
+//   quello di una regione attesoDellaRegione, con le variazioni del consorzio
+//   intere nel loro mese e nella loro regione;
 // - residuo, proiezione, ritmo, mesi, regioni con lo scarto e il raccolto fuori
 //   dalle regioni del contratto sono quelli del quadro della dashboard
 //   (quadroRete di quadroCommessa.ts), con lo stesso giorno dei dati.
@@ -53,9 +55,9 @@
 import { periodoMovimento, giornoMovimento } from "./movimenti.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
 import { commessaDellAnno } from "./annoTarget.ts";
-import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, attesoDellaRegione, giornoDeiDati } from "./attesoContratto.ts";
+import { targetAnnuoDellAnno, regioniDellAnno, attesoAllaData, attesoDellaRegione, giornoDeiDati, giornoDellaMisura } from "./attesoContratto.ts";
 import { formatoTonnellate } from "./formato.ts";
-import { quadroRete, giornoDellaMisura } from "./quadroCommessa.ts";
+import { quadroRete } from "./quadroCommessa.ts";
 
 /** La regione di un ritiro come la conta la dashboard (getDashboardRaccolta): il campo regione, poi la provincia, poi «Altro». */
 export const regioneDellaDashboard = (r) => r.regione || PROV_TO_REGION[(r.provincia || '').toUpperCase().trim()] || 'Altro';
@@ -113,7 +115,14 @@ export function contrattoReteDegliAnni({ commesse, anni, rete, reteAnno = null, 
   // oggi - e col profilo mensile del contratto, come l'Andamento per regione di
   // Target & Status e il controllo dei target mensili (attesoContratto.ts).
   const giornoDati = giornoDeiDati(tutte.reduce((m, r) => { const g = giornoMovimento(r); return g > m ? g : m; }, ''), oggi);
-  const attesi = contratti.map(({ anno: a, commessa }) => attesoAllaData(commessa, a, giornoDati));
+  // Ogni anno si misura sul suo giorno della misura (giornoDellaMisura, prova
+  // generale del cambio d'anno del 15/10/2026): un anno chiuso al 31/12 anche se
+  // l'ultimo ritiro caricato e' del 22/12 e quelli dell'anno nuovo non ci sono
+  // ancora; l'anno in corso senza ritiri suoi non ha atteso (null, non zero).
+  // Il giorno dell'atteso (atteso.giorno) resta il giorno dei dati, com'era: le
+  // etichette leggono il giorno della misura del quadro (quadroRete).
+  const misure = contratti.map(({ anno: a }) => giornoDellaMisura(a, giornoDati, oggi));
+  const attesi = contratti.map(({ anno: a, commessa }, i) => attesoAllaData(commessa, a, misure[i]));
   const attesoAnno = target === null || attesi.some(x => x.atteso_t === null) ? null : attesi.reduce((s, x) => s + x.atteso_t, 0);
   const atteso = attesoAnno === null ? null : {
     giorno: giornoDati,
@@ -135,7 +144,7 @@ export function contrattoReteDegliAnni({ commesse, anni, rete, reteAnno = null, 
     const reg = regioneDellaDashboard(r);
     raccoltoRegRete[reg] = (raccoltoRegRete[reg] || 0) + (r.peso_effettivo || 0) / 1000;
   }
-  const regioniAnni = contratti.map(({ anno: a, commessa }) => ({ anno: a, commessa, ...regioniDellAnno(commessa, a) }));
+  const regioniAnni = contratti.map(({ anno: a, commessa }, i) => ({ anno: a, commessa, misura: misure[i], ...regioniDellAnno(commessa, a) }));
   const conRiparto = regioniAnni.every(x => x.righe.length > 0);
   for (const x of regioniAnni) {
     if (!x.righe.length && targetAnni.some(t => t.anno === x.anno && t.t !== null)) avvisi_target.push(`Il contratto Ecotyre del ${x.anno} non ha il riparto per regione: il grafico mostra il solo raccolto.`);
@@ -150,7 +159,7 @@ export function contrattoReteDegliAnni({ commesse, anni, rete, reteAnno = null, 
         // nel loro mese, e quelle delle altre regioni non la toccano. Col target
         // della regione per la quota nazionale, le 100 t di ottobre in Puglia
         // spostavano un pezzo di atteso anche su Campania e Sicilia.
-        const a = attesoDellaRegione(x.commessa, x.anno, giornoDati, r.regione).atteso_t;
+        const a = attesoDellaRegione(x.commessa, x.anno, x.misura, r.regione).atteso_t;
         v.target += r.target_t;
         v.atteso = v.atteso === null || a === null ? null : v.atteso + a;
         perRegione.set(r.regione, v);
@@ -212,8 +221,12 @@ export function contrattoDellaRete({ commesse, anno, rete, oggi }) {
   // (giornoDellaMisura), e cosi' EcoTyna. Il riparto per regione dice da dove
   // viene: contro il ripiego i target dei raccoglitori non si confrontano, come
   // nella scheda e nel cruscotto (vociContrattoRaccoglitori).
+  // Dalla prova generale del cambio d'anno (15/10/2026) il giorno della misura
+  // guarda anche oggi: il 05/01/2027, con l'ultimo ritiro del 2026 al 22/12,
+  // EcoTyna scriveva «i numeri sono al 31/12/2026» accanto a dati_fino_al
+  // 2026-12-22.
   return {
-    anno: a, commessa, giorno_dati: c.giorno_dati, giorno_misura: giornoDellaMisura(a, c.giorno_dati),
+    anno: a, commessa, giorno_dati: c.giorno_dati, giorno_misura: giornoDellaMisura(a, c.giorno_dati, oggi),
     anno_chiuso: a < Number(String(oggi).slice(0, 4)), target, fonte_regioni: regioni.fonte,
     kpi: c.kpi, target_vs_raccolto: c.target_vs_raccolto, con_riparto: c.con_riparto, raccolto_per_regione: c.raccolto_per_regione,
     avvisi_target: c.avvisi_target, rete: quadro,

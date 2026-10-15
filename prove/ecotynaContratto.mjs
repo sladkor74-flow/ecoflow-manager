@@ -585,5 +585,69 @@ if (strumento('contratto_ecotyre')) {
 const codiceStrumenti = sorgente('base44/shared/strumentiAssistente.ts');
 verifica('nel codice degli strumenti target_totale_t non c\'e\' piu\'', !/target_totale_t\s*:/.test(codiceStrumenti.replace(/\/\/.*$/gm, '')));
 
+// ─── 4. IL CAMBIO D'ANNO ───
+// Prova generale del cambio d'anno (15/10/2026): il 05/01/2027, con l'ultimo
+// ritiro del 2026 al 22/12 (la pausa di Natale) e nessun ritiro del 2027,
+// EcoTyna scriveva «i numeri sono al 31/12/2026» accanto a dati_fino_al
+// 2026-12-22 e all'atteso del 22/12. Ora dati_fino_al e atteso_alla_data.al sono
+// il 31/12/2026, l'atteso il target intero, e gli stessi del 15/01/2027, quando
+// i ritiri di gennaio ci sono; e sono quelli della dashboard.
+console.log("4. IL CAMBIO D'ANNO: IL 2026 GUARDATO DAL 2027");
+if (strumento('contratto_ecotyre')) {
+  const NATALE = [...RETE, ritiro('NA', 33000, '2026-11-20', { trasportatore: 'ALFA SRL' }), ritiro('BA', 21000, '2026-12-22')];
+  const GENNAIO = [...NATALE, ritiro('NA', 12000, '2027-01-08', { trasportatore: 'ALFA SRL' }), ritiro('BA', 9000, '2027-01-14')];
+  const C27 = contratto({ id: 'c27', anno: 2027, target_annuo_t: 11600, created_date: '2026-12-20T10:00:00', updated_date: '2026-12-20T10:00:00' });
+  const giro = async (ora, rete) => {
+    prepara({ ...archivi(VERO), PrimariaRete: rete, CommessaEcotyre: [VERO, C27] });
+    const d = await laDashboard(ora, 2026);
+    const t = (await lo('contratto_ecotyre', ora, { anno: 2026 })).dati;
+    return { d, t };
+  };
+  const cinque = await giro('2027-01-05T10:00:00Z', NATALE);
+  stessiNumeri('il 2026 il 05/01/2027', cinque.t, cinque.d);
+  verifica('il 05/01/2027: dati_fino_al e atteso_alla_data.al sono il 31/12/2026, non il 22/12', cinque.t.dati_fino_al === '2026-12-31' && cinque.t.atteso_alla_data && cinque.t.atteso_alla_data.al === '2026-12-31', J([cinque.t.dati_fino_al, cinque.t.atteso_alla_data]));
+  verifica('e l\'atteso e\' il target intero, con l\'anno detto chiuso', cinque.t.atteso_alla_data.atteso_t === 11550 && cinque.t.atteso_alla_data.pct_del_target === 100 && !!cinque.t.atteso_alla_data.anno_chiuso && /i numeri sono al 31\/12\/2026/.test(cinque.t.anno_chiuso || ''), J([cinque.t.atteso_alla_data, cinque.t.anno_chiuso]));
+  verifica('la proiezione e\' il raccolto finale', cinque.t.proiezione_fine_anno && cinque.t.proiezione_fine_anno.finale === true && cinque.t.proiezione_fine_anno.t === cinque.t.raccolto_t, J([cinque.t.proiezione_fine_anno, cinque.t.raccolto_t]));
+  const quindici = await giro('2027-01-15T10:00:00Z', GENNAIO);
+  stessiNumeri('il 2026 il 15/01/2027', quindici.t, quindici.d);
+  const numeri = (t) => J([t.dati_fino_al, t.atteso_alla_data, t.raccolto_t, t.residuo_t, t.proiezione_fine_anno, t.regioni]);
+  verifica('il 05/01/2027 e il 15/01/2027 EcoTyna dice gli stessi numeri del 2026', numeri(cinque.t) === numeri(quindici.t), `\n    05/01 ${numeri(cinque.t).slice(0, 400)}\n    15/01 ${numeri(quindici.t).slice(0, 400)}`);
+  // controprova: il 28/12/2026 il 2026 e' l'anno in corso, misurato al 22/12
+  const dicembre = await giro('2026-12-28T10:00:00Z', NATALE);
+  verifica('controprova: il 28/12/2026 il 2026 e\' misurato all\'ultimo ritiro, il 22/12', dicembre.t.dati_fino_al === '2026-12-22' && dicembre.t.atteso_alla_data.al === '2026-12-22' && !dicembre.t.anno_chiuso && dicembre.t.atteso_alla_data.atteso_t < 11550, J([dicembre.t.dati_fino_al, dicembre.t.atteso_alla_data]));
+}
+
+// ─── 5. IL CONTESTO GENERALE DI ECOTYNA SUL 2027 SENZA RITIRI ───
+// Ritocco dopo la revisione del 15/10/2026. Il contesto generale di EcoTyna
+// (situazioneGestionale di assistente.ts) conta l'atteso dell'anno in corso con
+// attesoAllaData e attesoDellaRegione sul giorno dei dati, che il 05/01/2027,
+// senza ritiri del 2027, e' il 22/12/2026: la quota di un giorno dell'anno prima
+// era 0, e il contesto scriveva «quota attesa a oggi 0%» e «atteso a oggi 0,00
+// t» per regione, mentre dashboard, Target & Status e lo strumento del
+// contratto dicevano «—». Ora la quota di un giorno dell'anno prima e' null
+// (attesoContratto.ts): l'atteso non c'e', non e' zero.
+console.log('5. IL CONTESTO GENERALE DI ECOTYNA SUL 2027 SENZA RITIRI');
+{
+  const { situazioneGestionale } = await import('../base44/shared/assistente.ts');
+  const NATALE = [...RETE, ritiro('NA', 33000, '2026-11-20', { trasportatore: 'ALFA SRL' }), ritiro('BA', 21000, '2026-12-22')];
+  const GENNAIO = [...NATALE, ritiro('NA', 12000, '2027-01-08', { trasportatore: 'ALFA SRL' }), ritiro('BA', 9000, '2027-01-14')];
+  const C27 = contratto({ id: 'c27', anno: 2027, target_annuo_t: 11600, created_date: '2026-12-20T10:00:00', updated_date: '2026-12-20T10:00:00' });
+  const contesto = async (ora, rete) => {
+    prepara({ ...archivi(VERO), PrimariaRete: rete, CommessaEcotyre: [VERO, C27] });
+    const testo = await conOra(ora, () => situazioneGestionale(sdk, ora.slice(0, 10)));
+    const righe = (Array.isArray(testo) ? testo.join('\n') : String(testo)).split('\n');
+    const strumento2027 = (await lo('contratto_ecotyre', ora, { anno: 2027 })).dati;
+    return { contratto: righe.find(r => r.startsWith('Contratto Ecotyre 2027')) || '', regioni: righe.filter(r => /^- [A-Z][a-z]+: contratto /.test(r)), strumento2027 };
+  };
+  const cinque = await contesto('2027-01-05T10:00:00Z', NATALE);
+  verifica('il 05/01/2027 il contesto non dice «quota attesa a oggi 0%»: la quota non c\'e\', e lo dice', cinque.contratto && !/quota attesa a oggi 0%/.test(cinque.contratto) && /quota attesa non calcolabile/.test(cinque.contratto), cinque.contratto);
+  verifica('e nessuna regione «atteso a oggi 0,00 t»: n/d', cinque.regioni.length > 0 && cinque.regioni.every(r => /atteso a oggi n\/d/.test(r) && !/atteso a oggi 0,00 t/.test(r)), J(cinque.regioni));
+  verifica('come lo strumento del contratto sul 2027: l\'atteso non c\'e\', col perche\'', cinque.strumento2027 && cinque.strumento2027.atteso_alla_data === null && !!cinque.strumento2027.atteso_perche, J(cinque.strumento2027 && [cinque.strumento2027.atteso_alla_data, cinque.strumento2027.atteso_perche]));
+  // controprova: arrivati i ritiri di gennaio, la quota e l'atteso ci sono
+  const quindici = await contesto('2027-01-15T10:00:00Z', GENNAIO);
+  verifica('controprova: il 15/01/2027, coi ritiri di gennaio, la quota attesa c\'e\' e non e\' zero', /quota attesa a oggi \d+,\d%/.test(quindici.contratto) && !/quota attesa a oggi 0%/.test(quindici.contratto) && /fino al 14\/01\/2027/.test(quindici.contratto), quindici.contratto);
+  verifica('e le regioni hanno il loro atteso in tonnellate', quindici.regioni.length > 0 && quindici.regioni.every(r => /atteso a oggi \d[\d.]*,\d+ t/.test(r)), J(quindici.regioni));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

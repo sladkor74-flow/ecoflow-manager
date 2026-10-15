@@ -1,11 +1,21 @@
 import React from 'react';
 import { tonnellate, percentuale } from '@/lib/target';
 import { formatNumber } from '@/lib/utils';
+import { daConfermare } from '@/lib/annoTarget';
 
 // Canale ACI, indipendente dalla RETE: raccolto dai centri di demolizione per
 // regione confrontato con la previsione del contratto ACI Ecotyre, che e'
 // indicativa perche' i ritiri dipendono dalle richieste dei demolitori e dalla
 // capienza del fondo ACI. Il prezzo e' il corrispettivo per tonnellata.
+//
+// IL CONTRATTO COPIATO (prova generale del cambio d'anno, 15/10/2026).
+// Previsione e corrispettivi ACI stanno nel contratto dell'anno, e i
+// corrispettivi sono annuali senza tacito rinnovo: copiati dall'anno prima e
+// non ancora confermati sono i numeri dell'anno prima. Il 15/01/2027 la tabella
+// del 2027 scriveva «Puglia 400,00 ... 240,00 € 1.008,00 €» senza dirlo, mentre
+// la card del target RETE diceva «copiato, da confermare». Ora le colonne lo
+// dicono, e il valore del raccolto dice con il prezzo di quale anno e' fatto.
+// L'anno prima e' calcolato, mai scritto a mano.
 
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 const euro = (v) => `${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
@@ -26,17 +36,20 @@ export default function CanaleAci({ raccoltoAci, commessa, anno }) {
     return { regione, prev, fatto, prezzo, perc: prev ? (fatto / prev) * 100 : null, valore: fatto * prezzo };
   });
   const tot = righe.reduce((s, r) => ({ prev: s.prev + r.prev, fatto: s.fatto + r.fatto, valore: s.valore + r.valore }), { prev: 0, fatto: 0, valore: 0 });
+  const copiato = daConfermare(commessa);
+  const annoPrima = Number(anno) - 1;
+  const segno = (t) => <span className="block text-[11px] font-normal text-amber-700">{t}</span>;
   return (
     <div className="border rounded-lg overflow-x-auto bg-card">
       <table className="w-full text-sm">
         <thead className="bg-amber-50 text-left">
           <tr>
             <th className="px-3 py-2">Regione</th>
-            <th className="px-3 py-2 text-right">Previsione ACI (t)</th>
+            <th className="px-3 py-2 text-right">Previsione ACI (t){copiato && segno(`copiata dal ${annoPrima}, da confermare`)}</th>
             <th className="px-3 py-2 text-right">Raccolto ACI {anno} (t)</th>
             <th className="px-3 py-2 text-right">% della previsione</th>
-            <th className="px-3 py-2 text-right">Corrispettivo (€/t)</th>
-            <th className="px-3 py-2 text-right">Valore del raccolto</th>
+            <th className="px-3 py-2 text-right">Corrispettivo (€/t){copiato && segno(`copiato dal ${annoPrima}, da confermare`)}</th>
+            <th className="px-3 py-2 text-right">Valore del raccolto{copiato && segno(`calcolato col prezzo del ${annoPrima}`)}</th>
           </tr>
         </thead>
         <tbody>
@@ -60,6 +73,11 @@ export default function CanaleAci({ raccoltoAci, commessa, anno }) {
           </tr>
         </tbody>
       </table>
+      {copiato && (
+        <p className="px-3 py-2 text-xs text-amber-800 bg-amber-50 border-t">
+          Il contratto del {anno} è copiato dal {annoPrima} e non è ancora confermato: previsione e corrispettivi ACI sono quelli del {annoPrima}, e i corrispettivi sono annuali, senza tacito rinnovo. Confermali nella scheda Commessa Ecotyre.
+        </p>
+      )}
       <p className="px-3 py-2 text-xs text-muted-foreground border-t">
         Canale indipendente dalla RETE: non entra nel target del contratto né in quelli dei raccoglitori. La previsione del contratto ACI Ecotyre è indicativa:
         i ritiri partono solo su richiesta dei demolitori (almeno 1,5 t, compatibili con i veicoli radiati) e se il fondo ACI ha capienza.

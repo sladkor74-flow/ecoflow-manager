@@ -3,10 +3,22 @@ import { MESI } from '@/lib/pfuConstants';
 import { tonnellate, percentuale, chiaveNome } from '@/lib/target';
 import { calcolaReportGenerale, raggruppa, sommaRighe, valoriMese, impiantiMese, totaliPerImpianto } from '@/lib/reportGeneraleVista';
 import ReportGeneraleAnno from '@/components/target-status/ReportGeneraleAnno';
+import { targetMensiliValidi, targetCopiatiDellAnno, fraseTargetCopiati } from '@/lib/andamentoTarget';
+import { daConfermare } from '@/lib/annoTarget';
 
 // Report Generale: target assegnati contro raccolto RETE per regione e
 // raccoglitore. L'impianto di destinazione si legge a consuntivo: sotto ogni
 // raccoglitore il raccolto e' ripartito per impianto effettivo. Solo lettura.
+//
+// I TARGET COPIATI E NON CONFERMATI (prova generale del cambio d'anno,
+// 15/10/2026). Il 15/01/2027, col contratto 2027 confermato e i target dei
+// raccoglitori ancora copiati dal 2026, il Report generale mostrava «2027 Gen
+// 726,79 in corso Feb 825,00 ...» come target decisi. Ora sopra le tabelle si
+// dice quanti target sono copiati e da confermare in Target raccoglitori, e nel
+// mese singolo la riga del raccoglitore porta «copiato, da confermare». Si
+// contano come la tabella per raccoglitore (targetCopiatiDellAnno): del target
+// mensile scritto due volte vale l'ultimo, e copiato vuol dire daConfermare di
+// annoTarget, la regola della dashboard e degli avvisi.
 
 const leggiLista = (json) => { try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 const num = (v) => (v === null || v === undefined ? '—' : tonnellate(v));
@@ -80,6 +92,10 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
     [mensili, annui, raccolto],
   );
   const gruppi = useMemo(() => raggruppa(righe), [righe]);
+  const copiati = useMemo(() => {
+    const daConf = [...targetMensiliValidi(mensili || []), ...(annui || [])].filter(daConfermare);
+    return { ...targetCopiatiDellAnno({ mensili, annui }), chiavi: new Set(daConf.map(t => `${t.regione || ''}|${chiaveNome(t.raccoglitore)}`)) };
+  }, [mensili, annui]);
   const totale = useMemo(() => sommaRighe(righe), [righe]);
 
   if (!righe.length) {
@@ -108,6 +124,9 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
       </label>
     </div>
   );
+  const avvisoCopiati = copiati.copiati > 0 && (
+    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5">{fraseTargetCopiati(copiati, anno)}</p>
+  );
   const nota = (
     <p className="text-xs text-muted-foreground">
       Raccolto RETE: formulari terminati per data di fine trasporto. Delta = target meno raccolto, rosso se manca raccolta.
@@ -119,6 +138,7 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
     return (
       <div className="space-y-3">
         {barra}
+        {avvisoCopiati}
         <ReportGeneraleAnno anno={anno} gruppi={gruppi} righe={righe} dettaglio={dettaglio} vista={vista} meseInCorso={anno === oggi.getFullYear() ? oggi.getMonth() : -1} />
         {nota}
         {senzaTarget.length > 0 && <AvvisoSenzaTarget quante={senzaTarget.length} />}
@@ -129,6 +149,7 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
   return (
     <div className="space-y-3">
       {barra}
+      {avvisoCopiati}
       {nota}
       <div className="border rounded-lg overflow-x-auto bg-card">
         <table className="w-full text-sm">
@@ -160,6 +181,7 @@ export default function ReportGenerale({ anno, mensili, annui, raccolto, commess
                         <td className="px-2 py-1.5 pl-6">
                           {r.raccoglitore}
                           {!r.conTarget && <span className="ml-2 text-xs rounded bg-amber-100 text-amber-800 px-1.5 py-0.5">senza target</span>}
+                          {r.conTarget && copiati.chiavi.has(`${r.regione}|${r.kRaccoglitore}`) && <span className="ml-2 text-xs rounded bg-amber-100 text-amber-800 px-1.5 py-0.5">copiato, da confermare</span>}
                         </td>
                         <Celle v={v} />
                       </tr>

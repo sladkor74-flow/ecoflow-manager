@@ -291,8 +291,14 @@ const ORDINI_DA_DATE = 20;
  * dell'immissione, il ripiego di senzaFineNelAnno: { chiave, nome, ruolo, movimento, canale,
  * gia_fra_i_soggetti, quanti, ordini: ['ID (FIR ...): date che mancano'] }, uno
  * per ruolo, movimento e canale, mai sommati.
+ *
+ * opzioni.oggi (facoltativo, giorno italiano 'AAAA-MM-GG'): da gennaio a marzo
+ * dell'anno chiesto entrano anche i soggetti che hanno lavorato nell'ultimo
+ * trimestre dell'anno prima (vedi ULTIMO TRIMESTRE qui sotto), segnati
+ * da_ultimo_trimestre. Chi non lo passa ha i soli movimenti dell'anno: i
+ * contratti (contrattiAnno, preparaAnno) l'anno prima lo guardano da se'.
  */
-export async function individuaSoggetti(base44, anno) {
+export async function individuaSoggetti(base44, anno, opzioni = {}) {
   const annoNum = Number(anno);
   const svc = base44.asServiceRole.entities;
   const [rete, aci, extra, sec, fornitori, inclusioni] = await Promise.all([
@@ -337,6 +343,54 @@ export async function individuaSoggetti(base44, anno) {
     aggiungi(r.stoccaggio, 'stoccaggio');
     aggiungi(r.trasportatore, 'trasporto_secondaria');
     aggiungi(r.destinazione, 'trattamento');
+  }
+
+  // L'ULTIMO TRIMESTRE DELL'ANNO PRIMA (prova generale del cambio d'anno,
+  // 15/10/2026). I soggetti venivano solo dai terminati dell'anno: il
+  // 01/01/2027, e il 04/01, il controllo delle 7:30 diceva 0 soggetti e 0
+  // scaduti, i contratti di raccolta scaduti il 31/12/2026 non si dicevano piu',
+  // e ogni voce del catalogo intestata a un fornitore del 2026 (la CQC di C.L.
+  // SERVICE) diventava «errore del catalogo», per email e in dashboard, ogni
+  // giorno feriale; il 05/01, dopo un solo viaggio, ECO.GEA tornava col
+  // contratto «scaduto il 31/12/2026, 5 giorni fa»: lo scaduto arrivava dopo il
+  // lavoro, non prima. Come per i contratti (da_ultimo_trimestre, decisione
+  // dell'utente del 13/10/2026): da gennaio a marzo chi ha lavorato da ottobre a
+  // dicembre dell'anno prima (giorno italiano della fine trasporto) resta da
+  // qualificare, coi ruoli di quei movimenti; dal 1° aprile contano solo i
+  // movimenti dell'anno. Nessuna lettura in piu': gli archivi qui sopra sono gia'
+  // letti interi. Le esclusioni dell'anno, sotto, valgono anche per loro.
+  const giornoOggi = String(opzioni.oggi || '').slice(0, 10);
+  const primoTrimestre = !!giornoOggi && giornoOggi >= `${annoNum}-01-01` && giornoOggi <= `${annoNum}-03-31`;
+  if (primoTrimestre) {
+    const prima = annoNum - 1;
+    const dal = `${prima}-10-01`;
+    const nelTrimestre = (r) => nelAnno(r, prima) && String(giornoMovimento(r) || '') >= dal;
+    const dellAnno = new Map([...mappa].map(([k, s]) => [k, new Set(s.ruoli)]));
+    const aggiungiDalTrimestre = (nome, ruolo) => {
+      const n = pulisci(nome);
+      const k = n ? normalizzaRagioneSociale(n) : '';
+      if (!k || interni.has(k)) return;
+      const nuovo = !mappa.has(k);
+      aggiungi(n, ruolo);
+      const s = mappa.get(k);
+      if (!s) return;
+      if (nuovo) s.da_ultimo_trimestre = true;
+      // i ruoli che vengono solo dall'ultimo trimestre dell'anno prima
+      if (!(dellAnno.get(k) || new Set()).has(ruolo)) (s.ruoliTrimestre = s.ruoliTrimestre || new Set()).add(ruolo);
+    };
+    for (const r of [...rete, ...aci, ...extra]) {
+      if (!nelTrimestre(r)) continue;
+      const td = String(r.tipo_destinazione || '').toLowerCase().trim();
+      aggiungiDalTrimestre(r.trasportatore, 'raccolta');
+      aggiungiDalTrimestre(r.destinazione, td === 'stoc' ? 'stoccaggio' : 'trattamento');
+      aggiungiDalTrimestre(r.key_account, 'cliente');
+    }
+    for (const r of sec) {
+      if (!nelTrimestre(r)) continue;
+      aggiungiDalTrimestre(r.stoccaggio, 'stoccaggio');
+      aggiungiDalTrimestre(r.trasportatore, 'trasporto_secondaria');
+      aggiungiDalTrimestre(r.destinazione, 'trattamento');
+    }
   }
 
   // Inclusioni ed esclusioni manuali.
@@ -421,6 +475,10 @@ export async function individuaSoggetti(base44, anno) {
       piva: f ? (f.piva || '') : '',
       codice_fiscale: f ? (f.codice_fiscale || '') : '',
       email: f ? (f.email || '') : '',
+      // da gennaio a marzo: c'e' solo perche' ha lavorato nell'ultimo trimestre
+      // dell'anno prima, e i ruoli che gli vengono solo da li' (15/10/2026)
+      ...(s.da_ultimo_trimestre ? { da_ultimo_trimestre: true } : {}),
+      ...(s.ruoliTrimestre && s.ruoliTrimestre.size ? { ruoli_da_ultimo_trimestre: RUOLI.filter(r => s.ruoliTrimestre.has(r)) } : {}),
     };
   }).sort((a, b) => a.nome.localeCompare(b.nome, 'it'));
 

@@ -62,6 +62,13 @@ export default function KpiCards({ kpis, anno }) {
   const mesi = (kpis.mesiScarto || []).join(', ').toLowerCase();
   const tuttoLAnno = kpis.conFiltri ? " Tutto l'anno: i filtri non valgono qui." : '';
   const filtriScarto = (kpis.filtriScarto || []).length ? ` Con i filtri: ${kpis.filtriScarto.join('; ')}.` : '';
+  // I target dei raccoglitori copiati dall'anno prima e non confermati (prova
+  // generale del cambio d'anno, 15/10/2026): l'atteso del mese li conta, ma non
+  // sono ancora decisi, e la card lo dice. L'anno da cui vengono e' calcolato.
+  const copiatiMese = Number(kpis.targetCopiatiMese) || 0;
+  const notaCopiati = copiatiMese
+    ? ` ${copiatiMese === 1 ? "Un target dei raccoglitori è copiato" : `${copiatiMese} target dei raccoglitori sono copiati`} dal ${Number(anno) - 1}, da confermare in Target raccoglitori: l'atteso ${copiatiMese === 1 ? 'lo' : 'li'} conta.`
+    : '';
   const cards = [
     {
       label: 'Target annuo del contratto', value: tonnellate(kpis.targetAnnuoTotale), icon: Target,
@@ -76,9 +83,15 @@ export default function KpiCards({ kpis, anno }) {
     {
       label: `Scarto ${mesi ? `di ${mesi}` : 'del mese'} sull'atteso`, value: conSegno(kpis.scartoMese), icon: CalendarClock,
       color: kpis.scartoMese === null ? 'text-muted-foreground bg-muted' : kpis.scartoMese >= 0 ? 'text-emerald-700 bg-emerald-50' : 'text-red-600 bg-red-50',
+      // kpis.giornoDati e' il giorno della misura (giornoDellaMisura, 15/10/2026):
+      // il 31/12 per un anno chiuso, vuoto per l'anno in corso senza ritiri suoi;
+      // kpis.ultimoRitiro dice se di ritiri ce ne sono, ma di un altro anno.
       nota: kpis.scartoMese === null
-        ? "L'atteso non si calcola: non c'è ancora nessun ritiro terminato con la fine trasporto."
-        : `Raccolto meno atteso al ${giornoMese(kpis.giornoDati)} (${tonnellate(kpis.attesoMese)} t: il target dei raccoglitori per i giorni coperti dai dati). Positivo: avanti; negativo: indietro.${filtriScarto}`,
+        ? (kpis.ultimoRitiro
+          ? `L'atteso non si calcola: nessun ritiro del ${anno} è ancora terminato (non è zero).`
+          : "L'atteso non si calcola: non c'è ancora nessun ritiro terminato con la fine trasporto.")
+        : `Raccolto meno atteso al ${giornoMese(kpis.giornoDati)} (${tonnellate(kpis.attesoMese)} t: il target dei raccoglitori per i giorni coperti dai dati). Positivo: avanti; negativo: indietro.${filtriScarto}${notaCopiati}`,
+      avviso: !!copiatiMese && kpis.scartoMese !== null,
     },
   ];
 

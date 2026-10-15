@@ -280,7 +280,16 @@ export function pianoCopiaAnno({ anno, sorgente = {}, esistenti = {}, regolePrec
   }
 
   // --- target dei raccoglitori, annui e mensili
-  const kRacc = (r) => `${chiave(r.raccoglitore)}|${testo(r.regione)}|${chiave(r.impianto)}`;
+  // IL RUOLO FA PARTE DELL'IDENTITA' (prova generale del cambio d'anno,
+  // 15/10/2026). La scheda Target raccoglitori scrive il ruolo sull'annuo e sui
+  // mesi (impianto o piazzale di un sito a doppio ruolo) e lo tiene nella chiave
+  // della riga: due righe verso lo stesso sito, una per ruolo, non sono un
+  // doppione. La copia non lo portava e non lo guardava: le primarie di T-Cycle,
+  // 1.050 t all'impianto e 250 t al piazzale nel 2026, nel 2027 diventavano
+  // 1.300 t senza ruolo (targetPrimariePerRuolo), e due righe con ruoli diversi
+  // si sarebbero fuse. Ora il ruolo si copia ed e' nelle chiavi; una riga senza
+  // ruolo si copia come prima.
+  const kRacc = (r) => `${chiave(r.raccoglitore)}|${testo(r.regione)}|${chiave(r.impianto)}|${testo(r.ruolo)}`;
   const raccGia = new Set(gia('raccoglitori').map(kRacc));
   const raccoglitori = [];
   const raccoglitoriCompilati = compilata('raccoglitori');
@@ -288,7 +297,7 @@ export function pianoCopiaAnno({ anno, sorgente = {}, esistenti = {}, regolePrec
     if (raccGia.has(kRacc(r))) { saltati.raccoglitori_esistenti++; continue; }
     if (raccoglitoriCompilati) { salta('raccoglitori', 1); continue; }
     raccoglitori.push(conValore({
-      raccoglitore: r.raccoglitore, regione: r.regione, impianto: r.impianto, anno: a,
+      raccoglitore: r.raccoglitore, regione: r.regione, impianto: r.impianto, ruolo: r.ruolo, anno: a,
       target_tonnellate: Number(r.target_tonnellate) || 0, storico_json: storico(),
     }));
   }
@@ -300,7 +309,7 @@ export function pianoCopiaAnno({ anno, sorgente = {}, esistenti = {}, regolePrec
     if (mesiGia.has(kMese(r))) { saltati.mensili_esistenti++; continue; }
     if (mensiliCompilati) { salta('mensili', 1); continue; }
     mensili.push(conValore({
-      regione: r.regione, impianto: r.impianto, raccoglitore: r.raccoglitore, mese: r.mese, anno: a,
+      regione: r.regione, impianto: r.impianto, ruolo: r.ruolo, raccoglitore: r.raccoglitore, mese: r.mese, anno: a,
       target: r.target, non_raccoglie: !!r.non_raccoglie, storico_json: storico(),
     }));
   }
