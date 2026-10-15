@@ -4,6 +4,7 @@ import SezioneCompletati from '@/components/todo/SezioneCompletati';
 import { completamentoRichiesta, testoCompletamentoRichiesta, gg } from '@/lib/todoSezioni';
 import { listaOrdini, annoRichiesta } from '@/lib/richiesteEct';
 import { oggiRoma } from '@/lib/giornoItaliano';
+import NoteRichiesta from '@/components/todo/NoteRichiesta';
 
 // LE RICHIESTE ECT COMPLETATE (richiesta dell'utente del 12/10/2026). Una
 // richiesta evasa - da sola, perche' i suoi ordini risultano terminati, dal
@@ -85,6 +86,8 @@ export default function RichiesteCompletate({ tutte = [], righe = tutte, esitoDi
             </p>
             {annoDi(r) && annoDi(r) !== annoOggi && <p className="text-[11px] text-amber-800">richiesta del {annoDi(r)}</p>}
             {r.nota && <p className="text-[11px] text-muted-foreground break-words">{r.nota}</p>}
+            {/* La nota interna e le annotazioni restano, da leggere (15/10/2026). */}
+            <NoteRichiesta richiesta={r} />
           </div>
         );
       })}

@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Loader2, Plus, CheckSquare, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { usePermessi } from '@/lib/permessi';
 import { oggiRoma } from '@/lib/giornoItaliano';
-import { conteggiAttivita, dividiAttivita, campiCambioStato, EVENTO_TODO } from '@/lib/todoSezioni';
+import { conteggiAttivita, dividiAttivita, campiCambioStato, campiModificaAttivita, campiOrdiniNuovi, notaOrdiniNuovi, valoriDelModulo, eCompletata, eCancellata, EVENTO_TODO } from '@/lib/todoSezioni';
+import { ordiniAttivita } from '@/lib/todoOrdini';
+import { scriviAnnotazioni, accodaAnnotazione } from '@/lib/annotazioni';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import RichiesteEct from '@/components/todo/RichiesteEct';
-import ElencoAttivita, { PRIORITA } from '@/components/todo/ElencoAttivita';
+import ElencoAttivita from '@/components/todo/ElencoAttivita';
+import ModuloAttivita, { MODULO_VUOTO } from '@/components/todo/ModuloAttivita';
 import AttivitaCancellate from '@/components/todo/AttivitaCancellate';
+import { ScrittureTodo } from '@/components/todo/scrittureTodo';
 
 // Un giorno 'AAAA-MM-GG' scritto all'italiana, senza passare da new Date: la
 // data del ritiro e' un giorno, non un istante, e non deve scivolare di un fuso.
@@ -22,12 +26,14 @@ const gg = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '
 const FILTRI = [['tutti', 'Da fare', 'da_fare'], ['aperto', 'Aperti', 'aperto'], ['in_corso', 'In corso', 'in_corso']];
 
 export default function TodoPage() {
-  const { isAdmin } = usePermessi();
+  const { isAdmin, user } = usePermessi();
   const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [filterStato, setFilterStato] = useState('tutti');
-  const [form, setForm] = useState({ titolo: '', descrizione: '', categoria: '', priorita: 'media', data_scadenza: '', riferimento_ordine: '' });
+  // L'attivita' da fare che si sta modificando (il suo id): il modulo, gia'
+  // compilato, prende il posto della sua riga (15/10/2026).
+  const [inModifica, setInModifica] = useState(null);
   // Un cambio di stato che non si salva si dice sulla pagina: prima finiva solo
   // nella console, e la spunta sembrava ignorata.
   const [errore, setErrore] = useState('');
@@ -42,6 +48,13 @@ export default function TodoPage() {
   // L'elenco e' completo quando la lettura ha portato meno del massimo: solo
   // allora il suo «Da fare» e' quello vero, e si puo' dire al menu.
   const [elencoIntero, setElencoIntero] = useState(false);
+  // «Caricamento...» al posto dell'elenco solo alla PRIMA lettura (revisione del
+  // 15/10/2026). Le riletture - una spunta, un'attivita' eliminata o aggiunta,
+  // il controllo degli ordini che chiude qualcosa - lasciano l'elenco al suo
+  // posto: dentro ci sono il modulo di una modifica e i campi delle annotazioni,
+  // e togliendolo quello che l'amministratore stava scrivendo spariva senza un
+  // avviso (il modulo rinasceva coi valori salvati).
+  const [letto, setLetto] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -50,6 +63,7 @@ export default function TodoPage() {
       setElencoIntero(data.length < 500);
     } catch (e) { console.error(e); }
     setLoading(false);
+    setLetto(true);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -86,31 +100,103 @@ export default function TodoPage() {
   }, [isAdmin, load]);
   useEffect(() => { controllaOrdini(); }, [controllaOrdini]);
 
-  const handleAdd = async () => {
-    if (!form.titolo) return;
-    try {
-      await base44.entities.Todo.create({
-        ...form,
-        stato: 'aperto',
-        // il giorno italiano: toISOString e' UTC e fra mezzanotte e l'una (le due
-        // d'estate) scriveva il giorno prima (13/10/2026)
-        data_ricezione: oggiRoma(),
-      });
-      setForm({ titolo: '', descrizione: '', categoria: '', priorita: 'media', data_scadenza: '', riferimento_ordine: '' });
-      setShowForm(false);
-      load();
-      // L'ordine scritto adesso puo' essere gia' terminato: si controlla subito,
-      // invece di aspettare il prossimo caricamento.
-      controllaOrdini();
-    } catch (e) { alert(e.message); }
+  // Il modulo (ModuloAttivita) e' lo stesso per la creazione e per la modifica:
+  // un salvataggio che non riesce lo dice lui, sotto i pulsanti, e resta compilato.
+  const handleAdd = async (valori) => {
+    if (!isAdmin || !String(valori.titolo || '').trim()) return;
+    await base44.entities.Todo.create({
+      ...valori,
+      stato: 'aperto',
+      // il giorno italiano: toISOString e' UTC e fra mezzanotte e l'una (le due
+      // d'estate) scriveva il giorno prima (13/10/2026)
+      data_ricezione: oggiRoma(),
+    });
+    setShowForm(false);
+    load();
+    // L'ordine scritto adesso puo' essere gia' terminato: si controlla subito,
+    // invece di aspettare il prossimo caricamento.
+    controllaOrdini();
   };
+
+  // LA MODIFICA DI UN'ATTIVITA' DA FARE (15/10/2026). Richiesta dell'utente,
+  // testuale: «nella to-do list permetti la modifica delle richieste aperte per
+  // successive integrazioni e\o annotazioni». Solo l'amministratore, solo su
+  // un'attivita' aperta o in corso (una completata o cancellata si riapre prima),
+  // e si scrivono solo i campi cambiati (campiModificaAttivita): il segno e la
+  // nota di una chiusura del gestionale, il giorno della spunta e le annotazioni
+  // non passano da qui. Todo non e' fra gli archivi dei numeri che fanno i conti
+  // (CAMPI_TRACCIATI): la scrittura e' quella dell'archivio. Cambiati gli ordini
+  // si rifa' subito il controllo, come alla creazione: un ordine gia' terminato o
+  // cancellato quando lo aggiungi non chiude niente, e la riga lo dice.
+  // «Da fare» e' quello che dice l'elenco (dividiAttivita): anche una vecchia
+  // attivita' senza lo stato salvato, che la riga mostra come aperta.
+  const apriModifica = (todo) => {
+    if (!isAdmin || !todo || eCompletata(todo) || eCancellata(todo)) return;
+    setShowForm(false);
+    setInModifica(todo.id);
+  };
+  const salvaModifica = async (todo, valori) => {
+    if (!isAdmin) return;
+    const campi = campiModificaAttivita(todo, valori, ordiniAttivita);
+    if (!campi) throw new Error('il titolo è obbligatorio');
+    if (Object.keys(campi).length) await scriviAttivita(todo, campi);
+    setInModifica(null);
+    if (!Object.keys(campi).length) return;
+    await load();
+    if ('riferimento_ordine' in campi) await controllaOrdini();
+  };
+
+  // Chi e' collegato, per le righe che si accodano: l'email dei permessi, o
+  // quella del profilo se la pagina non l'ha ancora.
+  const chiScrive = useCallback(async () => {
+    const io = user && user.email ? user : await base44.auth.me().catch(() => null);
+    return (io && io.email) || '';
+  }, [user]);
+
+  // LA SCRITTURA DI UN'ATTIVITA' DA FARE, dalla modifica e dalla casella degli
+  // ordini. Ordini diversi su un'attivita' che il gestionale aveva chiuso e che
+  // e' stata riaperta tolgono il segno di quella chiusura (chiusa_dal_gestionale:
+  // false, campiOrdiniNuovi: revisione del 15/10/2026), cosi' si guardano come su
+  // un'attivita' nuova; la chiusura di prima si copia in un'annotazione, con la
+  // stessa scrittura, perche' la sua nota (chiusura_nota) la prossima chiusura
+  // del gestionale la riscriverebbe. La lettura in piu' (l'elenco delle
+  // annotazioni, riletto) c'e' solo in quel caso.
+  const scriviAttivita = async (todo, campi) => {
+    if (campi.chiusa_dal_gestionale !== false) return base44.entities.Todo.update(todo.id, campi);
+    const chi = await chiScrive();
+    const testo = notaOrdiniNuovi(todo, campi.riferimento_ordine, ordiniAttivita);
+    return scriviAnnotazioni(base44.entities.Todo, todo.id, (prima) => accodaAnnotazione(prima, testo, chi), campi);
+  };
+
+  // CHI SCRIVE LE ANNOTAZIONI E LA NOTA INTERNA (15/10/2026), per le righe delle
+  // due schede (scrittureTodo.js): solo l'amministratore. Le annotazioni si
+  // accodano sul record riletto appena prima (scriviAnnotazioni), con l'email di
+  // chi e' collegato; la nota interna di una richiesta ECT si scrive com'e'.
+  // Todo e RichiestaEct non sono archivi dei numeri che fanno i conti
+  // (CAMPI_TRACCIATI): niente storico delle modifiche, la storia e' l'elenco stesso.
+  const scritture = useMemo(() => (!isAdmin ? null : {
+    annota: async (archivio, id, cambia) => {
+      const chi = await chiScrive();
+      const gestore = archivio === 'RichiestaEct' ? base44.entities.RichiestaEct : base44.entities.Todo;
+      return scriviAnnotazioni(gestore, id, (prima) => cambia(prima, chi));
+    },
+    notaInterna: (id, testo) => base44.entities.RichiestaEct.update(id, { note_interne: testo }),
+  }), [isAdmin, chiScrive]);
+
+  // Il modulo gia' compilato al posto della riga che si sta modificando. Sa se il
+  // gestionale l'aveva gia' chiusa una volta: lo dice, con che cosa succede
+  // cambiando gli ordini.
+  const moduloDi = (todo) => (inModifica && todo.id === inModifica ? (
+    <ModuloAttivita key={`modifica-${todo.id}`} modifica chiusaDalGestionale={todo.chiusa_dal_gestionale === true} iniziale={valoriDelModulo(todo)} onSalva={(valori) => salvaModifica(todo, valori)} onAnnulla={() => setInModifica(null)} />
+  ) : null);
 
   // L'ID ordine si corregge anche dopo, sull'attivita' che c'e' gia'. Appena
   // salvato si ricontrolla: se quell'ordine e' terminato l'attivita' si chiude
-  // da sola senza aspettare altro.
+  // da sola senza aspettare altro. Ordini diversi su una riaperta: come dalla
+  // modifica (scriviAttivita), perche' le due strade non dicano due cose diverse.
   const salvaOrdine = async (todo, ordini) => {
     try {
-      await base44.entities.Todo.update(todo.id, { riferimento_ordine: ordini });
+      await scriviAttivita(todo, { riferimento_ordine: ordini, ...campiOrdiniNuovi(todo, ordini, ordiniAttivita) });
       await load();
       await controllaOrdini();
     } catch (e) { alert(e.message); }
@@ -159,6 +245,7 @@ export default function TodoPage() {
   const { cancellati } = dividiAttivita(todos);
 
   return (
+    <ScrittureTodo.Provider value={scritture}>
     <div className="p-4 lg:p-8 max-w-[1200px] mx-auto space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
@@ -166,7 +253,7 @@ export default function TodoPage() {
           <p className="text-muted-foreground mt-1">Attività, solleciti e pratiche con scadenze, e le richieste di ritiro che il consorzio manda per email.</p>
         </div>
         {isAdmin && sezione === 'attivita' && (
-          <button onClick={() => setShowForm(!showForm)} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
+          <button onClick={() => { setInModifica(null); setShowForm(!showForm); }} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">
             <Plus className="w-4 h-4" /> Nuovo To-Do
           </button>
         )}
@@ -202,6 +289,12 @@ export default function TodoPage() {
         cancellazione, rifare l&apos;ordine), e la riga te lo dice.
         Il controllo si rifà a ogni caricamento delle primarie e ogni volta che apri questa pagina. Un&apos;attività completata,
         a mano o da sola, esce dall&apos;elenco e passa fra i <strong>completati</strong>, in fondo alla pagina; se la riapri torna qui.
+        Un&apos;attività da fare si corregge con <strong>Modifica</strong> (titolo, descrizione, categoria, priorità, scadenza e
+        ordini), e sotto ognuna puoi <strong>aggiungere un&apos;annotazione</strong> — un sollecito fatto, una risposta ricevuta,
+        un&apos;integrazione — col giorno, l&apos;ora e chi l&apos;ha scritta: le annotazioni si accodano, restano anche quando
+        l&apos;attività si chiude e si leggono fra i completati e i cancellati. Un&apos;attività che il gestionale aveva chiuso e che
+        hai riaperto, con gli stessi ordini non si richiude; se ci scrivi ordini diversi li guarda da adesso come su
+        un&apos;attività nuova, e la chiusura di prima resta scritta fra le annotazioni.
       </p>
 
       {/* Che cosa ha fatto il controllo degli ordini appena aperta la pagina. */}
@@ -260,59 +353,15 @@ export default function TodoPage() {
       {errore && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errore}</p>}
 
       {showForm && (
-        <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
-          <h3 className="font-heading font-semibold">Nuovo To-Do</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="md:col-span-2">
-              <label className="text-xs font-medium">Titolo *</label>
-              <input value={form.titolo} onChange={e => setForm({ ...form, titolo: e.target.value })} className="w-full border rounded-md px-3 py-2 text-sm" placeholder="es. Sollecito Ecotyre ordine XYZ" />
-            </div>
-            <div className="md:col-span-2">
-              <label className="text-xs font-medium">Descrizione</label>
-              <textarea value={form.descrizione} onChange={e => setForm({ ...form, descrizione: e.target.value })} rows={2} className="w-full border rounded-md px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="text-xs font-medium">Categoria</label>
-              <input value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })} className="w-full border rounded-md px-3 py-2 text-sm" placeholder="es. Comunicazione consorzio" />
-            </div>
-            <div>
-              <label className="text-xs font-medium">Priorità</label>
-              <select value={form.priorita} onChange={e => setForm({ ...form, priorita: e.target.value })} className="w-full border rounded-md px-3 py-2 text-sm">
-                {Object.entries(PRIORITA).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium">Data Scadenza</label>
-              <input type="date" value={form.data_scadenza} onChange={e => setForm({ ...form, data_scadenza: e.target.value })} className="w-full border rounded-md px-3 py-2 text-sm" />
-            </div>
-            <div className="md:col-span-2">
-              <label className="text-xs font-medium">ID ordine da completare</label>
-              <input
-                value={form.riferimento_ordine}
-                onChange={e => setForm({ ...form, riferimento_ordine: e.target.value })}
-                className="w-full border rounded-md px-3 py-2 text-sm font-mono"
-                placeholder="ET26012345, ET26012346"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Quando l&apos;ordine passa da assegnato a terminato il gestionale segna l&apos;attività come completata da sé,
-                con la data della fine trasporto. Puoi metterne più di uno separati da virgola: si chiude quando sono terminati tutti.
-                Se il portale cancella gli ordini l&apos;attività passa da sola fra i cancellati, col motivo; se alcuni sono
-                terminati e gli altri cancellati si chiude come evasa in parte. Un ordine già terminato o già cancellato adesso non
-                chiude niente: il passaggio si conta da quando l&apos;attività c&apos;è.
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={handleAdd} disabled={!form.titolo} className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"><Plus className="w-4 h-4" /> Aggiungi</button>
-            <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm btn-secondario">Annulla</button>
-          </div>
-        </div>
+        <ModuloAttivita iniziale={MODULO_VUOTO} onSalva={handleAdd} onAnnulla={() => setShowForm(false)} />
       )}
 
-      {loading ? (
+      {loading && !letto ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Caricamento...</div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4" aria-busy={loading}>
+          {/* Una rilettura non toglie l'elenco: lo dice e basta. */}
+          {loading && <p className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Aggiorno l&apos;elenco…</p>}
           <ElencoAttivita
             todos={todos}
             filtro={filterStato}
@@ -321,6 +370,8 @@ export default function TodoPage() {
             onCiclo={cycleStato}
             onElimina={handleDelete}
             onSalvaOrdine={salvaOrdine}
+            onModifica={apriModifica}
+            modificaDi={moduloDi}
           />
           {/* Sotto i completati, le cancellate: i loro ordini il portale li ha
               cancellati, e ci passano da sole (14/10/2026). */}
@@ -329,5 +380,6 @@ export default function TodoPage() {
       )}
       </>)}
     </div>
+    </ScrittureTodo.Provider>
   );
 }

@@ -114,7 +114,46 @@
       "description": "Riga del foglio Richieste ECT da cui proviene: serve a ritrovarla ai caricamenti successivi"
     },
     "note_interne": {
-      "type": "string"
+      "type": "string",
+      "description": "La nota interna dell amministratore, che si scrive e si corregge dalla pagina To-Do List sulle richieste ancora da ritirare (15/10/2026): il caricamento del foglio Richieste ECT e il ricalcolo dei ritiri non la toccano"
+    },
+    "annotazioni": {
+      "type": "array",
+      "description": "Le annotazioni successive (15/10/2026): un sollecito fatto, una risposta ricevuta, un integrazione. Le scrive solo l amministratore dalla pagina To-Do List e si accodano nell ordine in cui sono scritte, senza toccare le altre; non si cancellano, e una correzione lo dice (corretta_il, corretta_da) lasciando il testo di prima in testo_originale. Restano ai caricamenti del foglio Richieste ECT (importaRichiesteEct) e ai ricalcoli dei ritiri dopo le primarie (importaBlocco, ritiri_ect), che scrivono solo i campi del foglio e dei ritiri, e si leggono anche fra le completate.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Per ritrovare la riga da correggere"
+          },
+          "testo": {
+            "type": "string"
+          },
+          "scritta_il": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Quando e stata scritta: a video giorno e ora italiani"
+          },
+          "scritta_da": {
+            "type": "string",
+            "description": "Email di chi l ha scritta"
+          },
+          "corretta_il": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Quando e stata corretta l ultima volta"
+          },
+          "corretta_da": {
+            "type": "string",
+            "description": "Email di chi l ha corretta"
+          },
+          "testo_originale": {
+            "type": "string",
+            "description": "Il testo scritto la prima volta, se poi e stato corretto"
+          }
+        }
+      }
     }
   },
   "required": [

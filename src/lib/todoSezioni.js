@@ -232,6 +232,124 @@ export function campiCambioStato(t, nuovo, oggi) {
   return campi;
 }
 
+// LA MODIFICA DI UN'ATTIVITA' DA FARE (15/10/2026). Richiesta dell'utente,
+// testuale: «nella to-do list permetti la modifica delle richieste aperte per
+// successive integrazioni e\o annotazioni». Il modulo e' quello del «Nuovo
+// To-Do», gia' compilato con i valori dell'attivita'; si salvano SOLO i campi
+// che l'utente ha cambiato davvero. Una completata o una cancellata si modifica
+// dopo averla riaperta, come prima. Le annotazioni non passano da qui: si
+// accodano sotto l'attivita' (src/lib/annotazioni.js).
+
+/** I valori con cui il modulo si apre su un'attivita' che c'e' gia'. */
+export function valoriDelModulo(t) {
+  const x = t || {};
+  return {
+    titolo: String(x.titolo ?? ''),
+    descrizione: String(x.descrizione ?? ''),
+    categoria: String(x.categoria ?? ''),
+    priorita: x.priorita || 'media',
+    data_scadenza: giorno(x.data_scadenza),
+    riferimento_ordine: String(x.riferimento_ordine ?? ''),
+  };
+}
+
+/**
+ * I campi da salvare dal modulo di modifica: {} se non e' cambiato niente, null
+ * se manca il titolo (e' obbligatorio, come alla creazione).
+ *
+ * Un campo si riscrive solo se il testo nel modulo e' diverso da quello salvato:
+ * aprire e salvare senza toccare niente non scrive niente. La scadenza tolta si
+ * scrive null (un giorno che non c'e' non e' un giorno vuoto).
+ *
+ * Gli ID ORDINE hanno la regola della riga dell'attivita' (OrdiniAttivita.jsx,
+ * AGENTS.md «Le attivita' della to-do list che si chiudono da sole»): un elenco
+ * di soli ID si riscrive in maiuscolo separato da virgole, una frase si salva
+ * com'e' scritta, e il campo non toccato non si riscrive mai - un vecchio «da
+ * chiedere a Ecotyre» diventava «DA, CHIEDERE, A, ECOTYRE». `ordiniDi` e' la
+ * regola che riconosce un ID ordine (ordiniAttivita di todoOrdini): questo file
+ * non importa niente. Cambiati gli ordini, la pagina rifa' subito il controllo
+ * degli ordini, come alla creazione: un ordine gia' terminato o cancellato
+ * quando lo aggiungi non chiude niente, e la riga lo dice. Su un'attivita' che
+ * il gestionale aveva gia' chiuso e che e' stata riaperta, ordini DIVERSI
+ * tolgono anche il segno di quella chiusura (campiOrdiniNuovi, qui sotto).
+ */
+export function campiModificaAttivita(t, valori, ordiniDi) {
+  const prima = t || {};
+  const v = valori || {};
+  if (!String(v.titolo ?? '').trim()) return null;
+  const campi = {};
+  // I testi: si confronta quello scritto con quello salvato, poi si pulisce.
+  for (const k of ['titolo', 'descrizione', 'categoria']) {
+    const scritto = String(v[k] ?? '');
+    const salvato = String(prima[k] ?? '');
+    if (scritto === salvato) continue;
+    const pulito = k === 'descrizione' ? scritto.replace(/\r\n?/g, '\n').trim() : scritto.replace(/\s+/g, ' ').trim();
+    if (pulito !== salvato.trim()) campi[k] = pulito;
+  }
+  const priorita = v.priorita || 'media';
+  if (priorita !== (prima.priorita || 'media')) campi.priorita = priorita;
+  const scadenza = giorno(v.data_scadenza);
+  if (scadenza !== giorno(prima.data_scadenza)) campi.data_scadenza = scadenza || null;
+  const originale = String(prima.riferimento_ordine ?? '');
+  const ordini = String(v.riferimento_ordine ?? '');
+  if (ordini !== originale) {
+    const pezzi = ordini.split(/[,;\s]+/).filter(Boolean);
+    const soloId = pezzi.length > 0 && typeof ordiniDi === 'function' && pezzi.every(p => ordiniDi({ riferimento_ordine: p }).length === 1);
+    const pulito = soloId ? pezzi.map(x => x.toUpperCase()).join(', ') : ordini.replace(/\s+/g, ' ').trim();
+    if (pulito !== originale.trim()) {
+      campi.riferimento_ordine = pulito;
+      Object.assign(campi, campiOrdiniNuovi(prima, pulito, ordiniDi));
+    }
+  }
+  return campi;
+}
+
+// GLI ORDINI NUOVI SU UN'ATTIVITA' RIAPERTA (revisione del 15/10/2026). Il
+// gestionale chiude un'attivita' una volta sola: chi l'ha riaperta l'ha fatto
+// apposta, e con gli STESSI ordini non la richiude (`chiusa_dal_gestionale`,
+// AGENTS.md «Le attivita' della to-do list che si chiudono da sole»). Ma se chi
+// lavora la riapre e ci scrive ordini DIVERSI - il portale ha cancellato
+// l'ordine e l'ordine e' stato rifatto, la strada che la pagina stessa indica -
+// sta chiedendo di guardare quelli: prima il passaggio si consumava senza
+// chiudere niente, l'attivita' restava aperta per sempre e la riga non lo
+// diceva, mentre il modulo di modifica prometteva il contrario. Adesso gli
+// ordini diversi tolgono il segno (chiusa_dal_gestionale: false) e si guardano
+// come su un'attivita' nuova: il primo controllo guarda e non chiude, il
+// passaggio da assegnato a terminato (o a cancellato) la chiude.
+// La chiusura di prima NON si cancella: la sua nota resta nell'attivita' e, dato
+// che una seconda chiusura la riscriverebbe, la pagina la copia in
+// un'annotazione con la stessa scrittura (notaOrdiniNuovi, TodoPage.jsx).
+
+/**
+ * { chiusa_dal_gestionale: false } se `riferimento` porta ordini diversi da
+ * quelli dell'attivita' (lo stesso elenco riscritto in un altro ordine o in
+ * minuscolo non conta) e l'attivita', da fare, era stata chiusa dal gestionale;
+ * altrimenti {}. Senza ID ordine non c'e' niente da guardare: il segno resta.
+ */
+export function campiOrdiniNuovi(t, riferimento, ordiniDi) {
+  if (!t || t.chiusa_dal_gestionale !== true || eCompletata(t) || eCancellata(t) || typeof ordiniDi !== 'function') return {};
+  const nuovi = ordiniDi({ riferimento_ordine: riferimento });
+  if (!nuovi.length) return {};
+  const chiave = (ids) => [...ids].sort().join(',');
+  return chiave(nuovi) === chiave(ordiniDi(t)) ? {} : { chiusa_dal_gestionale: false };
+}
+
+/**
+ * Il testo dell'annotazione che accompagna gli ordini nuovi su un'attivita' che
+ * il gestionale aveva chiuso: che ordini c'erano, quali ci sono adesso, e la
+ * chiusura di prima con la sua nota, cosi' come era scritta.
+ */
+export function notaOrdiniNuovi(t, riferimento, ordiniDi) {
+  const x = t || {};
+  const ids = (r) => (typeof ordiniDi === 'function' ? ordiniDi({ riferimento_ordine: r }) : []);
+  const prima = ids(x.riferimento_ordine).join(', ') || String(x.riferimento_ordine || '').trim() || 'nessuno';
+  const ora = ids(riferimento).join(', ') || String(riferimento || '').trim();
+  const nota = String(x.chiusura_nota || '').trim();
+  const quando = giorno(x.chiusa_dal_gestionale_il);
+  const chiusura = nota ? ` (${nota})` : quando ? ` il ${gg(quando)}` : '';
+  return `Ordini cambiati da ${prima} a ${ora}. Il gestionale l’aveva già chiusa una volta${chiusura}: riaperta, gli ordini nuovi li guarda da adesso come su un’attività nuova: la chiude da sola quando passano da assegnati a terminati, o la passa fra le cancellate se il portale li cancella.`;
+}
+
 // ---------------------------------------------------------------------------
 // LE RICHIESTE ECT
 

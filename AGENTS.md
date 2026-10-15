@@ -5991,8 +5991,10 @@ allora** indicarli come completati».
   come spiegazione.
 - Il passaggio si **consuma** anche quando non porta a una chiusura (attivita' gia'
   spuntata a mano): cosi' una riapertura a mano resta aperta. E chi e' stato chiuso
-  dal gestionale una volta non si richiude (`chiusa_dal_gestionale`): a decidere e'
-  chi lavora.
+  dal gestionale una volta non si richiude con gli stessi ordini
+  (`chiusa_dal_gestionale`): a decidere e' chi lavora. Se chi l'ha riaperta ci
+  scrive ordini diversi il segno si toglie e la chiusura di prima passa in
+  un'annotazione (15/10/2026, vedi «La to-do list: modifica e annotazioni»).
 - Un ordine **cancellato** a portale, dopo il passaggio, manda l'attivita' fra le
   cancellate (vedi «La to-do list: i cancellati dal portale», 14/10/2026): fino a
   quel giorno non chiudeva niente e chiedeva all'utente che cosa farne. Un
@@ -6105,7 +6107,8 @@ evidente sul portale»*.
   `ordini_stato_json`, portato avanti dal salvato). Mai `ordine_chiuso_il` come
   giorno della cancellazione, e nessun campo `cancellata_il`.
 - **Riaperta a mano** (Riapri porta ad `aperto`, mai alla spunta) non si
-  ricancella. Una cancellata il cui ordine il portale riassegna resta cancellata,
+  ricancella con gli stessi ordini (con ordini diversi vedi «La to-do list:
+  modifica e annotazioni»). Una cancellata il cui ordine il portale riassegna resta cancellata,
   e l'avviso dice «se serve ancora riaprila»; la riga del caricamento la dice fra
   le attivita' «gia' chiuse», non fra quelle che «restano aperte»
   (`testoControlloTodo`, `stato` in `da_guardare`).
@@ -6202,6 +6205,17 @@ gennaio, il foglio rifaceva le richieste di dicembre come doppioni senza spunta.
   lettura, se c'e'; gli anni col banco di `importaRichiesteEct`; `importaBlocco`
   vero per `ritiri_ect`; i tre casi della revisione), `prove/cruscotto.mjs`
   («IL CAMBIO D'ANNO IN DA GESTIRE») e `prove/cambioAnnoRitocchi.mjs` (7).
+
+### La to-do list: modifica e annotazioni (15/10/2026)
+
+Parole dell'utente: *«nella to-do list permetti la modifica delle richieste aperte per successive integrazioni e\o annotazioni»*. «Richieste aperte» sono le voci ancora da fare delle due schede: le attivita' aperte o in corso e le richieste ECT non chiuse.
+
+- **Modifica** (matita, solo amministratore, su ogni attivita' da fare, anche una vecchia senza stato salvato). Al posto della riga si apre lo stesso modulo del «Nuovo To-Do» (`src/components/todo/ModuloAttivita.jsx`), gia' compilato (`valoriDelModulo`). Si scrivono SOLO i campi cambiati (`campiModificaAttivita` in `src/lib/todoSezioni.js`): titolo, descrizione, categoria, priorita', scadenza (tolta = null) e ordini. Gli ordini hanno la regola della casella della riga: soli ID in maiuscolo separati da virgole, una frase com'e', il campo non toccato non si riscrive. Mai lo stato, la spunta, gli ordini attesi o le annotazioni. Cambiati gli ordini, la pagina rilancia subito `controllaTodoOrdini`, come alla creazione. Una completata o una cancellata si modifica dopo Riapri. Todo non e' in `CAMPI_TRACCIATI`: scrittura diretta.
+- **Ordini diversi su una riaperta** (revisione del 15/10/2026). Un'attivita' chiusa dal gestionale e riaperta non si richiude con gli STESSI ordini. Se chi l'ha riaperta ci scrive ordini DIVERSI (dalla modifica o dalla casella della riga), `campiOrdiniNuovi` scrive anche `chiusa_dal_gestionale: false`: i nuovi ordini si guardano come su un'attivita' nuova (il primo giro guarda, il passaggio chiude o manda fra le cancellate). Prima il passaggio si consumava senza chiudere, l'attivita' restava aperta per sempre e il modulo prometteva il contrario. La nota della chiusura di prima resta in `chiusura_nota`, ma la seconda chiusura la riscriverebbe: la pagina la copia in un'annotazione (`notaOrdiniNuovi`) con la STESSA scrittura (`scriviAnnotazioni(archivio, id, cambia, altri)`: una get e un update, solo in quel caso). Non tolgono il segno: lo stesso elenco riscritto in un altro ordine, gli ordini tolti, una frase senza ID. Il modulo lo dice (`chiusaDalGestionale`).
+- **Annotazioni.** Campo `annotazioni` in `Todo.jsonc` e `RichiestaEct.jsonc`: un elenco con lo schema di ogni riga (id, testo, scritta_il, scritta_da, corretta_il, corretta_da, testo_originale). Le regole stanno in `src/lib/annotazioni.js`, senza import. Si accodano senza toccare le altre, col giorno e l'ora italiani e l'email di chi e' collegato. Una correzione dice «corretta il gg/mm/aaaa alle hh:mm», e il testo della prima volta resta in `testo_originale`. `scriviAnnotazioni` RILEGGE il record, scrive solo quel campo (piu' gli `altri` dati) e rifiuta un elenco che perderebbe una riga. A video (`Annotazioni.jsx`) le ultime due e «tutte (N)». Si leggono anche sulle completate, sulle cancellate e sulle richieste completate. Chi scrive lo mette la pagina in `ScrittureTodo` (`scrittureTodo.js`), solo per l'amministratore. Nessuna lettura all'apertura.
+- **Richieste ECT.** `NoteRichiesta.jsx` sta nella colonna del produttore (ferma a sinistra a 375 px): nota interna (`note_interne`) e annotazioni. Il caricamento del foglio (`importaRichiesteEct`), il ricalcolo dei ritiri (`importaBlocco`, ritiri_ect) e `controllaTodoOrdini` scrivono solo i loro campi: annotazioni, note_interne e id_ordine_manuale restano. Il TERMINE non si modifica ancora, perche' il caricamento lo ricalcola dalla nota; servira' un `scadenza_manuale` rispettato come `id_ordine_manuale`.
+- **La pagina non toglie l'elenco quando rilegge** (revisione del 15/10/2026). «Caricamento...» compare solo alla prima lettura. Alle riletture l'elenco resta montato con «Aggiorno l'elenco…», perche' dentro ci sono il modulo della modifica e i campi delle annotazioni: togliendolo, il testo non salvato spariva.
+- Prova: `prove/todoModificaAnnotazioni.mjs` (179 verifiche; sezione 3 sul banco con le funzioni vere e la loro controprova).
 
 ### EcoTyna: le domande sui dati non sono domande di norma (29/09/2026)
 

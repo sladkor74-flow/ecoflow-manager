@@ -1,6 +1,7 @@
 import React from 'react';
-import { CheckSquare, Square, AlertCircle, CheckCircle2, Trash2 } from 'lucide-react';
+import { CheckSquare, Square, AlertCircle, CheckCircle2, Trash2, Pencil } from 'lucide-react';
 import OrdiniAttivita from '@/components/todo/OrdiniAttivita';
+import Annotazioni from '@/components/todo/Annotazioni';
 import SezioneCompletati from '@/components/todo/SezioneCompletati';
 import { dividiAttivita, daFareDelFiltro, completamentoAttivita, testoCompletamento, testoElencoVuoto } from '@/lib/todoSezioni';
 import { oggiRoma } from '@/lib/giornoItaliano';
@@ -54,7 +55,7 @@ export function eScaduta(todo, oggi = oggiRoma()) {
 }
 
 /** Un'attivita' da fare: la spunta la completa, la targhetta dello stato la fa avanzare. */
-function RigaDaFare({ todo, isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine }) {
+function RigaDaFare({ todo, isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine, onModifica }) {
   const pr = PRIORITA[todo.priorita] || PRIORITA.media;
   const st = STATO[todo.stato] || STATO.aperto;
   const isOverdue = eScaduta(todo);
@@ -71,10 +72,13 @@ function RigaDaFare({ todo, isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine
             ? <button onClick={() => onCiclo(todo)} className={`text-xs px-2 py-0.5 rounded ${st.color} hover:opacity-80`}>{st.label}</button>
             : <span className={`text-xs px-2 py-0.5 rounded ${st.color}`}>{st.label}</span>}
           {isOverdue && <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Scaduto</span>}
+          {/* La modifica e le annotazioni (15/10/2026): Annotazioni.jsx, ModuloAttivita.jsx. */}
+          {isAdmin && onModifica && <button onClick={() => onModifica(todo)} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border hover:bg-accent"><Pencil className="w-3 h-3" /> Modifica</button>}
         </div>
         <Dettagli todo={todo} />
         {/* L'ordine da completare, a che punto e' e perche' non si chiude. */}
         <OrdiniAttivita todo={todo} isAdmin={isAdmin} onSalva={(ordini) => onSalvaOrdine(todo, ordini)} />
+        <Annotazioni archivio="Todo" record={todo} modificabile={isAdmin} />
       </div>
       {isAdmin && <button onClick={() => onElimina(todo)} className="p-2 rounded-md hover:bg-red-50 flex-shrink-0" aria-label="Elimina"><Trash2 className="w-4 h-4 text-red-500" /></button>}
     </div>
@@ -104,6 +108,7 @@ function RigaCompletata({ todo, isAdmin, onSpunta, onElimina, onSalvaOrdine }) {
         </p>
         <Dettagli todo={todo} />
         <OrdiniAttivita todo={todo} isAdmin={isAdmin} onSalva={(ordini) => onSalvaOrdine(todo, ordini)} />
+        <Annotazioni archivio="Todo" record={todo} />
       </div>
       {isAdmin && <button onClick={() => onElimina(todo)} className="p-2 rounded-md hover:bg-red-50 flex-shrink-0" aria-label="Elimina"><Trash2 className="w-4 h-4 text-red-500" /></button>}
     </div>
@@ -114,16 +119,16 @@ function RigaCompletata({ todo, isAdmin, onSpunta, onElimina, onSalvaOrdine }) {
  * `filtro`: 'tutti' (aperte e in corso), 'aperto' o 'in_corso'. Le completate non
  * stanno in nessun filtro: stanno nella loro sezione.
  */
-export default function ElencoAttivita({ todos, filtro = 'tutti', isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine }) {
+export default function ElencoAttivita({ todos, filtro = 'tutti', isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine, onModifica, modificaDi = () => null }) {
   // Le cancellate dal portale (14/10/2026) stanno nella loro sezione, sotto i
   // completati: l'elenco vuoto lo dice, invece di «Nessuna attività».
   const { daFare, completati, cancellati } = dividiAttivita(todos);
   const visibili = daFareDelFiltro(daFare, filtro);
-  const azioni = { isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine };
+  const azioni = { isAdmin, onSpunta, onCiclo, onElimina, onSalvaOrdine, onModifica };
   return (
     <div className="space-y-4">
       <div className="space-y-2" data-elenco="da-fare">
-        {visibili.map((todo) => <RigaDaFare key={todo.id} todo={todo} {...azioni} />)}
+        {visibili.map((todo) => modificaDi(todo) || <RigaDaFare key={todo.id} todo={todo} {...azioni} />)}
         {visibili.length === 0 && (
           <div className="text-center py-8 px-3 text-muted-foreground border rounded-lg">{testoElencoVuoto(filtro, { daFare: daFare.length, completati: completati.length, cancellati: cancellati.length }, isAdmin)}</div>
         )}

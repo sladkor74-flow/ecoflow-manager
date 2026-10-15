@@ -74,7 +74,7 @@
     "chiusa_dal_gestionale": {
       "type": "boolean",
       "default": false,
-      "description": "Vero quando l ha chiusa il controllo degli ordini, non una spunta a mano. Riaperta a mano resta vero, cosi il gestionale non la richiude"
+      "description": "Vero quando l ha chiusa il controllo degli ordini, non una spunta a mano. Riaperta a mano resta vero, cosi il gestionale con gli stessi ordini non la richiude; se chi l ha riaperta ci scrive ordini diversi (dalla modifica o dalla casella degli ordini, 15/10/2026) torna falso e gli ordini nuovi si guardano come su un attivita nuova, con un annotazione che ricorda la chiusura di prima"
     },
     "chiusa_dal_gestionale_il": {
       "type": "string",
@@ -93,6 +93,44 @@
     "avviso_ordini": {
       "type": "string",
       "description": "Perche l attivita resta aperta anche se un suo ordine non e in corso: ordine eseguito a portale senza il clic su Chiudi, terminato senza la data di fine trasporto, ID che non si trova, ordine gia cancellato quando l attivita e stata scritta (il gestionale non ha visto il passaggio). Su un attivita gia chiusa dice che cosa guardare, per esempio un ordine che il portale ha riassegnato"
+    },
+    "annotazioni": {
+      "type": "array",
+      "description": "Le annotazioni successive (15/10/2026): un sollecito fatto, una risposta ricevuta, un integrazione. Le scrive solo l amministratore dalla pagina To-Do List e si accodano nell ordine in cui sono scritte, senza toccare le altre; non si cancellano, e una correzione lo dice (corretta_il, corretta_da) lasciando il testo di prima in testo_originale. Restano quando l attivita si chiude da sola (controllaTodoOrdini: completata, cancellata dal portale, evasa in parte), che scrive solo i campi degli ordini e della chiusura, e si leggono anche fra i completati e i cancellati.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Per ritrovare la riga da correggere"
+          },
+          "testo": {
+            "type": "string"
+          },
+          "scritta_il": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Quando e stata scritta: a video giorno e ora italiani"
+          },
+          "scritta_da": {
+            "type": "string",
+            "description": "Email di chi l ha scritta"
+          },
+          "corretta_il": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Quando e stata corretta l ultima volta"
+          },
+          "corretta_da": {
+            "type": "string",
+            "description": "Email di chi l ha corretta"
+          },
+          "testo_originale": {
+            "type": "string",
+            "description": "Il testo scritto la prima volta, se poi e stato corretto"
+          }
+        }
+      }
     }
   },
   "required": [

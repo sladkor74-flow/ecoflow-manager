@@ -5,6 +5,7 @@ import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFin
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { dividiRichieste, esitoDellaPagina } from '@/lib/todoSezioni';
 import RichiesteCompletate from '@/components/todo/RichiesteCompletate';
+import NoteRichiesta from '@/components/todo/NoteRichiesta';
 
 // Richieste del consorzio arrivate via email: ci chiedono di anticipare certi
 // ritiri. L'ID ordine lo porta il foglio quando e' scritto nella colonna «numero
@@ -266,7 +267,7 @@ export default function RichiesteEct({ isAdmin }) {
           </label>
           <span className="text-xs text-muted-foreground max-w-xl">
             Il file «Gestione Ecotyre», foglio «Richieste ECT». Le richieste nuove si aggiungono, quelle già in elenco si
-            aggiornano e le tue spunte non vengono toccate.
+            aggiornano e le tue spunte, le note interne e le annotazioni non vengono toccate.
           </span>
         </div>
       )}
@@ -420,6 +421,8 @@ export default function RichiesteEct({ isAdmin }) {
                         <span className="block text-[11px] text-amber-800">richiesta del {annoDellaRiga(r)}</span>
                       )}
                       {r.nota && <span className="block text-[11px] text-muted-foreground">{r.nota}</span>}
+                      {/* Nota interna e annotazioni (15/10/2026): NoteRichiesta.jsx. */}
+                      <NoteRichiesta richiesta={r} modificabile={isAdmin} />
                     </td>
                     <td className="px-2 py-2">{r.provincia || '—'}</td>
                     <td className="px-2 py-2">{r.classe || '—'}</td>

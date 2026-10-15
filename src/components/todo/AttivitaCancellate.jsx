@@ -3,6 +3,7 @@ import { ChevronRight, XCircle, AlertTriangle, Trash2 } from 'lucide-react';
 import { PRIORITA } from '@/components/todo/ElencoAttivita';
 import { cancellazioneAttivita, testoCancellazione } from '@/lib/todoSezioni';
 import { ordiniAttivita } from '@/lib/todoOrdini';
+import Annotazioni from '@/components/todo/Annotazioni';
 
 // LE ATTIVITA' CANCELLATE della to-do list (richiesta dell'utente del 14/10/2026,
 // testuale: «qualora vi fossero degli ordini tra quelli aperti che venissero non
@@ -53,6 +54,8 @@ function RigaCancellata({ todo, isAdmin, onRiapri, onElimina }) {
             <span>{todo.avviso_ordini}</span>
           </p>
         )}
+        {/* Le annotazioni restano anche qui, da leggere (15/10/2026). */}
+        <Annotazioni archivio="Todo" record={todo} />
       </div>
       {isAdmin && (
         <button onClick={() => onElimina(todo)} className="p-2 rounded-md hover:bg-red-50 flex-shrink-0" aria-label="Elimina">
