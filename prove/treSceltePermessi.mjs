@@ -24,7 +24,10 @@ import { readFileSync } from 'node:fs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
-const sorgente = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
+// I file possono avere i fine-riga di Windows (una copia appena estratta li ha
+// tutti CRLF) e le regole qui sotto cercano i ritorni a capo semplici: i
+// ritorni carrello si tolgono prima di cercare (15/10/2026).
+const sorgente = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8').replace(/\r/g, '');
 
 console.log('CONTROLLO QUALIFICHE: CHIUSO ALL\'AMMINISTRATORE');
 {
