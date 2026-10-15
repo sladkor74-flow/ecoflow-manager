@@ -47,7 +47,7 @@ import { COLORI, FORMATI, nuovaCartella, perLaStampa, bytesDi } from '@/lib/fogl
 // stampa stanno nel corredo comune dei fogli che si mandano fuori: se un domani
 // la palette cambia, cambia per tutti i documenti insieme e non si scoprono due
 // verdi diversi su due allegati della stessa mail.
-const { scuro: SCURO, medio: MEDIO, chiaro: CHIARO, zebra: ZEBRA, bordo: BORDO, bianco: BIANCO, testo: TESTO, grigio: TENUE } = COLORI;
+const { scuro: SCURO, medio: MEDIO, chiaro: CHIARO, zebra: ZEBRA, bordo: BORDO, bianco: BIANCO, testo: TESTO, grigio: TENUE, ambra: AMBRA } = COLORI;
 const TONN = FORMATI.tonnellate;
 const TONN3 = FORMATI.tonnellateTre;
 const EURO = FORMATI.euro;
@@ -346,7 +346,14 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
     // come numero, non come formula - una formula su una cella vuota, appena
     // Excel ricalcola, azzererebbe la riga.
     const prezzoNoto = riga.prezzo !== null && riga.prezzo !== undefined;
-    scrivi(ws, r, colPrezzo, prezzoNoto ? num(riga.prezzo) : '', { ...st, allinea: 'right', fmt: EURO });
+    // UNA VOCE SENZA LA TARIFFA DELL'ANNO E' «—» (D5, decisione dell'utente del
+    // 15/10/2026): prezzo e totale come testo, cosi' le somme (SUM) la lasciano
+    // fuori invece di contarla zero, e la nota dice il prezzo della voce e il
+    // suo anno. Prima il foglio di gennaio 2027 la prezzava in silenzio coi
+    // prezzi dei contratti 2026, scaduti.
+    const senzaPrezzo = riga.senza_prezzo === true;
+    const stMancante = { ...st, allinea: 'right', colore: AMBRA, grassetto: true };
+    scrivi(ws, r, colPrezzo, senzaPrezzo ? '—' : prezzoNoto ? num(riga.prezzo) : '', senzaPrezzo ? stMancante : { ...st, allinea: 'right', fmt: EURO });
     if (stile === 'piatto') scrivi(ws, r, col.eer, EER_PFU, { ...st, allinea: 'center', fmt: COD });
     // Il prezzo a viaggio non ha una colonna dei viaggi in questa tabella: la
     // formula si tiene dentro il numero dei viaggi e la nota lo dice, cosi'
@@ -363,12 +370,12 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
     // 1,003 t a 68 €/t: 68,20 + 68,20 nel PDF, 136,41 nell'Excel).
     const oltre = n2(riga.oltre_tariffa);
     const coda = oltre > 0 ? `+${oltre}` : '';
-    scrivi(ws, r, col.totale, prezzoNoto ? {
+    scrivi(ws, r, col.totale, senzaPrezzo ? '—' : prezzoNoto ? {
       formula: aViaggio
         ? `ROUND(${lettera(colPrezzo)}${r}*${viaggi},2)${coda}`
         : `ROUND(${lettera(col.tonn)}${r}*${lettera(colPrezzo)}${r},2)${coda}`,
       result: n2(riga.totale),
-    } : n2(riga.totale), { ...st, allinea: 'right', fmt: EURO });
+    } : n2(riga.totale), senzaPrezzo ? stMancante : { ...st, allinea: 'right', fmt: EURO });
     scrivi(ws, r, col.note, [
       aViaggio ? `prezzo a viaggio, ${viaggi} ${viaggi === 1 ? 'viaggio' : 'viaggi'}` : '',
       testo(riga.note),
@@ -391,6 +398,18 @@ function scriviBlocco(ws, r0, blocco0, { titolo, etichetta, stile }) {
     { ...st, allinea: 'right', fmt: EURO });
   const cellaTotale = `${lettera(col.totale)}${r}`;
   r++;
+
+  // IL TOTALE PARZIALE SI DICE (D5, decisione dell'utente del 15/10/2026): le
+  // voci «—» non sono nel totale, e la riga sotto il totale lo scrive.
+  const parziale = testo(blocco.senza_prezzo && blocco.senza_prezzo.testo);
+  if (parziale) {
+    const sp = { corsivo: true, colore: AMBRA, capo: true };
+    stendi(ws, r, 1, ultima, sp);
+    scrivi(ws, r, 1, `Totale parziale: ${parziale}.`, sp);
+    ws.mergeCells(r, 1, r, ultima);
+    ws.getRow(r).height = 28;
+    r++;
+  }
 
   // Chi ha movimenti nel mese e nessuna voce nel modello. Sta in coda al SUO
   // blocco e la riga di spiegazione dice quale: prima raccoglitori e impianti
@@ -485,7 +504,13 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
     scrivi(ws, r, 3, testo(t.destinatario), st);
     scrivi(ws, r, 4, num(t.tonnellate), { ...st, allinea: 'right', fmt: fmtT(t.tonnellate) });
     scrivi(ws, r, 5, aViaggio ? '€\\vg' : '€\\t', { ...st, allinea: 'center' });
-    scrivi(ws, r, 6, num(t.prezzo), { ...st, allinea: 'right', fmt: EURO });
+    // UNA TRATTA CON LA TARIFFA COPIATA E NON CONFERMATA E' «—» (D4 e D5,
+    // decisioni dell'utente del 15/10/2026; revisione dello stesso giorno), come
+    // le voci: prezzo e totale come testo, fuori dalle somme, e la nota dice il
+    // prezzo copiato e da che anno.
+    const senzaPrezzo = t.senza_prezzo === true;
+    const stMancante = { ...st, allinea: 'right', colore: AMBRA, grassetto: true };
+    scrivi(ws, r, 6, senzaPrezzo ? '—' : num(t.prezzo), senzaPrezzo ? stMancante : { ...st, allinea: 'right', fmt: EURO });
     // I VIAGGI CHE SI PAGANO, NON QUELLI CONTATI. Un viaggio misto porta
     // formulari di tutti e due i canali e ognuno ne paga la sua quota di chili:
     // due viaggi interi piu' un misto al 60% sono tre viaggi contati e 2,6
@@ -514,13 +539,13 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
     // una formula prezzo per viaggi col risultato zero in memoria lo rimetterebbe
     // a prezzo pieno al primo ricalcolo. Si scrive lo zero, e la nota della riga
     // dice perche'.
-    scrivi(ws, r, 8, t.interno
+    scrivi(ws, r, 8, senzaPrezzo ? '—' : t.interno
       ? 0
       : { formula: formulaTotaleTrasporto(t, r), result: n2(t.totale) },
-    { ...st, allinea: 'right', fmt: EURO });
+    senzaPrezzo ? stMancante : { ...st, allinea: 'right', fmt: EURO });
     scrivi(ws, r, 9, testo(t.note), { ...st, corsivo: true, colore: TENUE });
     sommandi.push(r);
-    sommandiE.push(r);
+    if (!senzaPrezzo) sommandiE.push(r);
     zebrata = !zebrata;
     r++;
   }
@@ -540,7 +565,21 @@ function scriviTrasporto(ws, r0, trasporti0, nomeCanale) {
     { ...st, allinea: 'right', fmt: fmtT(trasporti.totale_t) });
   scrivi(ws, r, 8, e ? { formula: e, result: n2(trasporti.totale_euro) } : n2(trasporti.totale_euro),
     { ...st, allinea: 'right', fmt: EURO });
-  return { prossima: r + 1, cellaTotale: `H${r}`, celleSurplus };
+  const cellaTotale = `H${r}`;
+  r++;
+  // Il totale parziale del trasporto si dice, come quello dei due blocchi (D5,
+  // decisione dell'utente del 15/10/2026): le tratte «—» e quelle senza la
+  // tariffa del mese, che una riga non ce l'hanno, non sono nel totale.
+  const parziale = testo(trasporti.senza_prezzo && trasporti.senza_prezzo.testo);
+  if (parziale) {
+    const sp = { corsivo: true, colore: AMBRA, capo: true };
+    stendi(ws, r, 1, ultima, sp);
+    scrivi(ws, r, 1, `Totale parziale: ${parziale}.`, sp);
+    ws.mergeCells(r, 1, r, ultima);
+    ws.getRow(r).height = 28;
+    r++;
+  }
+  return { prossima: r, cellaTotale, celleSurplus };
 }
 
 // L'EXTRA RACCOLTA: il dettaglio degli interventi chiusi nel mese.
@@ -830,9 +869,19 @@ function notaFinale(ws, r, fogli) {
     ws.getRow(r).height = surplus ? 42 : 30;
     return;
   }
-  scrivi(ws, r, 1, `Le voci del modello restano nel foglio anche a zero: il foglio e' lo stesso ogni mese e un conferimento comparso dove prima non ce n'erano si vede subito. I totali sono formule: correggi un prezzo e i totali si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.${surplus}`, st);
+  // Le voci «—» si spiegano solo dove ci sono (D5, 15/10/2026), con le due
+  // ragioni (revisione dello stesso giorno): la tariffa dell'anno che manca, e
+  // quella copiata dall'anno prima e non ancora confermata (D4).
+  const parti = (k) => quali.some(f => f && f.senza_prezzo && f.senza_prezzo[k] && Number(f.senza_prezzo[k].voci) > 0);
+  const conMancanti = parti('mancanti') || quali.some(f => f && f.senza_prezzo && !f.senza_prezzo.mancanti && Number(f.senza_prezzo.voci) > 0);
+  const conCopiate = parti('da_confermare');
+  const conTrattini = [
+    conMancanti ? " Le voci con «—» hanno movimenti nel mese ma non la tariffa dell'anno nel tariffario: restano senza prezzo e fuori dai totali finche' la tariffa non c'e', e la nota dice il prezzo della voce e di che anno e'." : '',
+    conCopiate ? " Le righe con «—» e la nota «copiata» hanno una tariffa copiata dall'anno prima e non ancora confermata: restano senza prezzo e fuori dai totali finche' non e' confermata in Target & Status › Nuovo anno, e la nota dice il prezzo copiato." : '',
+  ].join('');
+  scrivi(ws, r, 1, `Le voci del modello restano nel foglio anche a zero: il foglio e' lo stesso ogni mese e un conferimento comparso dove prima non ce n'erano si vede subito. I totali sono formule: correggi un prezzo e i totali si rifanno da soli. Tonnellate con due decimali (tre quando i chili non sono tondi), importi in euro, EER 160103 dei PFU. I canali non si sommano fra loro.${surplus}${conTrattini}`, st);
   ws.mergeCells(r, 1, r, LARGHEZZA);
-  ws.getRow(r).height = surplus ? 42 : 30;
+  ws.getRow(r).height = (surplus ? 42 : 30) + (conMancanti ? 14 : 0) + (conCopiate ? 14 : 0);
 }
 
 /** Vero se almeno un canale ha una riga del surplus, in un blocco qualunque. */

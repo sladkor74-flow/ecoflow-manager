@@ -31,6 +31,12 @@
 //    dice il blocco «Fuel Surcharge ai raccoglitori», non l'analisi per
 //    produttore, e la pagina legge una volta, solo per l'amministratore, i
 //    contratti dei trasporti con cui si pagano le secondarie;
+//    E dalla prova del cambio d'anno (15/10/2026, sezione 6d): con l'anno su
+//    «Tutti» i file prendono l'anno dei movimenti esportati, non quello di
+//    oggi; con lo stesso mese in due anni la pagina chiede l'anno. E dalla
+//    revisione dello stesso giorno (sezione 6e): con un intervento da fatturare
+//    senza prezzo l'Excel e il PDF per l'amministratore scrivono il margine
+//    «—» col perche', come la pagina, non un margine fatto da un ricavo che manca;
 // 6. la scheda dell'intervento mostra la quota e dice che fa fede il mese, e
 //    per chi e' la quota da Ecotyre: il raccoglitore;
 // 7. senza surplus niente cambia;
@@ -220,7 +226,11 @@ const IMPORT_FILE = "import { exportExtraRaccoltaExcel, exportExtraRaccoltaPDF }
 const FILE_FINTI = 'const exportExtraRaccoltaExcel = async (...a) => { globalThis.__FILE_CHIESTI.push([\'excel\', ...a]); };\n'
   + 'const exportExtraRaccoltaPDF = async (...a) => { globalThis.__FILE_CHIESTI.push([\'pdf\', ...a]); };';
 globalThis.__FILE_CHIESTI = [];
-const { datiExportExtra } = await caricaLibPagine('lib/extraRaccoltaExport');
+const EXPORT = await caricaLibPagine('lib/extraRaccoltaExport');
+const { datiExportExtra } = EXPORT;
+// Col nome del modulo: col codice di prima la funzione manca, e la sezione 6d
+// deve fallire nelle sue verifiche, non fermarsi qui.
+const periodoDelDocumento = (...a) => EXPORT.periodoDelDocumento(...a);
 const SORGENTE_PAGINA = readFileSync(fileURLToPath(new URL('../src/pages/ExtraRaccolta.jsx', import.meta.url)), 'utf8').replace(/\r/g, '');
 const cartella = mkdtempSync(join(tmpdir(), 'extra-surplus-'));
 async function montaPagina({ admin = true, archivi = {}, rompiSurplus = false } = {}) {
@@ -344,6 +354,134 @@ await sezione('6c. SE I SURPLUS NON SI LEGGONO, LA PAGINA LO DICE', async () => 
   const { r } = await montaPagina({ admin: true, rompiSurplus: true });
   verifica('l\'avviso c\'e\'', testo(r.albero).includes('I surplus sulle tariffe (come il Fuel Surcharge) non si sono potuti leggere'));
   verifica('e nessuna fascia', fasce(r).length === 0);
+});
+
+// Il file Excel vero dell'elenco (exceljs), con gli argomenti che la pagina
+// passa all'esportazione: il nome del file, il foglio e le prime righe.
+async function excelVero(records, mese, anno, contesto, opzioni = {}) {
+  const { resolveObjectURL } = await import('node:buffer');
+  const ExcelJS = (await import('exceljs')).default;
+  let scaricato = null, nome = null;
+  const prima = globalThis.document;
+  globalThis.document = { body: { appendChild() {} }, createElement: () => ({ click() { scaricato = resolveObjectURL(this.href); nome = this.download; }, remove() {} }) };
+  try { await EXPORT.exportExtraRaccoltaExcel(records, mese, anno, contesto, { ...opzioni, stato: { letto: true, utente: 'Prova', archivi: [] } }); } finally { globalThis.document = prima; }
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await scaricato.arrayBuffer()));
+  const ws = wb.worksheets[0];
+  const testa = [];
+  for (let n = 1; n <= 4; n++) testa.push([...new Set((ws.getRow(n).values || []).slice(1).filter(Boolean).map(String))].join(' | '));
+  return { nome, foglio: ws.name, testa: testa.join(' | ') };
+}
+
+// 6d. L'ANNO DEI FILE CON L'ANNO SU «TUTTI» (prova del cambio d'anno, 15/10/2026,
+// difetto 20). La pagina si apre con l'anno su «Tutti»: il 10/02/2027, scelto il
+// solo mese Dicembre, i file dei due interventi di dicembre 2026 uscivano
+// «Dicembre 2027» (l'anno di oggi) nel nome, nel foglio e nell'intestazione. Ora
+// l'anno e' quello dei movimenti esportati; con interventi di piu' anni nel mese
+// scelto i pulsanti chiedono l'anno; senza mese il documento dice «tutti gli
+// anni». Le prove di prima sceglievano sempre il 2026.
+await sezione('6d. IL 10/02/2027, ANNO SU «TUTTI» E MESE DICEMBRE: I FILE SONO DI DICEMBRE 2026', async () => {
+  const DateVera = globalThis.Date;
+  const ferma = (iso) => { const ms = DateVera.parse(iso); globalThis.Date = class extends DateVera { constructor(...a) { if (a.length) super(...a); else super(ms); } static now() { return ms; } }; };
+  const iv = (id, fine) => ({ id, stato: 'terminato', tipo_movimento: 'primaria', id_ordine: 'ER-' + id, numero_fir: 'FIR ' + id,
+    produttore: 'COMUNE DI PROVA', trasportatore: 'EMMESSE SRLS', destinazione: 'GATIM S.R.L.', tipo_destinazione: 'imp', provincia: 'NA', classe: 'P', cer: '160103',
+    ordine_immesso_il: '2025-11-20T08:00:00.000Z', trasporto_iniziato_il: fine, trasporto_finito_il: fine, peso_effettivo: 1000, prezzo_attivo_t: 202, costo_raccolta_t: 72, costo_trattamento_t: 90 });
+  const DICEMBRE = [iv('D1', '2026-12-10T09:00:00.000Z'), iv('D2', '2026-12-18T09:00:00.000Z'), iv('G1', '2027-01-20T09:00:00.000Z')];
+  const ids = (x) => (x || []).map(r => r.id).sort();
+  ferma('2027-02-10T09:00:00Z');
+  try {
+    const { r, scegli } = await montaPagina({ admin: true, archivi: { ExtraRaccolta: DICEMBRE, SurplusTariffa: [] } });
+    const anno0 = trova(r.albero, el => el.type && el.type.__finto === 'Select')[0];
+    verifica('la pagina si apre con l\'anno su «Tutti»', anno0 && anno0.props.value === 'all', anno0 && anno0.props.value);
+    await scegli(1, 'Dicembre');
+    for (const [scritta, quale] of [['Esporta Excel', 'excel'], ['Esporta PDF', 'pdf']]) {
+      const [tipo, interventi, mese, anno] = (await premi(r, scritta)) || [];
+      verifica(`«${scritta}»: i due interventi di dicembre 2026, col mese Dicembre e l'anno 2026 (non quello di oggi)`, tipo === quale && mese === 'Dicembre' && anno === 2026
+        && J(ids(interventi)) === J(['D1', 'D2']), J([tipo, mese, anno, ids(interventi)]));
+    }
+    verifica('il periodo del documento: «Dicembre 2026»', periodoDelDocumento('Dicembre', 2026) === 'Dicembre 2026' && periodoDelDocumento('Tutti', null) === 'Tutti gli anni');
+    // Il file vero, con exceljs, con gli argomenti che la pagina passa.
+    const chiesto = await premi(r, 'Esporta Excel');
+    const wb = await excelVero(...chiesto.slice(1));
+    verifica('il file vero: «SMOCO-Fatturazione EXTRA RACCOLTA Dicembre 2026.xlsx», foglio «DICEMBRE 2026», fascia «Fatturazione extra raccolta — Dicembre 2026»',
+      wb.nome === 'SMOCO-Fatturazione EXTRA RACCOLTA Dicembre 2026.xlsx' && wb.foglio === 'DICEMBRE 2026' && wb.testa.includes('Fatturazione extra raccolta — Dicembre 2026') && !/2027/.test(wb.testa.replace(/Generato il [^|]*/g, '')), J(wb));
+    // Senza mese, interventi di due anni: il documento dice «tutti gli anni».
+    await scegli(1, 'all');
+    const [, tutti, meseT, annoT] = (await premi(r, 'Esporta Excel')) || [];
+    verifica('senza mese, interventi del 2026 e del 2027: «Tutti», anno null, cioe\' «Tutti gli anni»', meseT === 'Tutti' && annoT === null && J(ids(tutti)) === J(['D1', 'D2', 'G1']), J([meseT, annoT, ids(tutti)]));
+    // La controprova: con l'anno 2026 scelto il file e' quello di sempre.
+    await scegli(0, '2026');
+    await scegli(1, 'Dicembre');
+    const [, scelti, meseS, annoS] = (await premi(r, 'Esporta Excel')) || [];
+    verifica('controprova: con l\'anno 2026 scelto, dicembre 2026 come prima', meseS === 'Dicembre' && String(annoS) === '2026' && J(ids(scelti)) === J(['D1', 'D2']), J([meseS, annoS]));
+    // Lo stesso mese in due anni (gennaio 2026 e gennaio 2027): i pulsanti non
+    // esportano e la pagina chiede l'anno.
+    const DUE_GENNAI = [iv('A', '2026-01-15T09:00:00.000Z'), iv('B', '2027-01-20T09:00:00.000Z')];
+    const due = await montaPagina({ admin: true, archivi: { ExtraRaccolta: DUE_GENNAI, SurplusTariffa: [] } });
+    await due.scegli(1, 'Gennaio');
+    const nessunExcel = await premi(due.r, 'Esporta Excel');
+    const nessunPdf = await premi(due.r, 'Esporta PDF');
+    verifica('gennaio di due anni con l\'anno su «Tutti»: non esce nessun file, e la pagina chiede l\'anno', nessunExcel === null && nessunPdf === null
+      && testo(due.r.albero).includes('Gli interventi di gennaio sono di più anni (2026 e 2027): scegli l\'anno per esportarli, un documento per anno.'), J([nessunExcel, nessunPdf]));
+    verifica('...e il pulsante, premuto, lo chiede', /if \(fileDa\.chiedi\) \{ chiediAnno\(\); return; \}/.test(SORGENTE_PAGINA) && /const chiediAnno = \(\) => toast\(\{ title: "Scegli l'anno", description: fileDa\.chiedi \}\);/.test(SORGENTE_PAGINA));
+  } finally { globalThis.Date = DateVera; }
+});
+
+// 6e. IL MARGINE NEI FILE PER L'AMMINISTRATORE CON UN PREZZO CHE MANCA (revisione
+// del 15/10/2026 sul difetto 18 della prova del cambio d'anno). Gennaio 2027: un
+// intervento senza prezzo (0,6 t, la base 2026 non vale nel 2027 e sull'intervento
+// il prezzo non c'e') e uno a 210 €/t. La pagina dice «—» (totaliExtraRaccolta);
+// l'Excel e il PDF per l'amministratore scrivevano nell'analisi per produttore
+// «TOTALE ... -113,5» e «Margine % complessivo -77,21%». Ora il margine e la
+// percentuale sono «—» con la frase della pagina; costi e ricavi restano.
+// Controprova: con tutti i prezzi i file scrivono il margine di sempre.
+await sezione('6e. IL MARGINE NEI FILE PER L\'AMMINISTRATORE: «—» CON UN INTERVENTO SENZA PREZZO', async () => {
+  const intervento = (id, kg, prezzo, costoRaccolta, costoTrattamento) => ({ id, stato: 'terminato', tipo_movimento: 'primaria', id_ordine: 'ER' + id, numero_fir: 'FIR ' + id,
+    produttore: 'COMUNE DI PROVA', trasportatore: 'EMMESSE SRLS', destinazione: 'GATIM S.R.L.', tipo_destinazione: 'imp', provincia: 'NA', classe: 'P', cer: '160103',
+    ordine_immesso_il: '2027-01-05T08:00:00.000Z', trasporto_iniziato_il: '2027-01-10T08:00:00.000Z', trasporto_finito_il: '2027-01-10T08:00:00.000Z',
+    peso_effettivo: kg, prezzo_attivo_t: prezzo, costo_raccolta_t: costoRaccolta, costo_trattamento_t: costoTrattamento });
+  const SENZA = intervento('E1', 600, 0, 105, 90);
+  const A210 = intervento('E2', 700, 210, 115, 90);
+  const ctx = calc.contestoPrezzi([], FORNITORI, [], subfornitori);
+  const FRASE = 'un intervento da fatturare senza prezzo: margine non calcolabile, ricavi e costi parziali';
+  // Le righe del foglio Excel vero, coi valori delle celle.
+  const righeExcel = async (records) => {
+    const { resolveObjectURL } = await import('node:buffer');
+    const ExcelJS = (await import('exceljs')).default;
+    let scaricato = null;
+    const prima = globalThis.document;
+    globalThis.document = { body: { appendChild() {} }, createElement: () => ({ click() { scaricato = resolveObjectURL(this.href); }, remove() {} }) };
+    try { await EXPORT.exportExtraRaccoltaExcel(records, 'Gennaio', 2027, ctx, { isAdmin: true, stato: { letto: true, utente: 'Prova', archivi: [] } }); } finally { globalThis.document = prima; }
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(await scaricato.arrayBuffer()));
+    const fuori = [];
+    wb.worksheets[0].eachRow(row => fuori.push((row.values || []).slice(1).map(v => (v && typeof v === 'object' && 'result' in v ? v.result : v))));
+    return fuori;
+  };
+  // Gli argomenti del PDF, con l'esportatore sostituito.
+  const PDF = await caricaLibPagine('lib/extraRaccoltaExport', [[/await import\('@\/lib\/esportaTabella'\)/, '({ esportaSezioniPdf: async (a) => { globalThis.__ARGOMENTI_PDF = a; } })']]);
+  const righePdf = async (records) => {
+    globalThis.__ARGOMENTI_PDF = null;
+    await PDF.exportExtraRaccoltaPDF(records, 'Gennaio', 2027, ctx, { isAdmin: true, stato: { letto: true, utente: 'Prova', archivi: [] } });
+    const s = (globalThis.__ARGOMENTI_PDF.sezioni || []).find(x => x.titolo === 'ANALISI MARGINE PER PRODUTTORE');
+    return (s ? s.righe : []).map(r => r.celle);
+  };
+  const comincia = (righe, testa) => righe.find(r => String(r[0] ?? '') === testa) || [];
+  const ex = await righeExcel([SENZA, A210]);
+  const totEx = comincia(ex, 'TOTALE');
+  verifica('Excel: nel TOTALE dell\'analisi costi 260,50 e ricavi 147,00 restano, il margine e\' «—» e non -113,50', totEx[9] === 260.5 && totEx[10] === 147 && totEx[11] === '—' && !ex.flat().includes(-113.5), J(totEx));
+  verifica('Excel: «Margine % complessivo» e\' «—», e la riga sotto dice perche\'', comincia(ex, 'Margine % complessivo')[1] === '—' && !ex.flat().some(c => /-77,21%/.test(String(c)))
+    && ex.some(r => String(r[0] ?? '') === `Margine «—»: ${FRASE}.`), J(comincia(ex, 'Margine % complessivo')));
+  verifica('Excel: anche il produttore che ha l\'intervento senza prezzo ha il margine «—»', comincia(ex, 'COMUNE DI PROVA')[11] === '—', J(comincia(ex, 'COMUNE DI PROVA')));
+  const pdf = await righePdf([SENZA, A210]);
+  verifica('PDF: il TOTALE col margine «—», la percentuale «—» e la frase', comincia(pdf, 'TOTALE')[11] === '—' && comincia(pdf, 'TOTALE')[10] === 147 && comincia(pdf, 'Margine % complessivo').includes('—')
+    && pdf.some(c => c[0] === `Margine «—»: ${FRASE}.`) && !pdf.flat().some(c => c === -113.5 || /-77,21%/.test(String(c))), J(pdf));
+  // La controprova: con tutti i prezzi (solo l'intervento a 210 €/t) il margine e'
+  // un numero, 147,00 - 143,50 = 3,50, e la percentuale 2,38%.
+  const exOk = await righeExcel([A210]);
+  verifica('controprova Excel: con tutti i prezzi margine 3,50 e 2,38%, nessuna frase', comincia(exOk, 'TOTALE')[11] === 3.5 && comincia(exOk, 'Margine % complessivo')[1] === '2,38%' && !exOk.some(r => /^Margine «—»/.test(String(r[0] ?? ''))), J([comincia(exOk, 'TOTALE'), comincia(exOk, 'Margine % complessivo')]));
+  const pdfOk = await righePdf([A210]);
+  verifica('controprova PDF: margine 3,50 e 2,38%', comincia(pdfOk, 'TOTALE')[11] === 3.5 && comincia(pdfOk, 'Margine % complessivo').includes('2,38%') && !pdfOk.some(c => /^Margine «—»/.test(String(c[0] ?? ''))), J(pdfOk));
 });
 
 await sezione('7. LA SCHEDA DELL\'INTERVENTO MOSTRA LA QUOTA E DICE CHE FA FEDE IL MESE', async () => {

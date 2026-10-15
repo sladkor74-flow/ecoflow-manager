@@ -35,6 +35,7 @@ import { formatoKg, formatoTonnellate } from "./formato.ts";
 import { distanzaFir, descriviDifferenzaFir } from "./numeroFir.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { importoSurplus, testoEuroT, periodoSurplus, surplusNonDisattivati, valePerFornitore, euroTDi, NOMI_ORIGINE } from "./surplus.ts";
+import { rigaConTariffaDaConfermare, annoDellaCopia } from "./ecotyreTariffe.ts";
 
 const kgTondi = (v) => Math.round(Number(v) || 0);
 const pulisci = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -1201,6 +1202,27 @@ export function avvisiDate(confronto) {
  * restano quelle delle righe standard: il surplus sta sulle stesse, e il
  * controllo sui chili non cambia. Un conto congelato prima del surplus non ha
  * questi campi: lo standard e' allora l'importo intero.
+ *
+ * LE RIGHE SENZA LA NOSTRA TARIFFA (prova del cambio d'anno, 15/10/2026). Una
+ * riga «senza tariffa» (o con un'unita' che la passiva non sa leggere) vale zero
+ * nel conto: non perche' al fornitore non spetti niente, ma perche' nel
+ * gestionale manca il prezzo. A gennaio succede a tutti i fornitori finche' le
+ * tariffe dell'anno nuovo non ci sono (i contratti sono annuali, senza tacito
+ * rinnovo). Confrontato con quello zero, il consuntivo di GATIM di gennaio 2027
+ * (6.000 kg, 432,00 €) «si scostava di +432,00 euro», cioe' la colpa andava al
+ * fornitore. Qui si contano quelle tonnellate (senza_tariffa_t) e si dice di
+ * quale prestazione: con senza_tariffa_t > 0 l'importo non si puo' controllare,
+ * e esitoConsuntivo lo dice. Il periodo del conto viaggia con lui (periodo), per
+ * dire «nella passiva di gennaio 2027» anche di un conto congelato.
+ *
+ * Dopo la revisione dello stesso giorno, due casi in piu'. Le righe prezzate con
+ * una tariffa copiata dall'anno prima e non confermata (da_confermare_t): per D4,
+ * decisione dell'utente del 15/10/2026, fermano il controllo come una riga senza
+ * prezzo, ed e' il caso normale di gennaio, quando «Prepara le tariffe» ha gia'
+ * copiato tutto. E le tratte del vettore delle secondarie senza la tariffa del
+ * mese, che nella passiva non hanno una riga ma solo un'anomalia: si contano
+ * dalle anomalie, e un vettore che ha soltanto quelle risulta trovato, con le
+ * sue tonnellate senza prezzo, invece che «senza una riga in questo ruolo».
  */
 export function costoAttesoDallaPassiva(passiva, fornitore, ruolo) {
   if (!passiva) return null;
@@ -1208,7 +1230,14 @@ export function costoAttesoDallaPassiva(passiva, fornitore, ruolo) {
     : ruolo === 'impianto' ? 'impianti_stoccaggi'
       : 'trasporti_secondaria';
   const righe = (passiva[blocco] || []).filter(f => stesso(f.fornitore, fornitore));
-  if (!righe.length) {
+  // LE TRATTE DEL VETTORE SENZA TARIFFA (revisione del 15/10/2026). Una tratta
+  // delle secondarie senza la tariffa del mese non ha una riga nel blocco dei
+  // trasporti: la passiva la salta e ne fa solo un'anomalia. A gennaio 2027 il
+  // vettore di NAPPI SUD → Irigom (15 t) risultava «senza una riga in questo
+  // ruolo», il consuntivo usciva difforme e nessuno diceva che la tariffa che
+  // mancava era nostra. Le sue tonnellate si leggono dalle anomalie.
+  const tratte = blocco === 'trasporti_secondaria' ? tratteSenzaTariffa(passiva, fornitore, righe) : { kg: 0, kg_senza_riga: 0, fornitore: '' };
+  if (!righe.length && !(tratte.kg > 0)) {
     return {
       trovato: false, blocco,
       motivo: `Nella fatturazione passiva di questo mese, nel blocco ${blocco.replace(/_/g, ' ')}, non c'e' nessuna riga per questo fornitore: o non gli spetta niente in questo canale, o manca la tariffa.`,
@@ -1216,18 +1245,181 @@ export function costoAttesoDallaPassiva(passiva, fornitore, ruolo) {
   }
   const cent = Math.round(righe.reduce((s, f) => s + centesimi(f.totale_euro), 0));
   const centSurplus = Math.round(righe.reduce((s, f) => s + centesimi(f.totale_surplus), 0));
+  const dettaglio = righe.flatMap(f => f.righe || []);
+  const senza = dettaglio.filter(rigaSenzaPrezzo);
+  const kgSenza = Math.round(senza.reduce((s, r) => s + (Number(r.tonnellate) || 0) * 1000, 0));
+  // Le righe prezzate con una tariffa copiata dall'anno prima e non confermata
+  // (D4, decisione dell'utente del 15/10/2026): fermano il controllo come una
+  // riga senza prezzo. Il 10/02/2027 GATIM a 70 €/t copiato dal 2026, contro i
+  // 72 del contratto 2027, «si scostava di +12,00 euro»: la colpa andava di
+  // nuovo al fornitore, per un prezzo nostro che nessuno aveva confermato.
+  const copiate = dettaglio.filter(rigaDaConfermare);
+  const kgCopiate = Math.round(copiate.reduce((s, r) => s + (Number(r.tonnellate) || 0) * 1000, 0));
   return {
     trovato: true,
     blocco,
-    tonnellate: righe.reduce((s, f) => s + (Number(f.totale_tonnellate) || 0), 0),
+    fornitore: String((righe[0] && righe[0].fornitore) || tratte.fornitore || fornitore || '').trim(),
+    periodo: { anno: Number(passiva.anno) || null, mese: String(passiva.mese || '') },
+    // le tonnellate che la passiva conta per il fornitore: le sue righe, piu' le
+    // tratte senza tariffa che una riga non ce l'hanno (tratte_senza_riga_t)
+    tonnellate: righe.reduce((s, f) => s + (Number(f.totale_tonnellate) || 0), 0) + tratte.kg_senza_riga / 1000,
     importo: cent / 100,
     importo_standard: (cent - centSurplus) / 100,
     importo_surplus: centSurplus / 100,
     surplus: righe.flatMap(f => f.surplus || []),
-    interno: righe.every(f => f.interno === true),
-    righe: righe.flatMap(f => f.righe || []),
+    interno: righe.length > 0 && righe.every(f => f.interno === true),
+    righe: dettaglio,
+    // le tonnellate senza la tariffa del mese, e di quali prestazioni (15/10/2026)
+    senza_tariffa_t: (kgSenza + tratte.kg) / 1000,
+    prestazioni_senza_tariffa: [...new Set([
+      ...senza.map(r => prestazioneDellaRiga(r, ruolo)),
+      ...(tratte.kg > 0 ? [PAROLE_PRESTAZIONE.TRASPORTO_SECONDARIA] : []),
+    ])],
+    tratte_senza_riga_t: tratte.kg_senza_riga / 1000,
+    // le tonnellate prezzate con una tariffa copiata e non confermata, di quali
+    // prestazioni e da che anno (D4, 15/10/2026)
+    da_confermare_t: kgCopiate / 1000,
+    prestazioni_da_confermare: [...new Set(copiate.map(r => prestazioneDellaRiga(r, ruolo)))],
+    anno_copia: kgCopiate > 0 ? annoDelleCopie(copiate, passiva, fornitore) : null,
   };
 }
+
+// Una riga prezzata con una tariffa copiata da «Prepara le tariffe» e non ancora
+// confermata: il segno che il calcolo della passiva le mette (tariffa_da_confermare,
+// 15/10/2026), o la nota che lo dice. Un interno, il prezzo unico della raccolta e
+// una riga senza prezzo non sono righe da confermare.
+const rigaDaConfermare = (r) => !!r && !(r.interno === true || r.compreso_nella_raccolta === true)
+  && !rigaSenzaPrezzo(r) && (r.tariffa_da_confermare === true || rigaConTariffaDaConfermare(r));
+
+// L'anno da cui sono state copiate le tariffe di quelle righe: la nota della riga
+// («prezzo copiato dal 2026»), o l'anomalia della passiva per quel fornitore.
+function annoDelleCopie(copiate, passiva, fornitore) {
+  for (const r of copiate) {
+    const a = annoDellaCopia({ note: r && r.note });
+    if (a) return a;
+  }
+  const anomalia = ((passiva && passiva.anomalie) || [])
+    .find(a => a && a.tipo === 'tariffa_da_confermare' && stesso(a.fornitore, fornitore) && Number(a.anno_copia) > 0);
+  return anomalia ? Number(anomalia.anno_copia) : null;
+}
+
+// Le anomalie della passiva che dicono una tratta senza la tariffa del mese: la
+// rete e l'ACI («Tratta secondaria senza tariffa»), l'extra raccolta («la tratta
+// non ha una tariffa»). Le stesse di tariffeMancantiDelConto.
+const RE_TRATTA_SENZA_TARIFFA = /senza tariffa|la tratta non ha una tariffa/i;
+
+/**
+ * I chili delle tratte del vettore senza la tariffa del mese, dalle anomalie
+ * della passiva (revisione del 15/10/2026): { kg, kg_senza_riga, fornitore }.
+ * kg_senza_riga sono quelli che una riga non ce l'hanno: un intervento di extra
+ * raccolta senza la tariffa della tratta ha una riga solo se porta un sovracosto,
+ * e i suoi chili sono gia' nelle righe (la nota della riga dice «intervento» e
+ * il formulario, l'anomalia «FIR» e lo stesso numero).
+ */
+function tratteSenzaTariffa(passiva, fornitore, righe) {
+  const note = righe.flatMap(f => f.righe || []).map(r => String((r && r.note) || ''));
+  let kg = 0;
+  let kgSenzaRiga = 0;
+  let nome = '';
+  for (const a of (passiva && passiva.anomalie) || []) {
+    if (!a || a.tipo === 'tariffa_da_confermare' || codice(a.prestazione) !== 'TRASPORTO_SECONDARIA') continue;
+    if (!stesso(a.fornitore, fornitore) || !RE_TRATTA_SENZA_TARIFFA.test(String(a.descrizione || ''))) continue;
+    const k = Math.round((Number(a.tonnellate) || 0) * 1000);
+    if (!(k > 0)) continue;
+    kg += k;
+    nome = nome || String(a.fornitore || '').trim();
+    const fir = /^FIR\s+(.+)$/.exec(String(a.ambito || '').trim());
+    const giaInRiga = !!fir && fir[1] !== '—' && note.some(n => n.includes(`intervento ${fir[1]}`));
+    if (!giaInRiga) kgSenzaRiga += k;
+  }
+  return { kg, kg_senza_riga: kgSenzaRiga, fornitore: nome };
+}
+
+// Una riga della passiva che vale zero perche' nel gestionale manca il prezzo:
+// «senza tariffa», o un'unita' che la passiva non sa leggere. La stessa regola del
+// foglio dell'amministrazione (rigaSenzaTariffa in src/lib/passivaAmministrazione.js).
+// Un interno e il prezzo unico della raccolta non sono prezzi che mancano.
+const rigaSenzaPrezzo = (r) => !!r && !(r.interno === true || r.compreso_nella_raccolta === true)
+  && /senza tariffa|sconosciuta/i.test(String(r.note || ''));
+
+// Il nome della prestazione di una riga, in parole: «raccolta», «trattamento»...
+const PAROLE_PRESTAZIONE = { RACCOLTA: 'raccolta', TRATTAMENTO: 'trattamento', CONFERIMENTO_STOCCAGGIO: 'stoccaggio', TRASPORTO_SECONDARIA: 'trasporto delle secondarie' };
+const PRESTAZIONE_DEL_RUOLO = { raccoglitore: 'RACCOLTA', impianto: 'TRATTAMENTO', trasportatore: 'TRASPORTO_SECONDARIA' };
+function prestazioneDellaRiga(r, ruolo) {
+  const p = codice(r && r.prestazione);
+  return PAROLE_PRESTAZIONE[p] || PAROLE_PRESTAZIONE[PRESTAZIONE_DEL_RUOLO[String(ruolo || '').trim().toLowerCase()]] || 'prestazione';
+}
+
+/**
+ * Il giorno in cui e' finita l'ultima tariffa passiva di un fornitore, per le
+ * prestazioni del suo ruolo e il canale, scaduta prima del mese del consuntivo.
+ * Serve a dire PERCHE' la tariffa del mese manca: i contratti rete e ACI sono
+ * annuali, senza tacito rinnovo (06/10/2026), e a gennaio la tariffa che manca e'
+ * quella del contratto nuovo, mentre quella dell'anno prima e' scaduta il 31/12
+ * (prova del cambio d'anno, 15/10/2026). Pura: le tariffe le ha gia' lette chi
+ * chiama, per il conto della passiva. '' se non ce n'e' una.
+ */
+export function ultimaTariffaScaduta(tariffeAll, { fornitore, ruolo, canale, anno, mese }) {
+  const prestazioni = PRESTAZIONI_DEL_RUOLO[String(ruolo || '').trim().toLowerCase()] || [];
+  const inizio = `${Number(anno)}-${String(Number(mese)).padStart(2, '0')}-01`;
+  const can = codice(canale);
+  let fine = '';
+  for (const t of tariffeAll || []) {
+    if (!t || codice(t.direzione || 'PASSIVA') !== 'PASSIVA' || codice(t.stato) === 'NON_ATTIVO') continue;
+    if (!stesso(t.fornitore_nome, fornitore) || !prestazioni.includes(codice(t.prestazione))) continue;
+    if (!['TUTTE', can].includes(codice(t.tipologia || 'TUTTE'))) continue;
+    const al = String(t.data_fine_validita || '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(al) && al < inizio && al > fine) fine = al;
+  }
+  return fine;
+}
+
+/**
+ * LE TARIFFE CHE MANCANO IN UN CONTO DELLA PASSIVA, prima di congelarlo (prova
+ * del cambio d'anno, 15/10/2026). Il 05/02/2027 gennaio si congelava senza le
+ * tariffe 2027 a 0,00 €, senza una domanda: i consuntivi arrivati dopo si
+ * confrontavano con quello zero. Qui, dalle anomalie del conto, chi non ha la
+ * tariffa del mese, per che cosa e su quante tonnellate, una voce per fornitore e
+ * prestazione (e tratta, per il trasporto delle secondarie). congelaPassivaMese
+ * risponde 409 con questo elenco e congela solo con la conferma; la pagina lo
+ * mostra prima di chiederla.
+ *
+ * Anche le righe prezzate con una tariffa copiata dall'anno prima e non ancora
+ * confermata (anomalie di tipo 'tariffa_da_confermare', che il calcolo della
+ * passiva aggiunge col giro del 15/10/2026; finche' non ci sono l'elenco e'
+ * vuoto): una riga prezzata con una tariffa copiata e non confermata ferma il
+ * documento come una riga senza prezzo (D4, decisione dell'utente del
+ * 15/10/2026; la conferma e' in Target & Status › Nuovo anno), e un conto
+ * congelato con un prezzo vecchio passato per nuovo e' peggio di uno con un
+ * prezzo che manca.
+ * -> { mancanti: [{ fornitore, prestazione, tratta, tonnellate }], da_confermare: [...], tonnellate }
+ */
+export function tariffeMancantiDelConto(passiva) {
+  const gruppi = (filtro) => {
+    const per = new Map();
+    for (const a of ((passiva && passiva.anomalie) || []).filter(filtro)) {
+      const prestazione = codice(a.prestazione);
+      const tratta = prestazione === 'TRASPORTO_SECONDARIA' ? String(a.ambito || '').trim() : '';
+      const k = `${normalizzaRagioneSociale(String(a.fornitore || ''))}|${prestazione}|${tratta}`;
+      const g = per.get(k) || { fornitore: String(a.fornitore || '').trim() || 'fornitore non scritto', prestazione, prestazione_parole: PAROLE_PRESTAZIONE[prestazione] || prestazione.toLowerCase(), tratta, kg: 0 };
+      g.kg += Math.round((Number(a.tonnellate) || 0) * 1000);
+      per.set(k, g);
+    }
+    return [...per.values()]
+      .map(({ kg, ...g }) => ({ ...g, tonnellate: kg / 1000 }))
+      .sort((x, y) => x.fornitore.localeCompare(y.fornitore, 'it') || x.prestazione.localeCompare(y.prestazione));
+  };
+  const mancanti = gruppi(a => a && a.tipo !== 'tariffa_da_confermare' && /senza tariffa|la tratta non ha una tariffa/i.test(String(a.descrizione || '')));
+  const daConfermare = gruppi(a => a && a.tipo === 'tariffa_da_confermare');
+  return {
+    mancanti,
+    da_confermare: daConfermare,
+    tonnellate: Math.round(mancanti.reduce((s, g) => s + g.tonnellate * 1000, 0)) / 1000,
+  };
+}
+
+/** Una voce dell'elenco delle tariffe mancanti, in parole: «GATIM S.R.L., raccolta: 6,00 t». */
+export const testoTariffaMancante = (g) => `${g.fornitore}, ${g.prestazione_parole}${g.tratta ? ` (${g.tratta})` : ''}: ${formatoTonnellate(g.tonnellate)} t`;
 
 // Il ruolo del consuntivo e le prestazioni su cui un surplus gli si paga.
 const PRESTAZIONI_DEL_RUOLO = {
@@ -1406,11 +1598,34 @@ function scartoDaSurplus(scartoCent, costo, { candidati = [], dopo = [] }, tolle
  * (surplusPerIlConfronto); surplus_dopo: le righe del surplus scritte o cambiate
  * dopo il congelamento del conto usato per il confronto (surplusScrittiDopo).
  * Tutti e due facoltativi: senza, lo scarto si dice come uno scarto qualunque.
+ *
+ * LA TARIFFA CHE MANCA E' NOSTRA, NON DEL FORNITORE (prova del cambio d'anno,
+ * 15/10/2026). Quando nel conto usato per il confronto ci sono tonnellate del
+ * fornitore senza la tariffa del mese (costo.senza_tariffa_t), il previsto e'
+ * zero o una parte: confrontarlo col consuntivo dava «si scosta di +432,00
+ * euro» e la colpa al fornitore. Allora l'importo non si controlla
+ * (quadra_importo e scarto_importo null, importo_previsto null), la ragione va
+ * in non_controllato e in importo_sospeso, e il verdetto complessivo, se tutto
+ * il resto torna, e' null: ne' verde ne' una difformita', «da confrontare» per
+ * la chiusura del mese finche' la tariffa non c'e' e il confronto si rifa'.
+ * Lo stesso con le tonnellate prezzate con una tariffa copiata dall'anno prima e
+ * non confermata (costo.da_confermare_t): per D4, decisione dell'utente del
+ * 15/10/2026, fermano il controllo come una riga senza prezzo (revisione del
+ * 15/10/2026: GATIM a 70 €/t copiato contro i 72 del contratto «si scostava di
+ * +12,00 euro»).
+ * Facoltativi:
+ * - tariffa_scaduta_il: il giorno in cui e' finita l'ultima tariffa del
+ *   fornitore (ultimaTariffaScaduta), per dire perche' manca;
+ * - costo_oggi e congelato_il: quando `costo` e' il conto congelato, il
+ *   ricalcolo di oggi e l'istante del congelamento. Se allora la tariffa
+ *   mancava e oggi c'e', la frase dice di rifare il congelamento (16 della
+ *   prova), non «ordini chiusi dopo».
  */
-export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, tolleranza_euro = 0.015, surplus_candidati = [], surplus_dopo = [] }) {
+export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, tolleranza_euro = 0.015, surplus_candidati = [], surplus_dopo = [], tariffa_scaduta_il = '', costo_oggi = null, congelato_il = '' }) {
   const kgPassiva = costo && costo.trovato ? Math.round(costo.tonnellate * 1000) : null;
   const scartoPassiva = kgPassiva === null ? null : confronto.totale_gestionale_kg - kgPassiva;
-  const scartoImporto = importo_consuntivo === null || !costo || !costo.trovato
+  const sospeso = importoSospeso(costo, { tariffa_scaduta_il, costo_oggi, congelato_il });
+  const scartoImporto = importo_consuntivo === null || !costo || !costo.trovato || sospeso
     ? null
     : (centesimi(importo_consuntivo) - centesimi(costo.importo)) / 100;
   const quadraPassiva = scartoPassiva === null ? null : scartoPassiva === 0;
@@ -1425,16 +1640,27 @@ export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, t
     // altri, prima di guardare gli euro va capito perche'.
     quadra_con_passiva: quadraPassiva,
     scarto_passiva_kg: scartoPassiva,
-    importo_previsto: costo && costo.trovato ? costo.importo : null,
+    // Con tonnellate senza la nostra tariffa (o con una tariffa copiata e non
+    // confermata, D4) il previsto e' zero, una parte o un prezzo vecchio: non e'
+    // un numero da opporre al fornitore, e resta «—» (15/10/2026). Le sue parti
+    // pure.
+    importo_previsto: costo && costo.trovato && !sospeso ? costo.importo : null,
     // di cui lo standard e il surplus (13/10/2026): il previsto e' la loro somma
-    importo_previsto_standard: costo && costo.trovato ? (costo.importo_standard ?? costo.importo) : null,
-    importo_previsto_surplus: costo && costo.trovato ? (costo.importo_surplus ?? 0) : null,
+    importo_previsto_standard: costo && costo.trovato && !sospeso ? (costo.importo_standard ?? costo.importo) : null,
+    importo_previsto_surplus: costo && costo.trovato && !sospeso ? (costo.importo_surplus ?? 0) : null,
     importo_consuntivo,
     scarto_importo: scartoImporto,
     quadra_importo: quadraImporto,
     // Lo scarto spiegato da un surplus: { tipo: 'manca' | 'scritto_dopo' |
     // 'non_dovuto', importo, voci, in_parte }. Il verdetto non cambia, cambia la frase.
     scarto_surplus: daSurplus,
+    // L'importo che non si e' potuto controllare perche' nel conto manca la
+    // nostra tariffa, o e' copiata e non confermata (15/10/2026): { tonnellate,
+    // da_confermare_t, prestazioni, prestazioni_da_confermare, anno_copia,
+    // fornitore, periodo, scaduta_il, importo_al_prezzo_copiato, congelato_il,
+    // testo, voce } - congelato_il solo quando nel conto congelato la tariffa
+    // mancava (o era da confermare) e oggi c'e'. null senza.
+    importo_sospeso: sospeso,
     // Un fornitore interno non manda fattura: la passiva lo riporta a zero e non e'
     // una difformita'.
     interno: !!(costo && costo.interno),
@@ -1451,7 +1677,12 @@ export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, t
     // davvero di un altro mese, perche' in un consuntivo del mese non ci vanno e
     // se il loro mese e' stato fatturato si rischia di pagarle due volte. Un
     // registro di piu' mesi e' un'altra cosa: quelle righe sono la sua natura.
-    quadra_tutto: confronto.quadra
+    //
+    // L'importo in sospeso per una nostra tariffa che manca (15/10/2026): se
+    // tutto il resto torna il verdetto e' null, ne' verde ne' una difformita'
+    // del fornitore. La chiusura del mese lo conta «da confrontare», ed e' vero:
+    // scritta la tariffa, il confronto va rifatto prima di pagare.
+    quadra_tutto: sospesoSeTorna(sospeso, confronto.quadra
       && quadraPassiva === true
       && (quadraImporto === null || quadraImporto === true)
       && !confronto.date_sbagliate_quante
@@ -1459,19 +1690,97 @@ export function esitoConsuntivo({ confronto, costo, importo_consuntivo = null, t
       // Un formulario o un ID ordine scritto male e' un errore del documento,
       // anche se i chili tornano: il riquadro non puo' dirsi verde mentre sotto
       // c'e' scritto che due numeri sono sbagliati (01/10/2026).
-      && !confronto.con_differenze,
+      && !confronto.con_differenze),
     // Che cosa NON si e' potuto controllare: dirlo e' diverso dal dire che va bene.
     non_controllato: [
       !costo || !costo.trovato ? 'il costo previsto (la fatturazione passiva non ha una riga per questo fornitore in questo ruolo)' : '',
       importo_consuntivo === null ? "l'importo (il consuntivo non ne porta uno)" : '',
+      sospeso ? sospeso.voce : '',
     ].filter(Boolean),
+  };
+}
+
+// Il verdetto con l'importo in sospeso: se tutto il resto torna e' null, se
+// qualcosa non torna resta quello che e'.
+const sospesoSeTorna = (sospeso, tutto) => (sospeso && tutto ? null : tutto);
+
+/**
+ * L'importo che non si puo' controllare perche' nel conto della passiva mancano
+ * delle tariffe di questo fornitore (15/10/2026), o sono copiate dall'anno prima
+ * e non ancora confermate (D4, decisione dell'utente del 15/10/2026), con le
+ * parole per dirlo:
+ * - testo: la frase del verdetto, al posto di «si scosta di ...»;
+ * - voce: la riga di non_controllato («l'importo, perché nella passiva ...»).
+ * null se nel conto ogni riga ha il suo prezzo, e confermato.
+ */
+function importoSospeso(costo, { tariffa_scaduta_il = '', costo_oggi = null, congelato_il = '' } = {}) {
+  if (!costo || !costo.trovato || costo.interno) return null;
+  const t = Number(costo.senza_tariffa_t) || 0;
+  // le tonnellate prezzate con una tariffa copiata e non confermata (D4,
+  // decisione dell'utente del 15/10/2026): fermano il controllo come quelle
+  // senza prezzo, e si dicono col loro nome
+  const tc = Number(costo.da_confermare_t) || 0;
+  if (!(t > 0) && !(tc > 0)) return null;
+  const periodo = costo.periodo || {};
+  const mese = periodo.mese ? `${String(periodo.mese).toLowerCase()}${periodo.anno ? ` ${periodo.anno}` : ''}` : 'questo mese';
+  const prestazioni = (costo.prestazioni_senza_tariffa || []).filter(Boolean);
+  const prestazioniCopiate = (costo.prestazioni_da_confermare || []).filter(Boolean);
+  const diCosa = (elenco) => (elenco.length ? ` di ${elenco.join(' e ')}` : '');
+  const chi = costo.fornitore || 'questo fornitore';
+  // Perche' manca: l'ultima tariffa e' scaduta. Un 31/12 e' la fine di un
+  // contratto annuale (06/10/2026): «i contratti 2026 sono scaduti il 31/12/2026».
+  const scaduta = /^\d{4}-\d{2}-\d{2}$/.test(String(tariffa_scaduta_il || '')) ? String(tariffa_scaduta_il) : '';
+  const perche = !scaduta ? ''
+    : scaduta.slice(5) === '12-31' ? `; i contratti ${scaduta.slice(0, 4)} sono scaduti il ${giornoIt(scaduta)}`
+      : `; l'ultima tariffa è scaduta il ${giornoIt(scaduta)}`;
+  const daAnno = Number(costo.anno_copia) > 0 ? `dal ${costo.anno_copia}` : "dall'anno prima";
+  const annoContratto = Number(periodo.anno) > 0 ? ` ${periodo.anno}` : " dell'anno";
+  const base = {
+    tonnellate: t, da_confermare_t: tc, prestazioni, prestazioni_da_confermare: prestazioniCopiate,
+    anno_copia: Number(costo.anno_copia) > 0 ? Number(costo.anno_copia) : null,
+    fornitore: chi, periodo, scaduta_il: scaduta,
+    // al prezzo copiato, quando e' l'unica cosa che manca: un'informazione, non
+    // un numero da opporre al fornitore
+    importo_al_prezzo_copiato: !(t > 0) && tc > 0 ? costo.importo : null,
+  };
+  // Il conto congelato senza la tariffa (o con la copia non confermata), che oggi
+  // c'e' (16 della prova del cambio d'anno): il rimedio e' rifare il
+  // congelamento, e lo si dice.
+  const oggi = costo_oggi && costo_oggi.trovato
+    ? (Number(costo_oggi.senza_tariffa_t) || 0) + (Number(costo_oggi.da_confermare_t) || 0)
+    : null;
+  const quando = congelato_il ? istanteIt(congelato_il) : '';
+  if (quando && oggi !== null && oggi < t + tc - 0.0005) {
+    const allora = [
+      t > 0 ? `mancava la tariffa${diCosa(prestazioni)} di ${chi} (${formatoTonnellate(t)} t senza prezzo)` : '',
+      tc > 0 ? `la tariffa${diCosa(prestazioniCopiate)}${t > 0 ? '' : ` di ${chi}`} era copiata ${daAnno} e non confermata (${formatoTonnellate(tc)} t)` : '',
+    ].filter(Boolean).join(' e ');
+    const frase = `nel conto congelato il ${quando} ${allora}, che oggi ${t > 0 ? "c'è" : 'è confermata'}: rifai il congelamento di ${mese} e poi il confronto`;
+    return {
+      ...base, congelato_il: String(congelato_il),
+      testo: `Non si è potuto controllare l'importo: ${frase}. Non è una difformità del fornitore.`,
+      voce: `l'importo, perché ${frase}`,
+    };
+  }
+  const pezzi = [
+    t > 0 ? `manca la tariffa${diCosa(prestazioni)} di ${chi} (${formatoTonnellate(t)} t senza prezzo${perche})` : '',
+    tc > 0 ? `la tariffa${diCosa(prestazioniCopiate)}${t > 0 ? '' : ` di ${chi}`} è copiata ${daAnno} e non ancora confermata (${formatoTonnellate(tc)} t a quel prezzo; si conferma sul contratto${annoContratto} in Target & Status › Nuovo anno)` : '',
+  ].filter(Boolean);
+  const frase = `nella passiva di ${mese} ${pezzi.join(' e ')}`;
+  const rimedio = t > 0 ? "quando la tariffa c'è, rifai il confronto" : 'confermata la tariffa, rifai il confronto';
+  const alPrezzoCopiato = base.importo_al_prezzo_copiato !== null ? ` Al prezzo copiato il previsto sarebbe ${euroIt(base.importo_al_prezzo_copiato)} €.` : '';
+  return {
+    ...base, congelato_il: '',
+    testo: `Non si è potuto controllare l'importo: ${frase}. Non è una difformità del fornitore: ${rimedio}.${alPrezzoCopiato}`,
+    voce: `l'importo, perché ${frase}`,
   };
 }
 
 /** Il testo del verdetto, in parole. Vuoto quando non c'e' niente da dire. */
 export function testoEsitoConsuntivo(confronto, esito) {
   const parti = [];
-  if (confronto.quadra) parti.push(`Il consuntivo corrisponde ai nostri movimenti: ${confronto.uguali} formulari, ${confronto.totale_consuntivo_kg} kg.`);
+  // i chili all'italiana, col punto delle migliaia: «6.000 kg», non «6000 kg» (15/10/2026)
+  if (confronto.quadra) parti.push(`Il consuntivo corrisponde ai nostri movimenti: ${confronto.uguali} formulari, ${formatoKg(confronto.totale_consuntivo_kg)} kg.`);
   else {
     const q = [];
     if (confronto.peso_diverso) q.push(`${confronto.peso_diverso} con un peso diverso`);
@@ -1518,6 +1827,9 @@ export function testoEsitoConsuntivo(confronto, esito) {
   if (esito.quadra_con_passiva === false) {
     parti.push(`I chili che la fatturazione passiva conta per questo fornitore sono ${Math.abs(esito.scarto_passiva_kg)} kg ${esito.scarto_passiva_kg > 0 ? 'in meno' : 'in piu'}' dei nostri movimenti del mese: di solito vuol dire che una tratta non ha una tariffa, o che una riga sta in un altro blocco.`);
   }
+  // La tariffa che manca e' nostra (15/10/2026): si dice quella, non «si scosta
+  // di», anche quando il consuntivo l'importo non lo porta.
+  if (esito.importo_sospeso && esito.importo_sospeso.testo) parti.push(esito.importo_sospeso.testo);
   if (esito.importo_consuntivo !== null && esito.quadra_importo === false) {
     // Uno scarto che e' esattamente un surplus si dice col suo nome (13/10/2026):
     // «manca il Fuel Surcharge» si capisce, «-1278.90 euro» no. Gli importi
@@ -1544,8 +1856,10 @@ export function testoEsitoConsuntivo(confronto, esito) {
   if (esito.interno) parti.push('E\' un fornitore interno: la passiva lo riporta a zero perche\' non fattura, e la differenza sull\'importo non e\' una difformita\'.');
   // Quello che non si e' potuto controllare va detto: un verdetto che tace su un
   // controllo mancato si legge come un controllo passato.
-  if ((esito.non_controllato || []).length) {
-    parti.push(`Non si e' potuto controllare: ${esito.non_controllato.join('; ')}.`);
+  // (l'importo in sospeso per la tariffa che manca e' gia' detto sopra, con la sua frase)
+  const nonControllato = (esito.non_controllato || []).filter(x => !(esito.importo_sospeso && x === esito.importo_sospeso.voce));
+  if (nonControllato.length) {
+    parti.push(`Non si e' potuto controllare: ${nonControllato.join('; ')}.`);
   }
   return parti.join(' ');
 }

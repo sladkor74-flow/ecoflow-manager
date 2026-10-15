@@ -10,6 +10,18 @@ import { t, pct, euro, NOMI_CANALE } from '@/components/dashboard/formato';
 // stesso titolo. Tre commesse, tre margini: non si sommano. A chi non e'
 // amministratore la sezione non esiste e la funzione non si chiama: i costi dei
 // fornitori sono dell'amministratore.
+//
+// UN MARGINE CON PREZZI MANCANTI E' «—» (prova del cambio d'anno, 15/10/2026). Il
+// 15/01/2027, senza le tariffe 2027, la sezione diceva «Rete € 0,00 · nessun
+// ricavo · 7,10 t» ed «Extra raccolta € -113,50 · -77,2% del ricavo». Ora il
+// margine e i suoi €/t sono «—» con la frase del calcolo («7 righe senza prezzo
+// (...): margine non calcolabile», testo_prezzi_mancanti), ricavo e costo sono
+// detti parziali, e «nessun ricavo» si scrive solo senza tonnellate. Come la
+// scheda di Fatturazione › Margine (sottoIlMargine in MargineCommessa.jsx).
+const sottoIlMargine = (x) => (x.testo_prezzi_mancanti ? x.testo_prezzi_mancanti
+  : x.margine_pct !== null && x.margine_pct !== undefined ? `${pct(x.margine_pct)} del ricavo`
+    : Number(x.tonnellate) > 0 ? '— del ricavo' : 'nessun ricavo');
+
 export default function SezioneEconomia({ margine, errore, anno, daGestire, onDaGestire }) {
   return (
     <Sezione
@@ -34,11 +46,12 @@ export default function SezioneEconomia({ margine, errore, anno, daGestire, onDa
                 <div key={c.canale} className="border rounded-lg p-4 bg-background">
                   <p className="text-sm font-medium">{NOMI_CANALE[c.canale] || c.canale}</p>
                   <p className={`text-2xl font-heading font-bold mt-1 ${c.anno.margine < 0 ? 'text-red-700' : ''}`}>{euro(c.anno.margine)}</p>
-                  <p className="text-xs text-muted-foreground">{c.anno.margine_pct === null || c.anno.margine_pct === undefined ? 'nessun ricavo' : `${pct(c.anno.margine_pct)} del ricavo`} · {t(c.anno.tonnellate)}</p>
+                  <p className={`text-xs ${c.anno.parziale ? 'text-amber-700' : 'text-muted-foreground'}`}>{sottoIlMargine(c.anno)} · {t(c.anno.tonnellate)}</p>
+                  {c.anno.testo_da_confermare && <p className="text-xs text-amber-700">{c.anno.testo_da_confermare}</p>}
                   <dl className="mt-2 pt-2 border-t text-xs space-y-0.5">
-                    <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Ricavo</dt><dd className="tabular-nums">{euro(c.anno.ricavo)}</dd></div>
-                    <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Costo</dt><dd className="tabular-nums">{euro(c.anno.costo)}</dd></div>
-                    <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Per tonnellata</dt><dd className="tabular-nums text-right">{euro(c.anno.ricavo_t)} − {euro(c.anno.costo_t)} = {euro(c.anno.margine_t)}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Ricavo{c.anno.parziale ? ' (parziale)' : ''}</dt><dd className="tabular-nums">{euro(c.anno.ricavo)}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Costo{c.anno.parziale ? ' (parziale)' : ''}</dt><dd className="tabular-nums">{euro(c.anno.costo)}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Per tonnellata</dt><dd className="tabular-nums text-right">{c.anno.parziale ? '—' : `${euro(c.anno.ricavo_t)} − ${euro(c.anno.costo_t)} = ${euro(c.anno.margine_t)}`}</dd></div>
                   </dl>
                 </div>
               ))}

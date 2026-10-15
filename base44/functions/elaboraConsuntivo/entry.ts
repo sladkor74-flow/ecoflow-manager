@@ -8,7 +8,7 @@ import { giornoRoma } from "../../shared/giornoItaliano.ts";
 
 import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts";
 import {
-  movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, leggiRigheConsuntivo,
+  movimentiDelFornitore, confrontaConsuntivo, costoAttesoDallaPassiva, leggiRigheConsuntivo, ultimaTariffaScaduta,
   periodoSospetto, righeCheParonoTotali,
   esitoConsuntivo, testoEsitoConsuntivo, surplusPerIlConfronto, surplusScrittiDopo,
   chiaviDelGestionale, avvisiDate,
@@ -75,7 +75,9 @@ async function contoPassiva(svc, anno, mese, canale) {
     { primarieRete, primarieAci, secondarieAll, extraRaccoltaAll, tariffeAll, fornitoriAll, surplusAll },
     anno, mese - 1, nomeMeseDi(mese), canale,
   );
-  return { passiva, surplusAll, archivi: { primarieRete, primarieAci, secondarie: secondarieAll, extraRaccolta: extraRaccoltaAll } };
+  // Le tariffe servono anche a dire perche' manca la tariffa del mese: l'ultima
+  // del fornitore, scaduta (ultimaTariffaScaduta, 15/10/2026). Sono gia' lette.
+  return { passiva, surplusAll, tariffeAll, archivi: { primarieRete, primarieAci, secondarie: secondarieAll, extraRaccolta: extraRaccoltaAll } };
 }
 
 export default async function(req) {
@@ -193,9 +195,9 @@ export default async function(req) {
     // riservato, e non si calcola nemmeno la passiva: sarebbero sei archivi interi
     // letti per un numero che poi va nascosto.
     const puoVedereICosti = user.role === 'admin';
-    const { passiva, archivi, surplusAll } = puoVedereICosti
+    const { passiva, archivi, surplusAll, tariffeAll } = puoVedereICosti
       ? await contoPassiva(svc, anno, mese, canale)
-      : { passiva: null, surplusAll: [], archivi: await archiviMovimenti(svc) };
+      : { passiva: null, surplusAll: [], tariffeAll: [], archivi: await archiviMovimenti(svc) };
     // I fornitori servono a sapere CHI FATTURA per chi: senza, un subfornitore e il
     // suo principale risultano due soggetti diversi qui e uno solo nella passiva.
     const fornitoriTutti = await fetchAll(svc.Fornitore, { stato: 'attivo' });
@@ -282,7 +284,27 @@ export default async function(req) {
           importo: Math.round(surplusDopo.reduce((s, v) => s + Math.round(Number(v.importo) * 100), 0)) / 100,
           voci: surplusDopo.map(v => ({ nome: v.nome, euro_t: v.euro_t, importo: v.importo, scritto_il: v.scritto_il || '', cambiato: !!v.cambiato, anche_tonnellate: !!v.anche_tonnellate })),
         } : null,
+        // LA TARIFFA CHE NEL CONTO CONGELATO MANCAVA (prova del cambio d'anno,
+        // 15/10/2026). Gennaio 2027 congelato il 05/02 senza le tariffe nuove, la
+        // tariffa di GATIM scritta l'08/02: il 10/02 il conto di allora diceva 0 €
+        // e quello di oggi 432, e la pagina spiegava la differenza con «ordini
+        // chiusi dopo la chiusura del mese», che non era vero. Qui le tonnellate
+        // senza tariffa di allora e di oggi: se allora mancava e oggi c'e', la
+        // pagina e il testo dicono di rifare il congelamento.
+        senza_tariffa_allora_t: costoAllora && costoAllora.trovato ? (Number(costoAllora.senza_tariffa_t) || 0) : null,
+        senza_tariffa_oggi_t: costoOggi && costoOggi.trovato ? (Number(costoOggi.senza_tariffa_t) || 0) : null,
+        // Lo stesso per le tariffe copiate dall'anno prima e non confermate (D4,
+        // decisione dell'utente del 15/10/2026; revisione dello stesso giorno):
+        // congelato con la copia, confermata dopo, il conto va rifatto anche se
+        // il prezzo confermato e' lo stesso.
+        da_confermare_allora_t: costoAllora && costoAllora.trovato ? (Number(costoAllora.da_confermare_t) || 0) : null,
+        da_confermare_oggi_t: costoOggi && costoOggi.trovato ? (Number(costoOggi.da_confermare_t) || 0) : null,
+        anno_copia: costoAllora && costoAllora.trovato ? (costoAllora.anno_copia || null) : null,
       };
+      congelato.mancava_la_tariffa = congelato.senza_tariffa_allora_t !== null && congelato.senza_tariffa_oggi_t !== null
+        && congelato.senza_tariffa_allora_t - congelato.senza_tariffa_oggi_t > 0.0005;
+      congelato.era_da_confermare = congelato.da_confermare_allora_t !== null && congelato.da_confermare_oggi_t !== null
+        && congelato.da_confermare_allora_t - congelato.da_confermare_oggi_t > 0.0005;
     }
 
     // Su un caricamento l'importo e' quello scritto adesso o quello del file
@@ -296,6 +318,11 @@ export default async function(req) {
       confronto, costo, importo_consuntivo: importoConsuntivo,
       surplus_candidati: surplusPerIlConfronto(surplusAll, { fornitore, ruolo, canale }),
       surplus_dopo: surplusDopo,
+      // Una tariffa del mese che manca e' nostra, non del fornitore: perche'
+      // manca, e se il conto congelato non l'aveva e oggi c'e' (15/10/2026).
+      tariffa_scaduta_il: puoVedereICosti ? ultimaTariffaScaduta(tariffeAll, { fornitore, ruolo, canale, anno, mese }) : '',
+      costo_oggi: congelato && congelato.usato_per_il_confronto ? costoOggi : null,
+      congelato_il: congelato && congelato.usato_per_il_confronto ? congelato.congelato_il : '',
     });
 
     // Il conto si e' mosso dal congelamento anche per un surplus scritto (o

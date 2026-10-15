@@ -1,7 +1,7 @@
 // Calcoli condivisi per Extra Raccolta — usato sia dalla pagina sia dall'esportazione.
 // Nessun valore viene memorizzato nell'entità: tutto è ricalcolato dai campi di input.
 // Import relativo con l'estensione: cosi' lo legge anche la prova in node.
-import { giornoRoma } from './giornoItaliano.js';
+import { giornoRoma, oggiRoma } from './giornoItaliano.js';
 import {
   TARIFFA_BASE_EXTRA_RACCOLTA, tariffaBaseExtraRaccolta, prezzoAttivoExtra as prezzoAttivoComune,
   sortTariffe, tariffeAttiveValide, servizioEcotyre, eSecondariaExtra, avvisoPesoMancante,
@@ -134,6 +134,32 @@ export function annoIntervento(r) {
   if (String((r && r.stato) || '').toLowerCase().trim() === 'terminato') return null;
   const immesso = giornoRoma(r && r.ordine_immesso_il);
   return immesso ? Number(immesso.slice(0, 4)) : null;
+}
+
+/**
+ * L'ANNO DEI FILE DELL'ELENCO (prova del cambio d'anno, 15/10/2026). La pagina si
+ * apre con l'anno su «Tutti», e i file prendevano l'anno di oggi: il 10/02/2027
+ * il dicembre 2026, scelto il solo mese, usciva «Dicembre 2027» nel nome, nel
+ * foglio e nell'intestazione, e dal 2028 lo stesso file avrebbe messo insieme i
+ * dicembre di due anni. Ora l'anno del documento e' quello dei movimenti:
+ * - l'anno scelto, se c'e';
+ * - con «Tutti», l'anno degli interventi esportati (fine trasporto, giorno
+ *   italiano) se e' uno solo; senza interventi, quello di oggi, come prima;
+ * - interventi di piu' anni con un mese scelto: non si esporta, si chiede
+ *   l'anno (chiedi, la frase per la pagina): un mese e' di un anno solo;
+ * - interventi di piu' anni senza mese: anno null, il documento dice «tutti
+ *   gli anni».
+ * -> { anno: numero | null, anni: [...], chiedi: '' | frase }
+ */
+export function annoDelDocumento({ anno = '', mese = '', interventi = [], oggi = '' } = {}) {
+  if (anno) return { anno: Number(anno), anni: [Number(anno)], chiedi: '' };
+  const anni = [...new Set((interventi || []).map(annoIntervento).filter(a => a !== null))].sort((a, b) => a - b);
+  if (anni.length === 1) return { anno: anni[0], anni, chiedi: '' };
+  if (!anni.length) return { anno: Number(String(oggi || oggiRoma()).slice(0, 4)), anni, chiedi: '' };
+  if (mese) {
+    return { anno: null, anni, chiedi: `Gli interventi di ${String(mese).toLowerCase()} sono di più anni (${anni.slice(0, -1).join(', ')} e ${anni[anni.length - 1]}): scegli l'anno per esportarli, un documento per anno.` };
+  }
+  return { anno: null, anni, chiedi: '' };
 }
 
 /**
@@ -790,14 +816,29 @@ export function calcExtraRaccolta(r, contesto = CONTESTO_VUOTO) {
 
   const margine = Math.round((ricavo - costo_totale) * 100) / 100;
   const margine_perc = ricavo !== 0 ? Math.round((margine / ricavo * 100) * 100) / 100 : 0;
+  // UN INTERVENTO DA FATTURARE SENZA PREZZO (prova del cambio d'anno,
+  // 15/10/2026): prezzo a zero e nessuna tariffa per l'anno, o un'unita' che la
+  // fattura non sa leggere. E' la riga che la fatturazione attiva mette in
+  // errore (attivaCalcolo.ts): il suo ricavo e' zero perche' il prezzo manca,
+  // e il margine che ne esce non e' un margine. I totali lo contano.
+  const senza_prezzo = fatturato && (!(Number(prezzo.valore) > 0) || !!prezzo.unita_sconosciuta);
 
   return {
-    tonnellate, kg: senza_peso ? null : quantita_kg, senza_peso, fatturato,
+    tonnellate, kg: senza_peso ? null : quantita_kg, senza_peso, fatturato, senza_prezzo,
     prezzo_attivo: prezzoAttivo, prezzo, ricavo, costi, costo_totale, margine, margine_perc,
     ricavo_standard, costo_standard, trasporto,
     surplus_attivo, surplus_passivo, surplus_ricavo, surplus_costo,
   };
 }
+
+/**
+ * La frase di un margine che non si calcola perche' degli interventi da fatturare
+ * non hanno un prezzo (prova del cambio d'anno, 15/10/2026): la stessa nella
+ * pagina e nei file per l'amministratore (extraRaccoltaExport.js). '' se zero.
+ */
+export const testoInterventiSenzaPrezzo = (n) => (Number(n) > 0
+  ? `${Number(n) === 1 ? 'un intervento' : `${n} interventi`} da fatturare senza prezzo: margine non calcolabile, ricavi e costi parziali`
+  : '');
 
 /**
  * I totali di un elenco di interventi, quelli dei riquadri della pagina: lo
@@ -812,10 +853,11 @@ export function calcExtraRaccolta(r, contesto = CONTESTO_VUOTO) {
  */
 export function totaliExtraRaccolta(interventi, contesto = CONTESTO_VUOTO) {
   const elenco = (interventi || []).filter(r => eTerminatoExtra(r) && giornoRoma(r.trasporto_finito_il));
-  let kgRaccolti = 0, ricaviStandard = 0, costiStandard = 0;
+  let kgRaccolti = 0, ricaviStandard = 0, costiStandard = 0, senzaPrezzo = 0;
   for (const r of elenco) {
     const c = calcExtraRaccolta(r, contesto);
     if (!eSecondariaExtra(r)) kgRaccolti += Number(r.peso_effettivo) || 0;
+    if (c.senza_prezzo) senzaPrezzo++;
     ricaviStandard += c.ricavo_standard;
     costiStandard += c.costo_standard;
   }
@@ -824,12 +866,21 @@ export function totaliExtraRaccolta(interventi, contesto = CONTESTO_VUOTO) {
   const costi_standard = arrotondaAlCentesimo(costiStandard);
   const ricavi = arrotondaAlCentesimo(ricavi_standard + surplus.totale_attivo);
   const costi = arrotondaAlCentesimo(costi_standard + surplus.totale_passivo);
-  const margine = arrotondaAlCentesimo(ricavi - costi);
+  // UN MARGINE FATTO DA UN RICAVO CHE MANCA NON E' UN MARGINE (prova del cambio
+  // d'anno, 15/10/2026). Il 15/01/2027 un intervento del 2027 senza prezzo
+  // (base 2026 chiusa, prezzo non scritto) e uno a 210 €/t facevano ricavi
+  // 147,00, costi 260,50 e un margine di -113,50 (-77,21%). Con un intervento da
+  // fatturare senza prezzo il margine e la percentuale sono null («—» nella
+  // pagina, col perche'), ricavi e costi restano e sono una parte. Come il
+  // margine della commessa (margine.ts). Un valore mancante non e' zero.
+  const margine = senzaPrezzo ? null : arrotondaAlCentesimo(ricavi - costi);
   return {
     interventi: elenco.length,
     kg_raccolti: kgRaccolti, tonnellate: kgRaccolti / 1000,
     ricavi_standard, costi_standard, ricavi, costi, margine,
-    margine_perc: ricavi !== 0 ? Math.round((margine / ricavi * 100) * 100) / 100 : 0,
+    margine_perc: margine === null ? null : ricavi !== 0 ? Math.round((margine / ricavi * 100) * 100) / 100 : 0,
+    senza_prezzo: senzaPrezzo,
+    testo_senza_prezzo: testoInterventiSenzaPrezzo(senzaPrezzo),
     surplus,
   };
 }
@@ -855,7 +906,7 @@ export function aggregaPerProduttore(records, contesto = CONTESTO_VUOTO) {
   const map = {};
   for (const r of records) {
     const p = r.produttore || '(senza produttore)';
-    if (!map[p]) map[p] = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, trasporto: 0, sovracosto_raccoglitore: 0, sovracosto_impianto: 0, costo_totale: 0, ricavi: 0, margine: 0 };
+    if (!map[p]) map[p] = { costi_aggiuntivi: 0, raccolta: 0, stoccaggio: 0, trattamento: 0, pulizia: 0, trasporto: 0, sovracosto_raccoglitore: 0, sovracosto_impianto: 0, costo_totale: 0, ricavi: 0, margine: 0, senza_prezzo: 0 };
     const c = calcExtraRaccolta(r, contesto);
     map[p].costi_aggiuntivi += Number(r.costi_aggiuntivi || 0);
     // Le voci a tonnellata come le conta il costo totale, gia' al centesimo per
@@ -872,6 +923,9 @@ export function aggregaPerProduttore(records, contesto = CONTESTO_VUOTO) {
     map[p].costo_totale += c.costo_standard;
     map[p].ricavi += c.ricavo_standard;
     map[p].margine += Math.round((c.ricavo_standard - c.costo_standard) * 100) / 100;
+    // gli interventi da fatturare senza prezzo (revisione del 15/10/2026): il
+    // margine del produttore che ne ha uno non e' un margine, e l'analisi lo dice
+    if (c.senza_prezzo) map[p].senza_prezzo++;
   }
   return map;
 }

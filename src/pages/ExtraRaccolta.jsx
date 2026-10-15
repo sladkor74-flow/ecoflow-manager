@@ -7,7 +7,7 @@ import { Loader2, Plus, Pencil, Trash2, Copy, FileSpreadsheet, FileText, AlertTr
 import { usePermessi } from '@/lib/permessi';
 import { BannerSolaLettura } from '@/components/shared/SolaLettura';
 import { MESI } from '@/lib/pfuConstants';
-import { calcExtraRaccolta, contestoPrezzi, conViaggi, avvisoPesoMancante, totaliExtraRaccolta, titoloSurplus } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, contestoPrezzi, conViaggi, avvisoPesoMancante, totaliExtraRaccolta, titoloSurplus, annoDelDocumento } from '@/lib/extraRaccoltaCalc';
 import { formatNumber, formatTonnellate, formatKg } from '@/lib/utils';
 import { euro } from '@/lib/formatoSoldi';
 import { fetchAllClient } from '@/lib/fetchAllClient';
@@ -27,8 +27,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ReportConferimenti from '@/components/report-conferimenti/ReportConferimenti';
 import { useToast } from '@/components/ui/use-toast';
 import { scriviConTraccia, eliminaConTraccia, avvisoTraccia } from '@/lib/scriviConTraccia';
-
-const ANNI = anniDaScegliere();
 
 // Dove si colloca una scheda, come in tutto il gestionale: un terminato sul giorno
 // italiano della fine trasporto, e se non ce l'ha non si colloca (niente ripiego
@@ -160,6 +158,11 @@ export default function ExtraRaccolta() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ anno: '', mese: '', stato: '', trasportatore: '', destinazione: '', tipologia_trasporto: '', date: '' });
+  // Gli anni si contano quando la pagina si disegna, non quando il modulo si
+  // carica (prova del cambio d'anno, 15/10/2026): con la scheda aperta dal
+  // 31/12, il 04/01 la lista restava ferma al 2026. Come la Dashboard.
+  const oggi = oggiRoma();
+  const anni = useMemo(() => anniDaScegliere({ oggi }), [oggi]);
   const [sistemando, setSistemando] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [formInitial, setFormInitial] = useState(null);
@@ -465,7 +468,7 @@ export default function ExtraRaccolta() {
     load();
   };
 
-  // Senza un anno scelto, quello di oggi in Italia. I file ricevono le tariffe
+  // L'anno dei file: vedi qui sotto (15/10/2026). I file ricevono le tariffe
   // che la pagina ha letto (contesto): senza, conoscevano solo il prezzo scritto
   // e la base dell'anno, e con la tabella a un altro valore dicevano un prezzo
   // diverso da pagina e fattura (chiusura dell'audit, 11/10/2026).
@@ -475,15 +478,29 @@ export default function ExtraRaccolta() {
   // file la porta solo all'amministratore, come la pagina (isAdmin; senza, il
   // file la toglie). Dal 13/10/2026 sera l'analisi e' lo standard e il surplus
   // ha il blocco «... ai raccoglitori», col costo solo all'amministratore.
+  //
+  // L'ANNO DEL FILE E' QUELLO DEI MOVIMENTI (prova del cambio d'anno,
+  // 15/10/2026). Con l'anno su «Tutti», com'e' all'apertura, il file prendeva
+  // l'anno di oggi: il 10/02/2027 il dicembre 2026 usciva «Dicembre 2027». Ora
+  // con «Tutti» vale l'anno degli interventi esportati se e' uno solo; con
+  // interventi di piu' anni e un mese scelto i pulsanti non esportano e chiedono
+  // l'anno (un mese e' di un anno solo); senza mese il file dice «tutti gli
+  // anni» (annoDelDocumento in extraRaccoltaCalc.js).
+  const fileDa = useMemo(() => annoDelDocumento({ anno: filters.anno, mese: filters.mese, interventi: terminati, oggi }), [filters.anno, filters.mese, terminati, oggi]);
+  // Con lo stesso mese in piu' anni il pulsante non esporta: chiede l'anno, e
+  // la frase resta scritta accanto ai pulsanti.
+  const chiediAnno = () => toast({ title: "Scegli l'anno", description: fileDa.chiedi });
   const exportExcel = async () => {
+    if (fileDa.chiedi) { chiediAnno(); return; }
     const mese = filters.mese || 'Tutti';
-    const anno = filters.anno || Number(oggiRoma().slice(0, 4));
+    const anno = fileDa.anno;
     await exportExtraRaccoltaExcel(terminati, mese, anno, contesto, { isAdmin });
   };
 
   const exportPDF = async () => {
+    if (fileDa.chiedi) { chiediAnno(); return; }
     const mese = filters.mese || 'Tutti';
-    const anno = filters.anno || Number(oggiRoma().slice(0, 4));
+    const anno = fileDa.anno;
     await exportExtraRaccoltaPDF(terminati, mese, anno, contesto, { isAdmin });
   };
 
@@ -585,7 +602,7 @@ export default function ExtraRaccolta() {
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Tutti</SelectItem>
-              {ANNI.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}
+              {anni.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -680,10 +697,18 @@ export default function ExtraRaccolta() {
         </div>
         <div className="border rounded-lg p-3 bg-card">
           <div className="text-xs text-muted-foreground">Margine</div>
-          <div className={`text-lg font-bold tabular-nums ${kpi.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
-            € {formatNumber(kpi.margine, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            <span className="text-xs font-normal ml-1">({formatNumber(kpi.margine_perc, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)</span>
-          </div>
+          {/* Con un intervento da fatturare senza prezzo il margine e' «—», col
+              perche': un margine fatto da un ricavo che manca non e' un margine
+              (prova del cambio d'anno, 15/10/2026). */}
+          {kpi.margine === null ? (<>
+            <div className="text-lg font-bold tabular-nums">—</div>
+            <div className="text-[11px] text-amber-700">{kpi.testo_senza_prezzo}</div>
+          </>) : (
+            <div className={`text-lg font-bold tabular-nums ${kpi.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
+              € {formatNumber(kpi.margine, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <span className="text-xs font-normal ml-1">({formatNumber(kpi.margine_perc, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)</span>
+            </div>
+          )}
         </div>
         </>)}
       </div>
@@ -709,6 +734,8 @@ export default function ExtraRaccolta() {
           <FileText className="w-4 h-4 mr-1.5" /> Esporta PDF
         </Button>
         {surplusNonLetti && <span className="self-center text-xs text-amber-700">I file si esportano quando i surplus sono letti: ricarica la pagina.</span>}
+        {/* interventi del mese scelto di piu' anni: si chiede l'anno (15/10/2026) */}
+        {fileDa.chiedi && terminati.length > 0 && <span className="self-center text-xs text-amber-700">{fileDa.chiedi}</span>}
         <span className="self-center text-xs text-muted-foreground">Totali ed esportazioni comprendono solo i terminati.</span>
         {/* Il surplus nei file (13/10/2026): fino a questa data i file avevano
             gli importi standard e la nota lo diceva; ora hanno la sua riga.
@@ -754,10 +781,13 @@ export default function ExtraRaccolta() {
             </thead>
             <tbody>
               {filtered.map(r => {
-                const c = calcExtraRaccolta(r, contesto);
+                const calc = calcExtraRaccolta(r, contesto);
+                // Senza prezzo il margine dell'intervento non e' un numero: «—»,
+                // e sotto il perche' (prova del cambio d'anno, 15/10/2026).
+                const c = calc.senza_prezzo ? { ...calc, margine: null } : calc;
                 const stato = statoExtra(r);
                 const conta = stato === 'terminato';
-                const soldi = (v) => (conta ? `€ ${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
+                const soldi = (v) => (conta && v !== null && v !== undefined ? `€ ${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
                 // Il ricavo che la fattura non ha non si scrive come un incasso:
                 // una secondaria non si fattura, un terminato senza peso nemmeno.
                 const perche = eSecondaria(r) ? 'Una secondaria non si fattura a Ecotyre: il ricavo sta sulla raccolta.' : avvisoPesoMancante(r);
@@ -808,8 +838,9 @@ export default function ExtraRaccolta() {
                         <span className={`block text-[11px] whitespace-nowrap ${QUOTA_SURPLUS}`} title={titoloQuota(c.surplus_passivo)}>surplus: interno, non si paga</span>
                       )}
                     </td>}
-                    {isAdmin && <td className={`px-3 py-2 text-right tabular-nums font-medium ${!conta ? 'text-muted-foreground' : c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
+                    {isAdmin && <td className={`px-3 py-2 text-right tabular-nums font-medium ${!conta || c.senza_prezzo ? 'text-muted-foreground' : c.margine >= 0 ? 'text-success' : 'text-destructive'}`}>
                       {soldi(c.margine)}
+                      {conta && c.senza_prezzo && <span className="block text-[11px] font-normal whitespace-nowrap text-amber-700">manca il prezzo</span>}
                     </td>}
                     <td className="px-3 py-2">
                       <div className="flex gap-1 justify-center">

@@ -18,6 +18,23 @@
 // 5. «scritto dopo il congelamento» si dice solo di un surplus scritto o
 //    cambiato dopo: quello che c'era gia' e cresce per un carico arrivato in
 //    ritardo non lo e' (revisione del 13/10/2026).
+// 6. LA TARIFFA CHE MANCA E' NOSTRA (prova del cambio d'anno, 15/10/2026,
+//    difetto 17): il consuntivo di GATIM di gennaio 2027 (6.000 kg, 432,00 €)
+//    senza le tariffe 2027 nel gestionale non «si scosta di +432,00 euro»:
+//    l'importo non si controlla, la ragione va in non_controllato e il
+//    fornitore non risulta difforme. Con la tariffa 2027 lo stesso consuntivo
+//    quadra.
+// 7. IL CONGELAMENTO CON LE TARIFFE MANCANTI (difetto 16): congelaPassivaMese
+//    risponde 409 con l'elenco e congela solo con la conferma; un conto con
+//    tutte le tariffe si congela subito. Congelato senza la tariffa e
+//    ricalcolato con la tariffa scritta dopo, il confronto dice di rifare il
+//    congelamento, non «ordini chiusi dopo»; quella frase resta quando e'
+//    vera. La pagina (Consuntivi.jsx) chiede con l'elenco.
+// 8. LA REVISIONE DEL 15/10/2026: una tariffa copiata dall'anno prima e non
+//    confermata ferma il controllo come una che manca (D4), anche nel
+//    congelamento e nel conto congelato confermato dopo allo stesso prezzo; il
+//    vettore delle secondarie senza la tariffa della tratta non e' difforme; il
+//    file Excel della verifica scrive «—» col perche', non 0,00 €.
 //
 // node prove/consuntivoSurplus.mjs
 import { calcolaPassivaMese } from '../base44/shared/passivaCalcolo.ts';
@@ -25,6 +42,7 @@ import { calcolaPassivaMese } from '../base44/shared/passivaCalcolo.ts';
 // mancano, e la prova deve fallire nelle sue sezioni, non fermarsi all'import.
 import * as C from '../base44/shared/consuntivoFornitore.ts';
 import { caricaFunzione, chiama } from './dati/bancoFunzioni.mjs';
+import { readFileSync } from 'node:fs';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -269,6 +287,236 @@ await sezione('5. «SCRITTO DOPO» SOLO QUELLO CHE E\' STATO SCRITTO O CAMBIATO 
   });
   verifica('e se intanto sono cambiate anche le tonnellate, il testo lo dice',
     (misto.j.testo || '').includes('di cui Fuel Surcharge 21,00 €, cambiato il 10/11/2026 dopo il congelamento (la cifra comprende anche le tonnellate cambiate da allora).'), misto.j.testo);
+});
+
+// 6 E 7. GENNAIO 2027 SENZA LE TARIFFE DELL'ANNO (prova del cambio d'anno,
+// 15/10/2026). GATIM raccoglie in Calabria e scarica a GATIM: due formulari,
+// 01/01/2027 2.000 kg e 12/01/2027 4.000 kg; il suo contratto 2027 e' a 72 €/t,
+// quindi 432,00 €. Nel gestionale le tariffe 2026 scadono il 31/12/2026.
+const TAR26 = [
+  { id: 't-ga-r26', direzione: 'PASSIVA', prestazione: 'RACCOLTA', tipologia: 'RETE', fornitore_nome: 'GATIM S.R.L.', regione: 'Calabria', unita_misura: '€/t', valore: 70, stato: 'attivo', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31' },
+  { id: 't-ga-t26', direzione: 'PASSIVA', prestazione: 'TRATTAMENTO', tipologia: 'RETE', fornitore_nome: 'GATIM S.R.L.', unita_misura: '€/t', valore: 95, stato: 'attivo', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31' },
+];
+const TAR27 = [...TAR26,
+  { id: 't-ga-r27', direzione: 'PASSIVA', prestazione: 'RACCOLTA', tipologia: 'RETE', fornitore_nome: 'GATIM S.R.L.', regione: 'Calabria', unita_misura: '€/t', valore: 72, stato: 'attivo', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31' },
+  { id: 't-ga-t27', direzione: 'PASSIVA', prestazione: 'TRATTAMENTO', tipologia: 'RETE', fornitore_nome: 'GATIM S.R.L.', unita_misura: '€/t', valore: 95, stato: 'attivo', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31' },
+];
+const gennaio = (n, kg, giorno) => ({
+  id: 'g' + n, stato: 'terminato', id_ordine: 'ET2701000' + n, numero_fir: `CAXXX00000${n}AA`, trasportatore: 'GATIM S.R.L.', provincia: 'CS', regione: 'Calabria',
+  destinazione: 'GATIM S.R.L.', tipo_destinazione: 'imp', classe: 'P', peso_effettivo: kg, automezzo: 'CZ00' + n,
+  ordine_immesso_il: '2026-12-28T08:00:00.000Z', trasporto_iniziato_il: `2027-01-${giorno}T09:00:00.000Z`, trasporto_finito_il: `2027-01-${giorno}T09:00:00.000Z`,
+});
+const GEN = [gennaio(1, 2000, '01'), gennaio(2, 4000, '12')];
+const passivaGen = (primarie, tariffe) => calcolaPassivaMese({ primarieRete: primarie, primarieAci: [], secondarieAll: [], extraRaccoltaAll: [], tariffeAll: tariffe, fornitoriAll: FORNITORI }, 2027, 0, 'gennaio', 'RETE');
+const confrontoGen = (righe) => confrontaConsuntivo(righe, movimentiDelFornitore({ primarieRete: GEN, primarieAci: [], secondarie: [], extraRaccolta: [] },
+  { fornitore: 'GATIM S.R.L.', ruolo: 'raccoglitore', anno: 2027, mese: 1, canale: 'RETE', fornitori: FORNITORI }), { canale: 'RETE', anno: 2027, mese: 1 });
+const fileGatim = (imponibile = 432) => [{ nome: 'Gennaio', celle: [
+  ['N. FORMULARIO', 'DATA', 'KG'], ['CAXXX000001AA', '01/01/2027', 2000], ['CAXXX000002AA', '12/01/2027', 4000], [],
+  ['ZONA', 'KG TOTALI', 'IMPONIBILE'], ['TOTALI', 6000, imponibile],
+] }];
+const caricaGatim = (tabelle = fileGatim()) => ({ azione: 'carica', fornitore: 'GATIM S.R.L.', ruolo: 'raccoglitore', anno: 2027, mese: 1, canale: 'RETE', file_nome: 'GATIM gennaio 2027.xlsx', tabelle });
+const DB_GEN = (tariffe, altro = {}) => ({ PrimariaRete: GEN, PrimariaAci: [], Secondaria: [], ExtraRaccolta: [], Tariffa: tariffe, Fornitore: FORNITORI, SurplusTariffa: [], ...altro });
+const MANCA_GATIM = 'nella passiva di gennaio 2027 manca la tariffa di raccolta di GATIM S.R.L. (6,00 t senza prezzo; i contratti 2026 sono scaduti il 31/12/2026)';
+
+await sezione('6. LA TARIFFA CHE MANCA E\' NOSTRA, NON DEL FORNITORE (difetto 17 della prova del cambio d\'anno)', async () => {
+  const costo = costoAttesoDallaPassiva(passivaGen(GEN, TAR26), 'GATIM S.R.L.', 'raccoglitore');
+  verifica('il conto di gennaio 2027 senza la tariffa: 6,00 t senza prezzo, di raccolta', costo.trovato && costo.importo === 0 && costo.senza_tariffa_t === 6
+    && J(costo.prestazioni_senza_tariffa) === J(['raccolta']) && costo.periodo && costo.periodo.anno === 2027 && costo.periodo.mese === 'gennaio', J(costo));
+  const scaduta = C.ultimaTariffaScaduta(TAR26, { fornitore: 'GATIM S.R.L.', ruolo: 'raccoglitore', canale: 'RETE', anno: 2027, mese: 1 });
+  verifica('l\'ultima tariffa di raccolta di GATIM e\' finita il 31/12/2026', scaduta === '2026-12-31', scaduta);
+  const confronto = confrontoGen(GEN.map(p => ({ numero_fir: p.numero_fir, kg: p.peso_effettivo })));
+  const esito = esitoConsuntivo({ confronto, costo, importo_consuntivo: 432, tariffa_scaduta_il: scaduta });
+  const testo = testoEsitoConsuntivo(confronto, esito);
+  verifica('l\'importo non si controlla: quadra_importo, scarto e previsto null', esito.quadra_importo === null && esito.scarto_importo === null && esito.importo_previsto === null, J(esito));
+  verifica('il fornitore non risulta difforme: il verdetto e\' null, ne\' verde ne\' una difformita\'', esito.quadra_tutto === null, J(esito.quadra_tutto));
+  verifica('la ragione sta in non_controllato', esito.non_controllato.includes(`l'importo, perché ${MANCA_GATIM}`), J(esito.non_controllato));
+  verifica('la frase dice la tariffa che manca, non «si scosta di»', testo.includes(`Non si è potuto controllare l'importo: ${MANCA_GATIM}. Non è una difformità del fornitore`) && !/si scosta/.test(testo), testo);
+  // Una tariffa che manca non copre un formulario che manca: quello resta una difformita'.
+  const meno = confrontoGen([{ numero_fir: 'CAXXX000001AA', kg: 2000 }]);
+  verifica('con un formulario in meno il consuntivo resta difforme anche con l\'importo in sospeso', esitoConsuntivo({ confronto: meno, costo, importo_consuntivo: 144, tariffa_scaduta_il: scaduta }).quadra_tutto === false);
+  // La controprova: con la tariffa 2027 di GATIM, 72 €/t, lo stesso consuntivo quadra.
+  const con27 = costoAttesoDallaPassiva(passivaGen(GEN, TAR27), 'GATIM S.R.L.', 'raccoglitore');
+  const quadra = esitoConsuntivo({ confronto, costo: con27, importo_consuntivo: 432 });
+  verifica('controprova: con la tariffa GATIM 72 €/t del 2027 il previsto e\' 432,00 e il consuntivo quadra', con27.importo === 432 && con27.senza_tariffa_t === 0
+    && quadra.quadra_importo === true && quadra.quadra_tutto === true && quadra.importo_sospeso === null && !/Non si è potuto/.test(testoEsitoConsuntivo(confronto, quadra)), J([con27.importo, quadra]));
+
+  // La funzione intera, sul banco: il caricamento del consuntivo il 10/02/2027.
+  const modulo = await caricaFunzione('elaboraConsuntivo');
+  const r = await chiama(modulo, { db: DB_GEN(TAR26), corpo: caricaGatim() });
+  const salvato = (r.db.ConsuntivoFornitore || [])[0] || {};
+  verifica('elaboraConsuntivo: importo in sospeso, la ragione col contratto scaduto, salvato con quadra null', r.stato === 200 && r.j.esito && r.j.esito.quadra_importo === null
+    && r.j.esito.quadra_tutto === null && (r.j.testo || '').includes(MANCA_GATIM) && !/si scosta/.test(r.j.testo || '') && salvato.quadra === null, `${r.stato} ${J(r.j.esito)} ${r.j.testo} ${J(salvato.quadra)}`);
+  const r27 = await chiama(modulo, { db: DB_GEN(TAR27), corpo: caricaGatim() });
+  verifica('controprova sulla funzione: con la tariffa 2027 quadra e si salva verde', r27.j.esito && r27.j.esito.quadra_tutto === true && ((r27.db.ConsuntivoFornitore || [])[0] || {}).quadra === true, `${J(r27.j.esito)} ${r27.j.testo}`);
+});
+
+// La pagina dei consuntivi, impacchettata come la Dashboard in
+// prove/dashboardPagina.mjs: servono le sue due frasi, fraseCongelato e
+// domandaTariffeMancanti.
+async function paginaConsuntivi(nomi = ['fraseCongelato', 'domandaTariffeMancanti']) {
+  const { build } = await import('esbuild');
+  const { existsSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
+  const daAlias = (p) => { const base = qui('../src/' + p.slice(2)); return ['', '.js', '.jsx', '.ts'].map(e => base + e).find(x => existsSync(x) && /\.\w+$/.test(x)) || base; };
+  const pacchetto = await build({
+    stdin: { contents: `export { ${nomi.join(', ')} } from ${J(qui('../src/components/verifiche-fornitori/Consuntivi.jsx'))};`, resolveDir: qui('.'), loader: 'js' },
+    bundle: true, write: false, format: 'esm', platform: 'browser', logLevel: 'silent',
+    loader: { '.jsx': 'jsx', '.js': 'jsx' }, define: { 'process.env.NODE_ENV': '"production"' },
+    plugins: [{ name: 'finti', setup(b) {
+      b.onResolve({ filter: /^@\/api\/base44Client$/ }, () => ({ path: 'client', namespace: 'client-finto' }));
+      b.onLoad({ filter: /.*/, namespace: 'client-finto' }, () => ({ contents: 'export const base44 = { functions: { invoke: async () => ({ data: {} }) }, entities: {} };', loader: 'js' }));
+      b.onResolve({ filter: /^@\// }, (a) => ({ path: daAlias(a.path) }));
+    } }],
+  });
+  if (typeof globalThis.window === 'undefined') globalThis.window = { self: 1, top: 1, matchMedia: () => ({ matches: false, addListener() {}, removeListener() {} }) };
+  return import('data:text/javascript;base64,' + Buffer.from(pacchetto.outputFiles[0].text).toString('base64'));
+}
+
+await sezione('7. IL CONGELAMENTO CON LE TARIFFE MANCANTI (difetto 16 della prova del cambio d\'anno)', async () => {
+  const congela = await caricaFunzione('congelaPassivaMese');
+  const corpo = { anno: 2027, mese: 1, canale: 'RETE', nota: 'chiusura del mese' };
+  const senza = await chiama(congela, { db: DB_GEN(TAR26), corpo });
+  const gat = (senza.j.tariffe_mancanti || []).find(g => g.fornitore === 'GATIM S.R.L.' && g.prestazione === 'RACCOLTA');
+  verifica('il 05/02/2027, senza le tariffe 2027: 409 con l\'elenco, chi, per che cosa, quante tonnellate', senza.stato === 409 && senza.j.da_confermare === true && gat && gat.tonnellate === 6
+    && /GATIM S\.R\.L\., raccolta: 6,00 t/.test(senza.j.error || ''), `${senza.stato} ${J(senza.j)}`);
+  verifica('e non scrive niente', !senza.scritte.some(x => x.entita === 'ChiusuraPassivaMese'), J(senza.scritte));
+  const conferma = await chiama(congela, { db: DB_GEN(TAR26), corpo: { ...corpo, conferma: true } });
+  const scritto = (conferma.db.ChiusuraPassivaMese || [])[0] || {};
+  verifica('con la conferma si congela, e la nota e il riepilogo dicono che cosa mancava', conferma.stato === 200 && /Congelato con la conferma, senza le tariffe di .*GATIM S\.R\.L\., raccolta: 6,00 t/.test(scritto.nota || '')
+    && (conferma.j.riepilogo.tariffe_mancanti || []).some(g => g.fornitore === 'GATIM S.R.L.') && conferma.j.riepilogo.tonnellate_senza_tariffa > 0, `${conferma.stato} ${scritto.nota} ${J(conferma.j.riepilogo)}`);
+  const tutte = await chiama(congela, { db: DB_GEN(TAR27), corpo });
+  verifica('controprova: con tutte le tariffe si congela subito, 200 senza domanda', tutte.stato === 200 && (tutte.j.riepilogo.tariffe_mancanti || []).length === 0
+    && (tutte.db.ChiusuraPassivaMese || []).length === 1 && !/Congelato con la conferma/.test(tutte.db.ChiusuraPassivaMese[0].nota), `${tutte.stato} ${J(tutte.j.riepilogo)}`);
+
+  // Il 10/02/2027 il consuntivo di GATIM contro gennaio congelato il 05/02 senza
+  // la tariffa, scritta l'08/02: il rimedio e' rifare il congelamento.
+  const elabora = await caricaFunzione('elaboraConsuntivo');
+  const congelato = (p, il = '2027-02-05T09:00:00.000Z') => ({ id: 'cg-gen', anno: 2027, mese: 1, canale: 'RETE', congelato_il: il, congelato_da: 'admin', totale_euro: p.totali.totale_complessivo, passiva_json: J(p) });
+  const r = await chiama(elabora, { db: DB_GEN(TAR27, { ChiusuraPassivaMese: [congelato(passivaGen(GEN, TAR26))] }), corpo: caricaGatim() });
+  const testo = r.j.testo || '';
+  verifica('il congelato senza la tariffa e oggi con: «mancava la tariffa», si dice di rifare il congelamento', r.stato === 200 && r.j.congelato && r.j.congelato.mancava_la_tariffa === true
+    && r.j.congelato.senza_tariffa_allora_t === 6 && r.j.congelato.senza_tariffa_oggi_t === 0
+    && testo.includes('nel conto congelato il 05/02/2027 mancava la tariffa di raccolta di GATIM S.R.L. (6,00 t senza prezzo), che oggi c\'è: rifai il congelamento di gennaio 2027 e poi il confronto')
+    && !/ordini chiusi dopo|si scosta/.test(testo) && r.j.esito.quadra_tutto === null, `${J(r.j.congelato)} ${testo}`);
+  const P = await paginaConsuntivi();
+  const frase = P.fraseCongelato(r.j.congelato, r.j.esito.importo_sospeso);
+  verifica('la pagina: «nel conto congelato il 05/02/2027 mancava la tariffa di GATIM S.R.L. ... rifai il congelamento», non «ordini chiusi dopo»',
+    frase === ' Si è mosso perché nel conto congelato il 05/02/2027 mancava la tariffa di GATIM S.R.L. (6,00 t senza prezzo), che oggi c\'è: rifai il congelamento, poi il confronto.', frase);
+  // Controprova: un congelato che cambia per un ordine chiuso dopo (tutte le
+  // tariffe, allora c'era solo il primo formulario) dice ancora la frase di oggi.
+  const tardi = await chiama(elabora, { db: DB_GEN(TAR27, { ChiusuraPassivaMese: [congelato(passivaGen([GEN[0]], TAR27))] }), corpo: caricaGatim() });
+  verifica('controprova: un congelato che cambia per ordini chiusi dopo dice ancora «ordini chiusi dopo»', tardi.j.congelato && tardi.j.congelato.cambiato === true && tardi.j.congelato.mancava_la_tariffa === false
+    && /ordini chiusi dopo la chiusura del mese/.test(P.fraseCongelato(tardi.j.congelato, tardi.j.esito.importo_sospeso)) && !/rifai il congelamento/.test(tardi.j.testo || ''), `${J(tardi.j.congelato)} ${tardi.j.testo}`);
+  verifica('e un congelato fermo dice «Non si è mosso.»', P.fraseCongelato({ cambiato: false }, null) === ' Non si è mosso.');
+  // La domanda prima di congelare, con l'elenco che la funzione manda col 409.
+  const domanda = P.domandaTariffeMancanti(senza.j, 'Gennaio 2027 (Rete)');
+  verifica('la pagina chiede con l\'elenco: «- GATIM S.R.L., raccolta: 6,00 t» e «Lo congelo lo stesso?»', domanda.includes('Nel conto della passiva di Gennaio 2027 (Rete) ci sono tonnellate senza un prezzo valido.')
+    && domanda.includes('- GATIM S.R.L., raccolta: 6,00 t') && domanda.endsWith('Lo congelo lo stesso?'), domanda);
+  // Il pulsante: prima senza conferma, al 409 delle tariffe la domanda, poi con la conferma; e il riepilogo si mostra.
+  const sorgente = readFileSync(new URL('../src/components/verifiche-fornitori/Consuntivi.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('Consuntivi.jsx: congela senza conferma, al 409 chiede con l\'elenco e solo allora congela con conferma: true, poi mostra il riepilogo',
+    /r = await chiedi\(false\);/.test(sorgente) && /if \(!window\.confirm\(domandaTariffeMancanti\(dati, periodo\)\)\) return;\s*r = await chiedi\(true\);/.test(sorgente)
+    && /setCongelamento\(\{ \.\.\.\(d\.riepilogo \|\| \{\}\)/.test(sorgente));
+});
+
+// 8. LE TARIFFE COPIATE E NON CONFERMATE, IL VETTORE DELLE SECONDARIE, IL FILE
+// DELLA VERIFICA (revisione del 15/10/2026 sui difetti 16 e 17).
+// - Il caso normale di gennaio: «Prepara le tariffe» ha copiato nel 2027 le
+//   tariffe 2026 di GATIM (70 €/t, nota «copiato dal 2026, da confermare») e il
+//   contratto 2027 dice 72. Il consuntivo di GATIM (432,00 €) «si scostava di
+//   +12,00 euro»: la colpa al fornitore per un prezzo nostro non confermato. D4,
+//   decisione dell'utente del 15/10/2026: una riga prezzata con una tariffa
+//   copiata e non confermata ferma il documento come una riga senza prezzo.
+// - Il vettore delle secondarie (LOGISTICA SRL, NAPPI SUD → IRIGOM, 15 t) senza
+//   la tariffa 2027 della tratta: la passiva salta la tratta e ne fa solo
+//   un'anomalia, e il consuntivo risultava «senza una riga in questo ruolo»,
+//   difforme. Ora le sue tonnellate senza prezzo si leggono dalle anomalie.
+// - Il file Excel della verifica scriveva «Importo previsto dalle tariffe 0,00 €»
+//   dove la pagina dice «—» (esitoPerIlFile in Consuntivi.jsx).
+// - Congelato con la tariffa copiata e confermata dopo allo stesso prezzo: il
+//   conto non si muove, ma va rifatto; la pagina non dice solo «Non si è mosso».
+const TAR27_COPIATE = [...TAR26, ...TAR26.map(t => ({ ...t, id: t.id.replace('26', '27c'), data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31', note: 'copiato dal 2026, da confermare' }))];
+const TAR27_CONFERMATE = TAR27_COPIATE.map(t => ({ ...t, note: '' }));
+const COPIATA_GATIM = 'nella passiva di gennaio 2027 la tariffa di raccolta di GATIM S.R.L. è copiata dal 2026 e non ancora confermata (6,00 t a quel prezzo; si conferma sul contratto 2027 in Target & Status › Nuovo anno)';
+
+await sezione('8. TARIFFE COPIATE E NON CONFERMATE, VETTORE DELLE SECONDARIE, FILE DELLA VERIFICA (revisione del 15/10/2026)', async () => {
+  const costo = costoAttesoDallaPassiva(passivaGen(GEN, TAR27_COPIATE), 'GATIM S.R.L.', 'raccoglitore');
+  verifica('il conto di gennaio 2027 con la tariffa copiata: 6,00 t da confermare, dal 2026, di raccolta; nessuna senza prezzo', costo.trovato && costo.importo === 420 && costo.senza_tariffa_t === 0
+    && costo.da_confermare_t === 6 && costo.anno_copia === 2026 && J(costo.prestazioni_da_confermare) === J(['raccolta']), J(costo));
+  const confronto = confrontoGen(GEN.map(p => ({ numero_fir: p.numero_fir, kg: p.peso_effettivo })));
+  const esito = esitoConsuntivo({ confronto, costo, importo_consuntivo: 432 });
+  const testo = testoEsitoConsuntivo(confronto, esito);
+  verifica('l\'importo non si controlla: null, ne\' verde ne\' difforme, e niente «si scosta di +12,00»', esito.quadra_importo === null && esito.scarto_importo === null && esito.importo_previsto === null
+    && esito.quadra_tutto === null && esito.importo_sospeso && esito.importo_sospeso.importo_al_prezzo_copiato === 420 && !/si scosta/.test(testo), J(esito));
+  verifica('la frase dice la copia, dove si conferma e il previsto al prezzo copiato', testo.includes(`Non si è potuto controllare l'importo: ${COPIATA_GATIM}. Non è una difformità del fornitore: confermata la tariffa, rifai il confronto. Al prezzo copiato il previsto sarebbe 420,00 €.`), testo);
+  const conf = costoAttesoDallaPassiva(passivaGen(GEN, TAR27), 'GATIM S.R.L.', 'raccoglitore');
+  verifica('controprova: con la tariffa 2027 confermata (72 €/t) niente da confermare, e il consuntivo quadra', conf.da_confermare_t === 0 && conf.anno_copia === null
+    && esitoConsuntivo({ confronto, costo: conf, importo_consuntivo: 432 }).quadra_tutto === true, J(conf));
+
+  // Il congelamento con le tariffe copiate: 409 con l'elenco, come quelle che mancano.
+  const congela = await caricaFunzione('congelaPassivaMese');
+  const corpo = { anno: 2027, mese: 1, canale: 'RETE' };
+  const c409 = await chiama(congela, { db: DB_GEN(TAR27_COPIATE), corpo });
+  verifica('congelaPassivaMese con le tariffe copiate: 409, «tariffa copiata dall\'anno prima e non ancora confermata», l\'elenco', c409.stato === 409
+    && (c409.j.tariffe_da_confermare || []).some(g => g.fornitore === 'GATIM S.R.L.' && g.prestazione === 'RACCOLTA' && g.tonnellate === 6)
+    && /hanno una tariffa copiata dall'anno prima e non ancora confermata GATIM S\.R\.L\., raccolta: 6,00 t/.test(c409.j.error || ''), `${c409.stato} ${J(c409.j)}`);
+
+  // Congelato il 05/02 con la copia, confermata dopo allo stesso prezzo (70): il
+  // conto non si muove, ma il testo e la pagina dicono di rifare il congelamento.
+  const elabora = await caricaFunzione('elaboraConsuntivo');
+  const pCopia = passivaGen(GEN, TAR27_COPIATE);
+  const congelato = { id: 'cg-gen', anno: 2027, mese: 1, canale: 'RETE', congelato_il: '2027-02-05T09:00:00.000Z', congelato_da: 'admin', totale_euro: pCopia.totali.totale_complessivo, passiva_json: J(pCopia) };
+  const r = await chiama(elabora, { db: DB_GEN(TAR27_CONFERMATE, { ChiusuraPassivaMese: [congelato] }), corpo: caricaGatim(fileGatim(420)) });
+  verifica('congelato con la copia e confermata dopo: era_da_confermare, «rifai il congelamento», verdetto null', r.stato === 200 && r.j.congelato && r.j.congelato.era_da_confermare === true
+    && r.j.congelato.cambiato === false && (r.j.testo || '').includes('nel conto congelato il 05/02/2027 la tariffa di raccolta di GATIM S.R.L. era copiata dal 2026 e non confermata (6,00 t), che oggi è confermata: rifai il congelamento di gennaio 2027 e poi il confronto')
+    && r.j.esito.quadra_tutto === null, `${J(r.j.congelato)} ${r.j.testo}`);
+  const P = await paginaConsuntivi(['fraseCongelato', 'esitoPerIlFile']);
+  const frase = P.fraseCongelato(r.j.congelato, r.j.esito.importo_sospeso);
+  verifica('la pagina: «Non si è mosso, ma nel conto congelato ... era copiata dal 2026 e non confermata ... rifai il congelamento»',
+    frase === ' Non si è mosso, ma nel conto congelato il 05/02/2027 la tariffa di GATIM S.R.L. era copiata dal 2026 e non confermata (6,00 t), che oggi è confermata: rifai il congelamento, poi il confronto.', frase);
+
+  // Il vettore delle secondarie senza la tariffa 2027 della tratta.
+  const FORNITORI_V = [...FORNITORI, { id: 'f-lo', ragione_sociale: 'LOGISTICA SRL', stato: 'attivo' }];
+  const SEC = [{ id: 's1', stato: 'terminato', cer: '160103', id_ordine: 'S1', numero_fir: 'CAZZZ000009CC', peso_effettivo: 15000, classe: 'A', automezzo: 'AA001',
+    ordine_immesso_il: '2027-01-05T08:00:00.000Z', trasporto_iniziato_il: '2027-01-05T08:00:00.000Z', trasporto_finito_il: '2027-01-05T08:00:00.000Z',
+    stoccaggio: 'NAPPI SUD SRL', trasportatore: 'LOGISTICA SRL', destinazione: 'IRIGOM S.R.L.', tipo_destinazione: 'imp' }];
+  const tratta = (anno, valore = 25) => ({ id: `t-lo-${anno}`, direzione: 'PASSIVA', prestazione: 'TRASPORTO_SECONDARIA', tipologia: 'TUTTE', fornitore_nome: 'LOGISTICA SRL', produttore: 'NAPPI SUD SRL',
+    destinatario: 'IRIGOM S.R.L.', unita_misura: '€/t', valore, stato: 'attivo', data_inizio_validita: `${anno}-01-01`, data_fine_validita: `${anno}-12-31` });
+  const fileVettore = [{ nome: 'Gennaio', celle: [['N. FORMULARIO', 'DATA', 'KG'], ['CAZZZ000009CC', '05/01/2027', 15000], [], ['TOTALI', 15000, 375]] }];
+  const vettore = (tariffe) => chiama(elabora, { db: DB_GEN(tariffe, { Secondaria: SEC, Fornitore: FORNITORI_V }), corpo: { azione: 'carica', fornitore: 'LOGISTICA SRL', ruolo: 'trasportatore', anno: 2027, mese: 1, canale: 'RETE', file_nome: 'vettore gennaio 2027.xlsx', tabelle: fileVettore } });
+  const v = await vettore([...TAR26, tratta(2026)]);
+  verifica('il vettore senza la tariffa 2027 della tratta: trovato, 15,00 t senza prezzo di trasporto delle secondarie, i chili tornano, nessuna difformita\'', v.stato === 200 && v.j.costo && v.j.costo.trovato === true
+    && v.j.costo.senza_tariffa_t === 15 && J(v.j.costo.prestazioni_senza_tariffa) === J(['trasporto delle secondarie']) && v.j.esito.quadra_con_passiva === true && v.j.esito.quadra_tutto === null
+    && (v.j.testo || '').includes('manca la tariffa di trasporto delle secondarie di LOGISTICA SRL (15,00 t senza prezzo; i contratti 2026 sono scaduti il 31/12/2026)') && !/si scosta|in meno/.test(v.j.testo || ''), `${v.stato} ${J(v.j.costo)} ${J(v.j.esito)} ${v.j.testo}`);
+  const v27 = await vettore([...TAR26, tratta(2026), tratta(2027)]);
+  verifica('controprova: con la tariffa 2027 della tratta (25 €/t) il previsto e\' 375,00 e il consuntivo quadra', v27.j.costo && v27.j.costo.importo === 375 && v27.j.costo.senza_tariffa_t === 0
+    && v27.j.esito.quadra_tutto === true, `${J(v27.j.costo)} ${J(v27.j.esito)}`);
+
+  // Il file Excel della verifica: «—» col perche' al posto di «0,00 €».
+  const sospeso = await chiama(elabora, { db: DB_GEN(TAR26), corpo: caricaGatim() });
+  const perFile = P.esitoPerIlFile(sospeso.j);
+  verifica('esitoPerIlFile: con l\'importo in sospeso il costo va al file come non utilizzabile, col perche\'', perFile.costo.trovato === false
+    && perFile.costo.motivo === `— ${MANCA_GATIM}` && perFile.esito === sospeso.j.esito, J(perFile.costo && { trovato: perFile.costo.trovato, motivo: perFile.costo.motivo }));
+  const { caricaLibPagine } = await import('./dati/libPagine.mjs');
+  const FILE = await caricaLibPagine('lib/consuntivoFornitoreFile', [["import { leggiFogliLista } from '@/lib/evasioneAssegnati';", 'const leggiFogliLista = null;']]);
+  const celleExcel = async (risposta) => {
+    const { resolveObjectURL } = await import('node:buffer');
+    const ExcelJS = (await import('exceljs')).default;
+    let blob = null;
+    const prima = globalThis.document;
+    globalThis.document = { body: { appendChild() {} }, createElement: () => ({ click() { blob = resolveObjectURL(this.href); }, remove() {} }) };
+    try { await FILE.scaricaExcelConsuntivo(risposta.consuntivo, risposta, { stato: { letto: true, utente: 'Prova', archivi: [], caricamenti_aperti: [] } }); } finally { globalThis.document = prima; }
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(await blob.arrayBuffer()));
+    let previsto;
+    wb.getWorksheet('Riepilogo').eachRow(row => { if (String(row.getCell(1).value || '') === 'Importo previsto dalle tariffe') previsto = row.getCell(2).value; });
+    return previsto;
+  };
+  const cella = await celleExcel(perFile);
+  verifica('il file Excel: «Importo previsto dalle tariffe» e\' «—» col perche\', non 0,00 €', typeof cella === 'string' && cella.startsWith('— nella passiva di gennaio 2027 manca la tariffa di raccolta di GATIM S.R.L.'), J(cella));
+  const intero = await chiama(elabora, { db: DB_GEN(TAR27), corpo: caricaGatim() });
+  verifica('controprova: senza importo in sospeso l\'esito va al file com\'e\' e il previsto e\' 432', P.esitoPerIlFile(intero.j) === intero.j && (await celleExcel(intero.j)) === 432);
 });
 
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);

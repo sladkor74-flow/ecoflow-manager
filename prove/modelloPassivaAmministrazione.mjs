@@ -15,8 +15,12 @@
 //   ACI   raccoglitori    18,89 t ->  1.509,38 euro
 //         impianti        33,35 t ->  2.873,89 euro
 //         trasporto        1,64 t ->     49,20 euro   (totale canale   4.432,47)
+// La prova 4-ter (prova del cambio d'anno, 15/10/2026): il modello per il 2027
+// porta i prezzi del 2026, e senza la tariffa 2027 la riga resta «—» con la nota
+// che dice il prezzo della voce e il suo anno (D5, decisione dell'utente).
 // npm run prove
 import { caricaLibPagine } from './dati/libPagine.mjs';
+import { readFileSync } from 'node:fs';
 
 const { foglioPassiva } = await caricaLibPagine('lib/passivaAmministrazione');
 const { modelloAmministrazione, quanteVociModello } = await caricaLibPagine('lib/modelloPassivaAmministrazione');
@@ -236,6 +240,41 @@ console.log('IL PREZZO VIENE DAL TARIFFARIO, NON DAL FOGLIO');
   const v4 = foglioPassiva(voci, senza, 'RETE', 'Settembre', 2026).raccoglitori.righe.find(r => r.tipo === 'voce' && r.soggetto === 'GATIM S.R.L.');
   verifica('senza tariffa si usa il prezzo del modello', v4.prezzo === 70 && v4.fonte_prezzo === 'modello', JSON.stringify([v4.prezzo, v4.fonte_prezzo]));
   verifica('e il foglio lo dichiara nelle note', /tariffario/i.test(v4.note), v4.note);
+  // 4-ter. L'ANNO NUOVO (prova del cambio d'anno, 15/10/2026, difetto 19). I
+  // contratti rete e ACI sono annuali senza tacito rinnovo (06/10/2026): il
+  // modello proposto per il 2027 ha i prezzi del foglio di settembre 2026, e lo
+  // dice (prezzo_anno). A gennaio 2027, senza la tariffa 2027, la riga di GATIM
+  // non prende in silenzio i 70 €/t di un contratto scaduto: resta «—» e la nota
+  // dice il prezzo della voce e il suo anno (D5, decisione dell'utente del
+  // 15/10/2026). Prima: 10 t x 70 = 700,00 e «il prezzo arriva dal modello».
+  {
+    const voci27 = modelloAmministrazione(2027);
+    verifica('il modello proposto per il 2027 porta i prezzi del 2026, e lo dice', voci27.length === voci.length && voci27.every(v => v.anno === 2027 && v.prezzo_anno === 2026), JSON.stringify(voci27[0]));
+    const gennaio = foglioPassiva(voci27, senza, 'RETE', 'Gennaio', 2027);
+    const v27 = gennaio.raccoglitori.righe.find(r => r.tipo === 'voce' && r.soggetto === 'GATIM S.R.L.');
+    verifica('gennaio 2027 senza la tariffa: la riga di GATIM resta senza prezzo e senza totale', v27.prezzo === null && v27.totale === null && v27.senza_prezzo === true && v27.fonte_prezzo === 'modello', JSON.stringify([v27.prezzo, v27.totale, v27.fonte_prezzo]));
+    verifica('la nota dice l\'anno: «Tariffa 2027 mancante: il prezzo della voce (70 €/t) e\' del 2026, contratto scaduto il 31/12/2026»',
+      v27.note.startsWith('Tariffa 2027 mancante: il prezzo della voce (70 €/t) e\' del 2026, contratto scaduto il 31/12/2026.') && !/arriva dal modello/.test(v27.note), v27.note);
+    verifica('il totale del foglio non la conta e lo dice', gennaio.raccoglitori.totale_euro === 0 && gennaio.senza_prezzo && gennaio.senza_prezzo.voci === 1 && gennaio.senza_prezzo.tonnellate === 10, JSON.stringify(gennaio.senza_prezzo));
+    // Una voce del 2027 senza movimenti vale zero comunque: tiene il prezzo,
+    // che e' un riferimento, e la nota dice di che anno e'.
+    const salerno27 = gennaio.raccoglitori.righe.find(r => r.tipo === 'voce' && /SALERNO/.test(r.voce));
+    verifica('una voce senza movimenti tiene il prezzo, e la nota dice che e\' del 2026', salerno27.prezzo === 68 && salerno27.totale === 0 && salerno27.senza_prezzo === false
+      && salerno27.note === 'Prezzo della voce del 2026 (contratto scaduto il 31/12/2026): la tariffa 2027 non e\' ancora nel tariffario.', JSON.stringify([salerno27.prezzo, salerno27.note]));
+    // Le voci copiate da un anno all'altro («Voci del foglio», VociPassivaDialog)
+    // tengono l'anno del loro prezzo, e un prezzo cambiato o confermato diventa
+    // dell'anno che si guarda.
+    const dialogo = readFileSync(new URL('../src/components/fatturazione/VociPassivaDialog.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
+    verifica('le voci copiate tengono l\'anno del loro prezzo (payloadDaVoce), e il prezzo scritto o confermato e\' dell\'anno che si guarda',
+      /prezzo_anno: annoDelPrezzoVoce\(voce\) \|\| Number\(anno\),/.test(dialogo) && /creaVoci\(voci\.map\(v => payloadDaVoce\(v, destinazione\)\)/.test(dialogo)
+      && /inModifica === 'nuova' \|\| form\.prezzo_confermato \|\| Number\(form\.prezzo\) !== Number\(form\.prezzo_prima\)\s*\? annoNum/.test(dialogo));
+    // La controprova: una voce col prezzo dell'anno del foglio ha la nota di oggi.
+    const conAnno = foglioPassiva(voci27.map(v => ({ ...v, prezzo_anno: 2027 })), senza, 'RETE', 'Gennaio', 2027).raccoglitori.righe.find(r => r.tipo === 'voce' && r.soggetto === 'GATIM S.R.L.');
+    verifica('controprova: col prezzo della voce del 2027 la riga si prezza, con la nota di oggi', conAnno.prezzo === 70 && conAnno.totale === 700 && /tariffario/i.test(conAnno.note) && !/mancante/.test(conAnno.note), JSON.stringify([conAnno.prezzo, conAnno.note]));
+    // E una voce senza prezzo_anno vale per l'anno della voce.
+    const senzaAnno = foglioPassiva(voci27.map(({ prezzo_anno: _a, ...v }) => v), senza, 'RETE', 'Gennaio', 2027).raccoglitori.righe.find(r => r.tipo === 'voce' && r.soggetto === 'GATIM S.R.L.');
+    verifica('una voce senza prezzo_anno vale per l\'anno della voce', senzaAnno.prezzo === 70 && !/mancante/.test(senzaAnno.note) && v4.prezzo === 70 && !/mancante/.test(v4.note), JSON.stringify([senzaAnno.prezzo, senzaAnno.note]));
+  }
   // 4-bis. LE TRE RAGIONI PER CUI UN IMPORTO E' ZERO SONO DIVERSE E NON SI
   // CONFONDONO. Un avviso che grida al torto fa smettere di guardare gli avvisi.
   {

@@ -4,7 +4,9 @@ import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Loader2, Upload, Download, RefreshCw, Trash2, AlertTriangle, CheckCircle2, Snowflake } from 'lucide-react';
 import Storia from '@/components/shared/Storia';
-import { formatKg } from '@/lib/utils';
+import { formatKg, formatTonnellate } from '@/lib/utils';
+import { euro } from '@/lib/formatoSoldi';
+import { giornoRoma } from '@/lib/giornoItaliano';
 import { tabelleDalFile, scaricaExcelConsuntivo } from '@/lib/consuntivoFornitoreFile';
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
@@ -17,6 +19,81 @@ import { TIPI_PASSIVA } from '@/lib/registroCaricamenti';
 // inglese e senza dire quale caricamento ripetere. Il motivo sta nel corpo della
 // risposta, come in PrefatturaEcotyre.jsx.
 const motivoErrore = (e) => e?.response?.data?.error || e?.data?.error || (e && e.message ? e.message : String(e));
+
+// Il giorno italiano di un istante, gg/mm/aaaa: il congelamento delle 00:30 del
+// 6 febbraio e' del 06/02, non del 05/02 come diceva il taglio della data UTC.
+const giornoIt = (v) => { const g = giornoRoma(v); return g ? g.split('-').reverse().join('/') : ''; };
+
+// UNA VOCE DELLE TARIFFE CHE MANCANO NEL CONTO DA CONGELARE (prova del cambio
+// d'anno, 15/10/2026): «GATIM S.R.L., raccolta: 6,00 t».
+const voceTariffa = (g) => `${g.fornitore}, ${g.prestazione_parole || String(g.prestazione || '').toLowerCase()}${g.tratta ? ` (${g.tratta})` : ''}: ${formatTonnellate(g.tonnellate)} t`;
+
+/**
+ * Perche' il conto congelato e quello di oggi non dicono lo stesso numero.
+ * Prima era sempre «di solito sono ordini chiusi dopo la chiusura del mese»;
+ * gennaio 2027, congelato il 05/02 senza le tariffe nuove e ricalcolato il 10/02
+ * dopo aver scritto la tariffa di GATIM, faceva 0 € allora e 432 oggi, e la
+ * frase era falsa (prova del cambio d'anno, 15/10/2026). Quando nel congelato
+ * mancava una tariffa che oggi c'e', si dice quello e il rimedio: rifare il
+ * congelamento. Gli ordini chiusi dopo restano la frase di sempre.
+ */
+export function fraseCongelato(congelato, sospeso) {
+  if (!congelato) return ' Non si è mosso.';
+  // Anche una tariffa copiata dall'anno prima e non confermata allora, e
+  // confermata oggi (D4, decisione dell'utente del 15/10/2026; revisione dello
+  // stesso giorno): il conto si e' mosso per quella, non per ordini chiusi dopo.
+  // Confermata allo stesso prezzo il conto non si muove, ma va rifatto lo stesso:
+  // il congelato porta una tariffa che allora non valeva, e il testo del
+  // confronto lo dice (elaboraConsuntivo); la pagina non puo' dire solo «Non si
+  // e' mosso».
+  if (congelato.mancava_la_tariffa || congelato.era_da_confermare) {
+    const chi = sospeso && sospeso.fornitore ? ` di ${sospeso.fornitore}` : '';
+    const t = Number(congelato.senza_tariffa_allora_t) || 0;
+    const tc = Number(congelato.da_confermare_allora_t) || 0;
+    const daAnno = Number(congelato.anno_copia) > 0 ? `dal ${congelato.anno_copia}` : "dall'anno prima";
+    const allora = [
+      congelato.mancava_la_tariffa ? `mancava la tariffa${chi} (${formatTonnellate(t)} t senza prezzo)` : '',
+      congelato.era_da_confermare ? `la tariffa${congelato.mancava_la_tariffa ? '' : chi} era copiata ${daAnno} e non confermata (${formatTonnellate(tc)} t)` : '',
+    ].filter(Boolean).join(' e ');
+    return ` ${congelato.cambiato ? 'Si è mosso perché' : 'Non si è mosso, ma'} nel conto congelato il ${giornoIt(congelato.congelato_il)} ${allora}, che oggi ${congelato.mancava_la_tariffa ? "c'è" : 'è confermata'}: rifai il congelamento, poi il confronto.`;
+  }
+  if (!congelato.cambiato) return ' Non si è mosso.';
+  return ' Si è mosso: prima di pagare va capito perché — di solito sono ordini chiusi dopo la chiusura del mese.';
+}
+
+/**
+ * L'ESITO PER IL FILE DELLA VERIFICA (revisione del 15/10/2026). Il file Excel
+ * (scaricaExcelConsuntivo, in src/lib/consuntivoFornitoreFile.js) scrive il
+ * previsto dal costo della passiva: con l'importo in sospeso, cioe' con una
+ * nostra tariffa che manca o e' copiata e non confermata, scriveva «0,00 €»
+ * mentre la pagina dice «—». Un valore mancante non e' zero: al file si passa il
+ * costo come non utilizzabile, col perche' al posto del numero. Il resto
+ * dell'esito resta com'e'.
+ */
+export function esitoPerIlFile(esito) {
+  const sospeso = esito && esito.esito && esito.esito.importo_sospeso;
+  if (!sospeso || !esito.costo) return esito;
+  const perche = String(sospeso.voce || '').replace(/^l'importo, perché /, '');
+  return { ...esito, costo: { ...esito.costo, trovato: false, motivo: `— ${perche}` } };
+}
+
+/**
+ * La domanda prima di congelare un conto con tariffe mancanti: l'elenco che la
+ * funzione manda col 409 (congelaPassivaMese), una riga per fornitore e
+ * prestazione. Il 05/02/2027 gennaio si congelava senza le tariffe 2027 a 0,00 €
+ * senza una domanda, e i consuntivi arrivati dopo si confrontavano con quello zero.
+ */
+export function domandaTariffeMancanti(dati, periodo) {
+  const righe = [];
+  const mancanti = (dati && dati.tariffe_mancanti) || [];
+  const daConfermare = (dati && dati.tariffe_da_confermare) || [];
+  righe.push(`Nel conto della passiva di ${periodo} ci sono tonnellate senza un prezzo valido.`);
+  if (mancanti.length) righe.push('', 'Manca la tariffa del mese per:', ...mancanti.map(g => `- ${voceTariffa(g)}`));
+  if (daConfermare.length) righe.push('', "Hanno una tariffa copiata dall'anno prima e non ancora confermata:", ...daConfermare.map(g => `- ${voceTariffa(g)}`));
+  righe.push('', "Congelato così, quelle righe restano senza il loro prezzo e i consuntivi di quei fornitori non si potranno controllare: meglio scrivere prima le tariffe e poi congelare.",
+    '', 'Lo congelo lo stesso?');
+  return righe.join('\n');
+}
 
 // I CONSUNTIVI DI CHIUSURA MESE DEI FORNITORI (richiesta dell'utente, 29/09/2026).
 //
@@ -131,14 +208,34 @@ export default function Consuntivi({ isAdmin, periodoIniziale = null, canaleIniz
     await carica();
   };
 
+  // IL CONGELAMENTO CHIEDE CONFERMA SE MANCANO DELLE TARIFFE, E POI DICE CHE COSA
+  // HA FISSATO (prova del cambio d'anno, 15/10/2026). La funzione risponde 409
+  // con l'elenco delle tariffe che mancano: si mostra e si chiede, e solo con la
+  // conferma si congela lo stesso. Prima il riepilogo che la funzione manda -
+  // quanto, quanti fornitori, quante anomalie - si buttava via, e chi aveva
+  // congelato gennaio a 0,00 € non lo sapeva.
+  const [congelamento, setCongelamento] = useState(null);
+  useEffect(() => { setCongelamento(null); }, [anno, mese, canale]);
   const congela = async () => {
-    if (!window.confirm(`Congelo il conto della fatturazione passiva di ${MESI[mese - 1]} ${anno} per ${canale}? Serve a confrontare i consuntivi che arriveranno con il conto di oggi, non con quello ricalcolato allora.`)) return;
+    const periodo = `${MESI[mese - 1]} ${anno} (${CANALI.find(x => x[0] === canale)?.[1] || canale})`;
+    if (!window.confirm(`Congelo il conto della fatturazione passiva di ${periodo}? Serve a confrontare i consuntivi che arriveranno con il conto di oggi, non con quello ricalcolato allora.`)) return;
     setOccupato('congela');
     setErrore('');
+    setCongelamento(null);
     try {
-      const r = await base44.functions.invoke('congelaPassivaMese', { anno, mese, canale, nota: 'chiusura del mese' });
+      const chiedi = (conferma) => base44.functions.invoke('congelaPassivaMese', { anno, mese, canale, nota: 'chiusura del mese', ...(conferma ? { conferma: true } : {}) });
+      let r;
+      try {
+        r = await chiedi(false);
+      } catch (e) {
+        const dati = e?.response?.data || e?.data;
+        if (!dati || !dati.da_confermare || !(Array.isArray(dati.tariffe_mancanti) || Array.isArray(dati.tariffe_da_confermare))) throw e;
+        if (!window.confirm(domandaTariffeMancanti(dati, periodo))) return;
+        r = await chiedi(true);
+      }
       const d = (r && r.data) || r;
       if (!d || d.error) throw new Error((d && d.error) || 'Il congelamento non è riuscito.');
+      setCongelamento({ ...(d.riepilogo || {}), congelato_il: d.congelato && d.congelato.congelato_il, periodo });
       if (aperto) await chiama({ azione: 'confronta', id: aperto.id }, 'confronta');
     } catch (e) { setErrore(motivoErrore(e)); }
     finally { setOccupato(''); }
@@ -218,6 +315,24 @@ export default function Consuntivi({ isAdmin, periodoIniziale = null, canaleIniz
         </div>
       )}
 
+      {/* Che cosa ha fissato il congelamento: quanto, quanti fornitori, e le
+          tariffe che mancavano se si e' congelato lo stesso (15/10/2026). */}
+      {congelamento && (
+        <div className={`text-sm border rounded-lg px-3 py-2 ${(congelamento.tariffe_mancanti || []).length || (congelamento.tariffe_da_confermare || []).length ? 'border-amber-300 bg-amber-50 text-amber-900' : 'bg-card'}`}>
+          <p>
+            <Snowflake className="w-4 h-4 inline mr-1.5 -mt-0.5" aria-hidden="true" />
+            Conto della passiva di {congelamento.periodo} congelato{congelamento.congelato_il ? ` il ${giornoIt(congelamento.congelato_il)}` : ''}: {euro(congelamento.totale_euro)}
+            {Number(congelamento.totale_surplus) > 0 ? `, di cui surplus ${euro(congelamento.totale_surplus)}` : ''} — {congelamento.raccoglitori ?? 0} raccoglitori, {congelamento.impianti_stoccaggi ?? 0} impianti e stoccaggi, {congelamento.trasporti_secondaria ?? 0} trasporti di secondaria; {congelamento.anomalie ?? 0} {congelamento.anomalie === 1 ? 'anomalia' : 'anomalie'}.
+          </p>
+          {(congelamento.tariffe_mancanti || []).length > 0 && (
+            <p className="mt-1 text-xs">Congelato senza le tariffe del mese di {congelamento.tariffe_mancanti.map(voceTariffa).join('; ')}: quelle righe nel conto valgono zero. Scritte le tariffe, rifai il congelamento.</p>
+          )}
+          {(congelamento.tariffe_da_confermare || []).length > 0 && (
+            <p className="mt-1 text-xs">Congelato con tariffe copiate dall&apos;anno prima e non confermate per {congelamento.tariffe_da_confermare.map(voceTariffa).join('; ')}: confermate le tariffe, rifai il congelamento.</p>
+          )}
+        </div>
+      )}
+
       {elenco.length === 0 && <p className="text-sm text-muted-foreground">Nessun consuntivo caricato per {MESI[mese - 1]} {anno} su {CANALI.find(x => x[0] === canale)?.[1]}.</p>}
 
       {elenco.length > 0 && (
@@ -239,7 +354,12 @@ export default function Consuntivi({ isAdmin, periodoIniziale = null, canaleIniz
                       ? <span className="text-emerald-700 inline-flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> quadra</span>
                       : x.quadra === false
                         ? <span className="text-amber-800 inline-flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> da guardare</span>
-                        : <span className="text-muted-foreground">non ancora confrontato</span>}
+                        // Confrontato ma senza verdetto: i movimenti tornano e
+                        // l'importo e' in sospeso perche' nel conto manca una
+                        // nostra tariffa (15/10/2026). Non e' una difformita'.
+                        : x.confrontato_il
+                          ? <span className="text-amber-800 inline-flex items-center gap-1" title="I movimenti tornano; l'importo non si è potuto controllare perché nella passiva manca una nostra tariffa, o è copiata dall'anno prima e non ancora confermata. Scritta o confermata la tariffa, rifai il confronto."><AlertTriangle className="w-3.5 h-3.5" /> importo in sospeso</span>
+                          : <span className="text-muted-foreground">non ancora confrontato</span>}
                     {/* Senza questo un consuntivo alleggerito si vedeva in elenco
                         identico a uno fresco. */}
                     {x.alleggerito_il && <span className="ml-2 text-xs text-muted-foreground">· solo storia</span>}
@@ -277,7 +397,7 @@ export default function Consuntivi({ isAdmin, periodoIniziale = null, canaleIniz
               {esito.testo}
             </span>
             {aperto && (
-              <Button size="sm" variant="outline" className="h-7" onClick={async () => { try { await scaricaExcelConsuntivo(aperto, esito); } catch (e) { setErrore(motivoErrore(e)); } }}>
+              <Button size="sm" variant="outline" className="h-7" onClick={async () => { try { await scaricaExcelConsuntivo(aperto, esitoPerIlFile(esito)); } catch (e) { setErrore(motivoErrore(e)); } }}>
                 <Download className="w-3.5 h-3.5 mr-1" /> Esporta
               </Button>
             )}
@@ -288,11 +408,16 @@ export default function Consuntivi({ isAdmin, periodoIniziale = null, canaleIniz
             <div><div className="text-xs text-muted-foreground">Chili dei nostri movimenti</div><div className="tabular-nums font-medium">{formatKg(c.totale_gestionale_kg)}</div></div>
             <div>
               <div className="text-xs text-muted-foreground">Importo previsto</div>
-              <div className="tabular-nums font-medium">{v.importo_previsto === null ? '—' : `${v.importo_previsto.toLocaleString('it-IT', { minimumFractionDigits: 2 })} €`}</div>
+              <div className="tabular-nums font-medium">{v.importo_previsto === null || v.importo_previsto === undefined ? '—' : euro(v.importo_previsto)}</div>
+              {/* Un previsto fatto con tariffe che mancano non e' un numero
+                  (15/10/2026): «—», col perche' */}
+              {v.importo_sospeso && Number(v.importo_sospeso.tonnellate) > 0 && <div className="text-[11px] text-amber-800">manca la nostra tariffa: {formatTonnellate(v.importo_sospeso.tonnellate)} t senza prezzo</div>}
+              {/* la tariffa copiata e non confermata (D4, 15/10/2026) */}
+              {v.importo_sospeso && Number(v.importo_sospeso.da_confermare_t) > 0 && <div className="text-[11px] text-amber-800">tariffa copiata {Number(v.importo_sospeso.anno_copia) > 0 ? `dal ${v.importo_sospeso.anno_copia}` : "dall'anno prima"}, da confermare: {formatTonnellate(v.importo_sospeso.da_confermare_t)} t</div>}
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Sul consuntivo</div>
-              <div className="tabular-nums font-medium">{v.importo_consuntivo === null ? 'non indicato' : `${Number(v.importo_consuntivo).toLocaleString('it-IT', { minimumFractionDigits: 2 })} €`}</div>
+              <div className="tabular-nums font-medium">{v.importo_consuntivo === null ? 'non indicato' : euro(v.importo_consuntivo)}</div>
             </div>
           </div>
 
@@ -322,10 +447,10 @@ export default function Consuntivi({ isAdmin, periodoIniziale = null, canaleIniz
           )}
           {esito.congelato && (
             <p className="px-3 py-2 text-xs text-muted-foreground border-b">
-              Il confronto usa il conto della passiva <strong>congelato</strong> il {String(esito.congelato.congelato_il).slice(0, 10).split('-').reverse().join('/')}
-              {esito.congelato.congelato_da ? ` da ${esito.congelato.congelato_da}` : ''}: allora erano {esito.congelato.importo_allora === null ? '—' : `${esito.congelato.importo_allora} €`},
-              ricalcolandolo oggi sono {esito.congelato.importo_oggi === null ? '—' : `${esito.congelato.importo_oggi} €`}.
-              {esito.congelato.cambiato ? ' Si è mosso: prima di pagare va capito perché — di solito sono ordini chiusi dopo la chiusura del mese.' : ' Non si è mosso.'}
+              Il confronto usa il conto della passiva <strong>congelato</strong> il {giornoIt(esito.congelato.congelato_il)}
+              {esito.congelato.congelato_da ? ` da ${esito.congelato.congelato_da}` : ''}: allora erano {esito.congelato.importo_allora === null ? '—' : euro(esito.congelato.importo_allora)},
+              ricalcolandolo oggi sono {esito.congelato.importo_oggi === null ? '—' : euro(esito.congelato.importo_oggi)}.
+              {fraseCongelato(esito.congelato, v && v.importo_sospeso)}
             </p>
           )}
 

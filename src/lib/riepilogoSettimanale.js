@@ -339,7 +339,13 @@ export function argomentiRiepilogoPdf({
       ...(aci ? [
         ...meseDelCanale(aci.mesi),
         { celle: [`Raccolto del ${anno}`, t(aci.raccolto_t), `${intero(aci.ritiri)} ${aci.ritiri === 1 ? 'ritiro' : 'ritiri'}`] },
-        { celle: ['Previsione indicativa del contratto ACI', t(aci.previsione_t), aci.previsione_t ? `${pct(aci.pct_previsione)} della previsione: non è un obiettivo` : 'nessuna previsione nel contratto ACI'] },
+        // Il contratto dell'anno copiato dall'anno prima e non ancora confermato
+        // (quadro.aci.da_confermare, prova del cambio d'anno del 15/10/2026): la
+        // previsione e' quella dell'anno prima, e il PDF lo dice come la dashboard.
+        { celle: ['Previsione indicativa del contratto ACI', t(aci.previsione_t), [
+          aci.previsione_t ? `${pct(aci.pct_previsione)} della previsione: non è un obiettivo` : 'nessuna previsione nel contratto ACI',
+          aci.da_confermare ? `previsione copiata dal ${Number(anno) - 1}, da confermare` : '',
+        ].filter(Boolean).join('; ')] },
       ] : [{ celle: [`Raccolto del ${anno}`, '—', erroreQuadro ? `il quadro non si è caricato: ${erroreQuadro}` : 'il quadro non è arrivato'] }]),
     ],
   });
@@ -439,7 +445,18 @@ export function argomentiRiepilogoPdf({
     else if (!margine || !Array.isArray(margine.canali)) sezioni.push(nonLetta(titoloEco, 'Il margine non è arrivato.'));
     else {
       const mesiSett = [...new Set(giorniSettimana.filter(x => Number(x.giorno.slice(0, 4)) === Number(anno)).map(x => MESI[Number(x.giorno.slice(5, 7)) - 1]))];
-      const riga = (c, periodo, x) => ({ celle: [NOMI_CANALE[c.canale] || c.canale, periodo, n(x.ricavo), n(x.costo), n(x.margine), n(x.margine_pct), n(x.tonnellate), n(x.margine_t)] });
+      // UN MARGINE CON PREZZI MANCANTI E' «—», COL PERCHE' (prova del cambio
+      // d'anno, 15/10/2026). Il 15/01/2027, senza le tariffe 2027, la rete usciva
+      // [0, 0, 0, —] e l'extra raccolta con un margine di -113,50 € fatto da un
+      // ricavo che mancava. Il calcolo mette margine, % ed €/t a null quando
+      // mancano dei prezzi e scrive la frase (testo_prezzi_mancanti): qui la
+      // nota la riporta, con ricavo e costo detti parziali, e le righe con una
+      // tariffa copiata e da confermare (testo_da_confermare).
+      const nota = (x) => [
+        x.testo_prezzi_mancanti ? `${x.testo_prezzi_mancanti}; ricavo e costo parziali` : '',
+        x.testo_da_confermare || '',
+      ].filter(Boolean).join('; ');
+      const riga = (c, periodo, x) => ({ celle: [NOMI_CANALE[c.canale] || c.canale, periodo, n(x.ricavo), n(x.costo), n(x.margine), n(x.margine_pct), n(x.tonnellate), n(x.margine_t), nota(x)] });
       const righe = [];
       for (const c of margine.canali) {
         if (c.anno) righe.push(riga(c, `${anno}, fino a oggi`, c.anno));
@@ -448,7 +465,7 @@ export function argomentiRiepilogoPdf({
       sezioni.push({
         titolo: titoloEco,
         colonne: [{ titolo: 'Canale', peso: 1.4 }, { titolo: 'Periodo', peso: 1.6 }, { titolo: 'Ricavo', tipo: 'euro' }, { titolo: 'Costo', tipo: 'euro' }, { titolo: 'Margine', tipo: 'euro' },
-          { titolo: '% del ricavo', tipo: 'percentuale' }, { titolo: 'Tonnellate', tipo: 't' }, { titolo: 'Margine per t', tipo: 'euro' }],
+          { titolo: '% del ricavo', tipo: 'percentuale' }, { titolo: 'Tonnellate', tipo: 't' }, { titolo: 'Margine per t', tipo: 'euro' }, { titolo: 'Nota', peso: 2.6 }],
         righe,
       });
     }

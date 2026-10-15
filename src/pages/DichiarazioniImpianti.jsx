@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { leggiCollegamento } from '@/lib/collegamenti';
 import { anniDaScegliere, annoDiOggi } from '@/lib/periodoPagine';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { notaTraccia } from '@/lib/scriviConTraccia';
 import { Button } from '@/components/ui/button';
@@ -23,8 +24,6 @@ import { esportaDichiarazioni } from '@/lib/dichiarazioniExport';
 
 // Dichiarazioni degli impianti: che cosa ogni impianto ricava dai PFU che gli
 // conferiamo, mese per mese, e come questo decurta la giacenza a portale.
-
-const ANNI = anniDaScegliere({ dal: 2025 }).reverse();
 
 // perche e percheNota: il perche' di un «—», al passaggio del mouse sul numero o
 // sulla nota (giro del 14/10/2026). Senza, la casella resta quella di prima.
@@ -105,6 +104,13 @@ export default function DichiarazioniImpianti() {
   // (src/lib/collegamenti.js): la scheda, l'anno e il mese della pratica.
   const location = useLocation();
   const arrivo = leggiCollegamento(location.search, SCHEDE);
+  // GLI ANNI SI CONTANO QUANDO LA PAGINA SI DISEGNA, NON QUANDO IL MODULO SI
+  // CARICA (prova del cambio d'anno, 15/10/2026). Le pagine si caricano alla
+  // prima visita e restano in memoria finche' la scheda non si ricarica: aperta
+  // il 31/12/2026 e ripresa il 04/01/2027, la pagina era sul 2027 ma offriva
+  // [2026, 2025], e chi sceglieva il 2026 non tornava al 2027. Come la Dashboard.
+  const oggi = oggiRoma();
+  const anni = useMemo(() => anniDaScegliere({ dal: 2025, oggi }).reverse(), [oggi]);
   const [anno, setAnno] = useState(() => arrivo.anno || annoDiOggi());
   const [scheda, setScheda] = useState(arrivo.tab || 'riepilogo');
   useEffect(() => {
@@ -196,7 +202,7 @@ export default function DichiarazioniImpianti() {
         <div className="flex items-center gap-2">
           <Select value={String(anno)} onValueChange={v => setAnno(Number(v))}>
             <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-            <SelectContent>{ANNI.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
+            <SelectContent>{anni.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant="outline" className="gap-1" onClick={carica} disabled={caricamento}>
             {caricamento ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Aggiorna
@@ -305,6 +311,12 @@ export default function DichiarazioniImpianti() {
 
       {dati && (
         <>
+          {/* I siti portati dall'anno prima, finche' la riga dell'anno non c'e',
+              da confermare sul contratto (decisione dell'utente del 15/10/2026,
+              D3): la frase e' quella della nota della notte (sitiPortati). */}
+          {dati.nota_siti_portati && (
+            <p className="text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2">{dati.nota_siti_portati}</p>
+          )}
           {/* Un archivio che si sta riscrivendo, o rimasto a meta', si dice sopra
               i totali: la stessa regola della dashboard e dei motori (11/10/2026). */}
           <AvvisoCaricamenti aggiorna={dati} />

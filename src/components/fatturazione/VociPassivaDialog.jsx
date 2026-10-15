@@ -144,10 +144,21 @@ function criterioAParole(voce) {
   return parti.join(', ');
 }
 
+// L'ANNO DEL PREZZO DI UNA VOCE (prova del cambio d'anno, 15/10/2026). I
+// contratti rete e ACI sono annuali senza tacito rinnovo (06/10/2026): le voci
+// copiate in un anno nuovo, e quelle del modello dell'amministrazione, portano
+// i prezzi dell'anno prima, e la voce lo dice (prezzo_anno). Nel foglio di un
+// anno dopo una riga con movimenti e senza la tariffa dell'anno resta «—», con
+// la nota che dice il prezzo della voce e il suo anno (D5, decisione dell'utente
+// del 15/10/2026). Senza prezzo_anno vale l'anno della voce, come
+// annoDelPrezzo in src/lib/passivaAmministrazione.js.
+const annoDelPrezzoVoce = (voce) => Number(voce && voce.prezzo_anno) || Number(voce && voce.anno) || null;
+
 const FORM_NUOVA = {
   canale: 'RETE', blocco: 'raccoglitori', soggetto: '', voce: '', prezzo: 0,
   unita_misura: 'euro_tonnellata', colonna_prezzo: '', ordine: 10, attiva: true, note: '',
   regione: '', provincia: '', destinazione: '', provenienza: '', prestazione: '', classi: [],
+  prezzo_anno: null, prezzo_prima: null, prezzo_confermato: false,
 };
 
 /** La voce aperta nel riquadro di modifica: il criterio diventa campi separati. */
@@ -170,6 +181,11 @@ function formDaVoce(voce) {
     provenienza: c.provenienza || '',
     prestazione: c.prestazione || '',
     classi: Array.isArray(c.classi) ? c.classi.filter(x => CLASSI.includes(x)) : [],
+    // l'anno del prezzo e il prezzo di prima: cambiato il prezzo (o confermato),
+    // la voce lo porta all'anno che si sta guardando (salva)
+    prezzo_anno: annoDelPrezzoVoce(voce),
+    prezzo_prima: Number(voce.prezzo) || 0,
+    prezzo_confermato: false,
   };
 }
 
@@ -194,6 +210,8 @@ function payloadDaVoce(voce, anno) {
     soggetto: testo(voce.soggetto),
     voce: testo(voce.voce),
     prezzo: Number(voce.prezzo) || 0,
+    // copiata in un altro anno, la voce tiene l'anno del suo prezzo (15/10/2026)
+    prezzo_anno: annoDelPrezzoVoce(voce) || Number(anno),
     unita_misura: voce.unita_misura || 'euro_tonnellata',
     colonna_prezzo: voce.colonna_prezzo || '',
     ordine: Number(voce.ordine) || 0,
@@ -284,7 +302,12 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
     }
     setSalvataggio(true);
     try {
-      const payload = payloadDaVoce({ ...form, criterio_json: criterioDaForm(form) }, annoNum);
+      // Il prezzo scritto o confermato adesso e' dell'anno che si sta guardando;
+      // una voce nuova pure. Cambiare solo la nota o il criterio non fa di un
+      // prezzo del 2026 un prezzo del 2027 (15/10/2026).
+      const prezzoAnno = inModifica === 'nuova' || form.prezzo_confermato || Number(form.prezzo) !== Number(form.prezzo_prima)
+        ? annoNum : (Number(form.prezzo_anno) || annoNum);
+      const payload = payloadDaVoce({ ...form, prezzo_anno: prezzoAnno, criterio_json: criterioDaForm(form) }, annoNum);
       const esito = await conRitentativi(() => scriviConTraccia(ENTITA, inModifica === 'nuova' ? null : inModifica, payload, { origine: ORIGINE }));
       setInModifica(null);
       await carica();
@@ -523,6 +546,14 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
                     Prezzo di riserva (il foglio usa il tariffario)
                   </label>
                   <Input type="number" step="0.01" value={form.prezzo} onChange={e => setForm({ ...form, prezzo: Number(e.target.value) })} />
+                  {/* Un prezzo di un anno prima (15/10/2026): si dice, e si conferma
+                      per quest'anno o se ne scrive uno nuovo. */}
+                  {Number(form.prezzo_anno) > 0 && Number(form.prezzo_anno) < annoNum && Number(form.prezzo) === Number(form.prezzo_prima) && (
+                    <label className="flex items-start gap-1.5 mt-1 text-[11px] text-amber-800">
+                      <Checkbox checked={!!form.prezzo_confermato} onCheckedChange={v => setForm({ ...form, prezzo_confermato: v === true })} className="mt-0.5" />
+                      <span>Prezzo del {form.prezzo_anno}, contratto scaduto: vale anche per il {annoNum}?</span>
+                    </label>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Unita&apos; di misura</label>
@@ -716,6 +747,9 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
                                   <td className="px-2 py-1.5">{parole || <span className="text-muted-foreground">tutto il soggetto</span>}</td>
                                   <td className="px-2 py-1.5 text-right tabular-nums">
                                     {euro(v.prezzo)} {v.unita_misura === 'euro_viaggio' ? '€/viaggio' : '€/t'}
+                                    {annoDelPrezzoVoce(v) && annoDelPrezzoVoce(v) < annoNum && (
+                                      <span className="block text-[11px] text-amber-800">prezzo del {annoDelPrezzoVoce(v)}</span>
+                                    )}
                                   </td>
                                   <td className="px-2 py-1.5">
                                     {v.colonna_prezzo
@@ -842,7 +876,9 @@ export default function VociPassivaDialog({ aperto, chiudi, anno, onSalvato }) {
             <AlertDialogTitle>Copiare le voci del {annoNum} nel {copia ? copia.anno : ''}?</AlertDialogTitle>
             <AlertDialogDescription>
               Si copiano {voci.length} voci con i prezzi di adesso: nell&apos;anno nuovo i prezzi cambiano,
-              l&apos;impianto del foglio no, e li correggi aprendo quell&apos;anno.
+              l&apos;impianto del foglio no, e li correggi aprendo quell&apos;anno. Le copie restano segnate coi
+              prezzi del {annoNum}: nel foglio di un anno dopo, una riga con movimenti senza la tariffa di
+              quell&apos;anno resta senza prezzo, e la nota dice il prezzo della voce e il suo anno.
               {copia && copia.esistenti.length > 0
                 ? ` Nel ${copia.anno} ci sono gia' ${copia.esistenti.length} voci: puoi sostituirle o aggiungere le copie a quelle.`
                 : ''}

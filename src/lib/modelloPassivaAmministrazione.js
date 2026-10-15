@@ -149,8 +149,21 @@ const BLOCCHI = [
 ];
 
 /**
+ * L'ANNO DEI PREZZI DEL MODELLO (prova del cambio d'anno, 15/10/2026): sono
+ * quelli del foglio di settembre 2026, cioe' dei contratti 2026. I contratti rete
+ * e ACI sono annuali senza tacito rinnovo (06/10/2026): proposto per il 2027, il
+ * modello porta prezzi di contratti scaduti il 31/12/2026, e la voce lo dice
+ * (prezzo_anno). Nel foglio di un anno dopo, una riga con movimenti senza la
+ * tariffa dell'anno resta «—» con la nota che dice il prezzo della voce e il suo
+ * anno (D5, decisione dell'utente del 15/10/2026; bloccoPassiva in
+ * passivaAmministrazione.js).
+ */
+export const ANNO_PREZZI_MODELLO = 2026;
+
+/**
  * Le voci del modello dell'amministrazione, pronte da scrivere nell'archivio.
- * @param {number} anno l'anno a cui attaccarle: i prezzi di un anno sono suoi.
+ * @param {number} anno l'anno a cui attaccarle. I prezzi restano del
+ *   ANNO_PREZZI_MODELLO, e la voce lo porta scritto (prezzo_anno).
  * @returns {array} le voci, nell'ordine in cui vanno stampate.
  */
 export function modelloAmministrazione(anno) {
@@ -165,6 +178,7 @@ export function modelloAmministrazione(anno) {
         soggetto,
         voce: voce || '',
         prezzo: Number(prezzo) || 0,
+        prezzo_anno: ANNO_PREZZI_MODELLO,
         unita_misura: unita || 'euro_tonnellata',
         colonna_prezzo: colonna || '',
         ordine: ++i * 10,

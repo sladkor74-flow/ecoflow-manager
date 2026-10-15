@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { anniDaScegliere, annoDiOggi } from '@/lib/periodoPagine';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,7 +13,6 @@ import { STILE_SURPLUS, nomiSurplusDistinti } from '@/lib/surplusVista';
 import NomeSurplus from './NomeSurplus';
 
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
-const ANNI = anniDaScegliere();
 const euro = (v) => (v === null || v === undefined ? '—' : formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const perc = (v) => (v === null || v === undefined ? '—' : `${formatPercentuale(v)}%`);
 const conSegno = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${euro(Math.abs(v))}`);
@@ -79,17 +79,34 @@ export function colonneMargine(c) {
   ];
 }
 
+/**
+ * Che cosa dire sotto il margine (prova del cambio d'anno, 15/10/2026): con prezzi
+ * che mancano «N righe senza prezzo: margine non calcolabile» (la frase la scrive
+ * il calcolo, testo_prezzi_mancanti); senza tonnellate «nessun ricavo»; senza
+ * ricavo ma con tonnellate non si scrive «nessun ricavo», che li' sarebbe falso.
+ * Il 15/01/2027 la dashboard diceva «Rete € 0,00 · nessun ricavo · 7,10 t».
+ */
+export function sottoIlMargine(x) {
+  if (!x) return '';
+  if (x.testo_prezzi_mancanti) return x.testo_prezzi_mancanti;
+  if (x.margine_pct !== null && x.margine_pct !== undefined) return `${formatPercentuale(x.margine_pct)}% del ricavo`;
+  return Number(x.tonnellate) > 0 ? '— del ricavo' : 'nessun ricavo';
+}
+
 // La scheda di un canale per l'anno: il margine, ricavo e costo, e sotto il
-// surplus dell'anno, uno per surplus (13/10/2026).
+// surplus dell'anno, uno per surplus (13/10/2026). Con prezzi che mancano il
+// margine e' «—» col perche', e ricavo e costo si dicono parziali (15/10/2026).
 export function SchedaMargine({ c, anno }) {
+  const parziale = !!c.anno.parziale;
   return (
     <div className="border rounded-lg p-4">
       <h3 className="font-heading font-semibold">{NOMI[c.canale]} — {anno}</h3>
-      <p className={`text-2xl font-bold mt-1 ${c.anno.margine < 0 ? 'text-red-600' : ''}`}>€ {euro(c.anno.margine)}</p>
-      <p className="text-xs text-muted-foreground">margine · {perc(c.anno.margine_pct)} del ricavo</p>
+      <p className={`text-2xl font-bold mt-1 ${c.anno.margine < 0 ? 'text-red-600' : ''}`}>{c.anno.margine === null || c.anno.margine === undefined ? '—' : `€ ${euro(c.anno.margine)}`}</p>
+      <p className={`text-xs ${parziale ? 'text-amber-700' : 'text-muted-foreground'}`}>margine · {sottoIlMargine(c.anno)}</p>
+      {c.anno.testo_da_confermare && <p className="text-xs text-amber-700">{c.anno.testo_da_confermare}</p>}
       <div className="mt-3 pt-3 border-t text-xs space-y-1">
-        <div className="flex justify-between"><span className="text-muted-foreground">Ricavo</span><span className="tabular-nums">€ {euro(c.anno.ricavo)}</span></div>
-        <div className="flex justify-between"><span className="text-muted-foreground">Costo</span><span className="tabular-nums">€ {euro(c.anno.costo)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Ricavo{parziale ? ' (parziale)' : ''}</span><span className="tabular-nums">€ {euro(c.anno.ricavo)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Costo{parziale ? ' (parziale)' : ''}</span><span className="tabular-nums">€ {euro(c.anno.costo)}</span></div>
         <div className="flex justify-between"><span className="text-muted-foreground">Tonnellate</span><span className="tabular-nums">{formatTonnellate(c.anno.tonnellate)} t</span></div>
         <div className="flex justify-between"><span className="text-muted-foreground">Per tonnellata: ricavo / costo / margine</span><span className="tabular-nums">{euro(c.anno.ricavo_t)} / {euro(c.anno.costo_t)} / {euro(c.anno.margine_t)}</span></div>
       </div>
@@ -138,20 +155,26 @@ export function TabellaMargine({ c }) {
           <tbody>
             {[...c.mesi, c.anno].map(r => {
               const rigaAnno = r.mese === 'Anno';
-              const vuoto = !r.ricavo && !r.costo;
+              // Vuoto e' un mese senza movimenti: un mese con tonnellate e
+              // prezzi che mancano non e' vuoto, e' da sistemare (15/10/2026).
+              const vuoto = !r.tonnellate && !r.ricavo && !r.costo;
               const suo = (r.surplus || []).length > 0;
               return (
                 <tr key={r.mese} className={`border-t ${rigaAnno ? 'bg-primary/5 font-semibold border-t-2' : ''} ${vuoto && !rigaAnno ? 'text-muted-foreground' : ''}`}>
                   <td className="px-3 py-1.5">
                     {r.mese}
                     {(r.righe_senza_prezzo > 0 || r.anomalie_passiva > 0) && (
-                      <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-amber-700" title="Un prezzo mancante o un'anomalia della passiva rendono il margine meno affidabile: i dettagli sono nelle due fatturazioni.">
+                      <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-amber-700" title={r.testo_prezzi_mancanti || "Un'anomalia della passiva rende il margine meno affidabile: i dettagli sono nelle due fatturazioni."}>
                         <AlertTriangle className="w-3 h-3" />
                         {r.righe_senza_prezzo > 0 && `${r.righe_senza_prezzo} senza prezzo`}
                         {r.righe_senza_prezzo > 0 && r.anomalie_passiva > 0 && ' · '}
                         {r.anomalie_passiva > 0 && `${r.anomalie_passiva} ${r.anomalie_passiva === 1 ? 'anomalia' : 'anomalie'} in passiva`}
                       </span>
                     )}
+                    {/* Con prezzi che mancano il margine del mese e' «—»: si dice
+                        perche', e che ricavo e costo sono una parte (15/10/2026). */}
+                    {r.testo_prezzi_mancanti && <span className="block text-[11px] font-normal text-amber-700">{r.testo_prezzi_mancanti}; ricavo e costo parziali</span>}
+                    {r.testo_da_confermare && <span className="block text-[11px] font-normal text-amber-700">{r.testo_da_confermare}</span>}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatTonnellate(r.tonnellate)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{euro(r.ricavo)}</td>
@@ -195,7 +218,9 @@ export function opzioniFoglioMargine(c, anno) {
     foglio: NOMI[c.canale],
     intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE  ·  MARGINE',
     titolo: `Margine ${NOMI[c.canale]} — ${anno}`,
-    sottotitolo: `Ricavo della fatturazione attiva meno costo della fatturazione passiva${nomi.length ? `; ricavo e costo comprendono ${nomi.join(' e ')}` : ''}`,
+    // Con prezzi che mancano le celle del margine restano vuote, e il
+    // sottotitolo dice perche' (15/10/2026).
+    sottotitolo: `Ricavo della fatturazione attiva meno costo della fatturazione passiva${nomi.length ? `; ricavo e costo comprendono ${nomi.join(' e ')}` : ''}${c.anno?.testo_prezzi_mancanti ? `. ${c.anno.testo_prezzi_mancanti}: dove mancano i prezzi le celle del margine sono vuote, ricavo e costo parziali` : ''}`,
     colonne: colonneMargine(c),
     righe: [...c.mesi, c.anno],
   };
@@ -204,7 +229,12 @@ export function opzioniFoglioMargine(c, anno) {
 // Il margine della commessa: ricavo della fatturazione attiva meno costo della
 // passiva, per canale. Tre commesse, tre tabelle: non esiste un totale unico.
 export default function MargineCommessa() {
-  const [anno, setAnno] = useState(annoDiOggi);
+  // Gli anni si contano quando la pagina si disegna, non quando il modulo si
+  // carica (prova del cambio d'anno, 15/10/2026): con la scheda aperta dal 31/12,
+  // il 04/01 la lista restava ferma al 2026. Come la Dashboard.
+  const oggi = oggiRoma();
+  const anni = useMemo(() => anniDaScegliere({ oggi }), [oggi]);
+  const [anno, setAnno] = useState(() => annoDiOggi(oggi));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errore, setErrore] = useState('');
@@ -240,7 +270,7 @@ export default function MargineCommessa() {
           <label className="text-xs text-muted-foreground block mb-1">Anno</label>
           <Select value={String(anno)} onValueChange={v => setAnno(Number(v))}>
             <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-            <SelectContent>{ANNI.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
+            <SelectContent>{anni.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <Button variant="outline" onClick={carica} disabled={loading}>

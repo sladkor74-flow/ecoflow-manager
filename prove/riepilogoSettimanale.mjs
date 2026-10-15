@@ -32,6 +32,9 @@
 //    variazione in meno leggibili, i cinque archivi caricati dopo la notte e il
 //    titolo di una voce lunga interi, e su ogni PDF della prova nessuna riga in
 //    due byte, nessuna cella oltre le tre righe, nessun titolo fuori pagina;
+//    e dalla prova del cambio d'anno (15/10/2026) un margine con prezzi che
+//    mancano «—» con la nota del perche', e l'ACI col contratto copiato che
+//    dice «previsione copiata dal ..., da confermare»;
 // 8. le misure del riepilogo (perIlPdf, pezziDellaCella) contro il jspdf vero.
 // node prove/riepilogoSettimanale.mjs (MOSTRA=1 stampa il testo dei PDF,
 // SALVA=<cartella fuori dal repository> li scrive per guardarli, TRACCIA=1 dice
@@ -672,6 +675,38 @@ await sezione('7. IL PDF SI LEGGE TUTTO: IL MENO, LE CELLE LUNGHE, OGNI PDF DELL
   const perdita = { anno: 2026, canali: [{ canale: 'RETE', anno: { ricavo: 1000, costo: 3500.5, margine: -2500.5, margine_pct: -250.05, tonnellate: 10, margine_t: -250.05 }, mesi: [] }] };
   const admin = await pdfDi(L.R.argomentiRiepilogoPdf(base({ isAdmin: true, margine: perdita, cruscotto: { ...C, impianti: notte }, quadro: conVariazione })));
   verifica('la copia dell\'amministratore, con la notte e la variazione in meno: un margine in perdita si legge («-2.500,50 €»), nessuna riga in due byte', admin.tutto.includes('Rete 2026, fino a oggi 1.000,00 € 3.500,50 € -2.500,50 €') && admin.dueByte.length === 0, parte(admin.tutto, 'Economia', 'Come si leggono').slice(0, 300));
+  // UN MARGINE CON PREZZI MANCANTI E' «—», COL PERCHE' (prova del cambio d'anno,
+  // 15/10/2026, difetto 18). Il 15/01/2027 la rete usciva [0, 0, 0, —] e
+  // l'extra raccolta con un margine di -113,50 € fatto da un ricavo che mancava.
+  // Il margine come lo da' il calcolo (margine.ts) quando mancano dei prezzi.
+  const mancano = { anno: 2026, canali: [
+    { canale: 'RETE', anno: { ricavo: 0, costo: 0, margine: null, margine_pct: null, tonnellate: 7.1, margine_t: null, parziale: true, prezzi_mancanti: 7,
+      testo_prezzi_mancanti: '7 righe senza prezzo (3 dell\'attiva, 4 della passiva): margine non calcolabile', testo_da_confermare: '' }, mesi: [] },
+    { canale: 'EXTRA_RACCOLTA', anno: { ricavo: 147, costo: 260.5, margine: null, margine_pct: null, tonnellate: 1.3, margine_t: null, parziale: true, prezzi_mancanti: 1,
+      testo_prezzi_mancanti: '1 riga senza prezzo (1 dell\'attiva): margine non calcolabile', testo_da_confermare: '2 righe con la tariffa copiata dal 2025, da confermare in Target & Status › Nuovo anno' }, mesi: [] },
+  ] };
+  const argMancano = L.R.argomentiRiepilogoPdf(base({ isAdmin: true, margine: mancano }));
+  const sEco = argMancano.sezioni.find(s => /^Economia/.test(s.titolo));
+  const rigaRete = sEco && sEco.righe.find(r => r.celle[0] === 'Rete');
+  const rigaExtra = sEco && sEco.righe.find(r => r.celle[0] === 'Extra raccolta');
+  verifica('Economia con prezzi mancanti: margine, % ed €/t «—», ricavo e costo restano, e la nota dice perche\'', !!rigaRete && rigaRete.celle[4] === '—' && rigaRete.celle[5] === '—' && rigaRete.celle[7] === '—'
+    && rigaRete.celle[2] === 0 && rigaRete.celle[8] === '7 righe senza prezzo (3 dell\'attiva, 4 della passiva): margine non calcolabile; ricavo e costo parziali', J(rigaRete));
+  // una nota lunga continua nelle righe sotto (sezionePerIlPdf): si rimette insieme
+  const iExtra = sEco ? sEco.righe.indexOf(rigaExtra) : -1;
+  const notaExtra = iExtra < 0 ? '' : [rigaExtra, ...sEco.righe.slice(iExtra + 1).filter((r, k, resto) => resto.slice(0, k + 1).every(x => x.celle[0] === ''))].map(r => r.celle[8]).filter(Boolean).join(' ');
+  verifica('...l\'extra raccolta non mostra il margine negativo di un ricavo che manca, e dice le tariffe da confermare', !!rigaExtra && rigaExtra.celle[4] === '—'
+    && notaExtra === '1 riga senza prezzo (1 dell\'attiva): margine non calcolabile; ricavo e costo parziali; 2 righe con la tariffa copiata dal 2025, da confermare in Target & Status › Nuovo anno', notaExtra);
+  const pdfMancano = await pdfDi(argMancano);
+  const ecoMancano = parte(pdfMancano.tutto, 'Economia della commessa', 'Come si leggono');
+  verifica('...e nel PDF: «margine non calcolabile», nessun -113,50, nessuna riga in due byte', ecoMancano.includes('margine non calcolabile') && !/-113,50/.test(ecoMancano) && pdfMancano.dueByte.length === 0, ecoMancano.slice(0, 400));
+  const rigaPiena = (L.R.argomentiRiepilogoPdf(base({ isAdmin: true, margine: perdita })).sezioni.find(s => /^Economia/.test(s.titolo)) || { righe: [] }).righe[0];
+  verifica('controprova: con tutti i prezzi la nota e\' vuota e il margine e\' il numero', !!rigaPiena && rigaPiena.celle[4] === -2500.5 && rigaPiena.celle[8] === '', J(rigaPiena));
+  // L'ACI col contratto copiato dall'anno prima e non ancora confermato
+  // (quadro.aci.da_confermare): la previsione e' quella dell'anno prima.
+  const aciDi = (quadro) => parte((L.R.argomentiRiepilogoPdf(base({ quadro })).sezioni.find(s => /^ACI/.test(s.titolo)) || { righe: [] }).righe.map(r => r.celle.join(' ')).join(' | '), 'Previsione indicativa', ' | ') || '';
+  const aciCopiata = aciDi({ ...q, aci: { ...q.aci, da_confermare: true } });
+  verifica('ACI col contratto copiato: «previsione copiata dal 2025, da confermare»', aciCopiata.includes('previsione copiata dal 2025, da confermare'), aciCopiata);
+  verifica('controprova: col contratto confermato la previsione non dice «copiata»', !/copiata/.test(aciDi(q)), aciDi(q));
   // Chi genera con un nome fuori dalla codifica: il piede resta leggibile.
   const nome = await pdfDi(L.R.argomentiRiepilogoPdf(base({ utente: 'Ștefan Łukasz' })));
   verifica('un nome fuori dalla codifica nel piede: «da Stefan Lukasz», leggibile', /da Stefan Lukasz/.test(nome.tutto) && nome.dueByte.length === 0, nome.testi.slice(0, 12).join(' | '));

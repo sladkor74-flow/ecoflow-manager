@@ -46,7 +46,7 @@
 import { cifreItaliane } from '@/lib/formatoSoldi';
 import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella, FORMATI } from '@/lib/fogliProfessionali';
 import { giornoRoma } from '@/lib/giornoItaliano';
-import { calcExtraRaccolta, totaleRiga, aggregaPerProduttore, prezzoAttivoExtra, avvisoPesoMancante, surplusDelMese, titoloSurplus, aiChiSurplus } from '@/lib/extraRaccoltaCalc';
+import { calcExtraRaccolta, totaleRiga, aggregaPerProduttore, prezzoAttivoExtra, avvisoPesoMancante, surplusDelMese, titoloSurplus, aiChiSurplus, testoInterventiSenzaPrezzo } from '@/lib/extraRaccoltaCalc';
 import { baseSurplus, dettaglioSurplus, nomiSurplusDistinti } from '@/lib/surplusVista';
 import { testoEuroT } from '@/lib/surplus';
 
@@ -229,18 +229,37 @@ function surplusAChi(conto, conCosti) {
  */
 function analisiPerProduttore(dati) {
   const tot = Object.fromEntries(VOCI_ANALISI.map(k => [k, 0]));
+  let senzaPrezzo = 0;
+  // UN MARGINE FATTO DA UN RICAVO CHE MANCA NON E' UN MARGINE (revisione del
+  // 15/10/2026 sul difetto 18 della prova del cambio d'anno). A gennaio 2027 un
+  // intervento senza prezzo (0,6 t, base 2026 chiusa) e uno a 210 €/t: la pagina
+  // diceva «—», l'Excel e il PDF per l'amministratore «TOTALE ... -113,50» e
+  // «Margine % complessivo -77,21%». Il margine del produttore che ha un
+  // intervento da fatturare senza prezzo, quello del TOTALE e la percentuale
+  // sono «—», e la frase dice perche' (la stessa della pagina,
+  // testoInterventiSenzaPrezzo). Costi e ricavi restano scritti.
+  const margineDi = (n, valore) => (n > 0 ? '—' : r2(valore));
   const produttori = Object.entries(dati.per_produttore).map(([p, v]) => {
     for (const k of VOCI_ANALISI) tot[k] += v[k];
-    return [p, ...VOCI_ANALISI.map(k => r2(v[k]))];
+    const suoi = Number(v.senza_prezzo) || 0;
+    senzaPrezzo += suoi;
+    return [p, ...VOCI_ANALISI.map(k => (k === 'margine' ? margineDi(suoi, v[k]) : r2(v[k])))];
   });
   return {
     produttori,
-    totale: ['TOTALE', ...VOCI_ANALISI.map(k => r2(tot[k]))],
+    totale: ['TOTALE', ...VOCI_ANALISI.map(k => (k === 'margine' ? margineDi(senzaPrezzo, tot[k]) : r2(tot[k])))],
     costi: r2(tot.costo_totale),
     ricavi: r2(tot.ricavi),
-    margine_perc: tot.ricavi !== 0 ? r2((tot.margine / tot.ricavi) * 100) : 0,
+    margine_perc: senzaPrezzo ? null : tot.ricavi !== 0 ? r2((tot.margine / tot.ricavi) * 100) : 0,
+    senza_prezzo: senzaPrezzo,
+    testo_senza_prezzo: testoInterventiSenzaPrezzo(senzaPrezzo),
   };
 }
+
+// La percentuale del margine in una cella: «—» quando non si calcola.
+const percentualeMargine = (perc) => (perc === null || perc === undefined ? '—' : `${cifreItaliane(perc, 2, 2)}%`);
+// La riga che dice perche' il margine e' «—», sotto l'analisi e il conto del mese.
+const rigaMargineMancante = (analisi) => `Margine «—»: ${analisi.testo_senza_prezzo}.`;
 
 /**
  * IL CONTO DEL MESE COL SURPLUS, per l'amministratore: costi, ricavi e margine,
@@ -251,10 +270,13 @@ function analisiPerProduttore(dati) {
 function contoDelMese(dati, analisi) {
   const costi = { standard: analisi.costi, surplus: dati.totale_surplus_costo, totale: r2(analisi.costi + dati.totale_surplus_costo) };
   const ricavi = { standard: dati.totale_standard, surplus: dati.totale_surplus, totale: dati.totale_imponibile };
-  const margine = { standard: r2(ricavi.standard - costi.standard), surplus: r2(ricavi.surplus - costi.surplus), totale: r2(ricavi.totale - costi.totale) };
+  // con un intervento da fatturare senza prezzo il margine standard e quello
+  // totale sono «—» (15/10/2026); quello del surplus si calcola, i suoi €/t ci sono
+  const manca = analisi.senza_prezzo > 0;
+  const margine = { standard: manca ? '—' : r2(ricavi.standard - costi.standard), surplus: r2(ricavi.surplus - costi.surplus), totale: manca ? '—' : r2(ricavi.totale - costi.totale) };
   return {
     righe: [['Costi', costi], ['Ricavi', ricavi], ['Margine', margine]].map(([voce, v]) => [voce, v.standard, v.surplus, v.totale]),
-    margine_perc: ricavi.totale !== 0 ? r2((margine.totale / ricavi.totale) * 100) : 0,
+    margine_perc: manca ? null : ricavi.totale !== 0 ? r2((margine.totale / ricavi.totale) * 100) : 0,
   };
 }
 
@@ -355,12 +377,22 @@ const testoSecondarie = (n) => (n === 1
   ? "un trasferimento da stoccaggio, pagato come trasporto di secondaria: i suoi chili non sono nel TOTALE QUANTITA'"
   : `${cifreItaliane(n, 0, 0)} trasferimenti da stoccaggio, pagati come trasporti di secondaria: i loro chili non sono nel TOTALE QUANTITA'`);
 
+// IL PERIODO DEL DOCUMENTO (prova del cambio d'anno, 15/10/2026): «Dicembre
+// 2026», o «Tutti 2026» per l'anno intero; senza anno (la pagina con l'anno su
+// «Tutti» e interventi di piu' anni, annoDelDocumento in extraRaccoltaCalc.js)
+// «Tutti gli anni», mai l'anno di oggi al posto di quello dei movimenti.
+export const periodoDelDocumento = (mese, anno) => {
+  const m = String(mese || 'Tutti');
+  if (anno !== null && anno !== undefined && anno !== '') return `${m} ${anno}`;
+  return m.toLowerCase() === 'tutti' ? 'Tutti gli anni' : `${m}, tutti gli anni`;
+};
+
 // Il blocco di testa dei due file: canale, mese per fine trasporto, fino a che
 // giorno arrivano le schede dell'extra raccolta. stato: quello gia' letto (le prove).
 function documentoExtra(mese, anno, stato, comeDocumento = true) {
   const opzioni = {
-    titolo: `Fatturazione extra raccolta — ${mese} ${anno}`,
-    canale: 'EXTRA_RACCOLTA', periodo: `${mese} ${anno}`, entita: ['ExtraRaccolta'],
+    titolo: `Fatturazione extra raccolta — ${periodoDelDocumento(mese, anno)}`,
+    canale: 'EXTRA_RACCOLTA', periodo: periodoDelDocumento(mese, anno), entita: ['ExtraRaccolta'],
     ...(stato !== undefined ? { stato } : {}),
   };
   return comeDocumento ? documentoDa(opzioni) : opzioni;
@@ -377,7 +409,7 @@ const celleSurplus = (nome, x, conCosti) => (conCosti
 
 export async function exportExtraRaccoltaExcel(records, mese, anno, contesto, opzioni = {}) {
   const doc = await documentoExtra(mese, anno, opzioni.stato);
-  const sheetName = `${MESI_UPPER[mese] || String(mese).toUpperCase()} ${anno}`;
+  const sheetName = periodoDelDocumento(MESI_UPPER[mese] || String(mese).toUpperCase(), anno).toUpperCase();
   const dati = datiExportExtra(records, contesto);
   const conCosti = opzioni.isAdmin === true;
   const wsData = [];
@@ -507,7 +539,9 @@ export async function exportExtraRaccoltaExcel(records, mese, anno, contesto, op
     }
     wsData.push([]);
     stili[wsData.length] = 'gruppo';
-    wsData.push(['Margine % complessivo', `${cifreItaliane(perc, 2, 2)}%`]);
+    wsData.push(['Margine % complessivo', percentualeMargine(perc)]);
+    // il perche' del «—» (15/10/2026)
+    if (analisi.senza_prezzo) wsData.push([rigaMargineMancante(analisi)]);
   }
 
   // I formati, area per area: negli interventi chili, prezzo a tonnellata e
@@ -534,7 +568,7 @@ export async function exportExtraRaccoltaExcel(records, mese, anno, contesto, op
   const quante = Math.max(1, ...wsData.map(r => r.length));
   for (const i of iSurplus) vestiRigaSurplus(ws.getRow(testa + i + 1), quante);
   for (const i of iSurplusAChi) vestiRigaSurplus(ws.getRow(testa + i + 1), wsData[i].length);
-  return scaricaCartella(wb, `SMOCO-Fatturazione EXTRA RACCOLTA ${mese} ${anno}.xlsx`);
+  return scaricaCartella(wb, `SMOCO-Fatturazione EXTRA RACCOLTA ${periodoDelDocumento(mese, anno)}.xlsx`);
 }
 
 /** La riga del surplus nel foglio: fondo indaco chiaro, testo indaco scuro in corsivo, barra a sinistra. */
@@ -572,7 +606,9 @@ export async function exportExtraRaccoltaPDF(records, mese, anno, contesto, opzi
       ...analisi.produttori.map(celle => ({ celle })),
       { stile: 'totale', celle: analisi.totale },
       // col surplus la percentuale sta nel conto del mese, che lo comprende
-      ...(conSurplus ? [] : [{ stile: 'gruppo', celle: ['Margine % complessivo', ...VOCI_ANALISI.map(() => null).slice(1), `${cifreItaliane(analisi.margine_perc, 2, 2)}%`] }]),
+      ...(conSurplus ? [] : [{ stile: 'gruppo', celle: ['Margine % complessivo', ...VOCI_ANALISI.map(() => null).slice(1), percentualeMargine(analisi.margine_perc)] }]),
+      // il perche' del «—» (15/10/2026)
+      ...(analisi.senza_prezzo ? [{ celle: [rigaMargineMancante(analisi), ...VOCI_ANALISI.map(() => null)] }] : []),
     ],
   });
   const sezioneConto = () => {
@@ -582,7 +618,8 @@ export async function exportExtraRaccoltaPDF(records, mese, anno, contesto, opzi
       colonne: [{ titolo: 'VOCE', tipo: 'testo', peso: 2 }, { titolo: 'STANDARD', tipo: 'euro', peso: 1 }, { titolo: 'SURPLUS', tipo: 'euro', peso: 1 }, { titolo: 'TOTALE', tipo: 'euro', peso: 1 }],
       righe: [
         ...conto.righe.map(celle => ({ celle })),
-        { stile: 'gruppo', celle: ['Margine % complessivo', null, null, `${cifreItaliane(conto.margine_perc, 2, 2)}%`] },
+        { stile: 'gruppo', celle: ['Margine % complessivo', null, null, percentualeMargine(conto.margine_perc)] },
+        ...(analisi.senza_prezzo ? [{ celle: [rigaMargineMancante(analisi), null, null, null] }] : []),
       ],
     };
   };
@@ -615,9 +652,9 @@ export async function exportExtraRaccoltaPDF(records, mese, anno, contesto, opzi
   const { esportaSezioniPdf } = await import('@/lib/esportaTabella');
   const n = dati.righe.length;
   await esportaSezioniPdf({
-    nomeFile: `SMOCO-Fatturazione EXTRA RACCOLTA ${mese} ${anno}`,
+    nomeFile: `SMOCO-Fatturazione EXTRA RACCOLTA ${periodoDelDocumento(mese, anno)}`,
     intestazione: 'SMOCO S.r.l.  ·  COMMESSA ECOTYRE  ·  EXTRA RACCOLTA',
-    titolo: `Fatturazione extra raccolta — ${mese} ${anno}`,
+    titolo: `Fatturazione extra raccolta — ${periodoDelDocumento(mese, anno)}`,
     sottotitolo: `${n} ${n === 1 ? 'intervento' : 'interventi'}${dati.secondarie_n ? `, di cui ${dati.secondarie_n === 1 ? 'un trasporto' : `${dati.secondarie_n} trasporti`} di secondaria (non si fatturano a Ecotyre)` : ''}`,
     documento: documentoExtra(mese, anno, opzioni.stato, false),
     riepilogo: [

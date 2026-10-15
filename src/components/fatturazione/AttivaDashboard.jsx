@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { anniDaScegliere } from '@/lib/periodoPagine';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
@@ -89,7 +89,6 @@ export function TotaleCanale({ label, doc, righe }) {
 }
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-const ANNI = anniDaScegliere();
 const STATI = {
   elaborata: 'bg-blue-100 text-blue-700', verificata: 'bg-green-100 text-green-700',
   approvata: 'bg-purple-100 text-purple-700', esportata: 'bg-cyan-100 text-cyan-700',
@@ -115,6 +114,11 @@ export function fraseErrore(a) {
 
 export default function AttivaDashboard({ periodo, setPeriodo, data, loading, elaborating, onElabora, onReload, isAdmin, anomalie, onVaiTariffe }) {
   const { anno, mese } = periodo;
+  // Gli anni si contano quando la pagina si disegna, non quando il modulo si
+  // carica (prova del cambio d'anno, 15/10/2026): con la scheda aperta dal
+  // 31/12, il 04/01 la lista restava ferma al 2026. Come la Dashboard.
+  const oggi = oggiRoma();
+  const anni = useMemo(() => anniDaScegliere({ oggi }), [oggi]);
   const [anomalieAnteprima, setAnomalieAnteprima] = useState([]);
   const [showConfirm, setShowConfirm] = useState(false);
   // Chiusura e riapertura valgono per un canale alla volta: qui c'e' quale
@@ -243,7 +247,7 @@ export default function AttivaDashboard({ periodo, setPeriodo, data, loading, el
           <label className="text-xs text-muted-foreground block mb-1">Anno</label>
           <Select value={String(anno)} onValueChange={v => setPeriodo({ ...periodo, anno: Number(v) })}>
             <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-            <SelectContent>{ANNI.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
+            <SelectContent>{anni.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div>

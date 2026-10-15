@@ -23,6 +23,9 @@
 // 6. Nel sorgente: niente title= per le spiegazioni (non si vedono sul
 //    telefono), niente .toFixed, localStorage solo in src/lib/avvisiNascosti.js,
 //    nessuna parola della piattaforma a video.
+// Prova del cambio d'anno (15/10/2026): con prezzi che mancano la sezione
+// Economia scrive il margine «—» col perche', ricavo e costo parziali, e
+// «nessun ricavo» solo senza tonnellate.
 // Revisione delle migliorie (11/10/2026), i rilievi dei revisori: le province
 // ferme sono quelle senza ritiri negli ultimi due mesi finiti; un anno chiuso si
 // misura al 31/12 e le regioni dicono il perche' vero; l'attiva di un anno
@@ -35,6 +38,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as Q from '../base44/shared/quadroCommessa.ts';
 import { attesoAllaData, targetAnnuoDellAnno } from '../base44/shared/attesoContratto.ts';
+import { calcolaMargineAnno } from '../base44/shared/margine.ts';
 
 const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
 let ok = 0, ko = 0;
@@ -278,6 +282,39 @@ verifica('la freschezza: due date, e i controlli della notte', fresc.includes('0
 
 const eco = testo(disegna('SezioneEconomia', { margine: { anno: 2026, canali: [{ canale: 'RETE', anno: { margine: 1234.5, margine_pct: 12.3, tonnellate: 100, ricavo: 10000, costo: 8765.5, ricavo_t: 100, costo_t: 87.655, margine_t: 12.345 } }] }, anno: 2026 }));
 verifica('l\'economia: euro all\'italiana, due decimali', eco.includes('€ 1.234,50') && eco.includes('€ 8.765,50') && eco.includes('visibile solo all\'amministratore'), eco);
+// UN MARGINE CON PREZZI MANCANTI E' «—» ANCHE NELLA DASHBOARD (prova del cambio
+// d'anno, 15/10/2026, difetto 18). Il 15/01/2027, senza le tariffe 2027, la
+// sezione Economia scriveva «Rete € 0,00 nessun ricavo · 7,10 t» ed «Extra
+// raccolta € -113,50 -77,2% del ricavo». Il margine del calcolo vero
+// (calcolaMargineAnno) su gennaio 2027 con le sole tariffe del 2026.
+{
+  const SOLO_2026 = { data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31' };
+  const mov = (id, kg, giorno) => ({ id, stato: 'terminato', cer: '160103', classe: 'A', id_ordine: 'ET' + id, numero_fir: 'F' + id, peso_effettivo: kg, ordine_immesso_il: giorno, trasporto_iniziato_il: giorno, trasporto_finito_il: giorno,
+    trasportatore: 'ALFA SRL', destinazione: 'BETA IMPIANTI', provincia: 'BA', tipo_destinazione: 'imp', automezzo: 'AA111AA' });
+  const datiM = {
+    reteAll: [mov('D1', 10000, '2026-12-10T09:00:00Z'), mov('G1', 7100, '2027-01-12T09:00:00Z')], aciAll: [], extraAll: [], secondarieAll: [],
+    fornitori: [{ ragione_sociale: 'ALFA SRL', stato: 'attivo' }, { ragione_sociale: 'BETA IMPIANTI', stato: 'attivo' }],
+    tariffe: [
+      { id: 'a1', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', valore: 202, unita_misura: '€/t', stato: 'attivo', ...SOLO_2026 },
+      { id: 'p1', direzione: 'PASSIVA', stato: 'attivo', prestazione: 'RACCOLTA', fornitore_nome: 'Alfa s.r.l.', tipologia: 'RETE', valore: 60, unita_misura: '€/t', ...SOLO_2026 },
+      { id: 'p2', direzione: 'PASSIVA', stato: 'attivo', prestazione: 'TRATTAMENTO', fornitore_nome: 'Beta Impianti', tipologia: 'RETE', valore: 80, unita_misura: '€/t', ...SOLO_2026 },
+    ],
+  };
+  const m27 = calcolaMargineAnno(datiM, 2027, 0);
+  const eco27 = testo(disegna('SezioneEconomia', { margine: m27, anno: 2027 }));
+  const rete = (eco27.match(/Rete .*?(?= ACI )/) || [''])[0];
+  verifica('Economia 2027 senza le tariffe dell\'anno: la rete dice «—» e il perche\', ricavo e costo parziali, niente «nessun ricavo» ne\' € 0,00 di margine',
+    rete.includes('Rete — 3 righe senza prezzo (1 dell\'attiva, 2 della passiva): margine non calcolabile · 7,10 t') && rete.includes('Ricavo (parziale)') && rete.includes('Per tonnellata —')
+    && !/nessun ricavo/.test(rete) && !/Rete € 0,00/.test(rete), rete);
+  verifica('...l\'ACI senza tonnellate dice «nessun ricavo»', /ACI € 0,00 nessun ricavo · 0,00 t/.test(eco27), eco27);
+  const m26 = calcolaMargineAnno(datiM, 2026, 11);
+  const eco26 = testo(disegna('SezioneEconomia', { margine: m26, anno: 2026 }));
+  verifica('controprova: il 2026 con tutti i prezzi dice il margine e la percentuale', /Rete € 620,00 30,7% del ricavo · 10,00 t/.test(eco26) && !/parziale|non calcolabile/.test(eco26), eco26.slice(0, 400));
+  // Le righe con la tariffa copiata e da confermare (CA3-1): sotto il margine.
+  const conCopia = { anno: 2027, canali: [{ canale: 'RETE', anno: { ...m26.canali[0].anno, righe_da_confermare: 2, testo_da_confermare: '2 righe con la tariffa copiata dal 2026, da confermare in Target & Status › Nuovo anno' } }] };
+  verifica('...e le righe con la tariffa copiata si dicono sotto il margine', testo(disegna('SezioneEconomia', { margine: conCopia, anno: 2027 })).includes('2 righe con la tariffa copiata dal 2026, da confermare in Target & Status › Nuovo anno'));
+}
+
 
 // La pagina intera, al primo disegno (prima delle risposte): non si rompe senza
 // dati, e l'economia c'e' solo per l'amministratore.

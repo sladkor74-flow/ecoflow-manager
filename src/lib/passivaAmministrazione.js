@@ -36,8 +36,9 @@
 import { normalizzaRagioneSociale } from '@/lib/normalizzaRagioneSocialeClient';
 import { getRegioneFromProvincia } from '@/lib/regioneMap';
 import { tariffaValeIl, tariffaNonDisattivata } from '@/lib/validitaTariffa';
+import { rigaConTariffaDaConfermare, annoDellaCopia, tariffaDaConfermare } from '@/lib/ecotyreTariffe';
 
-const n2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+const n2 =(v) => Math.round((Number(v) || 0) * 100) / 100;
 const n3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
 const testo = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 const chiave = (v) => testo(v).toLowerCase();
@@ -218,6 +219,23 @@ const rigaCompresa = (r) => /compreso/i.test(String(r && r.note || '')) || (r &&
 // Una riga con un'unita' di misura che la passiva non sa leggere vale zero come
 // una senza tariffa (11/10/2026): il suo prezzo non e' un prezzo da scrivere.
 const rigaSenzaTariffa = (r) => /senza tariffa|sconosciuta/i.test(String(r && r.note || ''));
+// Una riga prezzata con una tariffa copiata dall'anno prima da «Prepara le
+// tariffe» e non ancora confermata: il segno che il calcolo della passiva le
+// mette (tariffa_da_confermare) o la nota che lo dice. Per D4, decisione
+// dell'utente del 15/10/2026, ferma il documento come una riga senza prezzo
+// (bloccoPassiva e foglioPassiva, sotto). Un interno, il prezzo unico della
+// raccolta e una riga senza tariffa non sono righe da confermare.
+const rigaDaConfermare = (r) => !!r && !rigaInterna(r) && !rigaCompresa(r) && !rigaSenzaTariffa(r)
+  && (r.tariffa_da_confermare === true || rigaConTariffaDaConfermare(r));
+// L'anno da cui sono state copiate: quello scritto nella nota della riga
+// («prezzo copiato dal 2026»), null se la nota non lo dice.
+const annoDelleCopie = (righe) => {
+  for (const r of righe || []) {
+    const a = annoDellaCopia({ note: r && r.note });
+    if (a) return a;
+  }
+  return null;
+};
 
 // Le unita' del tariffario che il foglio sa trasformare in una colonna di prezzo.
 const UNITA_TARIFFARIO = ['€/t', '€/kg', '€/viaggio'];
@@ -328,13 +346,32 @@ export function prezzoDellaVoce(voce, righe, tariffe, canale, blocco, giorno) {
     };
   }
   const t = tariffaDellaVoce(tariffe, voce, canale, blocco, giorno);
-  if (t) return { ...prezzoDaTariffa(t.valore, t.unita_misura), fonte: 'tariffario' };
+  // Una tariffa del tariffario copiata dall'anno prima e non confermata si dice
+  // (D4, decisione dell'utente del 15/10/2026): bloccoPassiva la scrive nella
+  // nota, e con dei movimenti la riga resta senza prezzo.
+  if (t) {
+    return {
+      ...prezzoDaTariffa(t.valore, t.unita_misura), fonte: 'tariffario',
+      ...(tariffaDaConfermare(t) ? { da_confermare: true, anno_copia: annoDellaCopia(t) } : {}),
+    };
+  }
   return {
     prezzo: Number(voce.prezzo) || 0,
     unita_misura: voce.unita_misura || 'euro_tonnellata',
     fonte: 'modello',
   };
 }
+
+/**
+ * L'ANNO DEL PREZZO DI UNA VOCE (prova del cambio d'anno, 15/10/2026): quello
+ * scritto (prezzo_anno: il modello dell'amministrazione e le voci copiate da un
+ * anno all'altro portano i prezzi dell'anno prima), altrimenti l'anno della
+ * voce. null se la voce non dice nessuno dei due.
+ */
+export const annoDelPrezzo = (voce) => Number(voce && voce.prezzo_anno) || Number(voce && voce.anno) || null;
+
+// Un prezzo in una frase: «70 €/t», «350 €/viaggio».
+const prezzoTesto = (prezzo, unita) => `${(Number(prezzo) || 0).toLocaleString('it-IT', { maximumFractionDigits: 4, useGrouping: 'always' })} ${unita === 'euro_viaggio' ? '€/viaggio' : '€/t'}`;
 
 /**
  * I CHILI DEL MESE SI ASSEGNANO, NON SI FILTRANO.
@@ -681,6 +718,11 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surpl
   let totaleT = 0;
   let totaleEuro = 0;
   let totaleSurplus = 0;
+  // le voci con movimenti senza la tariffa dell'anno, o con una tariffa copiata
+  // e non confermata: restano «—» (D5 e D4, sotto)
+  const senzaPrezzo = { ...contoVuoto(), mancanti: contoVuoto(), da_confermare: { ...contoVuoto(), anno_copia: null } };
+  // l'anno del foglio: quello del giorno con cui si legge il tariffario
+  const annoFoglio = Number(String(giorno || '').slice(0, 4)) || null;
   const soggettiUsati = new Set();
   const ordineSoggetti = [...new Set(scelte.map(v => testo(v.soggetto)))];
   for (const soggetto of ordineSoggetti) {
@@ -697,7 +739,50 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surpl
       // Quando il prezzo non viene ne' dai movimenti ne' dal tariffario, il
       // foglio lo dichiara: un numero senza una fonte, su una fattura, va detto.
       const avvisi = [testo(v.note)];
-      if (p.fonte === 'modello' && q.righe.some(rigaSenzaTariffa)) {
+      // IL PREZZO DI UN CONTRATTO SCADUTO NON SI USA IN SILENZIO (prova del
+      // cambio d'anno, 15/10/2026). I contratti rete e ACI sono annuali senza
+      // tacito rinnovo (06/10/2026); il ripiego sul prezzo della voce (regola del
+      // 03/10/2026) a gennaio 2027 prezzava i movimenti senza la tariffa 2027 coi
+      // prezzi delle voci del 2026: GATIM 6 t x 70 = 420,00, Gatim 7,1 t x 105,
+      // Irigom 15 t x 90, in tutto 2.515,50 € contro una passiva a zero, e la nota
+      // non diceva di che anno. D5, decisione dell'utente del 15/10/2026: una
+      // riga con movimenti senza la tariffa dell'anno resta «—» - prezzo e totale
+      // null, fuori dal totale, che lo dice (senza_prezzo) - finche' la tariffa
+      // dell'anno non e' nel tariffario, come nella fatturazione passiva; e la
+      // nota dice il prezzo della voce e il suo anno. Una voce col prezzo
+      // dell'anno del foglio (scritto per quell'anno) resta com'era. Una voce
+      // senza movimenti nel mese vale zero comunque: tiene il prezzo, che e' un
+      // riferimento, e la nota dice di che anno e'.
+      const annoPrezzo = p.fonte === 'modello' ? annoDelPrezzo(v) : null;
+      const scaduto = !!(annoPrezzo && annoFoglio && annoPrezzo < annoFoglio);
+      const senzaTariffaQui = p.fonte === 'modello' && q.righe.some(rigaSenzaTariffa);
+      const mancaQui = scaduto && senzaTariffaQui;
+      // LA TARIFFA COPIATA E NON CONFERMATA (revisione del 15/10/2026). A gennaio
+      // il caso normale non e' la tariffa che manca: «Prepara le tariffe» ha gia'
+      // copiato nel 2027 quelle del 2026, con la nota «da confermare». La
+      // fatturazione passiva le segna, il foglio no: GATIM S.R.L. / Calabria 6 t
+      // x 70 = 420,00, Gatim 7,1 t x 105, Irigom 15 t x 90, la tratta Nappi →
+      // Irigom, 3.025,50 € di rete e 344,00 di ACI coi prezzi del 2026, la nota
+      // vuota e il totale intero. D4, decisione dell'utente del 15/10/2026: una
+      // riga prezzata con una tariffa copiata e non confermata ferma il documento
+      // come una riga senza prezzo; D5: nel foglio resta «—». Vale per le righe
+      // dei movimenti e per il tariffario quando la voce ha movimenti; senza
+      // movimenti la voce vale zero comunque, e la nota dice la copia.
+      const copiateQui = q.righe.filter(rigaDaConfermare);
+      const copiataDalTariffario = p.fonte === 'tariffario' && p.da_confermare === true;
+      const daConfermareQui = !mancaQui && (copiateQui.length > 0 || (copiataDalTariffario && q.righe.length > 0));
+      const annoCopia = copiateQui.length || copiataDalTariffario ? (annoDelleCopie(copiateQui) || p.anno_copia || null) : null;
+      const restaSenzaPrezzo = mancaQui || daConfermareQui;
+      if (mancaQui) {
+        avvisi.push(`Tariffa ${annoFoglio} mancante: il prezzo della voce (${prezzoTesto(p.prezzo, p.unita_misura)}) e' del ${annoPrezzo}, contratto scaduto il 31/12/${annoPrezzo}. La riga resta senza prezzo e fuori dal totale finche' la tariffa ${annoFoglio} non e' nel tariffario.`);
+      } else if (daConfermareQui) {
+        const tSenza = n3(q.righe.filter(rigaSenzaTariffa).reduce((s, r) => s + (Number(r.tonnellate) || 0), 0));
+        avvisi.push(`${fraseCopiata(annoFoglio, annoCopia, p.prezzo, p.unita_misura)} La riga resta senza prezzo e fuori dal totale finche' non e' confermata.${tSenza > 0 ? ` Altre ${tTesto(tSenza)} t della voce non hanno la tariffa del mese.` : ''}`);
+      } else if (copiataDalTariffario) {
+        avvisi.push(`Prezzo dal tariffario: ${fraseCopiata(annoFoglio, annoCopia, p.prezzo, p.unita_misura)}`);
+      } else if (scaduto && !q.righe.length) {
+        avvisi.push(`Prezzo della voce del ${annoPrezzo} (contratto scaduto il 31/12/${annoPrezzo}): la tariffa ${annoFoglio} non e' ancora nel tariffario.`);
+      } else if (senzaTariffaQui) {
         avvisi.push('Nel tariffario non c\'e\' la tariffa per questi movimenti: il prezzo arriva dal modello. Da sistemare nel tariffario.');
       } else if (p.fonte === 'compreso') {
         avvisi.push('Compreso nel prezzo unico della raccolta: qui non si fattura, altrimenti si paga due volte.');
@@ -746,7 +831,12 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surpl
             : `La fatturazione passiva per questa voce calcola ${euro} €: la differenza va guardata.`);
         }
       }
-      prezzate.push({ righe: q.righe, fonte: p.fonte, prezzata: !!PREZZO_SENZA_TARIFFA[p.fonte] && Number(p.prezzo) > 0 && totale > 0 });
+      prezzate.push({ righe: q.righe, fonte: p.fonte, prezzata: !restaSenzaPrezzo && !!PREZZO_SENZA_TARIFFA[p.fonte] && Number(p.prezzo) > 0 && totale > 0 });
+      if (restaSenzaPrezzo) {
+        conta(senzaPrezzo, soggetto, q.tonnellate);
+        conta(mancaQui ? senzaPrezzo.mancanti : senzaPrezzo.da_confermare, soggetto, q.tonnellate);
+        if (daConfermareQui && annoCopia && !senzaPrezzo.da_confermare.anno_copia) senzaPrezzo.da_confermare.anno_copia = annoCopia;
+      }
       return {
         tipo: 'voce',
         soggetto,
@@ -754,22 +844,36 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surpl
         tonnellate: q.tonnellate,
         viaggi: q.viaggi,
         viaggi_pagati: n2(q.viaggi_pagati),
-        prezzo: p.prezzo,
+        // «—» quando la tariffa dell'anno manca e il prezzo della voce e' di un
+        // contratto scaduto (D5, 15/10/2026): il prezzo della voce resta scritto
+        // a parte (prezzo_della_voce), col suo anno, per la nota e per i file.
+        // Lo stesso quando la tariffa e' copiata dall'anno prima e non
+        // confermata (D4): il prezzo copiato resta a parte (prezzo_copiato), con
+        // l'anno da cui viene (anno_copia).
+        prezzo: restaSenzaPrezzo ? null : p.prezzo,
         unita_misura: p.unita_misura,
         fonte_prezzo: p.fonte,
+        senza_prezzo: restaSenzaPrezzo,
+        // perche' e' «—»: 'tariffa_mancante' o 'tariffa_da_confermare'; null se ha il prezzo
+        senza_prezzo_perche: mancaQui ? 'tariffa_mancante' : daConfermareQui ? 'tariffa_da_confermare' : null,
+        prezzo_della_voce: scaduto ? p.prezzo : null,
+        anno_prezzo: scaduto ? annoPrezzo : null,
+        prezzo_copiato: daConfermareQui ? p.prezzo : null,
+        anno_copia: daConfermareQui ? annoCopia : null,
         // Quanto dell'importo non viene dalla moltiplicazione: lo scrittore del
         // foglio lo aggiunge alla formula, cosi' il conto si legge per intero.
         oltre_tariffa: oltre,
         // Negli impianti dell'ACI il foglio ha due colonne di prezzo: la voce
         // dice in quale delle due sta il suo.
         colonna_prezzo: testo(v.colonna_prezzo),
-        totale,
+        totale: restaSenzaPrezzo ? null : totale,
         note: avvisi.filter(Boolean).join(' '),
       };
     });
     const tFuori = n3(fuori.reduce((s, r) => s + (Number(r.tonnellate) || 0), 0));
     const tSoggetto = n3(dettaglio.reduce((s, d) => s + d.tonnellate, 0) + tFuori);
-    const eStandard = n2(dettaglio.reduce((s, d) => s + d.totale, 0));
+    // una voce «—» (D5) non e' zero: resta fuori dalla somma, e il blocco lo dice
+    const eStandard = n2(dettaglio.reduce((s, d) => s + (d.totale === null ? 0 : d.totale), 0));
     // Il surplus: le sue righe vanno nell'importo del soggetto, non nelle sue
     // tonnellate (sono le stesse del mese, gia' contate nelle voci).
     const sueSurplus = righeSurplusDelSoggetto(surplus, blocco, soggetto, sue, righeSoggetto,
@@ -801,7 +905,35 @@ export function bloccoPassiva(voci, dati, canale, blocco, tariffe, giorno, surpl
     totale_standard: n2(totaleEuro - totaleSurplus),
     totale_surplus: n2(totaleSurplus),
     non_previsti: nonPrevisti,
+    // Le voci con movimenti senza la tariffa dell'anno, fuori dal totale (D5,
+    // decisione dell'utente del 15/10/2026): { voci, tonnellate, soggetti, anno,
+    // testo }, con la frase che i file scrivono sotto il totale. null quando non
+    // ce ne sono: allora il totale e' intero. Le due ragioni a parte (revisione
+    // del 15/10/2026): mancanti { voci, tonnellate, soggetti } e da_confermare
+    // { voci, tonnellate, soggetti, anno_copia }, le tariffe copiate e non
+    // confermate (D4).
+    senza_prezzo: senzaPrezzo.voci ? conTesto({ ...senzaPrezzo, tratte: [], anno: annoFoglio }) : null,
   };
+}
+
+// I conti delle righe «—» (D5 e D4, 15/10/2026): quante, quante tonnellate, di chi.
+const contoVuoto = () => ({ voci: 0, tonnellate: 0, soggetti: [] });
+function conta(acc, soggetto, tonnellate) {
+  acc.voci++;
+  acc.tonnellate = n3(acc.tonnellate + (Number(tonnellate) || 0));
+  if (!acc.soggetti.includes(soggetto)) acc.soggetti.push(soggetto);
+}
+
+/**
+ * La frase di una tariffa copiata dall'anno prima e non confermata, per le note
+ * del foglio (D4, decisione dell'utente del 15/10/2026): «Tariffa 2027 copiata
+ * dal 2026 e non ancora confermata (70 €/t): si conferma sul contratto 2027 in
+ * Target & Status › Nuovo anno.» Senza un prezzo solo (tariffe diverse sulla
+ * stessa voce) non lo scrive.
+ */
+function fraseCopiata(annoFoglio, annoCopia, prezzo, unita) {
+  const prezzoQui = prezzo !== null && prezzo !== undefined ? ` (${prezzoTesto(prezzo, unita)})` : '';
+  return `Tariffa ${annoFoglio || "dell'anno"} copiata ${annoCopia ? `dal ${annoCopia}` : "dall'anno prima"} e non ancora confermata${prezzoQui}: si conferma sul contratto ${annoFoglio || "dell'anno"} in Target & Status › Nuovo anno.`;
 }
 
 /**
@@ -876,7 +1008,21 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
   // destinatario stanno sulla riga della tratta. Il surplus del trasporto delle
   // secondarie, se c'e', sta sotto le tratte del suo trasportatore, una riga per
   // surplus: anche qui le tonnellate sono le stesse e non si sommano.
-  const trasporti = (dati.trasporti_secondaria || []).flatMap(g => [...(g.righe || []).map(t => ({
+  //
+  // UNA TRATTA CON LA TARIFFA COPIATA E NON CONFERMATA E' «—» (revisione del
+  // 15/10/2026; D4 e D5, decisioni dell'utente del 15/10/2026), come le voci:
+  // prezzo e totale null, fuori dal totale, e il prezzo copiato a parte.
+  const annoFoglio = Number(anno) || Number(String(giorno).slice(0, 4)) || null;
+  const trasportiSenza = { ...contoVuoto(), mancanti: contoVuoto(), da_confermare: { ...contoVuoto(), anno_copia: null } };
+  const trasporti = (dati.trasporti_secondaria || []).flatMap(g => [...(g.righe || []).map(t => {
+    const copiata = g.interno !== true && rigaDaConfermare(t);
+    const annoCopia = copiata ? annoDelleCopie([t]) : null;
+    if (copiata) {
+      conta(trasportiSenza, testo(g.fornitore), n3(t.tonnellate));
+      conta(trasportiSenza.da_confermare, testo(g.fornitore), n3(t.tonnellate));
+      if (annoCopia && !trasportiSenza.da_confermare.anno_copia) trasportiSenza.da_confermare.anno_copia = annoCopia;
+    }
+    return {
     produttore: testo(t.stoccaggio),
     trasportatore: testo(g.fornitore),
     destinatario: testo(t.destinazione),
@@ -888,7 +1034,10 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     // riga a zero, detta nella nota: il prezzo resta zero anche qui, altrimenti
     // la formula del foglio Excel, ricalcolando, la rimetterebbe a prezzo pieno.
     unita_misura: prezzoTrasporto(t).unita_misura,
-    prezzo: prezzoTrasporto(t).prezzo,
+    prezzo: copiata ? null : prezzoTrasporto(t).prezzo,
+    senza_prezzo: copiata,
+    prezzo_copiato: copiata ? prezzoTrasporto(t).prezzo : null,
+    anno_copia: annoCopia,
     viaggi: Number(t.viaggi) || 0,
     // I VIAGGI CONTATI NON SONO SEMPRE QUELLI CHE SI PAGANO. Un viaggio misto
     // porta formulari di tutti e due i canali e ogni canale ne paga la sua quota:
@@ -896,18 +1045,31 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     // pagati. Il foglio moltiplicava il prezzo per i viaggi contati, quindi lo
     // stesso camion si pagava intero di qua e intero di la' (audit 03/10/2026).
     viaggi_pagati: viaggiPagatiTrasporto(t, g),
-    totale: n2(t.importo),
+    totale: copiata ? null : n2(t.importo),
     // UN TRASPORTO INTERNO NON SI FATTURA. SMOCO trasporta da se' e la passiva lo
     // mette a zero; nel foglio pero' restavano scritti il prezzo e i viaggi, e il
     // totale era una FORMULA prezzo x viaggi col risultato zero in memoria. Basta
     // che Excel ricalcoli - e ricalcola da solo appena si tocca una cella - e quel
     // trasporto torna a 350 euro dentro il totale del canale (audit 03/10/2026).
     interno: !!g.interno,
-    note: testo(t.note),
-  })), ...(g.interno === true ? [] : (g.surplus || [])
+    note: [testo(t.note), copiata ? `Nel foglio resta senza prezzo e fuori dal totale finche' la tariffa ${annoFoglio || "dell'anno"} non e' confermata: il prezzo copiato ${annoCopia ? `dal ${annoCopia}` : "dall'anno prima"} e' ${prezzoTesto(prezzoTrasporto(t).prezzo, prezzoTrasporto(t).unita_misura)}.` : ''].filter(Boolean).join(' '),
+    };
+  }), ...(g.interno === true ? [] : (g.surplus || [])
     .filter(s => testo(s.prestazione).toUpperCase() === 'TRASPORTO_SECONDARIA')
     .map(s => ({ ...rigaSurplus(testo(g.fornitore), s, s.tonnellate, s.importo), produttore: '', trasportatore: testo(g.fornitore), destinatario: '', viaggi_pagati: 0, interno: false })))]);
-  const totaleTrasporti = n2(trasporti.reduce((s, t) => s + t.totale, 0));
+  // una tratta «—» non e' zero: resta fuori dalla somma, e il blocco lo dice
+  const totaleTrasporti = n2(trasporti.reduce((s, t) => s + (t.totale === null ? 0 : t.totale), 0));
+  // LE TRATTE SENZA LA TARIFFA DEL MESE (revisione del 15/10/2026). Il calcolo
+  // della passiva non mette fra le righe una tratta delle secondarie senza
+  // tariffa: ne fa solo un'anomalia. Il foglio quindi non la mostrava e il
+  // totale la lasciava fuori in silenzio: a gennaio 2027 Logistica, NAPPI SUD
+  // SRL → Irigom S.r.l., 15 t. Una riga non ce l'ha (viaggi e prezzo non ci
+  // sono), ma il totale del trasporto e' parziale e lo dice (D5, decisione
+  // dell'utente del 15/10/2026: un valore che manca non e' zero).
+  trasportiSenza.tratte = tratteSenzaTariffa(dati.anomalie);
+  const trasportiParziale = trasportiSenza.voci || trasportiSenza.tratte.length
+    ? conTesto({ ...trasportiSenza, anno: annoFoglio })
+    : null;
   const surplusTrasporti = n2(trasporti.filter(eRigaSurplus).reduce((s, t) => s + t.totale, 0));
   const extraFoglio = canale === 'EXTRA_RACCOLTA' && extra ? extraConSurplus(extra, passiva) : null;
   return {
@@ -941,6 +1103,9 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
       totale_euro: totaleTrasporti,
       totale_standard: n2(totaleTrasporti - surplusTrasporti),
       totale_surplus: surplusTrasporti,
+      // le tratte «—» (copiate e non confermate) e quelle senza tariffa, fuori
+      // dal totale (D4 e D5, 15/10/2026); null quando il totale e' intero
+      senza_prezzo: trasportiParziale,
     },
     // L'EXTRA RACCOLTA NON HA VOCI FISSE: ogni intervento fa storia a se', coi
     // suoi prezzi scritti a mano sull'intervento prima di passarlo a terminato.
@@ -981,7 +1146,98 @@ export function foglioPassiva(voci, passiva, canale, mese, anno, tariffe, extra)
     totale_surplus: canale === 'EXTRA_RACCOLTA' && extra
       ? n2(Number(extraFoglio.totale_surplus) || 0)
       : n2(raccoglitori.totale_surplus + impianti.totale_surplus + surplusTrasporti),
+    // Le voci «—» del canale, fuori dal totale (D5, decisione dell'utente del
+    // 15/10/2026): il totale del foglio e' parziale e i file lo dicono, la
+    // pagina lo dice prima di scaricarli. null quando il totale e' intero.
+    senza_prezzo: canale === 'EXTRA_RACCOLTA' && extra ? null : unisciSenzaPrezzo([raccoglitori.senza_prezzo, impianti.senza_prezzo, trasportiParziale]),
   };
+}
+
+/**
+ * Le voci «—» di piu' blocchi in una: { voci, tonnellate, soggetti, anno,
+ * mancanti, da_confermare, tratte, testo }, o null.
+ */
+export function unisciSenzaPrezzo(elenco) {
+  const sp = (elenco || []).filter(Boolean);
+  if (!sp.length) return null;
+  const somma = (parti) => ({
+    voci: parti.reduce((s, x) => s + (Number(x && x.voci) || 0), 0),
+    tonnellate: n3(parti.reduce((s, x) => s + (Number(x && x.tonnellate) || 0), 0)),
+    soggetti: [...new Set(parti.flatMap(x => (x && x.soggetti) || []))],
+  });
+  // una parte scritta prima delle due ragioni vale come tariffe mancanti
+  const mancanti = (x) => (x.mancanti || (x.da_confermare ? null : x));
+  return conTesto({
+    ...somma(sp),
+    anno: sp[0].anno,
+    mancanti: somma(sp.map(mancanti).filter(Boolean)),
+    da_confermare: { ...somma(sp.map(x => x.da_confermare).filter(Boolean)), anno_copia: (sp.map(x => x.da_confermare && x.da_confermare.anno_copia).find(Boolean)) || null },
+    tratte: sp.flatMap(x => x.tratte || []),
+  });
+}
+
+// La frase sta nel dato: i file (passivaAmministrazioneExcel.js, il PDF) e la
+// pagina la scrivono senza importare questo file.
+const conTesto = (sp) => ({ ...sp, testo: testoSenzaPrezzo(sp) });
+
+/**
+ * Il perche' di un totale parziale, in una frase per i file e per la pagina
+ * (D5, 15/10/2026): «2 voci con movimenti senza la tariffa 2027 (13,10 t: GATIM
+ * S.R.L., Gatim) restano senza prezzo e fuori dal totale». '' se non ce ne sono.
+ *
+ * Dopo la revisione del 15/10/2026 le parti sono tre, una per ragione, separate
+ * da un punto e virgola: le voci senza la tariffa dell'anno (D5), le righe con
+ * una tariffa copiata dall'anno prima e non confermata (D4: «3 righe con la
+ * tariffa 2027 copiata dal 2026 e non ancora confermata (28,10 t: ...)
+ * restano senza prezzo e fuori dal totale, finche' non e' confermata in Target
+ * & Status › Nuovo anno»), e le tratte delle secondarie senza tariffa, che una
+ * riga nel foglio non ce l'hanno.
+ */
+export function testoSenzaPrezzo(sp) {
+  if (!sp) return '';
+  const anno = sp.anno || "dell'anno";
+  const m = sp.mancanti || (sp.da_confermare || sp.tratte ? null : sp);
+  const c = sp.da_confermare;
+  const tratte = sp.tratte || [];
+  const parti = [];
+  if (m && Number(m.voci) > 0) {
+    const una = Number(m.voci) === 1;
+    parti.push(`${una ? 'Una voce' : `${m.voci} voci`} con movimenti senza la tariffa ${anno} (${tTesto(m.tonnellate)} t: ${(m.soggetti || []).join(', ')}) ${una ? 'resta' : 'restano'} senza prezzo e fuori dal totale, finche' la tariffa non e' nel tariffario`);
+  }
+  if (c && Number(c.voci) > 0) {
+    const una = Number(c.voci) === 1;
+    parti.push(`${una ? 'Una riga' : `${c.voci} righe`} con la tariffa ${anno} copiata ${c.anno_copia ? `dal ${c.anno_copia}` : "dall'anno prima"} e non ancora confermata (${tTesto(c.tonnellate)} t: ${(c.soggetti || []).join(', ')}) ${una ? 'resta' : 'restano'} senza prezzo e fuori dal totale, finche' non e' confermata in Target & Status › Nuovo anno`);
+  }
+  if (tratte.length) {
+    const una = tratte.length === 1;
+    parti.push(`${una ? 'Una tratta' : `${tratte.length} tratte`} delle secondarie senza la tariffa del mese (${tratte.map(x => `${x.trasportatore}, ${x.tratta}: ${tTesto(x.tonnellate)} t`).join('; ')}) non ${una ? 'ha' : 'hanno'} una riga nel foglio e ${una ? 'resta' : 'restano'} fuori dal totale, finche' la tariffa non e' nel tariffario`);
+  }
+  if (!parti.length) return '';
+  // una frase sola: la prima parte con la maiuscola, le altre dopo il punto e virgola no
+  return parti.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join('; ');
+}
+
+/**
+ * Le tratte delle secondarie senza la tariffa del mese, dalle anomalie del
+ * calcolo della passiva (revisione del 15/10/2026): [{ trasportatore, tratta,
+ * tonnellate }], una per trasportatore e tratta. Sono le anomalie che la
+ * passiva scrive quando salta la tratta («Tratta secondaria senza tariffa»); le
+ * tariffe copiate e non confermate hanno la loro riga, e non sono qui.
+ */
+function tratteSenzaTariffa(anomalie) {
+  const per = new Map();
+  for (const a of anomalie || []) {
+    if (!a || a.tipo === 'tariffa_da_confermare') continue;
+    if (testo(a.prestazione).toUpperCase().replace(/[\s-]+/g, '_') !== 'TRASPORTO_SECONDARIA') continue;
+    if (!/senza tariffa/i.test(testo(a.descrizione))) continue;
+    const kg = Math.round((Number(a.tonnellate) || 0) * 1000);
+    if (!(kg > 0)) continue;
+    const k = `${nome(a.fornitore)}|${chiave(a.ambito)}`;
+    const g = per.get(k) || { trasportatore: testo(a.fornitore) || 'trasportatore non scritto', tratta: testo(a.ambito) || 'tratta non scritta', kg: 0 };
+    g.kg += kg;
+    per.set(k, g);
+  }
+  return [...per.values()].map(({ kg, ...g }) => ({ ...g, tonnellate: kg / 1000 }));
 }
 
 /** Vero per una riga del surplus sulle tariffe, in qualunque blocco del foglio. */

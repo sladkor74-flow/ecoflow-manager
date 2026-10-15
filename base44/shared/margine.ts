@@ -51,22 +51,82 @@ const euroIt = (v) => {
   return (n < 0 ? '-' : '') + intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
 };
 
-function chiudi(x) {
-  const margine = r2(x.ricavo - x.costo);
+// UN MARGINE CON PREZZI MANCANTI NON E' UN NUMERO (prova del cambio d'anno,
+// 15/10/2026). Il 15/01/2027, senza le tariffe 2027, la rete faceva ricavo 0,
+// costo 0, margine «€ 0,00 · nessun ricavo · 7,10 t», e l'extra raccolta, con un
+// intervento senza prezzo, «€ -113,50 · -77,2% del ricavo»: un margine fatto da
+// un ricavo che manca. Gli avvisi c'erano solo nelle righe della tabella. Ora
+// ogni mese e l'anno portano prezzi_mancanti, le righe senza un prezzo:
+// righe_senza_prezzo (le righe dell'attiva in errore) piu' passive_senza_tariffa
+// (le anomalie «senza tariffa» della passiva). Con prezzi_mancanti > 0 margine,
+// margine_pct e gli €/t sono null («—» nelle pagine, col perche'), mentre ricavo
+// e costo restano, con `parziale` a dire che sono una parte. Un valore mancante
+// non e' zero. «Nessun ricavo» resta per un periodo senza tonnellate.
+// Le parole stanno nel dato (testo_prezzi_mancanti, testo_da_confermare): le
+// pagine non importano da base44/shared, e la scheda, la dashboard e il PDF
+// della settimana dicono cosi' la stessa frase.
+function chiudi(x, anno = null) {
+  const parziale = (Number(x.prezzi_mancanti) || 0) > 0;
+  const margine = parziale ? null : r2(x.ricavo - x.costo);
   return {
     ...x,
+    testo_prezzi_mancanti: testoPrezziMancanti(x),
+    testo_da_confermare: testoDaConfermare(x, anno),
     tonnellate: r3(x.tonnellate), ricavo: r2(x.ricavo), costo: r2(x.costo),
     costo_raccolta: r2(x.costo_raccolta), costo_impianti: r2(x.costo_impianti), costo_trasporti: r2(x.costo_trasporti),
     ricavo_surplus: r2(x.ricavo_surplus || 0), costo_surplus: r2(x.costo_surplus || 0),
     surplus_netto: r2((x.ricavo_surplus || 0) - (x.costo_surplus || 0)),
     tonnellate_surplus_interni: r3(x.tonnellate_surplus_interni || 0),
+    parziale,
     margine,
-    margine_pct: x.ricavo ? Math.round((margine / x.ricavo) * 1000) / 10 : null,
-    ricavo_t: x.tonnellate ? r2(x.ricavo / x.tonnellate) : null,
-    costo_t: x.tonnellate ? r2(x.costo / x.tonnellate) : null,
-    margine_t: x.tonnellate ? r2(margine / x.tonnellate) : null,
+    margine_pct: !parziale && x.ricavo ? Math.round((margine / x.ricavo) * 1000) / 10 : null,
+    ricavo_t: !parziale && x.tonnellate ? r2(x.ricavo / x.tonnellate) : null,
+    costo_t: !parziale && x.tonnellate ? r2(x.costo / x.tonnellate) : null,
+    margine_t: !parziale && x.tonnellate ? r2(margine / x.tonnellate) : null,
   };
 }
+
+/**
+ * Le parole dei prezzi che mancano in un mese o nell'anno di un canale, per le
+ * pagine e il PDF: «3 righe senza prezzo (3 dell'attiva): margine non
+ * calcolabile». '' se non ne mancano. Le righe con una tariffa copiata
+ * dall'anno prima e non confermata si dicono a parte (testoDaConfermare).
+ */
+export function testoPrezziMancanti(x) {
+  const n = Number(x && x.prezzi_mancanti) || 0;
+  if (!(n > 0)) return '';
+  const att = Number(x.righe_senza_prezzo) || 0;
+  const pas = Number(x.passive_senza_tariffa) || 0;
+  const dove = [att ? `${att} dell'attiva` : '', pas ? `${pas} della passiva` : ''].filter(Boolean).join(', ');
+  return `${n} ${n === 1 ? 'riga' : 'righe'} senza prezzo${dove ? ` (${dove})` : ''}: margine non calcolabile`;
+}
+
+/**
+ * Le righe prezzate con una tariffa copiata dall'anno prima e non ancora
+ * confermata (CA3-1 della prova del cambio d'anno, 15/10/2026). Per D4,
+ * decisione dell'utente del 15/10/2026, una riga cosi' ferma un documento come
+ * una riga senza prezzo, e la conferma e' in Target & Status › Nuovo anno: qui
+ * si conta e si dice, ma il margine non diventa «—» (il prezzo c'e', e' da
+ * confermare). '' senza.
+ */
+export function testoDaConfermare(x, anno) {
+  const n = Number(x && x.righe_da_confermare) || 0;
+  if (!(n > 0)) return '';
+  const prima = Number(anno) ? ` dal ${Number(anno) - 1}` : " dall'anno prima";
+  return `${n} ${n === 1 ? 'riga' : 'righe'} con la tariffa copiata${prima}, da confermare in Target & Status › Nuovo anno`;
+}
+
+// Le anomalie della passiva che sono una tariffa che manca: «Raccoglitore senza
+// tariffa RACCOLTA: ...», «Impianto/stoccaggio senza tariffa ...», «Tratta
+// secondaria senza tariffa ...», e il trasferimento di extra raccolta la cui
+// tratta «non ha una tariffa» (non viene pagato a nessuno). Le altre (una stima
+// ACI sotto i 1.500 kg, le date) restano anomalie e non toccano il margine.
+const eSenzaTariffa = (a) => !!a && a.tipo !== 'tariffa_da_confermare' && /senza tariffa|la tratta non ha una tariffa/i.test(String(a.descrizione || ''));
+const eDaConfermare = (a) => !!a && a.tipo === 'tariffa_da_confermare';
+// Le righe con la tariffa da confermare: un'anomalia puo' riassumerne piu' d'una
+// (`quanti`, come fa il calcolo dell'attiva: una per canale), altrimenti e' una.
+const righeDaConfermare = (anomalie) => (anomalie || []).filter(eDaConfermare)
+  .reduce((s, a) => s + (Number(a.quanti) > 0 ? Number(a.quanti) : 1), 0);
 
 // Perche' un surplus cambia il margine, in parole: una frase per ragione.
 function perche(v) {
@@ -194,9 +254,19 @@ export function calcolaMargineAnno(dati, anno, finoAlMese = 11) {
         surplus,
         // un ricavo o un costo calcolato con un prezzo mancante e' un margine falso: si dice
         righe_senza_prezzo: righe.filter(r => r.stato_validazione === 'errore').length,
+        // e dal 15/10/2026 non si mostra: le righe della passiva senza tariffa e il
+        // totale dei prezzi che mancano, che fa il margine null (chiudi)
+        passive_senza_tariffa: (costo.anomalie || []).filter(eSenzaTariffa).length,
+        prezzi_mancanti: righe.filter(r => r.stato_validazione === 'errore').length + (costo.anomalie || []).filter(eSenzaTariffa).length,
+        // le righe con la tariffa copiata dall'anno prima e non confermata, dove
+        // il calcolo dell'attiva e quello della passiva le segnano (CA3-1, 15/10/2026):
+        // finche' i due calcoli non le hanno, zero. L'anomalia dell'attiva e' una
+        // per canale e porta in `quanti` le righe: si contano le righe.
+        righe_da_confermare: righeDaConfermare((attiva.anomalie || []).filter(a => a && a.tipologia === canale))
+          + righeDaConfermare(costo.anomalie),
         // senza i terminati senza fine trasporto, che si dicono una volta per l'anno
         anomalie_passiva: (costo.anomalie || []).filter(a => a.tipo !== 'date_senza_fine').length,
-      }));
+      }, annoNum));
     }
   }
 
@@ -239,7 +309,10 @@ export function calcolaMargineAnno(dati, anno, finoAlMese = 11) {
       ricavo_surplus: somma('ricavo_surplus'), costo_surplus: somma('costo_surplus'), tonnellate_surplus_interni: somma('tonnellate_surplus_interni'),
       surplus: surplusAnno,
       righe_senza_prezzo: somma('righe_senza_prezzo'), anomalie_passiva: somma('anomalie_passiva'),
-    });
+      // un mese con prezzi mancanti fa l'anno senza margine (15/10/2026)
+      passive_senza_tariffa: somma('passive_senza_tariffa'), prezzi_mancanti: somma('prezzi_mancanti'),
+      righe_da_confermare: somma('righe_da_confermare'),
+    }, annoNum);
   }
   return { anno: annoNum, canali: TIPOLOGIE_ATTIVA.map(c => canali[c]) };
 }

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { anniDaScegliere } from '@/lib/periodoPagine';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { fetchAllClient } from '@/lib/fetchAllClient';
@@ -18,7 +19,7 @@ import { exportFatturazionePassiva, exportFatturazionePassivaPdf } from '@/lib/p
 import { cartellaPassivaUnFoglio, cartellaPassivaPerCanale } from '@/lib/passivaAmministrazioneExcel';
 import { esportaPassivaAmministrazionePdf } from '@/lib/passivaAmministrazionePdf';
 import { fogliDa, nomeFilePassiva } from '@/lib/passivaAmministrazione';
-import { modelloAmministrazione, quanteVociModello } from '@/lib/modelloPassivaAmministrazione';
+import { modelloAmministrazione, quanteVociModello, ANNO_PREZZI_MODELLO } from '@/lib/modelloPassivaAmministrazione';
 import { bloccoExtraRaccolta } from '@/lib/extraRaccoltaAmministrazione';
 import { contestoPrezzi } from '@/lib/extraRaccoltaCalc';
 import * as subfornitori from '@/lib/subfornitori';
@@ -29,11 +30,14 @@ import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
 import { TIPI_PASSIVA, tipiDeiCanali } from '@/lib/registroCaricamenti';
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-const ANNI = anniDaScegliere();
-
 const TIPOLABEL = { 'RETE': 'Rete', 'ACI': 'ACI', 'EXTRA_RACCOLTA': 'Extra Raccolta' };
 
 export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
+  // Gli anni si contano quando la pagina si disegna, non quando il modulo si
+  // carica (prova del cambio d'anno, 15/10/2026): con la scheda aperta dal
+  // 31/12, il 04/01 la lista restava ferma al 2026. Come la Dashboard.
+  const oggi = oggiRoma();
+  const anni = useMemo(() => anniDaScegliere({ oggi }), [oggi]);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -51,6 +55,13 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
   const [ammLoading, setAmmLoading] = useState(false);
   const [vociAperte, setVociAperte] = useState(false);
   const [notaStorico, setNotaStorico] = useState('');
+  // IL FOGLIO DELL'AMMINISTRAZIONE CON PREZZI CHE MANCANO (prova del cambio
+  // d'anno, 15/10/2026). A gennaio 2027, senza le tariffe 2027, il foglio
+  // prezzava i movimenti coi prezzi delle voci del 2026 senza dirlo. Ora quelle
+  // righe restano «—» e fuori dal totale (D5, decisione dell'utente del
+  // 15/10/2026), e la pagina lo dice sopra, canale per canale, appena il foglio
+  // e' fatto: chi lo manda all'amministrazione sa che il totale e' parziale.
+  const [avvisoFoglio, setAvvisoFoglio] = useState('');
   // L'EXTRA RACCOLTA C'E', e ha un blocco tutto suo. L'utente, 03/10/2026: «nella
   // fatturazione passiva tutto cio' che riguarda l'extra raccolta deve rientrare
   // solo quando in quel determinato mese effettivamente sono stati chiusi quei
@@ -65,6 +76,7 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
   const esportaAmministrazione = async (come) => {
     setAmmLoading(true);
     setError('');
+    setAvvisoFoglio('');
     try {
       // TUTTO, CON LA STESSA REGOLA DEL CALCOLO (chiusura dell'audit,
       // 11/10/2026). Qui si leggevano le voci fino a 1000, le tariffe 'attivo'
@@ -125,7 +137,9 @@ export default function PassivaModulo({ tipologia, periodo, setPeriodo }) {
       if (!utili.length) {
         if (!window.confirm(`Il modello delle voci di ${periodo.anno} e' vuoto: il foglio uscirebbe senza righe.
 
-Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci - i fornitori, le loro righe e i prezzi del foglio di settembre 2026 - e restano tutte modificabili dal pulsante «Voci del foglio».`)) {
+Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci - i fornitori, le loro righe e i prezzi del foglio di settembre ${ANNO_PREZZI_MODELLO} - e restano tutte modificabili dal pulsante «Voci del foglio».${Number(periodo.anno) > ANNO_PREZZI_MODELLO ? `
+
+I prezzi sono dei contratti ${ANNO_PREZZI_MODELLO}, scaduti: nel foglio del ${periodo.anno} le righe con movimenti senza la tariffa ${periodo.anno} restano senza prezzo, e la nota dice il prezzo della voce e il suo anno.` : ''}`)) {
           setAmmLoading(false);
           return;
         }
@@ -138,6 +152,19 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
         voci.push(...proposta);
       }
       const fogli = fogliDa(voci, per, periodo.mese, periodo.anno, tariffe, extra);
+      const parziali = fogli.filter(f => f && f.senza_prezzo && f.senza_prezzo.testo);
+      // Il rimedio secondo la ragione (revisione del 15/10/2026): una tariffa
+      // che manca si scrive, una copiata dall'anno prima si conferma (D4).
+      const copiate = parziali.some(f => f.senza_prezzo.da_confermare && Number(f.senza_prezzo.da_confermare.voci) > 0);
+      const mancanti = parziali.some(f => !f.senza_prezzo.da_confermare || !(Number(f.senza_prezzo.da_confermare.voci) > 0)
+        || Number(f.senza_prezzo.voci) > Number(f.senza_prezzo.da_confermare.voci) || (f.senza_prezzo.tratte || []).length > 0);
+      const rimedio = [
+        mancanti ? `scrivi le tariffe ${periodo.anno} che mancano nel tariffario` : '',
+        copiate ? `conferma quelle copiate in Target & Status › Nuovo anno` : '',
+      ].filter(Boolean).join(' e ');
+      setAvvisoFoglio(parziali.length
+        ? `Foglio dell'amministrazione di ${periodo.mese} ${periodo.anno}, totale parziale. ${parziali.map(f => `${TIPOLABEL[f.canale] || f.canale}: ${f.senza_prezzo.testo}.`).join(' ')} ${rimedio.charAt(0).toUpperCase()}${rimedio.slice(1)}, poi rifai il foglio.`
+        : '');
       if (come === 'pdf') {
         await esportaPassivaAmministrazionePdf(fogli, { anno: periodo.anno, mese: periodo.mese });
       } else {
@@ -174,7 +201,7 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
           <label className="text-xs text-muted-foreground block mb-1">Anno</label>
           <Select value={String(periodo.anno)} onValueChange={v => setPeriodo({ ...periodo, anno: Number(v) })}>
             <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-            <SelectContent>{ANNI.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
+            <SelectContent>{anni.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div>
@@ -239,6 +266,9 @@ Carico adesso il modello dell'amministrazione? Sono ${quanteVociModello()} voci 
 
       {error && <div className="text-sm text-destructive bg-destructive/10 px-4 py-2 rounded">{error}</div>}
       {notaStorico && <div className="text-sm text-amber-800 bg-amber-50 dark:text-amber-200 dark:bg-amber-950/40 px-4 py-2 rounded">{notaStorico}</div>}
+      {/* Il foglio dell'amministrazione con voci senza la tariffa dell'anno: il
+          totale e' parziale, e si dice prima di mandarlo (D5, 15/10/2026). */}
+      {avvisoFoglio && <div className="text-sm text-amber-800 bg-amber-50 dark:text-amber-200 dark:bg-amber-950/40 px-4 py-2 rounded">{avvisoFoglio}</div>}
 
       {result && (
         <>

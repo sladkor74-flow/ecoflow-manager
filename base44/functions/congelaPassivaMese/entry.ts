@@ -6,6 +6,7 @@ import { valoreCampo } from "../../shared/testoLungo.ts";
 import { calcolaPassivaMese, MESI_PASSIVA } from "../../shared/passivaCalcolo.ts";
 import { controlloCaricamenti, TIPI_RINVIO } from "../../shared/statoArchivi.ts";
 import { tipiDeiCanali } from "../../shared/registroCaricamenti.ts";
+import { tariffeMancantiDelConto, testoTariffaMancante } from "../../shared/consuntivoFornitore.ts";
 
 // CONGELA IL CONTO DELLA PASSIVA DI UN MESE (decisione dell'utente, 29/09/2026).
 //
@@ -28,7 +29,7 @@ export default async function(req) {
     const { user, errore } = await soloAmministratore(base44);
     if (errore) return errore;
     const svc = base44.asServiceRole.entities;
-    const { anno, mese, canale, nota } = await req.json();
+    const { anno, mese, canale, nota, conferma } = await req.json();
     const annoNum = Number(anno);
     const meseNum = Number(mese);
     const can = String(canale || '').toUpperCase();
@@ -75,13 +76,42 @@ export default async function(req) {
     const rinvio = await controllo.dopo();
     if (rinvio) return rinvio;
 
+    // UN CONTO CON TARIFFE MANCANTI NON SI CONGELA SENZA DIRLO (prova del cambio
+    // d'anno, 15/10/2026). Il 05/02/2027 gennaio si congelava senza le tariffe
+    // 2027: 0,00 €, nessuna domanda, e la pagina buttava via il riepilogo. Il
+    // 10/02 il consuntivo di GATIM (432,00 €) si confrontava con quello zero e
+    // «si scostava di +432,00 euro». Ora, se nel conto ci sono tonnellate senza
+    // la tariffa del mese (o con una tariffa copiata dall'anno prima e non
+    // confermata: D4, decisione dell'utente del 15/10/2026, una riga cosi'
+    // ferma un documento come una riga senza prezzo), si risponde 409 con l'elenco - chi, per che cosa, quante
+    // tonnellate - e si congela solo con `conferma: true`: la pagina mostra
+    // l'elenco e chiede. Congelato con la conferma, la nota lo dice.
+    const { mancanti, da_confermare: daConfermare, tonnellate: tSenzaTariffa } = tariffeMancantiDelConto(passiva);
+    const nomeCanale = { RETE: 'rete', ACI: 'ACI', EXTRA_RACCOLTA: 'extra raccolta' }[can];
+    const periodo = `${nomeMese.toLowerCase()} ${annoNum}`;
+    if ((mancanti.length || daConfermare.length) && conferma !== true) {
+      const parti = [];
+      if (mancanti.length) parti.push(`mancano le tariffe del mese di ${mancanti.map(testoTariffaMancante).join('; ')}`);
+      if (daConfermare.length) parti.push(`hanno una tariffa copiata dall'anno prima e non ancora confermata ${daConfermare.map(testoTariffaMancante).join('; ')}`);
+      return Response.json({
+        error: `Nel conto della passiva di ${periodo} (${nomeCanale}) ${parti.join(', e ')}. Congelato così, quelle righe valgono zero (o il prezzo dell'anno prima) e i consuntivi di quei fornitori non si potranno controllare: scrivi prima le tariffe, oppure conferma per congelarlo lo stesso.`,
+        da_confermare: true,
+        tariffe_mancanti: mancanti,
+        tariffe_da_confermare: daConfermare,
+        tonnellate_senza_tariffa: tSenzaTariffa,
+      }, { status: 409 });
+    }
+
     const esistenti = await svc.ChiusuraPassivaMese.filter({ anno: annoNum, mese: meseNum, canale: can }, 'id', 5);
+    const notaTariffe = mancanti.length || daConfermare.length
+      ? `Congelato con la conferma${mancanti.length ? `, senza le tariffe di ${mancanti.map(testoTariffaMancante).join('; ')}` : ''}${daConfermare.length ? `${mancanti.length ? ',' : ''} con tariffe copiate e non confermate di ${daConfermare.map(testoTariffaMancante).join('; ')}` : ''}.`
+      : '';
     const campi = {
       anno: annoNum, mese: meseNum, canale: can,
       congelato_il: new Date().toISOString(),
       congelato_da: (user && (user.full_name || user.email)) || '',
       totale_euro: (passiva.totali && passiva.totali.totale_complessivo) || 0,
-      nota: String(nota || ''),
+      nota: [String(nota || ''), notaTariffe].filter(Boolean).join(' — '),
     };
     let record = esistenti && esistenti.length ? esistenti[0] : await svc.ChiusuraPassivaMese.create(campi);
     campi.passiva_json = await valoreCampo(base44, 'ChiusuraPassivaMese', record.id, 'passiva_json', JSON.stringify(passiva));
@@ -103,6 +133,10 @@ export default async function(req) {
         totale_surplus: (passiva.totali && passiva.totali.surplus && passiva.totali.surplus.totale) || 0,
         surplus: (passiva.surplus_del_mese || []).map(s => ({ nome: s.nome, euro_t: s.euro_t, tonnellate: s.tonnellate_pagate, importo: s.importo, nota: s.nota })),
         anomalie: (passiva.anomalie || []).length,
+        // le tariffe che mancavano e si e' congelato lo stesso (15/10/2026)
+        tariffe_mancanti: mancanti,
+        tariffe_da_confermare: daConfermare,
+        tonnellate_senza_tariffa: tSenzaTariffa,
       },
     });
   } catch (error) {

@@ -26,6 +26,10 @@
       "type": "number",
       "description": "Il prezzo della voce, nell unita di misura sotto"
     },
+    "prezzo_anno": {
+      "type": "number",
+      "description": "L anno del contratto da cui viene il prezzo. I contratti rete e ACI sono annuali senza tacito rinnovo: le voci proposte dal modello dell amministrazione e quelle copiate da un anno all altro portano i prezzi dell anno prima, e nel foglio di un anno nuovo una riga con movimenti e senza la tariffa dell anno resta senza prezzo, con la nota che dice di che anno e il prezzo della voce. Vuoto vuol dire l anno della voce"
+    },
     "unita_misura": {
       "type": "string",
       "enum": ["euro_tonnellata", "euro_viaggio"],
