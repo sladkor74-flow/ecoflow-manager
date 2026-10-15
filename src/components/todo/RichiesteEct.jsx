@@ -4,6 +4,7 @@ import { Loader2, CheckSquare, Square, AlertTriangle, Search, Upload } from 'luc
 import { giorniAllaScadenza, statoRichiesta, listaOrdini, testoTerminatiSenzaFine, testoOrdiniDateDaSistemare, testoAvanzamentoRichiesta } from '@/lib/richiesteEct';
 import { dividiRichieste, esitoDellaPagina } from '@/lib/todoSezioni';
 import RichiesteCompletate from '@/components/todo/RichiesteCompletate';
+import NoteRichiesta from '@/components/todo/NoteRichiesta';
 
 // Richieste del consorzio arrivate via email: ci chiedono di anticipare certi
 // ritiri. L'ID ordine non sta nella richiesta e lo riconosce il gestionale fra
@@ -250,7 +251,7 @@ export default function RichiesteEct({ isAdmin }) {
           </label>
           <span className="text-xs text-muted-foreground max-w-xl">
             Il file «Gestione Ecotyre», foglio «Richieste ECT». Le richieste nuove si aggiungono, quelle già in elenco si
-            aggiornano e le tue spunte non vengono toccate.
+            aggiornano e le tue spunte, le note interne e le annotazioni non vengono toccate.
           </span>
         </div>
       )}
@@ -373,6 +374,8 @@ export default function RichiesteEct({ isAdmin }) {
                     <td className="px-3 py-2 sticky left-0 bg-card">
                       <span className="font-medium">{r.pdr_nome}</span>
                       {r.nota && <span className="block text-[11px] text-muted-foreground">{r.nota}</span>}
+                      {/* Nota interna e annotazioni (15/10/2026): NoteRichiesta.jsx. */}
+                      <NoteRichiesta richiesta={r} modificabile={isAdmin} />
                     </td>
                     <td className="px-2 py-2">{r.provincia || '—'}</td>
                     <td className="px-2 py-2">{r.classe || '—'}</td>

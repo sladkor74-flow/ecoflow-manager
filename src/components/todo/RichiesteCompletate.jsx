@@ -3,6 +3,7 @@ import { CheckSquare, Square, Loader2 } from 'lucide-react';
 import SezioneCompletati from '@/components/todo/SezioneCompletati';
 import { completamentoRichiesta, testoCompletamentoRichiesta, gg } from '@/lib/todoSezioni';
 import { listaOrdini } from '@/lib/richiesteEct';
+import NoteRichiesta from '@/components/todo/NoteRichiesta';
 
 // LE RICHIESTE ECT COMPLETATE (richiesta dell'utente del 12/10/2026). Una
 // richiesta evasa - da sola, perche' i suoi ordini risultano terminati, dal
@@ -76,6 +77,8 @@ export default function RichiesteCompletate({ tutte = [], righe = tutte, esitoDi
               Mail del {gg(r.mail_inviata_il) || '—'}{r.scadenza ? `, entro il ${gg(r.scadenza)}` : ''}{r.trasportatore ? ` · ${r.trasportatore}` : ''}
             </p>
             {r.nota && <p className="text-[11px] text-muted-foreground break-words">{r.nota}</p>}
+            {/* La nota interna e le annotazioni restano, da leggere (15/10/2026). */}
+            <NoteRichiesta richiesta={r} />
           </div>
         );
       })}
