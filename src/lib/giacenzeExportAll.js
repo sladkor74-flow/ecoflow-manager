@@ -2,7 +2,7 @@ import { giornoRoma } from '@/lib/giornoItaliano';
 import { documentoDa, nuovaCartella, foglioDaRighe, scaricaCartella, FORMATI } from '@/lib/fogliProfessionali';
 import { testoFormulario, testoCollocato } from '@/lib/giacenzeDaDichiarareExport';
 import { INTESTAZIONE_DATE, righeExcelDate } from '@/components/giacenze/DateDaSistemare';
-import { notePercheGiacenze } from '@/lib/giacenzePdf';
+import { notePercheGiacenze, noteElencoDaDichiarare, INTESTAZIONI_NEL_FILE, celleNelFile } from '@/lib/giacenzePdf';
 
 // I formulari con le date da sistemare di una riga, a parole e per canale (mai
 // sommati): "rete 3 (2 senza fine trasporto) · ACI 1".
@@ -122,23 +122,39 @@ export async function exportGiacenzeAllExcel(data, ordiniData, anno, opzioni = {
   // nell'export della scheda Da dichiarare: la stessa lista, le stesse colonne.
   // La chiusura a portale non decide niente e qui non serve.
   // Con le due colonne del formulario nel gestionale (22/09/2026), come l'export della scheda.
+  //
+  // I CARICHI CHE IL FILE DEL PORTALE NON HA ANCORA (chiusura del giro del
+  // 15/10/2026). Dal 15/10/2026 getOrdiniDaDichiarare da' anche a questo foglio
+  // le righe che il file non ha (nel_file falso), perche' l'elenco sia la
+  // giacenza della Situazione. Il foglio le scriveva come le altre: nessuna
+  // colonna diceva quali erano, e una secondaria arrivata dopo il file usciva
+  // con la colonna Ordine vuota. Ora ha le tre colonne della scheda
+  // (INTESTAZIONI_NEL_FILE e celleNelFile, in giacenzePdf.js, uguali in ogni
+  // foglio con l'elenco), il numero della secondaria quando la primaria non
+  // c'e', il dichiarato oltre i carichi in una riga sua (cosi' il TOTALE e' la
+  // somma delle righe) e sotto le note dell'elenco: che cosa e', le parti del
+  // totale, la riconciliazione impianto per impianto.
   const ddHeaders = ['Ordine', 'FIR', 'Fine trasporto', 'Punto di raccolta', 'Comune', 'Prov.', 'Prodotto', 'CER', 'Peso da dichiarare (kg)', 'Destinazione', 'Trasferito a', 'Trasportatore',
-    'Formulario nel gestionale: date da sistemare', 'Collocato in un mese dal gestionale'];
+    'Formulario nel gestionale: date da sistemare', 'Collocato in un mese dal gestionale', ...INTESTAZIONI_NEL_FILE];
   const ddRows = (ordiniData.righe || []).map(r => [
-    r.ordine_primaria || '', r.numero_fir || '', r.fine_trasporto ? r.fine_trasporto.split('-').reverse().join('/') : '',
+    r.ordine_primaria || r.ordine_secondaria || '', r.numero_fir || '', r.fine_trasporto ? r.fine_trasporto.split('-').reverse().join('/') : '',
     r.punto_di_raccolta || '', r.comune || '', r.provincia || '',
     r.prodotto || '', r.cer || '', r.peso_non_dichiarato_kg || 0,
     r.destinazione || '', r.destinazione_secondaria || '', r.trasportatore || '',
     testoFormulario(r), testoCollocato(r),
+    ...celleNelFile(r, ordiniData.foto_del),
   ]);
-  ddRows.push(['TOTALE', '', '', '', '', '', '', '', ordiniData.totale_kg, '', '', '', '', '']);
-  const notaDd = ordiniDel
-    ? [`Carichi del ${ordiniDel} ancora da dichiarare oggi: il file degli ordini non dichiarati del portale è di oggi, e qui ci sono solo i carichi arrivati nel ${ordiniDel}, per fine trasporto, che oggi sono ancora da dichiarare.`]
-    : [];
+  const oltreKg = ordiniData.parti && ordiniData.parti.oltre_kg > 0 ? ordiniData.parti.oltre_kg : 0;
+  if (oltreKg) ddRows.push(["Dichiarato a portale dopo il file, oltre i carichi dell'elenco", '', '', '', '', '', '', '', -oltreKg, '', '', '', '', '', '', '', '']);
+  ddRows.push(['TOTALE', '', '', '', '', '', '', '', ordiniData.totale_kg, '', '', '', '', '', '', '', '']);
+  const notaDd = [
+    ...(ordiniDel ? [`Carichi del ${ordiniDel} ancora da dichiarare oggi: il file degli ordini non dichiarati del portale è di oggi, e qui ci sono solo i carichi arrivati nel ${ordiniDel}, per fine trasporto, che oggi sono ancora da dichiarare.`] : []),
+    ...noteElencoDaDichiarare(ordiniData, {}),
+  ];
   foglioDaRighe(wb, 'Da dichiarare', {
     doc, righe: [ddHeaders, ...ddRows, ...(notaDd.length ? [[], ...notaDd.map(n => [n])] : [])],
-    ...(notaDd.length ? { stili: { [ddRows.length + 2]: 'nota' } } : {}),
-    larghezze: [16, 16, 14, 28, 18, 6, 18, 10, 18, 24, 24, 24, 48, 36],
+    ...(notaDd.length ? { stili: Object.fromEntries(notaDd.map((_n, i) => [ddRows.length + 2 + i, 'nota'])) } : {}),
+    larghezze: [16, 16, 14, 28, 18, 6, 18, 10, 18, 24, 24, 24, 48, 36, 30, 16, 18],
   });
 
   // --- Foglio 3: Derivati ---

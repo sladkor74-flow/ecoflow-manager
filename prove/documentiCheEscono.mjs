@@ -398,6 +398,40 @@ await sezione('8. LE GIACENZE', async () => {
   verifica('i totali per canale sono quelli a video', tot && tot.getCell(3).value === 164.345 && tot.getCell(4).value === 3.2 && tot.getCell(5).value === 2.5, tot ? JSON.stringify(tot.values) : 'manca');
   const dd = rigaCheInizia(wb.getWorksheet('Da dichiarare'), 'TOTALE');
   verifica('il totale da dichiarare e\' quello a video: 8.000 kg', dd && dd.getCell(9).value === 8000 && dd.getCell(9).numFmt === '#,##0', dd ? JSON.stringify(dd.values) : 'manca');
+
+  // I CARICHI CHE IL FILE DEL PORTALE NON HA ANCORA (chiusura del giro del
+  // 15/10/2026). getOrdiniDaDichiarare li da' come righe (nel_file falso), e il
+  // foglio della pagina li scriveva come le altre: nessuna colonna diceva quali
+  // erano, e una secondaria arrivata dopo il file usciva con la colonna Ordine
+  // vuota. Nel file vero: le tre colonne della scheda, il numero della
+  // secondaria, il dichiarato dopo il file in chili interi, e sotto le note
+  // dell'elenco in corsivo. Il caso con le funzioni vere, e il dichiarato oltre
+  // i carichi, sta in prove/daDichiarareCarichiDopo.mjs.
+  const elencoDopo = {
+    foto_del: '2026-10-09', totale_righe: 2, totale_kg: 10620,
+    righe: [
+      { ordine_primaria: 'ET1', fine_trasporto: '2026-09-30', peso_non_dichiarato_kg: 7500, peso_del_file_kg: 8000, dichiarato_dopo_kg: 500, nel_file: true, arrivato_dopo_il_file: false },
+      { ordine_secondaria: 'SN2', fine_trasporto: '2026-10-12', giorno_al_sito: '2026-10-12', peso_non_dichiarato_kg: 3120, nel_file: false, arrivato_dopo_il_file: true, destinazione: 'NAPPI SUD SRL', destinazione_secondaria: 'IRIGOM SRL', carico: { tipo: 'secondaria', da: 'NAPPI SUD SRL' } },
+    ],
+    parti: { nel_file: { ordini: 1, kg: 8000 }, dopo_il_file: { ordini: 1, kg: 3120, arrivati_dopo: 1 }, dichiarato_dopo: { kg: 500 }, oltre_kg: 0, imp: { ordini: 2, kg: 10620 }, stoc: { ordini: 0, kg: 0 } },
+    carichi_dopo_il_file: { cercati: true },
+  };
+  await lib.exportGiacenzeAllExcel(data, elencoDopo, 2026, { stato: statoPer(...ARCHIVI.map(a => a.entita)) });
+  const wsDd = (await ultimoFile()).wb.getWorksheet('Da dichiarare');
+  const testata = rigaCheInizia(wsDd, 'Ordine');
+  const intestazioni = testata ? (testata.values || []).slice(1).map(valoreDi) : [];
+  verifica("il foglio «Da dichiarare» della pagina ha le tre colonne sul file del portale, in fondo",
+    JSON.stringify(intestazioni.slice(-3)) === JSON.stringify(['Nel file del portale', "Arrivato all'impianto il", 'Dichiarato a portale dopo il file (kg)']), JSON.stringify(intestazioni));
+  const sec = rigaCheInizia(wsDd, 'SN2');
+  verifica('la secondaria arrivata dopo il file ha il suo numero d\'ordine e dice che non e\' nel file del 09/10/2026',
+    sec && sec.getCell(15).value === 'no, arrivato dopo il file del 09/10/2026' && sec.getCell(9).value === 3120, sec ? JSON.stringify(sec.values) : 'manca');
+  const et1 = rigaCheInizia(wsDd, 'ET1');
+  verifica('la riga del file dice «sì» e il dichiarato dopo il file in chili interi',
+    et1 && et1.getCell(15).value === 'sì' && et1.getCell(17).value === 500 && et1.getCell(17).numFmt === '#,##0', et1 ? JSON.stringify(et1.values) : 'manca');
+  const totDopo = rigaCheInizia(wsDd, 'TOTALE');
+  verifica('il TOTALE e\' quello dell\'elenco: 10.620 kg', totDopo && totDopo.getCell(9).value === 10620, totDopo ? JSON.stringify(totDopo.values) : 'manca');
+  const notaTotale = cellaDi(wsDd, 'Il totale: 1 ordine nel file del 09/10/2026 (8.000 kg) + 1 carico arrivato dopo (3.120 kg) - 500 kg dichiarati a portale dopo il file, tolti dai carichi arrivati da piu’ tempo come fa il portale = 2 ordini, 10.620 kg.');
+  verifica('sotto, la nota col conto del totale, in corsivo come le note', notaTotale && notaTotale.font && notaTotale.font.italic === true, notaTotale ? JSON.stringify(notaTotale.font) : testoDi(wsDd).slice(-600));
 });
 
 await sezione('9. LE DICHIARAZIONI DEGLI IMPIANTI', async () => {

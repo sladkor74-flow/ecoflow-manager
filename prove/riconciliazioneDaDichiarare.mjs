@@ -117,7 +117,16 @@ console.log('IL CASO DELL\'AUDIT: UN ORDINE NEL FILE, UN CARICO ARRIVATO DOPO');
   const L = await ordini({ sito: ALFA, ruolo: 'imp', riconcilia: true });
   const r = L.riconciliazione;
   const rg = rigaG(G, ALFA);
-  verifica("l'elenco resta l'elenco del file: 1 ordine, 12.000 kg", L.totale_righe === 1 && L.totale_kg === 12000);
+  // Dal 15/10/2026 i carichi arrivati dopo il file sono righe dell'elenco, e il
+  // dichiarato dopo la fotografia si toglie dalla riga piu' vecchia: l'elenco
+  // dice la giacenza e il pulsante (prima: 1 ordine, 12.000 kg, il solo file).
+  verifica("l'elenco e' il file piu' i carichi arrivati dopo: 3 ordini, 21.000 kg, come pulsante e giacenza",
+    L.totale_righe === 3 && L.totale_kg === 21000 && L.parti.nel_file.ordini === 1 && L.parti.dopo_il_file.ordini === 2 && L.parti.dichiarato_dopo.kg === 3000,
+    JSON.stringify([L.totale_righe, L.totale_kg, L.parti]));
+  verifica("le righe: ET01 del file con 9.000 kg da dichiarare (3.000 dichiarati dopo), poi il carico del 05/10 e la secondaria del 07/10, arrivati dopo",
+    L.righe.map(x => `${x.ordine_primaria || x.ordine_secondaria}:${x.peso_non_dichiarato_kg}:${x.nel_file}`).join(',') === `ET${anno}01:9000:true,ET${anno}02:8000:false,SEC${anno}01:4000:false`
+      && L.righe[0].dichiarato_dopo_kg === 3000 && L.righe[0].peso_del_file_kg === 12000,
+    JSON.stringify(L.righe.map(x => [x.ordine_primaria || x.ordine_secondaria, x.peso_non_dichiarato_kg, x.nel_file, x.dichiarato_dopo_kg])));
   verifica('le Giacenze: pulsante 3 (1 nel file + 2 non ancora), giacenza 12 + 8 + 4 - 3 = 21 t',
     rg.ordini_da_dichiarare === 3 && rg.giacenza_rete_t === 21, JSON.stringify({ pulsante: rg.ordini_da_dichiarare, giacenza: rg.giacenza_rete_t }));
   verifica('la riconciliazione: file 12.000 + 2 carichi 12.000 - dichiarato dopo 3.000 = 21.000 kg',
@@ -129,13 +138,29 @@ console.log('IL CASO DELL\'AUDIT: UN ORDINE NEL FILE, UN CARICO ARRIVATO DOPO');
   verifica("l'ordine gia' dichiarato non e' un carico che manca al file: il report lo conosce", r && !r.aggiunti.some(o => o.id_ordine === `ET${anno}03`));
 }
 
-console.log('SOLO QUANDO SI CHIEDE, E SOLO PER UN IMPIANTO SENZA ALTRI FILTRI');
+// DAL 15/10/2026 LA RIGA C'E' SEMPRE, NON SOLO ARRIVANDO DAL PULSANTE. Prima si
+// faceva solo con riconcilia: true, un sito, il ruolo 'imp' e nessun altro
+// filtro: scegliendo il sito dal menu, o con l'anno o la provincia, l'elenco
+// diceva il solo file e nessuno lo riconciliava. Ora e' sempre di tutto il sito,
+// e con un filtro dice quanto ne mostra l'elenco.
+console.log("LA RIGA C'E' SEMPRE: DAL MENU, CON I FILTRI; NON DAL PULSANTE DEL PIAZZALE");
 {
   ilCaso();
-  verifica('senza riconcilia non si calcola', (await ordini({ sito: ALFA, ruolo: 'imp' })).riconciliazione === null);
-  verifica('con un altro filtro l\'elenco non e\' tutto quello che il portale aspetta: non si calcola',
-    (await ordini({ sito: ALFA, ruolo: 'imp', riconcilia: true, provincia: 'NA' })).riconciliazione === null
-    && (await ordini({ sito: ALFA, ruolo: 'imp', riconcilia: true, ricerca: 'FIR' })).riconciliazione === null);
+  const conFlag = await ordini({ sito: ALFA, ruolo: 'imp', riconcilia: true });
+  const dalMenu = await ordini({ sito: ALFA });
+  const senzaFlag = await ordini({ sito: ALFA, ruolo: 'imp' });
+  verifica('senza riconcilia la riga c\'e\', uguale', JSON.stringify(senzaFlag.riconciliazione) === JSON.stringify(conFlag.riconciliazione) && conFlag.riconciliazione.giacenza_kg === 21000, JSON.stringify(senzaFlag.riconciliazione));
+  verifica('scelto il sito dal menu, senza ruolo: la stessa riga, e l\'elenco 3 ordini e 21.000 kg',
+    dalMenu.riconciliazione && dalMenu.riconciliazione.giacenza_kg === 21000 && dalMenu.riconciliazione.ordini_pulsante === 3 && dalMenu.totale_righe === 3 && dalMenu.totale_kg === 21000,
+    JSON.stringify([dalMenu.totale_righe, dalMenu.totale_kg, dalMenu.riconciliazione]));
+  const na = await ordini({ sito: ALFA, ruolo: 'imp', provincia: 'NA' });
+  const fir = await ordini({ sito: ALFA, ruolo: 'imp', ricerca: `ET${anno}02` });
+  verifica('con la provincia: la riga di tutto il sito, coi filtri e quanto ne mostra l\'elenco',
+    na.riconciliazione && na.riconciliazione.giacenza_kg === 21000 && na.riconciliazione.filtri === true && na.riconciliazione.elenco.ordini === na.totale_righe && na.riconciliazione.elenco.kg === na.totale_kg,
+    JSON.stringify([na.totale_righe, na.totale_kg, na.riconciliazione && na.riconciliazione.elenco]));
+  verifica('con la ricerca di un carico arrivato dopo: si trova, e la riga resta quella del sito',
+    fir.totale_righe === 1 && fir.righe[0].ordine_primaria === `ET${anno}02` && fir.righe[0].nel_file === false && fir.riconciliazione.giacenza_kg === 21000 && fir.riconciliazione.elenco.kg === 8000,
+    JSON.stringify([fir.totale_righe, fir.righe, fir.riconciliazione && fir.riconciliazione.elenco]));
   verifica('per il piazzale non si calcola', (await ordini({ sito: ALFA, ruolo: 'stoc', riconcilia: true })).riconciliazione === null);
   const t = await ordini({ sito: TEC, ruolo: 'imp', riconcilia: true });
   verifica('Tecnogum, che la rete non la dichiara: niente da riconciliare, e si dice', t.riconciliazione && t.riconciliazione.non_dovuta === true, JSON.stringify(t.riconciliazione));
@@ -228,9 +253,12 @@ console.log('LA REGOLA DEI CARICHI NON ANCORA NEL FILE E\' UNA SOLA, PER I TRE')
 console.log('LA PAGINA');
 {
   const t = readFileSync(qui('../src/components/giacenze/DaDichiarareTable.jsx'), 'utf8').replace(/\r/g, '');
-  verifica('la scheda chiede la riconciliazione arrivando dal pulsante di un impianto, senza altri filtri',
-    t.includes("const daRiconciliare = !!sito && ruolo === 'imp' && !provincia && !annoChiusura && !ricerca && !soloDate;") && t.includes('payload.riconcilia = true'));
-  verifica('e la mostra sotto l\'elenco', t.includes('<Riconciliazione r={riconciliazione} sito={sito} />'));
+  // Dal 15/10/2026 la riga arriva con ogni elenco: la scheda non la chiede piu'
+  // solo dal pulsante, e la mostra sempre, coi siti tutti impianto per impianto.
+  verifica('la scheda non chiede piu\' la riconciliazione solo dal pulsante',
+    !t.includes('const daRiconciliare') && !t.includes('payload.riconcilia = true'));
+  verifica('e la mostra sotto l\'elenco, quella del sito e quella di tutti i siti',
+    t.includes('<Riconciliazione r={data?.riconciliazione || null} sito={sito}') && t.includes('{!sito && <RiconciliazioneSiti r={data?.riconciliazione_siti || null} />}'));
   verifica('il commento che diceva «dicono lo stesso» senza dimostrarlo non c\'e\' piu\'',
     !t.includes('col ruolo scelto, il numero del pulsante nella\n          scheda Situazione e questo elenco dicono lo stesso.'));
 }

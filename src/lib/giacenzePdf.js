@@ -154,6 +154,140 @@ export function situazionePdf(anno, righe, totali) {
   };
 }
 
+// --- L'elenco «Da dichiarare»: il file del portale piu' i carichi arrivati dopo ---
+//
+// Dal 15/10/2026 l'elenco e' il file degli ordini non dichiarati PIU' i carichi
+// che il gestionale conosce e il file non ha ancora, MENO il dichiarato a
+// portale dopo il file (getOrdiniDaDichiarare): per ogni impianto il totale e' la
+// giacenza della Situazione e le righe il numero del pulsante. Il PDF e il
+// foglio Excel della scheda portano le stesse righe, gli stessi totali e la
+// colonna che dice se la riga e' nel file o arrivata dopo, col giorno del file;
+// le frasi qui sotto le scrivono uguali nei due file. Sono testi per i file che
+// escono: il meno si scrive «-», che i caratteri del PDF hanno.
+
+/** I chili all'italiana, interi, col punto delle migliaia. */
+const kgItaliani = (v) => String(Math.round(Number(v) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+const quanti = (n, uno, molti) => `${kgItaliani(n)} ${n === 1 ? uno : molti}`;
+
+/**
+ * Un carico che il file non ha, a parole: «arrivato dopo il file del
+ * gg/mm/aaaa» solo se e' arrivato al sito dopo il giorno del file
+ * (arrivato_dopo_il_file, getOrdiniDaDichiarare); se no «non ancora nel file del
+ * gg/mm/aaaa (terminato il gg/mm/aaaa)». Un ordine terminato il 05/10 e chiuso a
+ * portale dopo il file del 09/10 non e' arrivato dopo il file, e la scritta
+ * diceva di si' (revisione del 15/10/2026). Stringa vuota per una riga del file.
+ */
+export const fuoriDalFile = (r, fotoDel) => {
+  if (!r || r.nel_file !== false) return '';
+  const del = fotoDel ? ` del ${giornoItaliano(fotoDel)}` : '';
+  if (r.arrivato_dopo_il_file) return `arrivato dopo il file${del}`;
+  const terminato = r.giorno_al_sito || r.fine_trasporto;
+  return `non ancora nel file${del}${terminato ? ` (terminato il ${giornoItaliano(terminato)})` : ''}`;
+};
+
+/** La colonna «Nel file del portale»: «sì», o «no, » e quello che dice fuoriDalFile. */
+export const testoNelFile = (r, fotoDel) => (r && r.nel_file === false ? `no, ${fuoriDalFile(r, fotoDel)}` : 'sì');
+
+/**
+ * LE TRE COLONNE SUL FILE DEL PORTALE DI OGNI FOGLIO CON L'ELENCO (15/10/2026):
+ * se la riga e' nel file o no, il giorno in cui il carico e' arrivato
+ * all'impianto quando non e' la fine trasporto della riga (per un carico passato
+ * da uno stoccaggio quello della secondaria, e il mese della riga e' quello), e
+ * il dichiarato a portale dopo il file tolto dalla riga. Stanno qui, e non con
+ * l'Excel della scheda, perche' anche l'Excel di tutta la pagina Giacenze le
+ * scriva uguali: questo file non importa niente, e le prove lo caricano cosi'
+ * com'e'.
+ */
+export const INTESTAZIONI_NEL_FILE = ['Nel file del portale', "Arrivato all'impianto il", 'Dichiarato a portale dopo il file (kg)'];
+export const celleNelFile = (r, fotoDel) => [
+  testoNelFile(r, fotoDel),
+  r && r.giorno_al_sito && r.giorno_al_sito !== r.fine_trasporto ? giornoItaliano(r.giorno_al_sito) : '',
+  r && r.dichiarato_dopo_kg > 0 ? r.dichiarato_dopo_kg : '',
+];
+
+/**
+ * I carichi che il file non ha sono tutti arrivati dopo il giorno del file? Se
+ * si', la testa dice «+ 4 arrivati dopo»; se anche uno solo e' terminato prima
+ * (o la risposta non lo dice), «+ 5 non ancora nel file», che e' vero sempre.
+ */
+export const tuttiArrivatiDopo = (parti) => !!(parti && parti.dopo_il_file && parti.dopo_il_file.ordini > 0
+  && parti.dopo_il_file.arrivati_dopo === parti.dopo_il_file.ordini);
+
+/** Il formulario nel gestionale di una riga: per un carico arrivato dopo il file, che cos'e' e quando e' terminato; poi le date da sistemare. */
+export const testoFormularioRiga = (r) => [
+  r && r.nel_file === false && r.carico
+    ? `${r.carico.tipo === 'secondaria' ? 'secondaria' : 'primaria'} terminata il ${giornoItaliano(r.fine_trasporto)}${r.carico.da ? `, ${r.carico.tipo === 'secondaria' ? 'dal piazzale di ' : ''}${r.carico.da}` : ''}`
+    : '',
+  ...((r && r.date_da_sistemare) || []).map(d => `${d.tipo} ${d.id_ordine}: ${d.testo}`),
+  r && r.giorno_al_sito && r.fine_trasporto && r.giorno_al_sito !== r.fine_trasporto ? `all’impianto il ${giornoItaliano(r.giorno_al_sito)}` : '',
+  r && r.dichiarato_dopo_kg > 0 ? `nel file ${kgItaliani(r.peso_del_file_kg)} kg, ${kgItaliani(r.dichiarato_dopo_kg)} dichiarati a portale dopo il file` : '',
+].filter(Boolean).join(' · ');
+
+/**
+ * Le frasi che spiegano l'elenco, uguali nel PDF e nell'Excel: che cosa e', le
+ * parti del totale, la riga di riconciliazione del sito o degli impianti, lo
+ * stoccaggio a parte. Vuoto se la risposta non ha il giorno del file.
+ */
+export function noteElencoDaDichiarare(dati = {}, filtri = {}) {
+  const note = [];
+  const foto = dati.foto_del;
+  const parti = dati.parti;
+  const giorno = foto ? giornoItaliano(foto) : '';
+  const errore = dati.carichi_dopo_il_file && dati.carichi_dopo_il_file.errore;
+  // Che l'elenco comprenda i carichi arrivati dopo lo dice la risposta
+  // (carichi_dopo_il_file.cercati): dal pulsante di uno stoccaggio non si
+  // cercano, e l'Excel lo affermava lo stesso perche' non riceveva il ruolo
+  // (revisione del 15/10/2026). Senza quel dato vale il ruolo, come prima.
+  const cercati = dati.carichi_dopo_il_file ? !!dati.carichi_dopo_il_file.cercati : filtri.ruolo !== 'stoc';
+  if (foto && cercati && filtri.ruolo !== 'stoc') {
+    note.push(`L’elenco e’ il file degli ordini non dichiarati del portale del ${giorno} piu’ i carichi che il gestionale conosce e il file non ha ancora, di solito arrivati dopo (colonna «Nel file del portale»). Caricando un file nuovo degli ordini non dichiarati quei carichi entrano nel file e l’etichetta sparisce.`);
+  }
+  if (errore) note.push(`I carichi arrivati dopo il file non si sono potuti leggere (${errore}): qui c’e’ solo il file del portale, e il totale non e’ la giacenza della scheda Situazione.`);
+  if (parti && (parti.dopo_il_file.ordini > 0 || parti.dichiarato_dopo.kg > 0 || parti.oltre_kg > 0)) {
+    const fuori = tuttiArrivatiDopo(parti)
+      ? `${quanti(parti.dopo_il_file.ordini, 'carico arrivato', 'carichi arrivati')} dopo`
+      : `${quanti(parti.dopo_il_file.ordini, 'carico', 'carichi')} non ancora nel file`;
+    note.push(`Il totale: ${quanti(parti.nel_file.ordini, 'ordine', 'ordini')} nel file del ${giorno} (${kgItaliani(parti.nel_file.kg)} kg) + ${fuori} (${kgItaliani(parti.dopo_il_file.kg)} kg)`
+      + `${parti.dichiarato_dopo.kg > 0 ? ` - ${kgItaliani(parti.dichiarato_dopo.kg)} kg dichiarati a portale dopo il file, tolti dai carichi arrivati da piu’ tempo come fa il portale` : ''}`
+      + `${parti.oltre_kg > 0 ? ` - ${kgItaliani(parti.oltre_kg)} kg dichiarati oltre i carichi (giacenza sotto zero, da correggere)` : ''}`
+      + ` = ${quanti((dati.totale_righe || 0), 'ordine', 'ordini')}, ${kgItaliani(dati.totale_kg)} kg.`);
+  }
+  if (parti && parti.imp.ordini > 0 && parti.stoc.ordini > 0) {
+    note.push(`Come impianto, da dichiarare: ${quanti(parti.imp.ordini, 'ordine', 'ordini')}, ${kgItaliani(parti.imp.kg)} kg. Come stoccaggio, in attesa di dichiarazione: ${quanti(parti.stoc.ordini, 'ordine', 'ordini')}, ${kgItaliani(parti.stoc.kg)} kg, gia’ ripartiti in secondaria: li dichiara chi li ha ricevuti, e non sono giacenza degli impianti.`);
+  }
+  const r = dati.riconciliazione;
+  if (r && !r.errore && !r.senza_fotografia) {
+    const nome = r.sito || filtri.sito || '';
+    if (r.non_dovuta) note.push(`Per accordo ${nome} non ci dichiara la rete: il portale non tiene per noi una giacenza di rete, e non c’e’ niente da riconciliare.`);
+    else if (!r.solo_stoccaggio && r.carichi_del !== null && r.carichi_del !== undefined) {
+      note.push(`Ordini dei carichi del ${r.carichi_del}: ${kgItaliani(r.file_ordini)} nel file del portale (${kgItaliani(r.file_kg)} kg) + ${kgItaliani(r.aggiunti_n)} non ancora nel file (${kgItaliani(r.aggiunti_kg)} kg) = ${kgItaliani(r.ordini_pulsante)}, il numero del pulsante della scheda Situazione del ${r.carichi_del}. La giacenza di un anno chiuso e’ la lettura del 31/12, non la somma di questo elenco.`);
+    } else if (!r.solo_stoccaggio) {
+      note.push(`Riconciliazione con la giacenza${nome ? ` di ${nome} come impianto` : ''}, tutto il sito: file del portale${r.foto_del ? ` del ${giornoItaliano(r.foto_del)}` : ''} ${quanti(r.file_ordini, 'ordine', 'ordini')}, ${kgItaliani(r.file_kg)} kg + ${quanti(r.aggiunti_n, 'carico', 'carichi')} non ancora nel file, ${kgItaliani(r.aggiunti_kg)} kg - dichiarato a portale dopo la fotografia, ${kgItaliani(r.dichiarato_dopo_kg)} kg = giacenza a portale ${kgItaliani(r.giacenza_kg)} kg, lo stesso numero delle Giacenze. Ordini: ${kgItaliani(r.file_ordini)} + ${kgItaliani(r.aggiunti_n)} = ${kgItaliani(r.ordini_pulsante)}, il numero del pulsante della scheda Situazione.`
+        + `${r.filtri && r.elenco ? ` Con i filtri scelti l’elenco ne mostra ${quanti(r.elenco.ordini, 'ordine', 'ordini')}, ${kgItaliani(r.elenco.kg)} kg.` : ''}`);
+    }
+    if (r.stoccaggio && r.stoccaggio.ordini > 0) {
+      note.push(`Come stoccaggio, ${nome} ha nel file ${quanti(r.stoccaggio.ordini, 'ordine', 'ordini')}, ${kgItaliani(r.stoccaggio.kg)} kg, passati dal piazzale e gia’ ripartiti in secondaria: per il portale sono in attesa di dichiarazione sullo stoccaggio, li dichiara chi li ha ricevuti, e non sono giacenza dell’impianto.`);
+    }
+  }
+  const rs = dati.riconciliazione_siti;
+  if (rs && rs.impianti && rs.impianti.length) {
+    const dellAnno = rs.carichi_del !== null && rs.carichi_del !== undefined;
+    const voci = rs.impianti.map(x => (x.non_dovuta
+      ? `${x.sito}: per accordo non ci dichiara la rete, —`
+      : dellAnno
+        ? `${x.sito}: ${kgItaliani(x.file_ordini)} + ${kgItaliani(x.aggiunti_n)} = ${kgItaliani(x.ordini_pulsante)} ordini`
+        : `${x.sito}: ${kgItaliani(x.file_kg)} + ${kgItaliani(x.aggiunti_kg)} - ${kgItaliani(x.dichiarato_dopo_kg)} = ${kgItaliani(x.giacenza_kg)} kg, ${kgItaliani(x.ordini_pulsante)} ordini`));
+    note.push(`Riconciliazione con le giacenze, impianto per impianto (file del portale${rs.foto_del ? ` del ${giornoItaliano(rs.foto_del)}` : ''} + carichi non ancora nel file - dichiarato dopo la fotografia): ${voci.join('; ')}.`
+      + (dellAnno ? '' : ` Impianti: ${quanti(rs.ordini_pulsante, 'ordine', 'ordini')}, ${kgItaliani(rs.giacenza_kg)} kg, la somma delle giacenze di rete degli impianti della scheda Situazione.`));
+    if ((rs.stoccaggi || []).length) note.push(`In attesa di dichiarazione sugli stoccaggi, gia’ ripartiti e da dichiarare da chi li ha ricevuti, non giacenza degli impianti: ${rs.stoccaggi.map(x => `${x.sito} ${kgItaliani(x.ordini)} ordini, ${kgItaliani(x.kg)} kg`).join('; ')}.`);
+  }
+  if (filtri.senza_fine_ignoti && filtri.senza_fine_ignoti.n > 0) {
+    const n = filtri.senza_fine_ignoti.n;
+    note.push(`${quanti(n, 'arrivo', 'arrivi')} di rete senza fine trasporto (${kgItaliani(filtri.senza_fine_ignoti.kg)} kg), che il portale non conosce ancora: non ${n === 1 ? 'entra' : 'entrano'} in questo elenco ne’ nella giacenza finche’ la data non arriva.`);
+  }
+  return note;
+}
+
 /**
  * Scheda Da dichiarare: gli ordini che il portale aspetta ancora, con i filtri
  * che si hanno davanti in quel momento.
@@ -162,11 +296,16 @@ export function situazionePdf(anno, righe, totali) {
  * totale sotto una tabella che ne mostra cento era proprio la lettura che ha
  * fatto credere che ottobre non fosse contato. Per lo stesso motivo il PDF si
  * apre con il conto per mese, che fa da riscontro alla giacenza dell'impianto.
+ * Dal 15/10/2026 con i carichi arrivati dopo il file: il mese dice quanti sono
+ * («di cui ... non ancora nel file»), l'ultima colonna degli ordini dice se la
+ * riga e' nel file, e le note la riconciliazione con la giacenza.
  */
 export function daDichiararePdf(anno, dati, filtri = {}) {
   const righe = dati.righe || [];
   const perMese = dati.per_mese || [];
   const date = dati.date_da_sistemare || { n: 0, kg: 0 };
+  const parti = dati.parti || null;
+  const fotoDel = dati.foto_del || null;
   const scelte = [
     filtri.sito ? `Sito: ${filtri.sito}` : 'Tutti i siti',
     filtri.ruolo === 'imp' ? 'solo i carichi da dichiarare come impianto'
@@ -176,6 +315,35 @@ export function daDichiararePdf(anno, dati, filtri = {}) {
     filtri.ricerca ? `Ricerca: ${filtri.ricerca}` : '',
     filtri.solo_date ? 'solo quelli col formulario da correggere' : '',
   ].filter(Boolean).join(' · ');
+  // Impianto e stoccaggio insieme: due fasce dei mesi, come nella scheda.
+  const dueRuoli = !!(parti && parti.imp.ordini > 0 && parti.stoc.ordini > 0);
+  const fasciaMesi = (titolo, ruolo = null) => {
+    const voci = perMese.map(m => ({ m, v: ruolo ? m[ruolo] || { ordini: 0, kg: 0 } : m })).filter(x => x.v.ordini > 0 || !ruolo);
+    const conDopo = ruolo !== 'stoc';
+    const tot = voci.reduce((t, { m, v }) => ({ ordini: t.ordini + v.ordini, kg: t.kg + v.kg, dopoN: t.dopoN + (conDopo && m.dopo_il_file ? m.dopo_il_file.ordini : 0), dopoKg: t.dopoKg + (conDopo && m.dopo_il_file ? m.dopo_il_file.kg : 0) }), { ordini: 0, kg: 0, dopoN: 0, dopoKg: 0 });
+    // Il totale della fascia unica e' quello dell'elenco (che toglie anche il
+    // dichiarato oltre i carichi); con due fasce, quello di ciascuna.
+    const totale = ruolo ? tot : { ...tot, ordini: dati.totale_righe || righe.length, kg: dati.totale_kg || 0 };
+    return {
+      titolo,
+      colonne: [
+        { titolo: 'Mese di fine trasporto', tipo: 'testo', peso: 2 },
+        { titolo: 'Ordini', tipo: 'intero', peso: 1 },
+        { titolo: 'Peso da dichiarare', tipo: 'kg', peso: 1.4 },
+        ...(conDopo ? [
+          { titolo: 'Di cui non ancora nel file: ordini', tipo: 'intero', peso: 1.2 },
+          { titolo: 'Di cui non ancora nel file: peso', tipo: 'kg', peso: 1.4 },
+        ] : []),
+      ],
+      // Il totale si scrive solo dove c'e' qualcosa da totalizzare: su un
+      // elenco vuoto una riga «Totale 0» sembrerebbe un dato.
+      righe: [
+        ...voci.map(({ m, v }) => ({ celle: [nomeMese(m.mese), v.ordini, v.kg, ...(conDopo ? [m.dopo_il_file ? m.dopo_il_file.ordini : 0, m.dopo_il_file ? m.dopo_il_file.kg : 0] : [])] })),
+        ...(voci.length ? [{ stile: 'totale', celle: ['Totale', totale.ordini, totale.kg, ...(conDopo ? [tot.dopoN, tot.dopoKg] : [])] }] : []),
+      ],
+    };
+  };
+  const oltre = parti && parti.oltre_kg > 0 ? parti.oltre_kg : 0;
   return {
     ...comune(anno, 'Da dichiarare'),
     sottotitolo: scelte,
@@ -184,22 +352,15 @@ export function daDichiararePdf(anno, dati, filtri = {}) {
       { etichetta: 'Peso da dichiarare', valore: dati.totale_kg || 0, tipo: 'kg' },
       { etichetta: 'Mesi coinvolti', valore: perMese.filter(m => m.mese).length, tipo: 'intero' },
       { etichetta: 'Col formulario da correggere', valore: date.n || 0, tipo: 'intero' },
+      ...(parti && fotoDel ? [
+        { etichetta: `Nel file del ${giornoItaliano(fotoDel)}`, valore: parti.nel_file.ordini, tipo: 'intero' },
+        { etichetta: tuttiArrivatiDopo(parti) ? 'Arrivati dopo il file' : 'Non ancora nel file', valore: parti.dopo_il_file.ordini, tipo: 'intero' },
+      ] : []),
     ],
     sezioni: [
-      {
-        titolo: 'Di quali mesi sono',
-        colonne: [
-          { titolo: 'Mese di fine trasporto', tipo: 'testo', peso: 2 },
-          { titolo: 'Ordini', tipo: 'intero', peso: 1 },
-          { titolo: 'Peso da dichiarare', tipo: 'kg', peso: 1.4 },
-        ],
-        // Il totale si scrive solo dove c'e' qualcosa da totalizzare: su un
-        // elenco vuoto una riga «Totale 0» sembrerebbe un dato.
-        righe: [
-          ...perMese.map(m => ({ celle: [nomeMese(m.mese), m.ordini, m.kg] })),
-          ...(perMese.length ? [{ stile: 'totale', celle: ['Totale', dati.totale_righe || righe.length, dati.totale_kg || 0] }] : []),
-        ],
-      },
+      ...(dueRuoli
+        ? [fasciaMesi('Da dichiarare come impianto, di quali mesi', 'imp'), fasciaMesi('In attesa sugli stoccaggi, di quali mesi', 'stoc')]
+        : [fasciaMesi('Di quali mesi sono')]),
       {
         titolo: 'Ordini, dal carico arrivato da piu’ tempo',
         colonne: [
@@ -218,29 +379,45 @@ export function daDichiararePdf(anno, dati, filtri = {}) {
           { titolo: 'Destinazione', tipo: 'testo', peso: 1.4 },
           { titolo: 'Trasferito a', tipo: 'testo', peso: 1.2 },
           { titolo: 'Formulario nel gestionale', tipo: 'testo', peso: 2 },
+          { titolo: 'Nel file del portale', tipo: 'testo', peso: 1.2 },
         ],
         righe: [
           ...righe.map(r => ({
             celle: [
-              r.ordine_primaria, r.numero_fir, giornoItaliano(r.fine_trasporto), r.giorni_attesa,
+              r.ordine_primaria || r.ordine_secondaria, r.numero_fir, giornoItaliano(r.fine_trasporto), r.giorni_attesa,
               r.punto_di_raccolta, r.comune, r.provincia, r.prodotto, r.peso_non_dichiarato_kg,
               r.destinazione, r.destinazione_secondaria,
-              (r.date_da_sistemare || []).map(d => `${d.tipo} ${d.id_ordine}: ${d.testo}`).join(' · '),
+              testoFormularioRiga(r),
+              testoNelFile(r, fotoDel),
             ],
           })),
-          ...(righe.length ? [{ stile: 'totale', celle: ['Totale', null, null, null, null, null, null, null, dati.totale_kg || 0, null, null, null] }] : []),
+          // Il dichiarato oltre i carichi (una giacenza sotto zero) sta in una
+          // riga sua, perche' il totale sia quello della scheda.
+          ...(righe.length && oltre ? [{ celle: ['Dichiarato dopo il file, oltre i carichi', null, null, null, null, null, null, null, -oltre, null, null, null, null] }] : []),
+          ...(righe.length ? [{ stile: 'totale', celle: ['Totale', null, null, null, null, null, null, null, dati.totale_kg || 0, null, null, null, null] }] : []),
         ],
       },
     ],
-    note: [
-      'Il peso e’ quello che il portale aspetta ancora per quell’ordine, non il peso del formulario: un ordine dichiarato a meta’ porta solo la parte che resta.',
-      'Tutto per fine del trasporto, mai per la data di chiusura a portale. Un carico senza fine trasporto non si colloca in nessun mese e sta nel gruppo a parte.',
-      date.n > 0 ? `${date.n} ordini hanno, nel gestionale, un formulario terminato senza tutte le date obbligatorie (${date.kg} kg): l’ultima colonna dice quali.` : '',
-      // Dal pulsante di uno stoccaggio la cui attesa e' per noi tutta chiusa
-      // (decisioni dell'utente del 13/10/2026): il PDF lo dice come la scheda.
-      filtri.per_noi_chiusi ? `Per noi chiusi: ${filtri.per_noi_chiusi}. Il portale li attribuisce ancora allo stoccaggio, ma nessuna dichiarazione li chiudera’ e non c’e’ niente da fare: il numero resta quello del portale, e serve alla quadratura.` : '',
-    ].filter(Boolean),
+    note: noteSchedaDaDichiarare(dati, filtri),
   };
+}
+
+/**
+ * Tutte le note della scheda Da dichiarare, le stesse nel PDF e nell'Excel
+ * (revisione del 15/10/2026): l'Excel chiamava noteElencoDaDichiarare senza i
+ * filtri e senza le altre frasi, e i due file non dicevano le stesse cose.
+ */
+export function noteSchedaDaDichiarare(dati = {}, filtri = {}) {
+  const date = dati.date_da_sistemare || { n: 0, kg: 0 };
+  return [
+    ...noteElencoDaDichiarare(dati, filtri),
+    'Il peso e’ quello che il portale aspetta ancora per quell’ordine, non il peso del formulario: un ordine dichiarato a meta’ porta solo la parte che resta. Per un carico che il file non ha ancora e’ il peso del formulario nel gestionale.',
+    'Tutto per fine del trasporto, mai per la data di chiusura a portale: il mese e’ quello in cui il carico e’ arrivato al sito, per un carico passato da uno stoccaggio la fine trasporto della secondaria. Un carico senza fine trasporto non si colloca in nessun mese e sta nel gruppo a parte.',
+    date.n > 0 ? `${quanti(date.n, 'ordine ha', 'ordini hanno')}, nel gestionale, un formulario terminato senza tutte le date obbligatorie (${kgItaliani(date.kg)} kg): la colonna del formulario dice quali.` : '',
+    // Dal pulsante di uno stoccaggio la cui attesa e' per noi tutta chiusa
+    // (decisioni dell'utente del 13/10/2026): il PDF lo dice come la scheda.
+    filtri.per_noi_chiusi ? `Per noi chiusi: ${filtri.per_noi_chiusi}. Il portale li attribuisce ancora allo stoccaggio, ma nessuna dichiarazione li chiudera’ e non c’e’ niente da fare: il numero resta quello del portale, e serve alla quadratura.` : '',
+  ].filter(Boolean);
 }
 
 /**

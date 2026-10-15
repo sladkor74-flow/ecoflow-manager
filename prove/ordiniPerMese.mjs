@@ -18,7 +18,12 @@
 // non della pagina, e la pagina lo mostra sopra la tabella; il totale sotto le
 // righe dice che e' dell'elenco, e dove la pagina non basta si scrive anche il
 // suo. npm run prove
+//
+// Dal 15/10/2026 il conto per mese sta in shared/riconciliazioneDaDichiarare.ts
+// (contoPerMese), con le parti dei carichi arrivati dopo il file e il mese del
+// giorno di arrivo al sito: qui si prova anche la funzione vera.
 import { readFileSync } from 'node:fs';
+import { contoPerMese } from '../base44/shared/riconciliazioneDaDichiarare.ts';
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
@@ -86,16 +91,19 @@ console.log('CHI NON HA LA FINE TRASPORTO HA UN GRUPPO SUO');
 
 console.log('LA FUNZIONE E LA PAGINA FANNO QUESTO');
 {
-  const f = sorgente('base44/functions/getOrdiniDaDichiarare/entry.ts');
-  verifica('il conto per mese si fa sulle righe filtrate, tutte',
-    /const perMese = new Map\(\);\s*\n\s*for \(const r of filtrate\)/.test(f));
-  verifica('il mese e quello della fine trasporto, mai la chiusura a portale',
-    /const fine = fineDi\(r, dateFiltrate\.get\(r\)\);\s*\n\s*const chiave = fine \? fine\.slice\(0, 7\) : '';/.test(f));
+  const f = sorgente('base44/functions/getOrdiniDaDichiarare/entry.ts').split(String.fromCharCode(13)).join('');
+  verifica('il conto per mese si fa sulle righe filtrate, tutte, con contoPerMese',
+    /const per_mese = contoPerMese\(filtrate\.map\(/.test(f));
+  verifica('il mese e quello del giorno di arrivo al sito: la fine trasporto, mai la chiusura a portale',
+    /giorno: giornoDelCarico\(r, ruolo, \{ finiSecondarie, finePrimaria \}\)/.test(f) && /per_mese = contoPerMese\(filtrate\.map\(x => \(\{ giorno: x\.giorno,/.test(f));
   verifica('e si manda sempre, con la pagina', f.includes('per_mese,'));
-  verifica('chi non ha la data finisce per ultimo', f.includes("(a.mese || '9999-99').localeCompare(b.mese || '9999-99')"));
+  const c = contoPerMese([{ giorno: '', kg: 5 }, { giorno: '2026-10-12', kg: 3940, nel_file: false }, { giorno: '2026-09-30', kg: 100, nel_file: true }, { giorno: '2026-10-01', kg: 60, nel_file: true, dichiarato_dopo_kg: 40 }]);
+  verifica('chi non ha la data finisce per ultimo', c.map(m => m.mese).join(',') === '2026-09,2026-10,', JSON.stringify(c.map(m => m.mese)));
+  verifica('e il mese dice quanti sono arrivati dopo il file e quanto se n e dichiarato dopo',
+    c[1].ordini === 2 && c[1].kg === 4000 && c[1].dopo_il_file.ordini === 1 && c[1].dopo_il_file.kg === 3940 && c[1].dichiarato_dopo_kg === 40, JSON.stringify(c[1]));
 
   const t = sorgente('src/components/giacenze/DaDichiarareTable.jsx');
-  verifica('la pagina mostra i mesi sopra la tabella', t.includes('Di quali mesi:') && t.includes('data?.per_mese'));
+  verifica('la pagina mostra i mesi sopra la tabella', t.includes('titolo="Di quali mesi:"') && t.includes('data?.per_mese'));
   verifica('e dice che l elenco parte dal carico piu vecchio e che i mesi recenti sono dopo',
     t.includes('i mesi più recenti sono nelle pagine dopo'));
   verifica('il totale sotto le righe dice di essere dell elenco, non della pagina',

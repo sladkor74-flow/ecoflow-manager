@@ -6,9 +6,11 @@ import { giornoRoma, annoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
 import { eAci } from "../../shared/canaleSecondaria.ts";
 import { formulariDelFile, ruoloDellaRiga, giornoFotografia, ordiniNotiAlPortale, dichiaratoDopoLaFotografia, inizioAggiunti, finiDelleSecondarie, giornoDelCarico, nellAttesaDellAnno } from "../../shared/giacenzaPortale.ts";
 import { eTerminato } from "../../shared/movimenti.ts";
-import { carichiNonNelFile, riconciliazioneDaDichiarare } from "../../shared/riconciliazioneDaDichiarare.ts";
+import { carichiNonNelFile, riconciliazioneDaDichiarare, scalaDichiaratoDopo, contoPerMese } from "../../shared/riconciliazioneDaDichiarare.ts";
 
-// Restituisce l'elenco paginato degli ordini in attesa di dichiarazione (OrdineNonDichiarato).
+// Restituisce l'elenco paginato degli ordini da dichiarare: le righe del file
+// del portale degli ordini non dichiarati (OrdineNonDichiarato) PIU' i carichi
+// che il gestionale conosce e il file non ha ancora (15/10/2026, vedi sotto).
 // Payload: { sito, provincia, anno, ricerca, limite, offset, tutte } - tutti opzionali.
 // Con tutte: true le righe non si tagliano a mille: serve agli export, che
 // scrivevano il TOTALE di tutto l'elenco sotto le sole prime mille righe.
@@ -31,25 +33,65 @@ import { carichiNonNelFile, riconciliazioneDaDichiarare } from "../../shared/ric
 // la riporta (fine_a_portale) perche' la si ricopi. La regola che lega una riga
 // ai suoi formulari sta in shared/giacenzaPortale.ts (formulariDelFile).
 //
+// L'ELENCO E' IL FILE DEL PORTALE PIU' I CARICHI ARRIVATI DOPO (15/10/2026).
+//
+// La domanda dell'utente: «non capisco perche' ad ottobre in t-cycle sono entrati
+// finora 49,04 t e nelle giacenze alla voce di ottobre risulta ancora 40,92 t».
+// La giacenza della Situazione (372,92 t) e il pulsante (122 ordini) contavano i
+// 4 carichi del 12-13/10 che il file del 09/10 non ha ancora; l'elenco, il suo
+// totale e la fascia dei mesi solo le 118 righe del file, e i 4 carichi stavano
+// in un «quali sono» che si vedeva solo arrivando dal pulsante. Ora, per tutti
+// gli impianti con una regola sola:
+//  - i carichi che il gestionale conosce e il file non ha ancora
+//    (carichiNonNelFile, shared/riconciliazioneDaDichiarare.ts: la regola della
+//    giacenza e del riepilogo delle dichiarazioni) sono RIGHE dell'elenco, con
+//    nel_file falso, e passano dagli stessi filtri delle altre; solo quelli
+//    arrivati al sito dopo il giorno del file (arrivato_dopo_il_file) si dicono
+//    «arrivati dopo»: uno terminato prima e chiuso a portale dopo il file e'
+//    «non ancora nel file»;
+//  - il dichiarato a portale dopo la fotografia si toglie dalle righe a cui il
+//    portale lo aggancia, dal carico piu' vecchio (scalaDichiaratoDopo): la riga
+//    resta, dice quanto ne e' uscito, e il peso da dichiarare e' quello che resta;
+//  - percio' il totale dell'elenco di un impianto e' la sua giacenza a portale
+//    della Situazione, al chilo, e il numero delle righe e' quello del pulsante;
+//  - il mese di una riga e' quello del giorno in cui il carico e' arrivato al
+//    sito a cui il portale lo attribuisce (giornoDelCarico): per un carico passato
+//    da uno stoccaggio la fine trasporto della secondaria, come nel riepilogo
+//    delle dichiarazioni, cosi' i mesi di questo elenco sono quelli che le
+//    Dichiarazioni Impianti dicono da dichiarare. La colonna «Fine trasporto»
+//    resta quella del file, e la riga dice il giorno dell'arrivo all'impianto
+//    quando e' un altro (giorno_al_sito).
+// Lo stoccaggio resta quello che e': le sue righe sono carichi passati dal
+// piazzale e gia' ripartiti, «in attesa di dichiarazione», non giacenza
+// dell'impianto, e non hanno carichi aggiunti (il materiale arrivato al piazzale
+// non diventa un carico dell'impianto: lo decide ingressoMovimento).
+//
 // Filtri:
 //   sito     -> destinazione_secondaria se valorizzata, altrimenti destinazione (normalizzaRagioneSociale)
 //   provincia-> confronto in maiuscolo e con trim
-//   anno     -> anno della fine trasporto (accetta ancora anno_chiusura dalle pagine vecchie)
-//   ricerca  -> corrispondenza parziale case-insensitive su numero_fir e ordine_primaria
+//   anno     -> anno del giorno in cui il carico e' arrivato al sito (accetta ancora anno_chiusura dalle pagine vecchie)
+//   ricerca  -> corrispondenza parziale case-insensitive su numero_fir e numero d'ordine
 //   solo_date_da_sistemare -> solo le righe il cui formulario ha le date da sistemare
 //   ruolo    -> 'imp' (da dichiarare su quell'impianto) o 'stoc' (passati dal piazzale e gia' ripartiti)
 //
 // Restituisce: righe (paginate), totale_righe, totale_kg, per_mese (di quali mesi
-// sono gli ordini di tutto l'elenco filtrato, non della pagina: ordini e kg, con
-// mese vuoto per chi non ha la fine trasporto), siti_distinti, province_distinte, anni_distinti,
-// date_da_sistemare ({ n, kg, fuori_dai_mesi, fuori_dai_mesi_kg } delle righe filtrate),
-// senza_fine_a_portale (righe del file senza fine trasporto), senza_fine_dal_gestionale
-// (quante di quelle la prendono dalla primaria nel gestionale).
+// sono gli ordini di tutto l'elenco filtrato, non della pagina, con le parti:
+// arrivati dopo il file, dichiarato dopo, impianto e stoccaggio), parti (le
+// stesse sul totale), foto_del (il giorno del file), siti_distinti (anche, con un
+// sito scelto, gli altri impianti che hanno solo carichi arrivati dopo),
+// province_distinte, anni_distinti, date_da_sistemare ({ n, kg, fuori_dai_mesi,
+// fuori_dai_mesi_kg } delle righe filtrate), senza_fine_a_portale (righe del file
+// senza fine trasporto), senza_fine_dal_gestionale (quante la prendono dalla
+// primaria nel gestionale), carichi_dopo_il_file ({ cercati, errore }).
 //
-// Con riconcilia: true, un sito, ruolo 'imp' e nessun altro filtro - il caso del
-// pulsante della scheda Situazione - anche riconciliazione: righe del file +
-// carichi non ancora nel file - dichiarato dopo la fotografia = giacenza a
-// portale, e righe + carichi = il numero del pulsante (11/10/2026, vedi riconcilia).
+// La riga di riconciliazione (11/10/2026) c'e' sempre, non solo arrivando dal
+// pulsante (il vecchio riconcilia: true non serve piu' e si ignora): con un sito
+// e un ruolo che non sia 'stoc', riconciliazione = righe del file + carichi non
+// ancora nel file - dichiarato dopo la fotografia = giacenza a portale, e righe +
+// carichi = il numero del pulsante, sempre di TUTTO il sito anche con l'anno o la
+// provincia scelti (elenco dice quanto ne mostra l'elenco filtrato); per un sito
+// che e' anche stoccaggio, la parte dello stoccaggio a parte. Senza un sito,
+// riconciliazione_siti: la stessa riga per ogni impianto, e gli stoccaggi.
 //
 // carichi_del (anno, dal 14/10/2026) -> solo i carichi arrivati in quell'anno al
 // sito a cui il portale li attribuisce: all'impianto (la fine della secondaria,
@@ -57,19 +99,28 @@ import { carichiNonNelFile, riconciliazioneDaDichiarare } from "../../shared/ric
 // la regola con cui le Giacenze di un anno passato contano gli ordini da
 // dichiarare (giornoDelCarico e nellAttesaDellAnno,
 // shared/giacenzaPortale.ts): il pulsante di quell'anno apre l'elenco con
-// carichi_del, e l'elenco dice lo stesso numero. Sull'anno in corso e su quello
-// dopo non filtra niente. Con riconcilia la riga dice solo gli ordini (file +
-// carichi non ancora nel file = pulsante): la giacenza di un anno chiuso e' la
-// lettura del 31/12, non questo elenco.
+// carichi_del, e l'elenco dice lo stesso numero, carichi non ancora nel file
+// compresi. Sull'anno in corso e su quello dopo non filtra niente. La riga di
+// riconciliazione dice solo gli ordini (file + carichi non ancora nel file =
+// pulsante): la giacenza di un anno chiuso e' la lettura del 31/12, non questo
+// elenco.
 //
-// I formulari si leggono solo per gli ordini del file (22/09/2026). La scheda Da
-// dichiarare chiama questa funzione a ogni pagina, filtro o ricerca: leggere
-// tutta PrimariaRete (undici pagine da mille) e tutta Secondaria ogni volta la
-// rendeva lenta, con il rischio che la funzione scadesse. Si chiedono a blocchi,
-// con $in sul numero d'ordine, le primarie e le secondarie delle righe che
-// servono: quelle che passano i filtri di sito, provincia e ricerca, per le date
-// da sistemare, e quelle senza fine trasporto nel file, per l'anno. Il blocco e'
-// piccolo perche' la domanda viaggia nell'indirizzo della richiesta.
+// LE LETTURE (15/10/2026, misurate sui dati veri dell'11/10). I carichi che il
+// file non ha si cercano fra le primarie e le secondarie terminate da
+// inizioAggiunti in avanti (la finestra: 3.104 primarie e 167 secondarie, una
+// pagina ciascuna). Le stesse primarie servono alle righe del file: tutte le 943
+// primarie del file erano nella finestra, e le domande per numero d'ordine si
+// fanno solo per quelle che la finestra non ha. Che il portale conosca un carico
+// lo dice il report delle dichiarazioni: se ne leggono le righe dichiarate da
+// inizio finestra in avanti (3.236 righe, una pagina; un carico non si dichiara
+// prima di arrivare), e solo per i carichi che restano si chiede il report per
+// numero d'ordine, che fa il conto esatto qualunque data porti la riga. Misurato
+// sui dati veri: con tutti i siti da 9 richieste a 6; dal pulsante di un
+// impianto, con la riga di riconciliazione, da 8-14 a 6 (T-Cycle 8, Irigom 14);
+// sfogliando le pagine o con un filtro da 3-4 a 6, perche' la riga c'e' sempre;
+// dal pulsante di uno stoccaggio 4, come prima. Con dei carichi arrivati dopo il
+// file, una o due richieste in piu' per numero d'ordine, per quei soli carichi.
+// Ogni richiesta e' una pagina; nessuna lettura per riga.
 const BLOCCO_ORDINI = 150;
 const BLOCCHI_INSIEME = 3;
 
@@ -91,82 +142,17 @@ async function perOrdini(entity, ids, fn, campo = 'id_ordine') {
  * non torna nessun record, si rilegge tutto l'archivio pagina per pagina e si
  * tengono gli ordini voluti: meglio lenta che una scheda che non segnala le date
  * da sistemare. `fn` puo' ricevere due volte lo stesso record: formulariDelFile
- * lo tiene una volta sola.
+ * lo tiene una volta sola. `giaTrovati` sono gli ordini voluti che la finestra
+ * ha gia' portato (15/10/2026): se la domanda torna vuota ma non da' errore,
+ * quei pochi che mancano non sono nel gestionale, e non si rilegge l'archivio.
  */
-async function leggiOrdini(entity, ids, fn) {
+async function leggiOrdini(entity, ids, fn, giaTrovati = 0) {
   if (!ids.length) return;
-  let letti = 0;
-  try { letti = await perOrdini(entity, ids, fn); } catch { letti = 0; }
-  if (letti) return;
+  let letti = 0, guasto = false;
+  try { letti = await perOrdini(entity, ids, fn); } catch { guasto = true; }
+  if (letti || (giaTrovati && !guasto)) return;
   const voluti = new Set(ids);
   await perPagina(entity, null, (r) => { if (voluti.has(String(r.id_ordine || '').trim())) fn(r); });
-}
-
-/**
- * LA RIGA DI RICONCILIAZIONE DI UN IMPIANTO (chiusura dell'audit, 11/10/2026).
- *
- * Righe del file + carichi che il file non ha ancora - dichiarato dopo la
- * fotografia = la giacenza a portale, lo stesso numero delle Giacenze; e righe
- * del file + carichi aggiunti = il numero del pulsante della scheda Situazione
- * (shared/riconciliazioneDaDichiarare.ts). Si fa solo se la si chiede, e solo
- * per un impianto senza altri filtri: e' il caso del pulsante, ed e' l'unico in
- * cui l'elenco e' tutto quello che il portale aspetta da quell'impianto.
- *
- * Le letture sono piccole: primarie e secondarie dalla finestra dei carichi
- * aggiunti in avanti (inizioAggiunti, un giorno di margine per il giorno
- * italiano), il report delle dichiarazioni solo per i numeri d'ordine che il file
- * non ha, e le dichiarazioni mensili, che sono poche.
- */
-async function riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini, fileKg, carichiDel = null, annoDiOggi = Number(oggiRoma().slice(0, 4)) }) {
-  const foto = giornoFotografia(righeFile);
-  if (!foto) return { senza_fotografia: true };
-  const portaleConosce = ordiniNotiAlPortale();
-  for (const r of righeFile) portaleConosce.segna(r);
-  const inizio = inizioAggiunti(foto);
-  const d = new Date(`${inizio}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  const finestra = { stato: 'terminato', trasporto_finito_il: { $gte: `${d.toISOString().slice(0, 10)}T00:00:00` } };
-  // I CARICHI DI UN ANNO PASSATO (14/10/2026): i carichi non
-  // ancora nel file si cercano da inizioAggiunti in avanti, quindi un anno finito
-  // prima non ne puo' avere, e primarie, secondarie e report non si leggono
-  // nemmeno. Chi la rete non la dichiara si legge nei siti di quell'anno, come le
-  // Giacenze di quell'anno; il dichiarato dopo la fotografia non serve, perche'
-  // la riga di quell'anno non arriva a una giacenza.
-  const nessunAggiunto = carichiDel !== null && `${carichiDel}-12-31` < inizio;
-  const [primarie, secondarie, giacenzeSito, dichiarazioniSito] = await Promise.all([
-    nessunAggiunto ? Promise.resolve([]) : fetchAll(svc.PrimariaRete, finestra),
-    nessunAggiunto ? Promise.resolve([]) : fetchAll(svc.Secondaria, finestra),
-    fetchAll(svc.GiacenzaSito, { anno: carichiDel !== null ? carichiDel : annoDiOggi }),
-    carichiDel !== null ? Promise.resolve([]) : fetchAll(svc.DichiarazioneSito),
-  ]);
-  // Chi la rete non la dichiara per accordo (oggi Tecnogum) non ha una giacenza
-  // di rete che il portale tenga per noi: non c'e' niente da riconciliare.
-  const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
-  if (nonDichiaraRete.has(sitoNorm)) return { foto_del: foto, non_dovuta: true };
-  // Solo i carichi di questo impianto che il file non ha: quelli si cercano nel
-  // report, perche' un ordine gia' dichiarato il portale lo conosce.
-  const suoi = (r) => norm(r.destinazione) === sitoNorm;
-  const candidatePrimarie = primarie.filter(r => suoi(r) && !portaleConosce.noto(r, 'primaria'));
-  const candidateSecondarie = secondarie.filter(r => suoi(r) && !portaleConosce.noto(r, 'secondaria'));
-  const ids = (righe) => [...new Set(righe.map(r => String(r.id_ordine || '').trim()).filter(Boolean))];
-  await Promise.all([
-    perOrdini(svc.DichiarazioneTrattamento, ids(candidatePrimarie), (r) => portaleConosce.segna(r, 'dichiarazioni'), 'ordine_primaria'),
-    perOrdini(svc.DichiarazioneTrattamento, ids(candidateSecondarie), (r) => portaleConosce.segna(r, 'dichiarazioni'), 'ordine_secondaria'),
-  ]);
-  const carichi = carichiNonNelFile({ foto, portaleConosce, chiaveDi: norm, nonDichiaraRete });
-  for (const r of candidatePrimarie) carichi.segna(r, 'primaria');
-  for (const r of candidateSecondarie) carichi.segna(r, 'secondaria');
-  if (carichiDel !== null) {
-    // Gli ordini di quell'anno: le righe del file arrivate in quell'anno (l'elenco)
-    // piu' i carichi non ancora nel file arrivati in quell'anno = il numero del
-    // pulsante delle Giacenze di quell'anno. Niente giacenza (null): e' la lettura
-    // del 31/12, o «—», non la somma di questo elenco.
-    const ordini = carichi.di(sitoNorm).ordini.filter(o => nellAttesaDellAnno(o.fine_trasporto, carichiDel, annoDiOggi));
-    const aggiunti = { n: ordini.length, kg: ordini.reduce((s, o) => s + o.kg, 0), ordini };
-    return { ...riconciliazioneDaDichiarare({ foto, fileOrdini, fileKg, aggiunti, dichiaratoDopoKg: 0 }), carichi_del: carichiDel, dichiarato_dopo_kg: null, giacenza_kg: null };
-  }
-  const dopo = dichiaratoDopoLaFotografia(dichiarazioniSito, foto, norm).get(sitoNorm) || 0;
-  return riconciliazioneDaDichiarare({ foto, fileOrdini, fileKg, aggiunti: carichi.di(sitoNorm), dichiaratoDopoKg: dopo });
 }
 
 export default async function(req) {
@@ -201,6 +187,11 @@ export default async function(req) {
     const svc = base44.asServiceRole.entities;
     const righeFile = await fetchAll(svc.OrdineNonDichiarato);
     const all = righeFile.filter(r => !eAci({ prodotto: r.prodotto }));
+    // Il giorno del file e quello che il portale conosce: le righe del file
+    // subito, il report delle dichiarazioni piu' sotto.
+    const foto = giornoFotografia(righeFile);
+    const portaleConosce = ordiniNotiAlPortale();
+    for (const r of righeFile) portaleConosce.segna(r);
 
     const sitoNorm = sito ? norm(sito) : null;
     const provUpper = provincia ? String(provincia).trim().toUpperCase() : null;
@@ -212,26 +203,55 @@ export default async function(req) {
       if (sec) return sec;
       return String(r.destinazione || '').trim();
     }
-    // I filtri che non dipendono dalle date del gestionale.
-    const passaFiltri = (r) => {
-      if (sitoNorm && norm(sitoDiRiga(r)) !== sitoNorm) return false;
-      if (provUpper && String(r.provincia || '').trim().toUpperCase() !== provUpper) return false;
-      if (ricercaLower) {
-        const fir = String(r.numero_fir || '').toLowerCase();
-        const ord = String(r.ordine_primaria || '').toLowerCase();
-        if (!fir.includes(ricercaLower) && !ord.includes(ricercaLower)) return false;
+
+    // --- Le letture dei carichi che il file non ha ancora ---
+    // Servono solo se l'elenco puo' avere righe di un impianto: dal pulsante di uno
+    // stoccaggio no, e li' le letture restano quelle di prima. Senza il file non
+    // c'e' una fotografia a cui aggiungerli. Su un anno passato finito prima della
+    // finestra non ce ne possono essere (14/10/2026): si leggono solo i siti di
+    // quell'anno, per sapere chi la rete non la dichiara.
+    const servonoICarichi = !!foto && ruoloChiesto !== 'stoc';
+    const inizio = inizioAggiunti(foto);
+    const nessunAggiunto = !servonoICarichi || (carichiDel !== null && `${carichiDel}-12-31` < inizio);
+    let finestra = null;
+    if (!nessunAggiunto) {
+      // Un giorno di margine per il giorno italiano, come le Giacenze.
+      const d = new Date(`${inizio}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - 1);
+      const giorno = d.toISOString().slice(0, 10);
+      finestra = { giorno, filtro: { stato: 'terminato', trasporto_finito_il: { $gte: `${giorno}T00:00:00` } } };
+    }
+    // Se una di queste letture non riesce l'elenco esce lo stesso, con le sole
+    // righe del file, e lo dice (carichi_dopo_il_file.errore, e la riga di
+    // riconciliazione): mai un elenco piu' corto che si spaccia per la giacenza.
+    let erroreCarichi = '';
+    const motivo = (e) => (e && e.message ? e.message : String(e));
+    let primarieFinestra = [], secondarieFinestra = [], giacenzeSito = [], dichiarazioniSito = [], reportRecente = [];
+    if (servonoICarichi) {
+      try {
+        [primarieFinestra, secondarieFinestra, giacenzeSito, dichiarazioniSito, reportRecente] = await Promise.all([
+          finestra ? fetchAll(svc.PrimariaRete, finestra.filtro) : Promise.resolve([]),
+          finestra ? fetchAll(svc.Secondaria, finestra.filtro) : Promise.resolve([]),
+          fetchAll(svc.GiacenzaSito, { anno: carichiDel !== null ? carichiDel : annoDiOggi }),
+          carichiDel === null ? fetchAll(svc.DichiarazioneSito) : Promise.resolve([]),
+          finestra ? fetchAll(svc.DichiarazioneTrattamento, { data_dichiarazione: { $gte: finestra.giorno } }) : Promise.resolve([]),
+        ]);
+      } catch (e) {
+        erroreCarichi = motivo(e);
+        primarieFinestra = []; secondarieFinestra = []; giacenzeSito = []; dichiarazioniSito = []; reportRecente = [];
       }
-      return true;
-    };
+    }
 
     // I formulari del gestionale da sistemare: primarie di rete e secondarie
     // terminate con una data obbligatoria mancante o incoerente, lette solo per
-    // gli ordini del file che servono (vedi in testa).
+    // gli ordini del file che servono (vedi in testa): quelli del sito scelto (di
+    // tutto il sito, perche' la riga di riconciliazione e il dichiarato dopo sono
+    // del sito) e quelli senza fine trasporto nel file, per l'anno.
     const formulari = formulariDelFile();
     const idPrimarie = new Set();
     const idSecondarie = new Set();
     for (const r of all) {
-      const serve = passaFiltri(r) || !giornoRoma(r.fine_trasporto);
+      const serve = !sitoNorm || norm(sitoDiRiga(r)) === sitoNorm || !giornoRoma(r.fine_trasporto);
       if (!serve) continue;
       const p = String(r.ordine_primaria || '').trim();
       const s = String(r.ordine_secondaria || '').trim();
@@ -244,151 +264,352 @@ export default async function(req) {
     // ruolo lo dice la primaria nel gestionale, e si legge qui senza una lettura
     // in piu' (utente, 08/10/2026).
     const tipoPrimaria = new Map();
-    // Il giorno in cui un carico e' arrivato al sito, per carichi_del: la fine
-    // trasporto della primaria terminata (come fineRete nelle Giacenze) e quella
-    // delle secondarie lette qui, le stesse delle righe che servono. Nessuna
-    // lettura in piu' (14/10/2026).
+    // Il giorno in cui un carico e' arrivato al sito: la fine trasporto della
+    // primaria terminata (come fineRete nelle Giacenze) e quella delle secondarie
+    // lette qui, le stesse delle righe che servono. Nessuna lettura in piu'.
     const finePrimarie = new Map();
     const secondarieLette = [];
-    await Promise.all([
-      leggiOrdini(svc.PrimariaRete, [...idPrimarie], (r) => {
-        formulari.segna(r, 'primaria');
-        const id = String(r.id_ordine || '').trim();
-        const td = String(r.tipo_destinazione || '').trim().toLowerCase();
-        if (id && td) tipoPrimaria.set(id, td.startsWith('stoc') ? 'stoc' : 'imp');
-        const fine = eTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
-        if (id && fine) finePrimarie.set(id, fine);
-      }),
-      // Le secondarie ACI non portano righe di questo file, che e' della rete.
-      leggiOrdini(svc.Secondaria, [...idSecondarie], (r) => { secondarieLette.push(r); if (!eAci(r)) formulari.segna(r, 'secondaria'); }),
-    ]);
-    const finiSecondarie = finiDelleSecondarie(secondarieLette);
-    const giornoDelSuoArrivo = (r) => giornoDelCarico(r, ruoloDellaRiga(r, (id) => tipoPrimaria.get(id) || ''), {
-      finiSecondarie, finePrimaria: (id) => finePrimarie.get(id) || '',
+    const segnaPrimaria = (r) => {
+      formulari.segna(r, 'primaria');
+      const id = String(r.id_ordine || '').trim();
+      const td = String(r.tipo_destinazione || '').trim().toLowerCase();
+      if (id && td) tipoPrimaria.set(id, td.startsWith('stoc') ? 'stoc' : 'imp');
+      const fine = eTerminato(r) ? giornoRoma(r.trasporto_finito_il) : '';
+      if (id && fine) finePrimarie.set(id, fine);
+    };
+    // Le secondarie ACI non portano righe di questo file, che e' della rete.
+    const segnaSecondaria = (r) => { secondarieLette.push(r); if (!eAci(r)) formulari.segna(r, 'secondaria'); };
+    // Quello che la finestra ha gia' portato non si chiede di nuovo.
+    const vistePrimarie = new Set();
+    const visteSecondarie = new Set();
+    for (const r of primarieFinestra) {
+      const id = String(r.id_ordine || '').trim();
+      if (idPrimarie.has(id)) { segnaPrimaria(r); vistePrimarie.add(id); }
+    }
+    for (const r of secondarieFinestra) {
+      const id = String(r.id_ordine || '').trim();
+      if (idSecondarie.has(id)) { segnaSecondaria(r); visteSecondarie.add(id); }
+    }
+
+    // Che il portale conosca un carico: il report delle dichiarazioni recenti
+    // subito, poi per numero d'ordine solo quello che resta (vedi in testa).
+    // Chi la rete non la dichiara per accordo (oggi Tecnogum) non ha carichi
+    // «in ritardo nel file»: non ce ne sono proprio.
+    for (const r of reportRecente) portaleConosce.segna(r, 'dichiarazioni');
+    const nonDichiaraRete = new Set(giacenzeSito.filter(g => g.dichiara_rete === false).map(g => norm(g.sito)));
+    const carichi = carichiNonNelFile({ foto, portaleConosce, chiaveDi: norm, nonDichiaraRete });
+    const daChiedere = (righe, tipo) => righe.filter(r => {
+      const ns = carichi.candidato(r, tipo);
+      return !!ns && (!sitoNorm || ns === sitoNorm) && !portaleConosce.noto(r, tipo);
     });
-    // I formulari da sistemare di una riga del file, e se il carico resta fuori dai
-    // mesi: conta il movimento che l'ha portato all'impianto.
-    const dateDiRiga = (r) => formulari.diRiga(r);
+    const candidatePrimarie = erroreCarichi ? [] : daChiedere(primarieFinestra, 'primaria');
+    const candidateSecondarie = erroreCarichi ? [] : daChiedere(secondarieFinestra, 'secondaria');
+    const ids = (righe) => [...new Set(righe.map(r => String(r.id_ordine || '').trim()).filter(Boolean))];
+    const nelReport = (lista, campo) => perOrdini(svc.DichiarazioneTrattamento, ids(lista), (r) => portaleConosce.segna(r, 'dichiarazioni'), campo)
+      .catch((e) => { erroreCarichi = erroreCarichi || motivo(e); });
+    await Promise.all([
+      leggiOrdini(svc.PrimariaRete, [...idPrimarie].filter(id => !vistePrimarie.has(id)), segnaPrimaria, vistePrimarie.size),
+      leggiOrdini(svc.Secondaria, [...idSecondarie].filter(id => !visteSecondarie.has(id)), segnaSecondaria, visteSecondarie.size),
+      nelReport(candidatePrimarie, 'ordine_primaria'),
+      nelReport(candidateSecondarie, 'ordine_secondaria'),
+    ]);
+    if (!erroreCarichi) {
+      for (const r of candidatePrimarie) carichi.segna(r, 'primaria');
+      for (const r of candidateSecondarie) carichi.segna(r, 'secondaria');
+    }
+    // IL MENU DEI SITI CON UN SITO GIA' SCELTO (revisione del 15/10/2026). La
+    // scheda rifa' il menu a ogni risposta, e i carichi arrivati dopo il file si
+    // cercano solo per il sito scelto: scelto T-Cycle, T.R.S. - che nel file non
+    // c'e' e ha solo carichi arrivati dopo - spariva dal menu finche' non si
+    // tornava a «Tutti i siti». I nomi degli altri impianti vengono dalle
+    // primarie e secondarie della finestra gia' lette, con la stessa decisione
+    // (candidato) e quello che il portale conosce gia' qui: nessuna lettura in
+    // piu'. Il report per numero d'ordine si chiede solo per il sito scelto: un
+    // impianto i cui carichi il portale conosce solo da un report vecchio puo'
+    // comparire nel menu e, scelto, dire che non ha niente da dichiarare.
+    const sitiDeiCandidati = new Map();
+    if (sitoNorm && !erroreCarichi) {
+      for (const [righe, tipo] of [[primarieFinestra, 'primaria'], [secondarieFinestra, 'secondaria']]) {
+        for (const r of righe) {
+          const ns = carichi.candidato(r, tipo);
+          if (ns && ns !== sitoNorm && !sitiDeiCandidati.has(ns) && !portaleConosce.noto(r, tipo)) sitiDeiCandidati.set(ns, String(r.destinazione || '').trim());
+        }
+      }
+    }
+
+    // --- Le righe: quelle del file e i carichi arrivati dopo ---
+    const finiSecondarie = finiDelleSecondarie(secondarieLette);
+    const ruoloPrimaria = (id) => tipoPrimaria.get(id) || '';
+    const finePrimaria = (id) => finePrimarie.get(id) || '';
+    const righeTutte = [];
+    for (const r of all) {
+      const date = formulari.diRiga(r);
+      const ruolo = ruoloDellaRiga(r, ruoloPrimaria);
+      const nome = sitoDiRiga(r);
+      righeTutte.push({
+        nel_file: true, r, date, ruolo, nome, chiave: norm(nome),
+        // La fine trasporto della riga: quella del file o, se il file non la
+        // scrive, quella della primaria nel gestionale. Mai la chiusura (22/09/2026).
+        fine: giornoRoma(r.fine_trasporto) || date.fine_dal_gestionale || '',
+        // Il giorno in cui il carico e' arrivato al sito: decide mese, anno e ordine.
+        giorno: giornoDelCarico(r, ruolo, { finiSecondarie, finePrimaria }),
+        kg: Number(r.peso_non_dichiarato_kg) || 0,
+        provincia: r.provincia, fir: r.numero_fir, ordini: [r.ordine_primaria],
+      });
+    }
+    for (const m of carichi.movimenti()) {
+      const r = m.r;
+      // Il formulario nel gestionale del carico: le date da sistemare, se ce ne sono.
+      formulari.segna(r, m.tipo);
+      const date = m.tipo === 'secondaria'
+        ? formulari.diRiga({ ordine_secondaria: r.id_ordine, destinazione_secondaria: r.destinazione })
+        : formulari.diRiga({ ordine_primaria: r.id_ordine, fine_trasporto: m.giorno });
+      righeTutte.push({
+        nel_file: false, carico: m, date, ruolo: 'imp', nome: String(r.destinazione || '').trim(), chiave: m.ns,
+        fine: m.giorno, giorno: m.giorno, kg: Number(r.peso_effettivo) || 0,
+        provincia: r.provincia, fir: r.numero_fir, ordini: [r.id_ordine],
+        // Arrivato al sito dopo il giorno del file, o prima e il file non l'ha
+        // lo stesso (un ordine chiuso a portale dopo il file): la scritta della
+        // riga dice quale delle due, e solo nel primo caso «arrivato dopo il
+        // file» (revisione del 15/10/2026). Lo stesso giorno del file non si sa
+        // se prima o dopo la fotografia: si dice «non ancora nel file».
+        dopo: !!foto && !!m.giorno && m.giorno > foto,
+      });
+    }
+
+    // Il dichiarato a portale dopo la fotografia, sulle righe a cui il portale lo
+    // aggancia: solo sull'anno in corso, dove l'elenco arriva alla giacenza.
+    const dopoPerSito = new Map();
+    if (servonoICarichi && !erroreCarichi && carichiDel === null) {
+      for (const [ns, kg] of dichiaratoDopoLaFotografia(dichiarazioniSito, foto, norm)) if (!nonDichiaraRete.has(ns)) dopoPerSito.set(ns, kg);
+    }
+    const { tolto, oltre } = scalaDichiaratoDopo(righeTutte, dopoPerSito);
+    const netto = (x) => x.kg - (tolto.get(x) || 0);
+
+    const passa = (x) => {
+      if (sitoNorm && x.chiave !== sitoNorm) return false;
+      if (provUpper && String(x.provincia || '').trim().toUpperCase() !== provUpper) return false;
+      if (ricercaLower) {
+        const fir = String(x.fir || '').toLowerCase();
+        if (!fir.includes(ricercaLower) && !x.ordini.some(o => String(o || '').toLowerCase().includes(ricercaLower))) return false;
+      }
+      return true;
+    };
+    const dellAnnoDeiCarichi = (x) => carichiDel === null || nellAttesaDellAnno(x.giorno, carichiDel, annoDiOggi);
 
     const filtrate = [];
-    const dateFiltrate = new Map(); // riga -> { formulari, fuori, fine_a_portale, fine_dal_gestionale }
     let senzaFineAPortale = 0;
     let senzaFineDalGestionale = 0;
-    // La fine trasporto di una riga: quella del file o, se il file non la scrive,
-    // quella della primaria nel gestionale. Mai la chiusura (22/09/2026).
-    const fineDi = (r, date) => giornoRoma(r.fine_trasporto) || date.fine_dal_gestionale || '';
-    const sitiSet = new Set();
+    // Un sito per chiave: un carico arrivato dopo puo' scrivere il nome in un
+    // altro modo, e il menu non deve offrire due volte lo stesso impianto.
+    const sitiSet = new Map();
     const provinceSet = new Set();
     const anniSet = new Set();
     const oggi = oggiRoma();
     const giorniFra = (da, a) => Math.round((Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10)) - Date.UTC(+da.slice(0, 4), +da.slice(5, 7) - 1, +da.slice(8, 10))) / 86400000);
 
-    for (const r of all) {
-      // Valori distinti per i filtri, su tutti i record
-      const s = sitoDiRiga(r);
-      if (s) sitiSet.add(s);
-      const prov = String(r.provincia || '').trim().toUpperCase();
+    for (const x of righeTutte) {
+      // Valori distinti per i filtri, su tutte le righe: anche un impianto che nel
+      // file non c'e' e ha solo carichi arrivati dopo si deve poter scegliere.
+      if (x.nome && !sitiSet.has(x.chiave)) sitiSet.set(x.chiave, x.nome);
+      const prov = String(x.provincia || '').trim().toUpperCase();
       if (prov) provinceSet.add(prov);
-      const date = dateDiRiga(r);
-      const annoFine = annoRoma(fineDi(r, date));
-      if (annoFine !== null) anniSet.add(annoFine);
+      const annoArrivo = annoRoma(x.giorno);
+      if (annoArrivo !== null) anniSet.add(annoArrivo);
 
-      if (!passaFiltri(r)) continue;
-      if (annoNum !== null && annoFine !== annoNum) continue;
-      if (soloDate && !date.formulari.length) continue;
+      if (!passa(x)) continue;
+      if (annoNum !== null && annoArrivo !== annoNum) continue;
+      if (soloDate && !x.date.formulari.length) continue;
       // Chiesto il ruolo, restano solo le righe di quel titolo: dal pulsante
       // dell'impianto si vede quello che l'impianto deve dichiarare, e basta.
-      if (ruoloChiesto && ruoloDellaRiga(r, (id) => tipoPrimaria.get(id) || '') !== ruoloChiesto) continue;
+      if (ruoloChiesto && x.ruolo !== ruoloChiesto) continue;
       // Su un anno passato, solo i carichi arrivati in quell'anno: gli ordini che
       // il pulsante delle Giacenze di quell'anno conta.
-      if (carichiDel !== null && !nellAttesaDellAnno(giornoDelSuoArrivo(r), carichiDel, annoDiOggi)) continue;
-      filtrate.push(r);
-      dateFiltrate.set(r, date);
-      if (!giornoRoma(r.fine_trasporto)) { senzaFineAPortale++; if (date.fine_dal_gestionale) senzaFineDalGestionale++; }
+      if (!dellAnnoDeiCarichi(x)) continue;
+      filtrate.push(x);
+      if (x.nel_file && !giornoRoma(x.r.fine_trasporto)) { senzaFineAPortale++; if (x.date.fine_dal_gestionale) senzaFineDalGestionale++; }
     }
+    for (const [ns, nome] of sitiDeiCandidati) if (nome && !sitiSet.has(ns)) sitiSet.set(ns, nome);
 
-    // Dal carico arrivato da piu' tempo; quelli senza fine trasporto in fondo.
-    filtrate.sort((a, b) => (fineDi(a, dateFiltrate.get(a)) || '9999').localeCompare(fineDi(b, dateFiltrate.get(b)) || '9999'));
+    // Dal carico arrivato da piu' tempo; quelli senza giorno in fondo.
+    filtrate.sort((a, b) => (a.giorno || '9999').localeCompare(b.giorno || '9999'));
+
+    // L'elenco e' tutto il sito (o tutti i siti) se non c'e' un filtro che ne
+    // mostra una parte: solo allora il dichiarato che va oltre le righe (una
+    // giacenza sotto zero) entra nel totale, perche' il totale e' la giacenza.
+    const conFiltri = !!provUpper || annoNum !== null || !!ricercaLower || soloDate;
+    const oltreNellElenco = conFiltri ? 0 : [...oltre].filter(([ns]) => !sitoNorm || ns === sitoNorm).reduce((s, [, kg]) => s + kg, 0);
+    const somma = (l, f) => Math.round(l.reduce((s, x) => s + f(x), 0));
 
     const totale_righe = filtrate.length;
-    const totale_kg = filtrate.reduce((s, r) => s + (Number(r.peso_non_dichiarato_kg) || 0), 0);
-    // DI QUALI MESI SONO (regola dell'utente, 09/10/2026).
-    //
-    // Il fatto vero: «laddove c'e' il pulsante con gli ordini da dichiarare non
-    // compaiono poi in elenco gli ingressi di ottobre e mi chiedo: come fai a
-    // trovarti con la giacenza attuale se non consideri anche quelli?».
-    //
-    // Gli ordini c'erano - su T-Cycle 114 righe per 352.940 kg, esattamente la
-    // giacenza, ottobre compreso con 12 ordini e 29.060 kg - ma l'elenco e'
-    // ordinato dal carico piu' vecchio e mostra cento righe per pagina: la prima
-    // pagina finiva a settembre, e sotto c'era un totale (352.940 kg) che era di
-    // tutte le 114. Chi legge vede un totale che le righe davanti non fanno, e
-    // conclude che ottobre non e' contato.
-    //
-    // Il conto per mese si manda sempre, su tutto l'elenco filtrato e non sulla
-    // pagina: sta sopra la tabella, si legge in un colpo d'occhio e fa da
-    // riscontro alla giacenza. Un carico senza fine trasporto non ha mese e si
-    // conta a parte, perche' fingere un mese sarebbe peggio che dirlo.
-    const perMese = new Map();
-    for (const r of filtrate) {
-      const fine = fineDi(r, dateFiltrate.get(r));
-      const chiave = fine ? fine.slice(0, 7) : '';
-      if (!perMese.has(chiave)) perMese.set(chiave, { mese: chiave, ordini: 0, kg: 0 });
-      const x = perMese.get(chiave);
-      x.ordini++;
-      x.kg += Number(r.peso_non_dichiarato_kg) || 0;
-    }
-    const per_mese = [...perMese.values()]
-      .sort((a, b) => (a.mese || '9999-99').localeCompare(b.mese || '9999-99'))
-      .map(x => ({ ...x, kg: Math.round(x.kg) }));
+    const totale_kg = somma(filtrate, netto) - Math.round(oltreNellElenco);
+    // DI QUALI MESI SONO (regola dell'utente, 09/10/2026), su tutto l'elenco
+    // filtrato e non sulla pagina, con le parti (15/10/2026): quanti di quel mese
+    // sono arrivati dopo il file e quanto si e' dichiarato dopo. Un carico senza
+    // giorno non ha mese e si conta a parte, perche' fingere un mese sarebbe
+    // peggio che dirlo.
+    const per_mese = contoPerMese(filtrate.map(x => ({ giorno: x.giorno, kg: netto(x), nel_file: x.nel_file, ruolo: x.ruolo, dichiarato_dopo_kg: tolto.get(x) || 0 })));
+    const nelFile = filtrate.filter(x => x.nel_file);
+    const dopoIlFile = filtrate.filter(x => !x.nel_file);
+    const comeImpianto = filtrate.filter(x => x.ruolo === 'imp');
+    const comeStoccaggio = filtrate.filter(x => x.ruolo === 'stoc');
+    // Le parti del totale: file (il peso che il file scrive) + arrivati dopo -
+    // dichiarato dopo - quello che va oltre le righe = totale_kg.
+    // dopo_il_file sono i carichi che il file non ha; arrivati_dopo quanti di
+    // loro sono arrivati al sito dopo il giorno del file: se sono tutti, la testa
+    // della scheda dice «arrivati dopo», se no «non ancora nel file» (15/10/2026).
+    const parti = {
+      foto_del: foto || null,
+      nel_file: { ordini: nelFile.length, kg: somma(nelFile, x => x.kg) },
+      dopo_il_file: { ordini: dopoIlFile.length, kg: somma(dopoIlFile, x => x.kg), arrivati_dopo: dopoIlFile.filter(x => x.dopo).length },
+      dichiarato_dopo: { ordini: filtrate.filter(x => tolto.has(x)).length, kg: somma(filtrate, x => tolto.get(x) || 0) },
+      oltre_kg: Math.round(oltreNellElenco),
+      imp: { ordini: comeImpianto.length, kg: somma(comeImpianto, netto) - Math.round(oltreNellElenco) },
+      stoc: { ordini: comeStoccaggio.length, kg: somma(comeStoccaggio, netto) },
+    };
     // Le righe filtrate col formulario da sistemare, e quelle che il gestionale non
     // colloca in nessun mese: un conteggio della rete, l'unico canale del file.
-    const conDate = filtrate.filter(r => dateFiltrate.get(r).formulari.length);
-    const fuori = filtrate.filter(r => dateFiltrate.get(r).fuori);
-    const kgDi = (l) => Math.round(l.reduce((s, r) => s + (Number(r.peso_non_dichiarato_kg) || 0), 0));
+    const conDate = filtrate.filter(x => x.date.formulari.length);
+    const fuori = filtrate.filter(x => x.date.fuori);
     const pagina = tutte ? filtrate.slice(offsetNum) : filtrate.slice(offsetNum, offsetNum + limiteNum);
-    // La riga di riconciliazione, chiesta dal pulsante di un impianto: solo se
-    // l'elenco e' tutto quello che il portale aspetta da lui, cioe' senza altri
-    // filtri (11/10/2026). Se una lettura non riesce l'elenco esce lo stesso, e
-    // la riga dice perche' manca.
+
+    // --- La riga di riconciliazione ---
+    const nomeDi = (ns) => {
+      const g = giacenzeSito.find(x => norm(x.sito) === ns);
+      if (g && g.sito) return String(g.sito).trim();
+      const x = righeTutte.find(y => y.chiave === ns && y.nome);
+      if (x) return x.nome;
+      return ns === sitoNorm && sito ? String(sito).trim() : ns;
+    };
+    const eImpianto = (ns) => righeTutte.some(x => x.chiave === ns && x.ruolo === 'imp')
+      || giacenzeSito.some(g => norm(g.sito) === ns && (String(g.tipo_destinazione || '').toLowerCase().trim() || 'imp') !== 'stoc')
+      || dopoPerSito.has(ns);
+    // La riga di un sito, di TUTTO il sito: i filtri dell'elenco non la cambiano.
+    const rigaDelSito = (ns) => {
+      const sue = righeTutte.filter(x => x.chiave === ns && dellAnnoDeiCarichi(x));
+      const fileImp = sue.filter(x => x.nel_file && x.ruolo === 'imp');
+      const stoc = sue.filter(x => x.ruolo === 'stoc');
+      const stoccaggio = stoc.length ? { ordini: stoc.length, kg: somma(stoc, x => x.kg) } : null;
+      const nome = nomeDi(ns);
+      // Solo stoccaggio: niente lo dice impianto (righe da dichiarare, carichi, la
+      // scheda dei siti). Dal pulsante di un impianto (ruolo 'imp') e' un impianto
+      // anche senza righe: su un anno passato i suoi ordini possono essere zero.
+      if (!eImpianto(ns) && !(ns === sitoNorm && ruoloChiesto === 'imp')) return { foto_del: foto || null, sito: nome, solo_stoccaggio: true, stoccaggio };
+      if (nonDichiaraRete.has(ns)) return { foto_del: foto || null, sito: nome, non_dovuta: true, file_ordini: fileImp.length, file_kg: somma(fileImp, x => x.kg), stoccaggio };
+      const tuttiAggiunti = carichi.di(ns);
+      const ordini = carichiDel === null ? tuttiAggiunti.ordini : tuttiAggiunti.ordini.filter(o => nellAttesaDellAnno(o.fine_trasporto, carichiDel, annoDiOggi));
+      const aggiunti = { n: ordini.length, kg: ordini.reduce((s, o) => s + o.kg, 0), ordini };
+      const base = riconciliazioneDaDichiarare({ foto, fileOrdini: fileImp.length, fileKg: somma(fileImp, x => x.kg), aggiunti, dichiaratoDopoKg: carichiDel === null ? (dopoPerSito.get(ns) || 0) : 0 });
+      const diche = { sito: nome, chiave: ns, stoccaggio, oltre_kg: Math.round(oltre.get(ns) || 0) };
+      // Gli ordini di un anno passato: file + carichi non ancora nel file = il
+      // pulsante di quell'anno. Niente giacenza (null): e' la lettura del 31/12.
+      if (carichiDel !== null) return { ...base, ...diche, carichi_del: carichiDel, dichiarato_dopo_kg: null, giacenza_kg: null };
+      return { ...base, ...diche };
+    };
     let riconciliazione = null;
-    if (body.riconcilia === true && sitoNorm && ruoloChiesto === 'imp' && !provUpper && annoNum === null && !ricercaLower && !soloDate) {
-      try {
-        // L'anno dei carichi e l'anno di oggi viaggiano con la domanda (14/10/2026):
-        // senza, i siti si leggevano con un anno vuoto e Tecnogum, che la rete non
-        // la dichiara, non si riconosceva piu' (prove/riconciliazioneDaDichiarare.mjs).
-        riconciliazione = await riconcilia(svc, { righeFile, sitoNorm, norm, fileOrdini: totale_righe, fileKg: totale_kg, carichiDel, annoDiOggi });
-      } catch (e) {
-        riconciliazione = { errore: e && e.message ? e.message : String(e) };
+    let riconciliazione_siti = null;
+    if (sitoNorm && ruoloChiesto !== 'stoc') {
+      if (!foto) riconciliazione = { senza_fotografia: true };
+      else if (erroreCarichi) riconciliazione = { errore: erroreCarichi };
+      else {
+        riconciliazione = rigaDelSito(sitoNorm);
+        // Quello che l'elenco filtrato ne mostra, come impianto: con l'anno o la
+        // provincia scelti e' una parte, e la riga lo dice.
+        if (!riconciliazione.solo_stoccaggio) {
+          const mostrate = comeImpianto.filter(x => x.chiave === sitoNorm);
+          riconciliazione.elenco = { ordini: mostrate.length, kg: somma(mostrate, netto) - (conFiltri ? 0 : Math.round(oltre.get(sitoNorm) || 0)) };
+          riconciliazione.filtri = conFiltri;
+        }
+        // Chiesto il solo impianto, la parte dello stoccaggio non si dice.
+        if (ruoloChiesto === 'imp') riconciliazione.stoccaggio = null;
+      }
+    } else if (!sitoNorm && ruoloChiesto !== 'stoc') {
+      if (!foto) riconciliazione_siti = { senza_fotografia: true };
+      else if (erroreCarichi) riconciliazione_siti = { errore: erroreCarichi };
+      else {
+        const chiavi = new Set([
+          ...righeTutte.map(x => x.chiave),
+          ...giacenzeSito.map(g => norm(g.sito)),
+          ...dopoPerSito.keys(),
+        ].filter(Boolean));
+        // Un piazzale che non ha niente nel file non ha niente da dire.
+        const righe = [...chiavi].map(rigaDelSito).filter(x => !x.solo_stoccaggio || x.stoccaggio).sort((a, b) => String(a.sito).localeCompare(String(b.sito), 'it', { sensitivity: 'base' }));
+        const impianti = righe.filter(x => !x.solo_stoccaggio).map(({ stoccaggio: _s, ...x }) => x);
+        const stoccaggi = righe.filter(x => x.stoccaggio).map(x => ({ sito: x.sito, ordini: x.stoccaggio.ordini, kg: x.stoccaggio.kg }));
+        const contati = impianti.filter(x => !x.non_dovuta);
+        riconciliazione_siti = {
+          foto_del: foto,
+          carichi_del: carichiDel,
+          impianti,
+          stoccaggi,
+          // La somma delle giacenze di rete degli impianti: il totale «come
+          // impianto» dell'elenco senza filtri. Su un anno passato non c'e'.
+          giacenza_kg: carichiDel === null ? contati.reduce((s, x) => s + x.giacenza_kg, 0) : null,
+          ordini_pulsante: impianti.reduce((s, x) => s + (x.non_dovuta ? x.file_ordini : x.ordini_pulsante), 0),
+        };
       }
     }
 
-    const righe = pagina.map(r => {
-      const fine = fineDi(r, dateFiltrate.get(r));
-      return {
+    const righe = pagina.map(x => {
+      const r = x.r || (x.carico && x.carico.r) || {};
+      const via = tolto.get(x) || 0;
+      const secondaria = !x.nel_file && x.carico.tipo === 'secondaria';
+      const base = x.nel_file ? {
         ordine_primaria: r.ordine_primaria || '',
+        ordine_secondaria: r.ordine_secondaria || '',
         numero_fir: r.numero_fir || '',
-        fine_trasporto: fine || null,
+        fine_trasporto: x.fine || null,
         // Solo da mostrare: non decide nulla.
         data_chiusura: r.data_chiusura || null,
         punto_di_raccolta: r.punto_di_raccolta || '',
+        destinazione: r.destinazione || '',
+        destinazione_secondaria: r.destinazione_secondaria || '',
+        // La fine trasporto che il portale scrive, quando al formulario della primaria manca.
+        fine_a_portale: x.date.fine_a_portale || null,
+        // Il file non scrive la fine trasporto e questa e' quella del gestionale.
+        fine_dal_gestionale: !!x.date.fine_dal_gestionale,
+      } : {
+        // Un carico che il file non ha ancora: i dati sono quelli del formulario
+        // nel gestionale. Una secondaria si scrive come le righe del file passate
+        // da uno stoccaggio: la destinazione e' il piazzale, «trasferito a»
+        // l'impianto.
+        ordine_primaria: secondaria ? '' : (r.id_ordine || ''),
+        ordine_secondaria: secondaria ? (r.id_ordine || '') : '',
+        numero_fir: r.numero_fir || '',
+        fine_trasporto: x.giorno || null,
+        data_chiusura: null,
+        punto_di_raccolta: secondaria ? '' : (r.punto_di_raccolta || ''),
+        destinazione: secondaria ? (r.stoccaggio || '') : (r.destinazione || ''),
+        destinazione_secondaria: secondaria ? (r.destinazione || '') : '',
+        fine_a_portale: null,
+        fine_dal_gestionale: false,
+        carico: { tipo: x.carico.tipo, da: secondaria ? (r.stoccaggio || '') : (r.trasportatore || '') },
+      };
+      return {
+        ...base,
         comune: r.comune || '',
         provincia: r.provincia || '',
         prodotto: r.prodotto || '',
         cer: r.cer || '',
-        peso_non_dichiarato_kg: Number(r.peso_non_dichiarato_kg) || 0,
-        destinazione: r.destinazione || '',
-        destinazione_secondaria: r.destinazione_secondaria || '',
+        // Quello che resta da dichiarare: il peso del file, o del formulario, meno
+        // il dichiarato dopo il file che il portale ha agganciato a questa riga.
+        peso_non_dichiarato_kg: netto(x),
+        ...(via ? { peso_del_file_kg: x.kg, dichiarato_dopo_kg: via } : {}),
         trasportatore: r.trasportatore || '',
+        // Il giorno in cui il carico e' arrivato al sito: il mese e l'ordine della
+        // riga. Per un carico passato da uno stoccaggio e' la fine della secondaria.
+        giorno_al_sito: x.giorno || null,
         // Da quanti giorni il carico e' arrivato e aspetta la dichiarazione.
-        giorni_attesa: fine ? giorniFra(fine, oggi) : null,
+        giorni_attesa: x.giorno ? giorniFra(x.giorno, oggi) : null,
         // Il formulario nel gestionale: le date che mancano o non tornano.
-        date_da_sistemare: dateFiltrate.get(r).formulari,
-        fuori_dai_mesi: dateFiltrate.get(r).fuori,
-        // La fine trasporto che il portale scrive, quando al formulario della primaria manca.
-        fine_a_portale: dateFiltrate.get(r).fine_a_portale || null,
-        // Il file non scrive la fine trasporto e questa e' quella del gestionale.
-        fine_dal_gestionale: !!dateFiltrate.get(r).fine_dal_gestionale,
+        date_da_sistemare: x.date.formulari,
+        fuori_dai_mesi: x.date.fuori,
+        ruolo: x.ruolo,
+        // Nel file del portale, o arrivato dopo: il file non l'ha ancora.
+        nel_file: x.nel_file,
+        // Fuori dal file e arrivato al sito dopo il giorno del file: solo allora
+        // la riga dice «arrivato dopo il file», se no «non ancora nel file».
+        arrivato_dopo_il_file: !x.nel_file && !!x.dopo,
       };
     });
 
@@ -396,16 +617,20 @@ export default async function(req) {
       righe,
       totale_righe,
       // Chilogrammi interi.
-      totale_kg: Math.round(totale_kg),
+      totale_kg,
       // Di quali mesi sono gli ordini dell'elenco filtrato, non della pagina.
       per_mese,
+      foto_del: foto || null,
+      parti,
       // File + carichi non ancora nel file - dichiarato dopo = giacenza (11/10/2026).
       riconciliazione,
-      date_da_sistemare: { n: conDate.length, kg: kgDi(conDate), fuori_dai_mesi: fuori.length, fuori_dai_mesi_kg: kgDi(fuori) },
+      riconciliazione_siti,
+      carichi_dopo_il_file: { cercati: servonoICarichi && !erroreCarichi, errore: erroreCarichi || null },
+      date_da_sistemare: { n: conDate.length, kg: somma(conDate, netto), fuori_dai_mesi: fuori.length, fuori_dai_mesi_kg: somma(fuori, netto) },
       // Righe del file senza fine trasporto, e quante la prendono dal gestionale.
       senza_fine_a_portale: senzaFineAPortale,
       senza_fine_dal_gestionale: senzaFineDalGestionale,
-      siti_distinti: [...sitiSet].sort(),
+      siti_distinti: [...sitiSet.values()].sort(),
       province_distinte: [...provinceSet].sort(),
       anni_distinti: [...anniSet].sort((a, b) => a - b),
       limite: tutte ? totale_righe : limiteNum,

@@ -10,7 +10,7 @@ import { giornoRoma } from '@/lib/giornoItaliano';
 import { annoDiOggi } from '@/lib/periodoPagine';
 import { creaSequenza } from '@/lib/ultimaRichiesta';
 import EsportaPdf from '@/components/shared/EsportaPdf';
-import { daDichiararePdf } from '@/lib/giacenzePdf';
+import { daDichiararePdf, fuoriDalFile, tuttiArrivatiDopo } from '@/lib/giacenzePdf';
 
 // I pesi di questa lista sono chilogrammi: sempre interi. Si scrivevano con
 // formatTonnellate, e un peso in kg usciva con i decimali delle tonnellate.
@@ -20,14 +20,29 @@ const kg = (n) => (n == null || n === '' || isNaN(n) ? '—' : formatKg(n));
 // inizio e fine trasporto sono obbligatorie. Se al movimento che ha portato il
 // carico all'impianto manca la fine trasporto, il portale lo conta nella sua
 // giacenza e il gestionale non lo colloca in nessun mese.
+//
+// Un carico arrivato dopo il file del portale (15/10/2026) il file non lo ha
+// ancora: quello che c'e' e' il formulario nel gestionale, e la cella lo dice -
+// primaria o secondaria, terminata quando, da chi - con le date da sistemare,
+// se ce ne sono.
 function Formulario({ r }) {
   const date = r.date_da_sistemare || [];
-  if (!date.length) return <span className="text-muted-foreground">—</span>;
+  const carico = r.nel_file === false ? r.carico || {} : null;
+  if (!date.length && !carico) return <span className="text-muted-foreground">—</span>;
   return (
-    <span className="text-amber-700">
-      {date.map(d => <span key={`${d.tipo}-${d.id_ordine}`} className="block">{d.tipo} {d.id_ordine}: {d.testo}</span>)}
-      {r.fuori_dai_mesi && <span className="block text-[11px]">il portale lo conta nella giacenza, il gestionale non lo colloca in nessun mese</span>}
-      {r.fine_a_portale && <span className="block text-[11px]">il portale scrive la fine trasporto ({fmtData(r.fine_a_portale)}): va riportata nella primaria</span>}
+    <span>
+      {carico && (
+        <span className="block text-muted-foreground">
+          {carico.tipo === 'secondaria' ? 'secondaria' : 'primaria'} terminata il {fmtData(r.fine_trasporto)}{carico.da ? `, ${carico.tipo === 'secondaria' ? 'dal piazzale di ' : ''}${carico.da}` : ''}
+        </span>
+      )}
+      {date.length > 0 && (
+        <span className="text-amber-700">
+          {date.map(d => <span key={`${d.tipo}-${d.id_ordine}`} className="block">{d.tipo} {d.id_ordine}: {d.testo}</span>)}
+          {r.fuori_dai_mesi && <span className="block text-[11px]">il portale lo conta nella giacenza, il gestionale non lo colloca in nessun mese</span>}
+          {r.fine_a_portale && <span className="block text-[11px]">il portale scrive la fine trasporto ({fmtData(r.fine_a_portale)}): va riportata nella primaria</span>}
+        </span>
+      )}
     </span>
   );
 }
@@ -63,11 +78,49 @@ const nomeMese = (m) => {
   return `${MESI_BREVI[i] || m} ${String(m).slice(0, 4)}`;
 };
 
+// UNA FASCIA DEI MESI (15/10/2026). Ogni mese dice i suoi ordini e i chili
+// ancora da dichiarare, e in piccolo quanti di quelli sono carichi che il file
+// del portale non ha ancora e quanto se n'e' dichiarato dopo il file: ottobre di
+// T-Cycle e' «20 · 49.040 kg, di cui 4 · 8.120 kg non ancora nel file del
+// portale». Con `ruolo` dice la sola parte di impianto o di stoccaggio.
+export function FasciaMesi({ mesi, ruolo = null, titolo }) {
+  const voci = (mesi || []).map(m => ({ m, v: ruolo ? m[ruolo] || { ordini: 0, kg: 0 } : m })).filter(x => x.v.ordini > 0);
+  if (!voci.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground">{titolo}</span>
+      {voci.map(({ m, v }) => {
+        // I carichi dopo il file e il dichiarato dopo sono sempre dell'impianto.
+        const dopo = ruolo !== 'stoc' && m.dopo_il_file && m.dopo_il_file.ordini > 0 ? m.dopo_il_file : null;
+        const dichiarato = ruolo !== 'stoc' && m.dichiarato_dopo_kg > 0 ? m.dichiarato_dopo_kg : 0;
+        return (
+          <span key={m.mese || 'senza'} className="rounded-md border bg-card px-2 py-0.5 tabular-nums"
+            title={`${v.ordini} ${v.ordini === 1 ? 'ordine' : 'ordini'} per ${kg(v.kg)} kg${m.mese ? '' : ' senza fine trasporto: non si collocano in nessun mese'}`}>
+            <span className="font-medium">{nomeMese(m.mese)}</span>{' '}
+            <span className="text-muted-foreground">{formatIntero(v.ordini)} · {kg(v.kg)} kg</span>
+            {dopo && <span className="block text-[10px] text-muted-foreground">di cui {formatIntero(dopo.ordini)} · {kg(dopo.kg)} kg non ancora nel file del portale</span>}
+            {dichiarato > 0 && <span className="block text-[10px] text-muted-foreground">tolti {kg(dichiarato)} kg dichiarati dopo il file</span>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 // LA RIGA CHE TIENE INSIEME PULSANTE, ELENCO E GIACENZA (11/10/2026). Il pulsante
 // della scheda Situazione conta anche i carichi che il file del portale non ha
-// ancora, l'elenco qui sopra ha solo le righe del file: questa riga dice quanti
-// e quali sono, toglie le dichiarazioni caricate dopo la fotografia e arriva alla
-// giacenza delle Giacenze. Se qualcosa non torna, lo si vede qui e non a occhio.
+// ancora: questa riga dice quanti e quali sono, toglie le dichiarazioni caricate
+// dopo la fotografia e arriva alla giacenza delle Giacenze. Se qualcosa non
+// torna, lo si vede qui e non a occhio.
+//
+// DAL 15/10/2026 QUEI CARICHI SONO ANCHE RIGHE DELL'ELENCO, e questa riga c'e'
+// sempre, non solo arrivando dal pulsante: scegliendo il sito dal menu, con
+// l'anno o la provincia scelti (allora dice quanto ne mostra l'elenco filtrato,
+// ma il conto e' di tutto il sito). Per un sito che e' anche stoccaggio dice la
+// parte dello stoccaggio a parte, per quello che e': in attesa di dichiarazione,
+// non giacenza dell'impianto. E dice, con le righe della Situazione che la pagina
+// ha gia', gli arrivi senza fine trasporto che il portale non conosce: non
+// entrano qui ne' nella giacenza finche' la data non arriva.
 //
 // SU UN ANNO PASSATO (giro del 14/10/2026, sull'approvazione
 // dell'utente) la riga dice solo gli ordini: quelli del file arrivati in
@@ -75,13 +128,38 @@ const nomeMese = (m) => {
 // del pulsante della Situazione di quell'anno (carichi_del). La giacenza di un
 // anno chiuso e' la lettura del 31/12 salvata dalla chiusura, o «—»: questo
 // elenco, che e' di oggi, non ci arriva, e la riga non lo fa credere.
-export function Riconciliazione({ r, sito }) {
+const quanti = (n, uno, molti) => `${formatIntero(n)} ${n === 1 ? uno : molti}`;
+/** Gli arrivi di rete senza fine trasporto che il portale non conosce, dalla riga della Situazione. */
+export function senzaFineIgnoti(righeGiacenze, sito) {
+  const rg = (righeGiacenze || []).find(x => x.tipo_destinazione !== 'stoc' && x.sito === sito);
+  const g = rg && (rg.date_da_sistemare || []).find(x => x.canale === 'RETE');
+  const sf = g && g.senza_fine;
+  return sf && sf.ignoti_al_portale_n > 0 ? { n: sf.ignoti_al_portale_n, kg: sf.ignoti_al_portale_kg } : null;
+}
+export function Riconciliazione({ r, sito, righeGiacenze = null, chiusi = null }) {
   const [aperto, setAperto] = useState(false);
   if (!r) return null;
   if (r.errore) return <p className="text-xs text-amber-800">La riconciliazione con la giacenza non si è potuta calcolare: {r.errore}</p>;
   if (r.senza_fotografia) return <p className="text-xs text-muted-foreground">Il file degli ordini non dichiarati non è caricato: la riconciliazione con la giacenza non si fa.</p>;
-  if (r.non_dovuta) return <p className="text-xs text-muted-foreground">Per accordo {sito} non ci dichiara la rete: il portale non tiene per noi una giacenza di rete, e non c&apos;è niente da riconciliare.</p>;
+  const nome = r.sito || sito;
+  const stoccaggio = r.stoccaggio && r.stoccaggio.ordini > 0 ? (
+    <p className="text-muted-foreground">
+      <strong className="text-foreground">Come stoccaggio</strong>, {nome} ha nel file {quanti(r.stoccaggio.ordini, 'ordine', 'ordini')}, {kg(r.stoccaggio.kg)} kg, passati dal piazzale e già ripartiti in secondaria:
+      {chiusi ? <> per noi chiusi ({chiusi.motivo}).</> : <> per il portale sono in attesa di dichiarazione sullo stoccaggio e li dichiara chi li ha ricevuti.</>}
+      {' '}Non sono giacenza dell&apos;impianto e non entrano nel conto qui sopra.
+    </p>
+  ) : null;
+  if (r.solo_stoccaggio) {
+    return (
+      <div className="text-xs border rounded-lg bg-card px-3 py-2 space-y-1">
+        <p>{nome} qui è solo stoccaggio: non ha una giacenza di impianto da riconciliare.</p>
+        {stoccaggio}
+      </div>
+    );
+  }
+  if (r.non_dovuta) return <p className="text-xs text-muted-foreground">Per accordo {nome} non ci dichiara la rete: il portale non tiene per noi una giacenza di rete, e non c&apos;è niente da riconciliare.</p>;
   const dellAnno = r.carichi_del !== null && r.carichi_del !== undefined;
+  const ignoti = dellAnno ? null : senzaFineIgnoti(righeGiacenze, nome);
   return (
     <div className="text-xs border rounded-lg bg-card px-3 py-2 space-y-1">
       {dellAnno ? (
@@ -96,6 +174,7 @@ export function Riconciliazione({ r, sito }) {
       ) : (
         <p>
           <strong>Riconciliazione con la giacenza:</strong>{' '}
+          {r.stoccaggio || r.filtri ? <>{nome} come impianto, tutto il sito: </> : null}
           file del portale{r.foto_del ? ` del ${fmtData(r.foto_del)}` : ''} {formatIntero(r.file_ordini)} {r.file_ordini === 1 ? 'ordine' : 'ordini'}, {kg(r.file_kg)} kg
           {' '}+ {formatIntero(r.aggiunti_n)} {r.aggiunti_n === 1 ? 'carico' : 'carichi'} non ancora nel file, {kg(r.aggiunti_kg)} kg
           {' '}− dichiarato a portale dopo la fotografia, {kg(r.dichiarato_dopo_kg)} kg
@@ -121,6 +200,83 @@ export function Riconciliazione({ r, sito }) {
             ))}
           </tbody>
         </table>
+      )}
+      {r.filtri && r.elenco && (
+        <p className="text-muted-foreground">Con i filtri scelti l&apos;elenco ne mostra {quanti(r.elenco.ordini, 'ordine', 'ordini')}, {kg(r.elenco.kg)} kg: il conto qui sopra è di tutto il sito.</p>
+      )}
+      {r.oltre_kg > 0 && (
+        <p className="text-amber-800">Il dichiarato a portale dopo il file supera di {kg(r.oltre_kg)} kg i carichi da dichiarare: la giacenza va sotto zero, ed è un errore da correggere.</p>
+      )}
+      {ignoti && (
+        <p className="text-amber-800">
+          {quanti(ignoti.n, 'arrivo', 'arrivi')} di rete senza fine trasporto ({kg(ignoti.kg)} kg), che il portale non conosce ancora: non {ignoti.n === 1 ? 'entra' : 'entrano'} in questo elenco né nella giacenza finché la data non arriva (lo dice anche la scheda Situazione).
+        </p>
+      )}
+      {stoccaggio}
+    </div>
+  );
+}
+
+// CON TUTTI I SITI, LA STESSA RIGA PER OGNI IMPIANTO (15/10/2026). Il totale
+// degli impianti in testa all'elenco e' la somma delle loro giacenze di rete
+// della Situazione: qui si vede impianto per impianto da dove viene, con le
+// stesse parole della riga di un sito. Gli stoccaggi a parte, per quello che
+// sono. Su un anno passato solo gli ordini.
+export function RiconciliazioneSiti({ r }) {
+  if (!r) return null;
+  if (r.errore) return <p className="text-xs text-amber-800">La riconciliazione con le giacenze non si è potuta calcolare: {r.errore}</p>;
+  if (r.senza_fotografia) return <p className="text-xs text-muted-foreground">Il file degli ordini non dichiarati non è caricato: la riconciliazione con le giacenze non si fa.</p>;
+  const dellAnno = r.carichi_del !== null && r.carichi_del !== undefined;
+  const impianti = r.impianti || [];
+  if (!impianti.length && !(r.stoccaggi || []).length) return null;
+  return (
+    <div className="text-xs border rounded-lg bg-card px-3 py-2 space-y-1">
+      <p>
+        <strong>Riconciliazione con le giacenze, impianto per impianto</strong>{' '}
+        (file del portale{r.foto_del ? ` del ${fmtData(r.foto_del)}` : ''} + carichi non ancora nel file − dichiarato a portale dopo la fotografia{dellAnno ? `; carichi del ${r.carichi_del}` : ''}):
+      </p>
+      <div className="overflow-x-auto">
+        <table className="text-[11px] tabular-nums">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="pr-3 font-medium">Impianto</th>
+              <th className="pr-3 font-medium text-right">Nel file</th>
+              <th className="pr-3 font-medium text-right">Non ancora nel file</th>
+              {!dellAnno && <th className="pr-3 font-medium text-right">Dichiarato dopo</th>}
+              {!dellAnno && <th className="pr-3 font-medium text-right">Giacenza a portale</th>}
+              <th className="font-medium text-right">Ordini (pulsante)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {impianti.map(x => (
+              <tr key={x.sito}>
+                <td className="pr-3">{x.sito}</td>
+                {x.non_dovuta ? (
+                  <td className="pr-3 text-muted-foreground" colSpan={dellAnno ? 2 : 4}>per accordo non ci dichiara la rete: —</td>
+                ) : (
+                  <>
+                    <td className="pr-3 text-right">{formatIntero(x.file_ordini)} · {kg(x.file_kg)} kg</td>
+                    <td className="pr-3 text-right">{formatIntero(x.aggiunti_n)} · {kg(x.aggiunti_kg)} kg</td>
+                    {!dellAnno && <td className="pr-3 text-right">{kg(x.dichiarato_dopo_kg)} kg</td>}
+                    {!dellAnno && <td className="pr-3 text-right font-medium">{kg(x.giacenza_kg)} kg</td>}
+                  </>
+                )}
+                <td className="text-right">{formatIntero(x.non_dovuta ? x.file_ordini : x.ordini_pulsante)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-muted-foreground">
+        {dellAnno
+          ? <>Ordini degli impianti: {formatIntero(r.ordini_pulsante)}, la somma dei pulsanti della scheda Situazione del {r.carichi_del}. La giacenza di un anno chiuso è la lettura del 31/12, non questo elenco.</>
+          : <>Impianti: {formatIntero(r.ordini_pulsante)} ordini, {kg(r.giacenza_kg)} kg, la somma delle giacenze di rete degli impianti della scheda Situazione.</>}
+      </p>
+      {(r.stoccaggi || []).length > 0 && (
+        <p className="text-muted-foreground">
+          In attesa di dichiarazione sugli stoccaggi, già ripartiti e da dichiarare da chi li ha ricevuti, non giacenza degli impianti:{' '}
+          {r.stoccaggi.map(x => `${x.sito} ${formatIntero(x.ordini)} · ${kg(x.kg)} kg`).join('; ')}.
+        </p>
       )}
     </div>
   );
@@ -198,9 +354,6 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   const [soloDate, setSoloDate] = useState(false);
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);
-  // La riga di riconciliazione con la giacenza: si chiede solo arrivando dal
-  // pulsante di un impianto, senza altri filtri, e non cambia sfogliando le pagine.
-  const [riconciliazione, setRiconciliazione] = useState(null);
   const [loading, setLoading] = useState(false);
   const [filterOptions, setFilterOptions] = useState({ siti_distinti: [], province_distinte: [], anni_distinti: [] });
   const sequenza = useRef(creaSequenza()).current;
@@ -230,16 +383,13 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
       if (soloDate) payload.solo_date_da_sistemare = true;
       if (ruolo) payload.ruolo = ruolo;
       if (carichiDellAnno !== null) payload.carichi_del = carichiDellAnno;
-      // Il pulsante di un impianto e nessun altro filtro: l'elenco e' tutto quello
-      // che il portale aspetta da lui, e si chiede anche la riconciliazione con la
-      // giacenza (11/10/2026). Sfogliando le pagine si tiene quella che c'e'.
-      const daRiconciliare = !!sito && ruolo === 'imp' && !provincia && !annoChiusura && !ricerca && !soloDate;
-      if (daRiconciliare && offset === 0) payload.riconcilia = true;
+      // La riga di riconciliazione arriva sempre con l'elenco (15/10/2026): dal
+      // pulsante, dal menu, con l'anno o la provincia scelti. Le letture che la
+      // fanno sono quelle dei carichi arrivati dopo il file, che l'elenco fa
+      // comunque: chiederla non costa niente, e non serve piu' riconcilia.
       const res = await base44.functions.invoke('getOrdiniDaDichiarare', payload);
       if (!sequenza.valida(mia)) return;
       setData(res.data);
-      if (!daRiconciliare) setRiconciliazione(null);
-      else if (offset === 0) setRiconciliazione(res.data.riconciliazione || null);
       if (res.data.siti_distinti) setFilterOptions(res.data);
     } catch (e) {
       console.error(e);
@@ -285,19 +435,6 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
     return payload;
   }, [sito, provincia, annoChiusura, ricerca, soloDate, ruolo, carichiDellAnno]);
 
-  const handleExport = async () => {
-    // Scarica tutto l'elenco filtrato (senza limite) per l'export
-    try {
-      // tutte: le righe non si tagliano a mille, come il totale.
-      const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
-      // L'anno dei carichi va anche al foglio (null sull'anno in corso): la lista
-      // di lavoro per gli impianti deve dire di quali carichi e', come il PDF.
-      await exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg, { carichi_del: carichiDellAnno });
-    } catch (e) {
-      alert('Errore nell\'export: ' + e.message);
-    }
-  };
-
   // IL PDF DELLA SCHEDA (09/10/2026). Nel PDF vanno TUTTE le righe del filtro,
   // non le cento della pagina: un totale sotto una tabella parziale e' la
   // lettura che ha fatto credere che ottobre non fosse contato. Si vanno a
@@ -310,12 +447,40 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   // quell'anno ancora da dichiarare oggi (carichi_del, 14/10/2026) e lo dice in
   // testa e nelle note (pdfDeiCarichiDel).
   const chiusi = attesaTuttaChiusa(righeGiacenze, sito, ruolo);
+  // Con un sito che e' anche stoccaggio, guardato senza ruolo, la riga di
+  // riconciliazione dice la parte dello stoccaggio: se l'attesa e' per noi
+  // chiusa lo dice come la scritta qui sotto.
+  const chiusiStoccaggio = attesaTuttaChiusa(righeGiacenze, sito, 'stoc');
+  // Gli arrivi senza fine trasporto che il portale non conosce, dalla riga della
+  // Situazione che la pagina ha gia': nessuna lettura in piu' (15/10/2026).
+  const ignoti = sito && ruolo !== 'stoc' && carichiDellAnno === null ? senzaFineIgnoti(righeGiacenze, sito) : null;
+  // I filtri che i due documenti dicono, gli stessi per il PDF e per l'Excel
+  // (revisione del 15/10/2026): l'Excel non li riceveva, e le sue note non erano
+  // quelle del PDF.
+  const filtriDocumento = () => ({
+    sito, ruolo, provincia, anno: annoChiusura, ricerca, solo_date: soloDate,
+    ...(chiusi ? { per_noi_chiusi: chiusi.motivo } : {}),
+    ...(ignoti ? { senza_fine_ignoti: ignoti } : {}),
+  });
   const sezioniPdf = async () => {
     const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
-    return pdfDeiCarichiDel(daDichiararePdf(annoChiusura || carichiDellAnno || annoDiOggi(), res.data, {
-      sito, ruolo, provincia, anno: annoChiusura, ricerca, solo_date: soloDate,
-      ...(chiusi ? { per_noi_chiusi: chiusi.motivo } : {}),
-    }), carichiDellAnno);
+    return pdfDeiCarichiDel(daDichiararePdf(annoChiusura || carichiDellAnno || annoDiOggi(), res.data, { ...filtriDocumento() }), carichiDellAnno);
+  };
+
+  const handleExport = async () => {
+    // Scarica tutto l'elenco filtrato (senza limite) per l'export
+    try {
+      // tutte: le righe non si tagliano a mille, come il totale.
+      const res = await base44.functions.invoke('getOrdiniDaDichiarare', payloadFiltrato());
+      // L'anno dei carichi va anche al foglio (null sull'anno in corso): la lista
+      // di lavoro per gli impianti deve dire di quali carichi e', come il PDF. E
+      // la risposta intera, per le parti del totale e il giorno del file
+      // (15/10/2026): il foglio dice quali righe sono arrivate dopo il file. E i
+      // filtri del PDF, perche' le note siano le stesse.
+      await exportDaDichiarareExcel(res.data.righe, res.data.totale_righe, res.data.totale_kg, { carichi_del: carichiDellAnno, dati: res.data, filtri: filtriDocumento() });
+    } catch (e) {
+      alert('Errore nell\'export: ' + e.message);
+    }
   };
 
   const righe = data?.righe || [];
@@ -325,6 +490,12 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
   const dateInfo = data?.date_da_sistemare || { n: 0 };
   const senzaFineAPortale = data?.senza_fine_a_portale || 0;
   const senzaFineDalGestionale = data?.senza_fine_dal_gestionale || 0;
+  const fotoDel = data?.foto_del || null;
+  const parti = data?.parti || null;
+  const erroreCarichi = data?.carichi_dopo_il_file?.errore || '';
+  // Impianto e stoccaggio insieme nell'elenco (tutti i siti, o un sito coi due
+  // ruoli guardato dal menu): le due cose non si somigliano, e si dicono a parte.
+  const dueRuoli = !!(parti && parti.imp.ordini > 0 && parti.stoc.ordini > 0);
   const hasPrev = offset > 0;
   const hasNext = righe.length === PAGE_SIZE && offset + PAGE_SIZE < totaleRighe;
 
@@ -388,11 +559,11 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
       </div>
       {/* Da dove si arriva conta: col ruolo scelto si vedono solo i carichi di quel
           titolo. Il numero del pulsante nella scheda Situazione conta anche i
-          carichi che il file del portale non ha ancora: il pulsante e l'elenco
-          dicono lo stesso attraverso la riga di riconciliazione sotto la tabella,
-          che li mette insieme e arriva alla giacenza (11/10/2026). Prima questo
-          commento lo affermava e basta, ed era falso appena un carico arrivava
-          dopo l'ultimo file, cioe' quasi ogni settimana. */}
+          carichi che il file del portale non ha ancora: dal 15/10/2026 sono righe
+          dell'elenco, e il totale e' la giacenza; la riga di riconciliazione sotto
+          la tabella dice da dove viene (11/10/2026). Prima questo commento lo
+          affermava e basta, ed era falso appena un carico arrivava dopo l'ultimo
+          file, cioe' quasi ogni settimana. */}
       {/* Su un anno passato si dice di quali carichi e'
           l'elenco, sopra tutto il resto (14/10/2026). */}
       {carichiDellAnno !== null && (
@@ -422,10 +593,42 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
         </div>
       )}
 
-      {/* Conteggio e peso totale */}
+      {/* IL FILE DEL PORTALE PIU' I CARICHI ARRIVATI DOPO (15/10/2026). L'utente
+          vedeva a ottobre su T-Cycle 40,92 t mentre ne erano entrate 49,04: i 4
+          carichi del 12-13/10 il file del 09/10 non li aveva ancora, e l'elenco
+          aveva solo il file. Ora ci sono, con l'etichetta, e due frasi dicono
+          che cosa e' l'elenco e quando l'etichetta sparisce. */}
+      {fotoDel && ruolo !== 'stoc' && (
+        <p className="text-xs text-muted-foreground">
+          L&apos;elenco è il file degli ordini non dichiarati del portale del {fmtData(fotoDel)} più i carichi che il gestionale conosce e il file non ha ancora, di solito arrivati dopo (colonna «Nel file del portale»).
+          {' '}Caricando un file nuovo degli ordini non dichiarati quei carichi entrano nel file e l&apos;etichetta sparisce.
+          {parti && parti.dichiarato_dopo.kg > 0 && <> Le dichiarazioni caricate a portale dopo il file si tolgono dai carichi arrivati da più tempo, come fa il portale.</>}
+        </p>
+      )}
+      {erroreCarichi && (
+        <p className="text-xs border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2">
+          I carichi arrivati dopo il file non si sono potuti leggere ({erroreCarichi}): qui c&apos;è solo il file del portale, e il totale non è la giacenza della scheda Situazione. Si può riprovare fra poco.
+        </p>
+      )}
+
+      {/* Conteggio e peso totale. Il primo numero in grassetto resta quello degli
+          ordini (prove/daDichiarareRicercaAttesa.mjs lo legge). */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
         <span><strong className="text-foreground">{formatIntero(totaleRighe)}</strong> ordini</span>
         <span><strong className="text-foreground">{kg(totaleKg)}</strong> kg totali</span>
+        {/* «arrivati dopo» solo se lo sono tutti: un ordine terminato prima del
+            file e chiuso a portale dopo e' «non ancora nel file» (15/10/2026). */}
+        {parti && parti.dopo_il_file.ordini > 0 && (
+          <span className="text-xs">
+            {formatIntero(parti.nel_file.ordini)} nel file del {fmtData(fotoDel)} + {formatIntero(parti.dopo_il_file.ordini)} {tuttiArrivatiDopo(parti) ? `${parti.dopo_il_file.ordini === 1 ? 'arrivato' : 'arrivati'} dopo` : 'non ancora nel file'} ({kg(parti.dopo_il_file.kg)} kg)
+          </span>
+        )}
+        {parti && parti.dichiarato_dopo.kg > 0 && (
+          <span className="text-xs">− {kg(parti.dichiarato_dopo.kg)} kg dichiarati a portale dopo il file</span>
+        )}
+        {parti && parti.oltre_kg > 0 && (
+          <span className="text-xs text-amber-800">− {kg(parti.oltre_kg)} kg dichiarati oltre i carichi: giacenza sotto zero, da correggere</span>
+        )}
         {totaleRighe > righe.length && (
           <span className="text-xs">
             in tabella {righe.length === 0 ? 0 : offset + 1}–{offset + righe.length}: l&apos;elenco parte dal carico arrivato da più tempo, i mesi più recenti sono nelle pagine dopo
@@ -433,6 +636,12 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
         )}
         {(loading || ricercaInSospeso) && <RefreshCw className="w-4 h-4 animate-spin" />}
       </div>
+      {dueRuoli && (
+        <p className="text-xs text-muted-foreground">
+          Come impianto, da dichiarare: <strong className="text-foreground">{formatIntero(parti.imp.ordini)}</strong> ordini, {kg(parti.imp.kg)} kg{sito ? ', la giacenza a portale' : ', la somma delle giacenze a portale degli impianti'}.
+          {' '}Come stoccaggio, in attesa di dichiarazione: {formatIntero(parti.stoc.ordini)} ordini, {kg(parti.stoc.kg)} kg, già ripartiti in secondaria: li dichiara chi li ha ricevuti, e non sono giacenza degli impianti.
+        </p>
+      )}
       {/* DI QUALI MESI SONO, SU TUTTO L'ELENCO (09/10/2026).
           Chiesto dall'utente dopo aver guardato gli ordini da dichiarare di
           T-Cycle: «non compaiono poi in elenco gli ingressi di ottobre e mi
@@ -441,18 +650,16 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
           prime cento righe, e il totale sotto la tabella li contava senza che si
           vedessero. Questa riga dice i mesi di TUTTO l'elenco filtrato: si legge
           in un colpo d'occhio e fa da riscontro alla giacenza dell'impianto. */}
-      {perMese.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-muted-foreground">Di quali mesi:</span>
-          {perMese.map(m => (
-            <span key={m.mese || 'senza'} className="rounded-md border bg-card px-2 py-0.5 tabular-nums"
-              title={`${m.ordini} ${m.ordini === 1 ? 'ordine' : 'ordini'} per ${kg(m.kg)} kg${m.mese ? '' : ' senza fine trasporto: non si collocano in nessun mese'}`}>
-              <span className="font-medium">{nomeMese(m.mese)}</span>{' '}
-              <span className="text-muted-foreground">{formatIntero(m.ordini)} · {kg(m.kg)} kg</span>
-            </span>
-          ))}
-        </div>
-      )}
+      {/* Dal 15/10/2026 i mesi comprendono i carichi arrivati dopo il file, e lo
+          dicono in piccolo («di cui 4 · 8.120 kg non ancora nel file del
+          portale»); il mese e' quello dell'arrivo al sito, come nelle
+          Dichiarazioni Impianti. Con impianto e stoccaggio insieme, due fasce. */}
+      {perMese.length > 0 && (dueRuoli ? (
+        <>
+          <FasciaMesi mesi={perMese} ruolo="imp" titolo="Da dichiarare come impianto, di quali mesi:" />
+          <FasciaMesi mesi={perMese} ruolo="stoc" titolo="In attesa sugli stoccaggi, di quali mesi:" />
+        </>
+      ) : <FasciaMesi mesi={perMese} titolo="Di quali mesi:" />)}
       {(dateInfo.n > 0 || senzaFineAPortale > 0) && (
         <div className="text-xs border border-amber-300 bg-amber-50 text-amber-900 rounded-lg px-3 py-2 space-y-0.5">
           {dateInfo.n > 0 && (
@@ -485,6 +692,7 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
                 <th className="px-2 py-2 font-semibold">Prov.</th>
                 <th className="px-2 py-2 font-semibold">Prodotto</th>
                 <th className="px-2 py-2 font-semibold text-right">Peso da dichiarare</th>
+                <th className="px-2 py-2 font-semibold" title="Se la riga e' nel file degli ordini non dichiarati del portale, o se e' un carico che il file non ha ancora: arrivato dopo il file, oppure terminato prima ma non ancora nel file">Nel file del portale</th>
                 <th className="px-2 py-2 font-semibold">Destinazione</th>
                 <th className="px-2 py-2 font-semibold">Trasferito a</th>
                 <th className="px-2 py-2 font-semibold" title="Il formulario nel gestionale: le date obbligatorie che mancano o non tornano">Formulario nel gestionale</th>
@@ -492,23 +700,39 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
             </thead>
             <tbody>
               {righe.length === 0 && (
-                <tr><td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">Nessun ordine da dichiarare</td></tr>
+                <tr><td colSpan={12} className="px-3 py-8 text-center text-muted-foreground">Nessun ordine da dichiarare</td></tr>
               )}
               {righe.map((r, i) => {
                 const giorni = r.giorni_attesa;
                 let rowClass = 'border-t hover:bg-muted/30';
                 if (giorni != null && giorni > 180) rowClass = 'border-t bg-red-50 hover:bg-red-100';
                 else if (giorni != null && giorni > 90) rowClass = 'border-t bg-amber-50 hover:bg-amber-100';
+                // Il giorno in cui il carico e' arrivato all'impianto, quando e'
+                // un altro dalla fine trasporto della riga: un carico passato da
+                // uno stoccaggio arriva con la secondaria, e il suo mese e' quello.
+                const arrivo = r.giorno_al_sito && r.fine_trasporto && r.giorno_al_sito !== r.fine_trasporto ? r.giorno_al_sito : null;
                 return (
                   <tr key={i} className={rowClass}>
-                    <td className="px-2 py-1.5 font-mono text-xs">{r.ordine_primaria}</td>
+                    <td className="px-2 py-1.5 font-mono text-xs">{r.ordine_primaria || r.ordine_secondaria}{!r.ordine_primaria && r.ordine_secondaria && <span className="block text-[10px] font-sans text-muted-foreground">secondaria</span>}</td>
                     <td className="px-2 py-1.5 font-mono text-xs">{r.numero_fir || '—'}</td>
-                    <td className="px-2 py-1.5" title={r.data_chiusura ? `chiuso a portale il ${fmtData(r.data_chiusura)}` : ''}>{fmtData(r.fine_trasporto)}{r.fine_dal_gestionale && <span className="block text-[10px] text-muted-foreground" title="Il file del portale non la scrive: e' quella del formulario nel gestionale">dal gestionale</span>}</td>
+                    <td className="px-2 py-1.5" title={r.data_chiusura ? `chiuso a portale il ${fmtData(r.data_chiusura)}` : ''}>
+                      {fmtData(r.fine_trasporto)}
+                      {r.fine_dal_gestionale && <span className="block text-[10px] text-muted-foreground" title="Il file del portale non la scrive: e' quella del formulario nel gestionale">dal gestionale</span>}
+                      {arrivo && <span className="block text-[10px] text-muted-foreground" title="La fine trasporto della secondaria che l'ha portato all'impianto: il mese della riga e' questo">all&apos;impianto il {fmtData(arrivo)}</span>}
+                    </td>
                     <td className="px-2 py-1.5">{r.punto_di_raccolta || '—'}</td>
                     <td className="px-2 py-1.5">{r.comune || '—'}</td>
                     <td className="px-2 py-1.5">{r.provincia || '—'}</td>
                     <td className="px-2 py-1.5">{r.prodotto || '—'}</td>
-                    <td className="px-2 py-1.5 text-right font-medium">{kg(r.peso_non_dichiarato_kg)} kg</td>
+                    <td className="px-2 py-1.5 text-right font-medium">
+                      {kg(r.peso_non_dichiarato_kg)} kg
+                      {r.dichiarato_dopo_kg > 0 && <span className="block text-[10px] font-normal text-muted-foreground">nel file {kg(r.peso_del_file_kg)} kg, {kg(r.dichiarato_dopo_kg)} dichiarati a portale dopo il file</span>}
+                    </td>
+                    <td className="px-2 py-1.5 text-xs">
+                      {r.nel_file === false
+                        ? <span className="text-primary font-medium">{fuoriDalFile(r, fotoDel)}</span>
+                        : <span className="text-muted-foreground">sì</span>}
+                    </td>
                     <td className="px-2 py-1.5">{r.destinazione || '—'}</td>
                     <td className="px-2 py-1.5">{r.destinazione_secondaria || '—'}</td>
                     <td className="px-2 py-1.5 text-xs"><Formulario r={r} /></td>
@@ -527,13 +751,20 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
                   <tr className="font-normal text-muted-foreground">
                     <td className="px-2 py-1.5" colSpan={7}>In questa pagina ({formatIntero(righe.length)} {righe.length === 1 ? 'ordine' : 'ordini'})</td>
                     <td className="px-2 py-1.5 text-right">{kg(righe.reduce((s, r) => s + (r.peso_non_dichiarato_kg || 0), 0))} kg</td>
-                    <td className="px-2 py-1.5" colSpan={3}></td>
+                    <td className="px-2 py-1.5" colSpan={4}></td>
+                  </tr>
+                )}
+                {parti && parti.oltre_kg > 0 && (
+                  <tr className="font-normal text-amber-800">
+                    <td className="px-2 py-1.5" colSpan={7}>Dichiarato a portale dopo il file, oltre i carichi dell&apos;elenco</td>
+                    <td className="px-2 py-1.5 text-right">− {kg(parti.oltre_kg)} kg</td>
+                    <td className="px-2 py-1.5" colSpan={4}></td>
                   </tr>
                 )}
                 <tr>
                   <td className="px-2 py-2" colSpan={7}>TOTALE DELL&apos;ELENCO ({formatIntero(totaleRighe)} ordini)</td>
                   <td className="px-2 py-2 text-right">{kg(totaleKg)} kg</td>
-                  <td className="px-2 py-2" colSpan={3}></td>
+                  <td className="px-2 py-2" colSpan={4}></td>
                 </tr>
               </tfoot>
             )}
@@ -545,8 +776,11 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
           Righe del file + carichi che il file non ha ancora - dichiarato dopo la
           fotografia = la giacenza a portale, lo stesso numero delle Giacenze; e
           righe + carichi = il numero del pulsante. Le regole sono quelle delle
-          Giacenze (base44/shared/riconciliazioneDaDichiarare.ts). */}
-      <Riconciliazione r={riconciliazione} sito={sito} />
+          Giacenze (base44/shared/riconciliazioneDaDichiarare.ts). Dal 15/10/2026
+          arriva con ogni elenco: dal pulsante, dal menu, coi filtri; e senza un
+          sito si dice impianto per impianto. */}
+      <Riconciliazione r={data?.riconciliazione || null} sito={sito} righeGiacenze={carichiDellAnno === null ? righeGiacenze : null} chiusi={ruolo ? null : chiusiStoccaggio} />
+      {!sito && <RiconciliazioneSiti r={data?.riconciliazione_siti || null} />}
 
       {/* Paginazione */}
       {totaleRighe > PAGE_SIZE && (

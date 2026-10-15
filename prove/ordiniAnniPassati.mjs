@@ -237,15 +237,18 @@ console.log('2. LE DUE FUNZIONI VERE, SU UN ARCHIVIO COSTRUITO');
     return { ...L.j, stato: L.stato, richieste: [...globalThis.__RICHIESTE_ANNI_PASSATI] };
   };
   const a26 = await chiedi({ sito: ALFA, ruolo: 'imp', riconcilia: true, carichi_del: 2026 });
-  verifica("l'elenco di ALFA del 2026: le quattro righe del file arrivate nel 2026",
-    a26.stato === 200 && a26.totale_righe === 4 && J(a26.righe.map(r => r.ordine_primaria).sort()) === J(['ET01', 'ET02', 'ET05', 'ET11']), J(a26.righe && a26.righe.map(r => r.ordine_primaria)));
+  // Dal 15/10/2026 il carico del 2026 che il file non ha ancora (ET08) e' una
+  // riga dell'elenco: le righe sono il numero del pulsante del 2026.
+  verifica("l'elenco di ALFA del 2026: le quattro righe del file arrivate nel 2026 e il carico non ancora nel file, il numero del pulsante",
+    a26.stato === 200 && a26.totale_righe === 5 && a26.totale_righe === o(G26, ALFA, 'imp') && J(a26.righe.map(r => r.ordine_primaria).sort()) === J(['ET01', 'ET02', 'ET05', 'ET08', 'ET11'])
+      && a26.righe.filter(r => r.nel_file === false).map(r => r.ordine_primaria).join() === 'ET08', J(a26.righe && a26.righe.map(r => [r.ordine_primaria, r.nel_file])));
   const r26 = a26.riconciliazione || {};
   verifica("la riga dice gli ordini: 4 nel file + 1 non ancora nel file = 5, il numero del pulsante del 2026",
     r26.carichi_del === 2026 && r26.file_ordini === 4 && r26.aggiunti_n === 1 && r26.ordini_pulsante === o(G26, ALFA, 'imp') && J(r26.aggiunti.map(x => x.id_ordine)) === J(['ET08']), J(r26));
   verifica("e niente giacenza: quella di un anno chiuso e' la lettura del 31/12, non questo elenco", r26.giacenza_kg === null && r26.dichiarato_dopo_kg === null, J(r26));
   const a27 = await chiedi({ sito: ALFA, ruolo: 'imp', riconcilia: true });
   verifica("l'anno in corso, senza carichi_del: tutto il file e la riga che arriva alla giacenza, col pulsante",
-    a27.totale_righe === 6 && a27.riconciliazione && a27.riconciliazione.ordini_pulsante === o(G27, ALFA, 'imp') && typeof a27.riconciliazione.giacenza_kg === 'number' && !('carichi_del' in a27.riconciliazione),
+    a27.totale_righe === 8 && a27.totale_righe === a27.riconciliazione.ordini_pulsante && a27.totale_kg === a27.riconciliazione.giacenza_kg && a27.riconciliazione && a27.riconciliazione.ordini_pulsante === o(G27, ALFA, 'imp') && typeof a27.riconciliazione.giacenza_kg === 'number' && !('carichi_del' in a27.riconciliazione),
     J([a27.totale_righe, a27.riconciliazione]));
   const a27c = await chiedi({ sito: ALFA, ruolo: 'imp', riconcilia: true, carichi_del: 2027 });
   const { richieste: _x, ...a27senza } = a27; const { richieste: _y, ...a27con } = a27c;
@@ -263,8 +266,8 @@ console.log('2. LE DUE FUNZIONI VERE, SU UN ARCHIVIO COSTRUITO');
   verifica("Tecnogum sul 2026: il suo ordine, e niente da riconciliare (la rete non la dichiara, per i siti del 2026)",
     t26.totale_righe === 1 && t26.riconciliazione && t26.riconciliazione.non_dovuta === true, J([t26.totale_righe, t26.riconciliazione]));
   const tutti26 = await chiedi({ carichi_del: 2026 });
-  verifica("tutti i siti del 2026: le righe del file di quell'anno (il totale meno il carico non ancora nel file)",
-    tutti26.totale_righe === G26.j.totali.ordini_da_dichiarare - 1, `${tutti26.totale_righe} / ${G26.j.totali.ordini_da_dichiarare}`);
+  verifica("tutti i siti del 2026: le righe del file di quell'anno e il carico non ancora nel file, il totale della colonna (15/10/2026)",
+    tutti26.totale_righe === G26.j.totali.ordini_da_dichiarare, `${tutti26.totale_righe} / ${G26.j.totali.ordini_da_dichiarare}`);
   const a25 = await chiedi({ sito: ALFA, ruolo: 'imp', riconcilia: true, carichi_del: 2025 });
   verifica("il 2025: niente, e la riga lo dice", a25.totale_righe === 0 && a25.riconciliazione && a25.riconciliazione.ordini_pulsante === 0, J(a25.riconciliazione));
   verifica("e senza letture inutili: un anno finito prima della finestra dei carichi non ancora nel file non legge primarie, secondarie, report e dichiarazioni per riconciliare",
@@ -341,7 +344,7 @@ console.log('3. LE PAGINE');
     return fuori;
   };
   const del25 = await apri({ filtroSitoEsterno: 'ALFA RECYCLING SRL', filtroRuoloEsterno: 'imp', carichiDel: 2025 });
-  verifica("dal pulsante del 2025: l'elenco chiede i carichi del 2025, con la riconciliazione", del25.prima.length === 1 && del25.prima[0].carichi_del === 2025 && del25.prima[0].riconcilia === true && del25.prima[0].sito === 'ALFA RECYCLING SRL', J(del25.prima));
+  verifica("dal pulsante del 2025: l'elenco chiede i carichi del 2025, con la riconciliazione", del25.prima.length === 1 && del25.prima[0].carichi_del === 2025 && del25.prima[0].sito === 'ALFA RECYCLING SRL', J(del25.prima));
   verifica("e lo dice sopra tutto", /Carichi del 2025 ancora da dichiarare oggi\./.test(del25.testo) && /Tutto il file di oggi si vede scegliendo l.anno in corso/.test(del25.testo), del25.testo.slice(0, 400));
   verifica("l'Excel e il PDF portano gli stessi carichi", del25.excel && del25.excel.carichi_del === 2025 && del25.pdf && del25.pdf.carichi_del === 2025, J([del25.excel, del25.pdf]));
   verifica("e il PDF e' del 2025", del25.documento && /-2025$/.test(String(del25.documento.nomeFile)), J(del25.documento && del25.documento.nomeFile));
@@ -365,7 +368,8 @@ console.log('3. LE PAGINE');
     J([oggi.prima, oggi.excel, oggi.pdf]));
   verifica('nessun errore', !del25.errori.length && !oggi.errori.length && !dopo.errori.length, J([del25.errori, oggi.errori, dopo.errori]));
   const sorgenteTabella = readFileSync(qui('../src/components/giacenze/DaDichiarareTable.jsx'), 'utf8').replace(/\r/g, '');
-  verifica("l'anno dei carichi va anche al foglio Excel dell'elenco", /exportDaDichiarareExcel\([^)]*\{ carichi_del: carichiDellAnno \}\)/.test(sorgenteTabella));
+  // Dal 15/10/2026 il foglio riceve anche i filtri del PDF, per le stesse note.
+  verifica("l'anno dei carichi va anche al foglio Excel dell'elenco", /exportDaDichiarareExcel\([^;]*\{ carichi_del: carichiDellAnno, dati: res\.data, filtri: filtriDocumento\(\) \}\)/.test(sorgenteTabella));
 
   // La riga di riconciliazione di un anno passato non parla di giacenza.
   verifica('la riga di riconciliazione si disegna da sola (Riconciliazione esportata)', typeof tabella.modulo.Riconciliazione === 'function');

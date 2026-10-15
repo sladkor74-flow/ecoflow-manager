@@ -256,6 +256,12 @@ const invariante = ({ G, D, L }, quando) => {
       !!r && !!rg && vicino(r.giacenza_kg / 1000, rg.giacenza_rete_t), JSON.stringify({ r, giacenza: rg && rg.giacenza_rete_t }));
     verifica(`${quando} · elenco di ${sito}: ordini del file + carichi aggiunti = numero del pulsante`,
       !!r && !!rg && r.ordini_pulsante === rg.ordini_da_dichiarare, JSON.stringify({ elenco: r && r.ordini_pulsante, pulsante: rg && rg.ordini_da_dichiarare }));
+    // Dal 15/10/2026 i carichi non ancora nel file sono righe dell'elenco: il suo
+    // totale e' la giacenza, le sue righe il pulsante, e i mesi fanno il totale.
+    const mesiKg = (risposta.per_mese || []).reduce((s, m) => s + m.kg, 0);
+    verifica(`${quando} · elenco di ${sito}: il totale dell'elenco e' la giacenza delle Giacenze, le righe il pulsante, i mesi il totale`,
+      !!rg && vicino(risposta.totale_kg / 1000, rg.giacenza_rete_t) && risposta.totale_righe === rg.ordini_da_dichiarare && mesiKg === risposta.totale_kg,
+      JSON.stringify({ totale: risposta.totale_kg, righe: risposta.totale_righe, mesi: mesiKg, giacenza: rg && rg.giacenza_rete_t, pulsante: rg && rg.ordini_da_dichiarare }));
   }
 };
 
