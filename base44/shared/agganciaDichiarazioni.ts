@@ -18,6 +18,7 @@ import { eAci } from "./canaleSecondaria.ts";
 import { giornoRoma } from "./giornoItaliano.ts";
 import { fetchAll } from "./fetchAll.ts";
 import { nostraRiga } from "./giacenzaPortale.ts";
+import { formatoKg } from "./formato.ts";
 
 /** Dal nome del campo del portale a quello della nostra dichiarazione. */
 export const MATERIALI_PORTALE = [
@@ -32,6 +33,14 @@ export const MATERIALI_PORTALE = [
 export const TOLLERANZA_KG = 2;
 /** Quante riprese consecutive si provano per un solo nostro mese. */
 export const MAX_RIPRESE = 3;
+/**
+ * Quanti nostri mesi consecutivi si provano insieme contro un caricamento
+ * (agganciaMesiInsieme): tutti quelli di un anno. La prova del cambio d'anno
+ * parlava di due o tre; non serve fermarsi li', perche' si aggancia solo se i
+ * mesi degli ordini chiusi coincidono con i nostri, e Gatim, che all'11/10/2026
+ * aveva dichiarato la rete fino a maggio, l'arretrato lo carichera' tutto insieme.
+ */
+export const MAX_MESI_INSIEME = 12;
 
 const num = (v) => Number(v) || 0;
 // Il giorno italiano: tagliare la stringa UTC spostava al giorno prima una data
@@ -107,7 +116,7 @@ export function caricamentiPortale(righe, anno, canale = '', provenienza = '') {
     if (!sito) continue;
     if (!per.has(sito)) per.set(sito, new Map());
     const perGiorno = per.get(sito);
-    if (!perGiorno.has(data)) perGiorno.set(data, { data, kg: 0, materiali: {}, mesi: new Map(), provenienze: new Set() });
+    if (!perGiorno.has(data)) perGiorno.set(data, { data, kg: 0, materiali: {}, mesi: new Map(), materialiMesi: new Map(), provenienze: new Set() });
     const c = perGiorno.get(data);
     c.kg += num(r.peso_associato_kg);
     for (const [dal, al] of MATERIALI_PORTALE) c.materiali[al] = (c.materiali[al] || 0) + num(r[dal]);
@@ -121,16 +130,27 @@ export function caricamentiPortale(righe, anno, canale = '', provenienza = '') {
     // prima, e nessuno lo vedeva (01/10/2026).
     const mese = giorno(r.fine_trasporto).slice(0, 7);
     if (mese) c.mesi.set(mese, (c.mesi.get(mese) || 0) + num(r.peso_associato_kg));
+    // E i materiali di ogni mese, letti riga per riga: servono quando un
+    // caricamento solo porta piu' nostri mesi (agganciaMesiInsieme), perche'
+    // ciascuno prenda i suoi e non una parte in proporzione ai chili (seconda
+    // revisione del 15/10/2026).
+    if (mese) {
+      if (!c.materialiMesi.has(mese)) c.materialiMesi.set(mese, {});
+      const mm = c.materialiMesi.get(mese);
+      for (const [dal, al] of MATERIALI_PORTALE) mm[al] = (mm[al] || 0) + num(r[dal]);
+    }
     c.provenienze.add(provenienzaRigaPortale(r));
   }
   const esito = new Map();
+  const tondi = (m) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, Math.round(v)]));
   for (const [sito, perGiorno] of per) {
     esito.set(sito, [...perGiorno.values()]
       .map(c => ({
         data: c.data,
         kg: Math.round(c.kg),
-        materiali: Object.fromEntries(Object.entries(c.materiali).map(([k, v]) => [k, Math.round(v)])),
+        materiali: tondi(c.materiali),
         mesi: [...c.mesi.entries()].map(([mese, kg]) => ({ mese, kg: Math.round(kg) })).sort((a, b) => a.mese.localeCompare(b.mese)),
+        materiali_mesi: Object.fromEntries([...c.materialiMesi.entries()].map(([mese, m]) => [mese, tondi(m)])),
         provenienze: [...c.provenienze].sort(),
       }))
       .sort((a, b) => a.data.localeCompare(b.data)));
@@ -170,30 +190,155 @@ export function agganciaMesi(nostre, caricamenti) {
       materiali,
     });
   }
-  const avanzi = caricamenti.filter((_, i) => !usati.has(i));
-  return { trovati, senzaRiscontro, avanzi };
+  // Poi i mesi rimasti senza riscontro, provati insieme (agganciaMesiInsieme).
+  const insieme = agganciaMesiInsieme(senzaRiscontro, caricamenti, usati);
+  return { trovati: [...trovati, ...insieme.trovati], senzaRiscontro: insieme.senzaRiscontro, avanzi: caricamenti.filter((_, i) => !usati.has(i)) };
+}
+
+// 'AAAA-MM' di una nostra riga mensile, come i mesi degli ordini di un
+// caricamento; '' se l'anno o il mese non si sanno. Le somme dell'ACI
+// (agganciaAci) hanno l'anno nelle loro righe.
+function meseDellaRiga(n) {
+  const i = MESI.indexOf(n && n.mese);
+  const anno = Number((n && n.anno) || (n && Array.isArray(n.righe) && n.righe[0] && n.righe[0].anno));
+  return i >= 0 && anno ? `${anno}-${String(i + 1).padStart(2, '0')}` : '';
+}
+
+/**
+ * PIU' NOSTRI MESI IN UN CARICAMENTO SOLO (prova del cambio d'anno del
+ * 15/10/2026, difetto 13). Il portale fa un caricamento per giorno e per
+ * impianto: se un impianto carica due mesi lo stesso giorno, in due
+ * dichiarazioni (Gatim novembre 2026, 20.000 kg alle 10:00, e dicembre 2026,
+ * 15.000 kg alle 10:20, il 12/01/2027), il caricamento del giorno fa 35.000 kg e
+ * nessuno dei due mesi, provato da solo, lo pareggia. Restavano tutti e due non
+ * caricati, il riquadro diceva «nessun nostro mese ha questo peso: va inserita
+ * nel mese giusto» spingendo a creare un doppione, e nel 2027 Gatim calcolava
+ * 303,62 t contro 268,62 a portale. Raggruppare per dichiarazione del portale non
+ * si puo': sui dati veri un mese e' spesso fatto di piu' dichiarazioni lo stesso
+ * giorno (130 giorni-impianto su 183).
+ *
+ * Dopo il passo mese per mese, i nostri mesi consecutivi rimasti senza
+ * riscontro si provano insieme contro UN caricamento, cioe' un giorno solo,
+ * entro TOLLERANZA_KG. Si agganciano SOLO se i mesi degli ordini che quel
+ * caricamento chiude (c.mesi, dalla fine trasporto) sono proprio i nostri mesi:
+ * due mesi che fanno lo stesso peso per caso, ma con ordini di altri mesi,
+ * restano senza riscontro. Le righe prendono il giorno di quel caricamento
+ * (caricata_il) e il segno «insieme» (insieme_mesi). La storia della riga
+ * racconta gia' «due dichiarazioni caricate lo stesso giorno hanno un caricamento
+ * solo» (storiaDichiarazioni.ts).
+ *
+ * I MATERIALI DI OGNI MESE SONO I SUOI (seconda revisione del 15/10/2026). La
+ * prima versione divideva granulo, fibre e metalli del caricamento in
+ * proporzione ai chili, e l'allineamento li scriveva sulle righe di rete:
+ * novembre (granulo 12.000, metalli 4.000 a portale) diventava granulo 12.857 e
+ * metalli 3.429, dicembre (10.500 e 2.000) 9.643 e 2.571, diversi da quelli che il
+ * portale ha riga per riga. Ora ogni mese prende i materiali delle righe del
+ * portale con la fine trasporto in quel mese (materiali_mesi, come c.mesi),
+ * quando i chili di ogni mese tornano col nostro mese entro TOLLERANZA_KG.
+ * Altrimenti - il portale aggancia dal piu' vecchio, e i chili di un mese
+ * possono finire sugli ordini di quello dopo - i materiali di un mese non si
+ * possono leggere ma solo stimare, e una stima non si scrive al posto di un dato
+ * (regola dell'utente: un valore che non si legge non si deduce): la riga si
+ * segna caricata, i suoi materiali restano com'erano e l'esito lo dice
+ * (materiali_non_letti).
+ *
+ * MAI CARICAMENTI DI GIORNI DIVERSI (revisione del 15/10/2026). La prima
+ * versione provava anche gruppi di caricamenti consecutivi: novembre caricato il
+ * 05/12/2026 (20.000 kg di ordini di novembre) e dicembre l'08/01/2027 (15.000
+ * kg, di cui 1.000 del resto di novembre, perche' il portale aggancia dal piu'
+ * vecchio), contro le nostre righe da 21.000 e 14.000 kg, facevano 35.000 kg di
+ * novembre e dicembre e si agganciavano insieme: novembre prendeva caricata_il
+ * 08/01/2027 invece del 05/12/2026, e la data sbagliata entrava nelle giacenze
+ * (35.000 kg «dichiarati dopo la fotografia» del 31/12/2026 contro i 15.000 veri,
+ * giacenzaPortale.ts), nella chiusura dell'anno e nelle uscite dichiarate per
+ * giorno; e lo scarto di 1.000 kg per mese non si vedeva piu'. Due giorni
+ * diversi restano come prima: ogni mese col suo caricamento, o senza riscontro.
+ *
+ * `usati` sono gli indici dei caricamenti gia' presi: si aggiornano qui.
+ */
+export function agganciaMesiInsieme(senzaRiscontro, caricamenti, usati = new Set()) {
+  const trovati = [];
+  const conMese = senzaRiscontro.filter(n => meseDellaRiga(n) && Math.round(num(n.quantita_kg)) > 0);
+  const presi = new Set();
+  // I mesi distinti, in ordine: l'ACI puo' avere due righe nello stesso mese.
+  const mesi = [...new Set(conMese.map(meseDellaRiga))].sort();
+  const consecutivi = (a, b) => {
+    const [ya, ma] = a.split('-').map(Number);
+    const [yb, mb] = b.split('-').map(Number);
+    return yb * 12 + mb === ya * 12 + ma + 1;
+  };
+  for (let quanti = 2; quanti <= Math.min(MAX_MESI_INSIEME, mesi.length); quanti++) {
+    for (let da = 0; da + quanti <= mesi.length; da++) {
+      const fila = mesi.slice(da, da + quanti);
+      if (fila.some((m, k) => k > 0 && !consecutivi(fila[k - 1], m))) continue;
+      const righe = conMese.filter(n => fila.includes(meseDellaRiga(n)) && !presi.has(n));
+      // Un mese gia' agganciato in un'altra fila non si riprende.
+      if (new Set(righe.map(meseDellaRiga)).size !== fila.length) continue;
+      const quanto = righe.reduce((s, n) => s + Math.round(num(n.quantita_kg)), 0);
+      // Un caricamento solo, cioe' un giorno solo (revisione del 15/10/2026, qui sopra).
+      const i = caricamenti.findIndex((c, k) => {
+        if (usati.has(k) || Math.abs(c.kg - quanto) > TOLLERANZA_KG) return false;
+        const loro = [...new Set((c.mesi || []).filter(m => Math.round(num(m.kg)) > 0).map(m => m.mese))].sort();
+        return loro.join() === fila.join();
+      });
+      if (i < 0) continue;
+      usati.add(i);
+      const c = caricamenti[i];
+      const nomi = MESI.filter(m => righe.some(n => n.mese === m));
+      // I materiali di ogni mese, letti dal portale per fine trasporto, solo se
+      // ogni nostro mese e' una riga sola e i suoi chili tornano con quelli del
+      // portale per quel mese (qui sopra).
+      const kgDelMese = (m) => Math.round(num(((c.mesi || []).find(x => x.mese === m) || {}).kg));
+      const letti = fila.every(m => {
+        const sue = righe.filter(n => meseDellaRiga(n) === m);
+        return sue.length === 1 && Math.abs(kgDelMese(m) - Math.round(num(sue[0].quantita_kg))) <= TOLLERANZA_KG
+          && !!(c.materiali_mesi && c.materiali_mesi[m]);
+      });
+      const perMese = (fila.map(m => `${MESI[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)} ${formatoKg(kgDelMese(m))} kg`)).join(', ');
+      righe.forEach((n) => {
+        presi.add(n);
+        trovati.push({
+          dichiarazione: n,
+          date: [c.data],
+          caricata_il: c.data,
+          materiali: letti ? { ...c.materiali_mesi[meseDellaRiga(n)] } : {},
+          insieme_mesi: nomi,
+          ...(letti ? {} : { materiali_non_letti: `i chili per mese degli ordini chiusi dal caricamento (${perMese}) non tornano con i nostri mesi: i materiali di ogni mese si potrebbero solo stimare, e restano quelli scritti` }),
+        });
+      });
+    }
+  }
+  return { trovati, senzaRiscontro: senzaRiscontro.filter(n => !presi.has(n)) };
 }
 
 /** Piu' elenchi di caricamenti dello stesso impianto, sommati giorno per giorno. */
 function unisciPerGiorno(...liste) {
   const per = new Map();
   const mesi = new Map();       // data -> Map(mese -> kg)
+  const materialiMesi = new Map(); // data -> Map(mese -> materiali)
   const provenienze = new Map(); // data -> Set
   for (const c of liste.flat()) {
-    if (!per.has(c.data)) { per.set(c.data, { data: c.data, kg: 0, materiali: {} }); mesi.set(c.data, new Map()); provenienze.set(c.data, new Set()); }
+    if (!per.has(c.data)) { per.set(c.data, { data: c.data, kg: 0, materiali: {} }); mesi.set(c.data, new Map()); materialiMesi.set(c.data, new Map()); provenienze.set(c.data, new Set()); }
     const t = per.get(c.data);
     t.kg += c.kg;
     for (const [k, v] of Object.entries(c.materiali || {})) t.materiali[k] = (t.materiali[k] || 0) + v;
     // I mesi degli ordini chiusi e la provenienza non si perdono unendo: sono
     // quello che permette di dire di che mese e' una dichiarazione che il
-    // gestionale non ha.
+    // gestionale non ha. Nemmeno i materiali di ogni mese (15/10/2026).
     for (const m of c.mesi || []) mesi.get(c.data).set(m.mese, (mesi.get(c.data).get(m.mese) || 0) + m.kg);
+    for (const [mese, mm] of Object.entries(c.materiali_mesi || {})) {
+      const dove = materialiMesi.get(c.data);
+      if (!dove.has(mese)) dove.set(mese, {});
+      const somma = dove.get(mese);
+      for (const [k, v] of Object.entries(mm || {})) somma[k] = (somma[k] || 0) + v;
+    }
     for (const p of c.provenienze || []) provenienze.get(c.data).add(p);
   }
   return [...per.values()]
     .map(t => ({
       ...t,
       mesi: [...mesi.get(t.data).entries()].map(([mese, kg]) => ({ mese, kg })).sort((a, b) => a.mese.localeCompare(b.mese)),
+      materiali_mesi: Object.fromEntries(materialiMesi.get(t.data)),
       provenienze: [...provenienze.get(t.data)].sort(),
     }))
     .sort((a, b) => a.data.localeCompare(b.data));
@@ -251,7 +396,7 @@ export function agganciaAci(mie, caricamentiPrimaria, caricamentiSecondaria) {
   const insieme = agganciaMesi(somme, conSomma);
   for (const t of insieme.trovati) {
     const quote = ripartisciMateriali(t.materiali, t.dichiarazione.righe);
-    t.dichiarazione.righe.forEach((d, i) => trovati.push({ dichiarazione: d, date: t.date, caricata_il: t.caricata_il, materiali: quote[i], insieme: true }));
+    t.dichiarazione.righe.forEach((d, i) => trovati.push({ dichiarazione: d, date: t.date, caricata_il: t.caricata_il, materiali: quote[i], insieme: true, ...(t.insieme_mesi ? { insieme_mesi: t.insieme_mesi } : {}), ...(t.materiali_non_letti ? { materiali_non_letti: t.materiali_non_letti } : {}) }));
   }
   const ancora = [
     ...insieme.senzaRiscontro.flatMap(s => s.righe),
@@ -416,7 +561,10 @@ export async function allineaDalPortale(svc, anno, righePortale = null, nostreRi
     const cambia = Object.entries(campi).some(([c, v]) => (c === 'caricata_inviata' ? !d[c] : Math.round(num(d[c])) !== Math.round(num(v))));
     if (!cambia) continue;
     await svc.DichiarazioneSito.update(d.id, campi);
-    aggiornate.push({ sito: t.sito, canale: t.canale, provenienza: d.provenienza || '', mese: d.mese, kg: Math.round(num(d.quantita_kg)), caricata_il: t.caricata_il, riprese: t.date.length, gia_segnata: !!d.caricata_inviata, ...(t.insieme ? { insieme_all_altra_provenienza: true } : {}) });
+    // Piu' mesi caricati insieme lo dicono, coi loro nomi (difetto 13 della prova
+    // del cambio d'anno, 15/10/2026), e se i materiali non si sono potuti leggere
+    // mese per mese lo dicono anche (seconda revisione del 15/10/2026).
+    aggiornate.push({ sito: t.sito, canale: t.canale, provenienza: d.provenienza || '', mese: d.mese, kg: Math.round(num(d.quantita_kg)), caricata_il: t.caricata_il, riprese: t.date.length, gia_segnata: !!d.caricata_inviata, ...(t.insieme ? { insieme_all_altra_provenienza: true } : {}), ...(t.insieme_mesi ? { insieme_ad_altri_mesi: t.insieme_mesi } : {}), ...(t.materiali_non_letti ? { materiali_non_scritti: t.materiali_non_letti } : {}) });
   }
   return { anno: annoNum, aggiornate, non_trovate: esito.non_trovate, arretrato: esito.arretrato, da_inserire: esito.da_inserire };
 }

@@ -12,6 +12,8 @@
 // si somigliano nessuno decide al posto dell'operatore: la verifica si fa in
 // ufficio, con i documenti in mano, e la decisione resta sua.
 
+import { oggiRoma } from "./giornoItaliano.ts";
+
 const FORME = /\b(srls|srl|spa|sas|snc|sc|ss|soc|societa|cooperativa|coperativa|unipersonale|ditta|di|del|della|dei|e|c)\b/g;
 
 /**
@@ -177,11 +179,16 @@ export const PESO_DIVERGENZA = {
   nessuna: 9,
 };
 
-/** Giorni che mancano alla scadenza; negativo se e' gia' passata. */
+/**
+ * Giorni che mancano alla scadenza; negativo se e' gia' passata. Senza «oggi»
+ * vale il giorno italiano (prova del cambio d'anno del 15/10/2026, difetto 30):
+ * col giorno UTC, all'01/01/2027 alle 00:30 l'omologa del 31/12/2026 era a 0
+ * giorni, «scade oggi», invece che scaduta. Uguale in src/lib/omologhe.js.
+ */
 export function giorniAllaScadenza(omologaA, oggi) {
   if (!omologaA) return null;
   const fine = new Date(String(omologaA).slice(0, 10) + 'T00:00:00Z').getTime();
-  const adesso = new Date(String(oggi || new Date().toISOString()).slice(0, 10) + 'T00:00:00Z').getTime();
+  const adesso = new Date(String(oggi || oggiRoma()).slice(0, 10) + 'T00:00:00Z').getTime();
   if (Number.isNaN(fine) || Number.isNaN(adesso)) return null;
   return Math.round((fine - adesso) / 86400000);
 }

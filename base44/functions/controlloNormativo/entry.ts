@@ -6,6 +6,7 @@ import {
   AREE_NORMATIVE, BASE_CONOSCENZA, FONTI_UFFICIALI, REGOLE_FONTI, vociApprovate, voceAttuale, proponiNovita, scartaSuperate,
 } from "../../shared/baseConoscenza.ts";
 import { oggiRoma } from "../../shared/qualificaFornitori.ts";
+import { giornoRoma } from "../../shared/giornoItaliano.ts";
 
 // Controllo periodico delle novita' normative sulla base di conoscenza.
 //
@@ -86,10 +87,14 @@ async function controllaNormativa(req) {
     const svc = base44.asServiceRole.entities;
     const oggi = oggiRoma();
 
-    // Il controllo pianificato non si ripete nello stesso mese.
+    // Il controllo pianificato non si ripete nello stesso mese. Il mese di
+    // eseguito_il e' quello del giorno italiano, come quello di oggi (prova del
+    // cambio d'anno del 15/10/2026, difetto 36): tagliando la stringa UTC, un
+    // controllo lanciato a mano alle 00:30 dell'01/01/2027 (2026-12-31T23:30Z)
+    // era di dicembre, e il giro pianificato delle 7:00 ne faceva un secondo.
     if (!manuale) {
       const recenti = await svc.ControlloNormativo.list('-created_date', 5).catch(() => []);
-      if (recenti.some(c => String(c.eseguito_il || '').slice(0, 7) === oggi.slice(0, 7) && c.esito !== 'errore')) {
+      if (recenti.some(c => giornoRoma(c.eseguito_il).slice(0, 7) === oggi.slice(0, 7) && c.esito !== 'errore')) {
         return Response.json({ ok: true, saltato: 'Controllo del mese gia\' eseguito' });
       }
     }

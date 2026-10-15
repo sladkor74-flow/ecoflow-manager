@@ -1,4 +1,5 @@
 import { testo, daData, siNo, apriFoglio, griglia } from '@/lib/foglioExcel';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 // Dichiarazioni RENTRI: lettura del foglio e controlli con i dati del portale.
 //
@@ -93,7 +94,10 @@ const formularioPortale = (v) => (/digital/i.test(testo(v)) ? 'digitale' : /cart
  * dichiarazione non corrisponde piu' al portale, 'verificare' se qualcosa va
  * guardato, 'collegare' se manca il PDR.
  */
-export function controlliDichiarazione(d, pdr, oggi = new Date().toISOString().slice(0, 10)) {
+// «Oggi», se chi chiama non lo dice, e' il giorno italiano: con quello UTC fra
+// mezzanotte e l'una era ancora ieri, e il controllo del FIR digitale guardava il
+// giorno prima (prova del cambio d'anno del 15/10/2026, difetto 30).
+export function controlliDichiarazione(d, pdr, oggi = oggiRoma()) {
   const esiti = [];
   const conDato = pdr.filter(p => iscrittoPortale(p.rentri_iscrizione) !== null);
   const iscrittiPortale = conDato.filter(p => iscrittoPortale(p.rentri_iscrizione) === true);

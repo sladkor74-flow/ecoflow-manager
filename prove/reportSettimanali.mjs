@@ -740,5 +740,76 @@ console.log('IL TERZO PASSAGGIO IN UN ORDINE UNICO (A57, 13/10)');
   verifica(`a caso: ${scenari} scenari senza parita' esatte, nessuno dipende dall'ordine delle righe`, scenari >= 30 && dipendono === 0, JSON.stringify({ scenari, dipendono, esempi }));
 }
 
+console.log('LA SETTIMANA 53 DEL 2026 E\' INTERA, DAL 28/12/2026 AL 03/01/2027');
+{
+  // Prova del cambio d'anno del 15/10/2026, difetto 14 (D1, decisione
+  // dell'utente del 15/10/2026). Prima l'intervallo si
+  // fermava all'anno solare: la 53 finiva il 31/12, la 1 del 2027 partiva dal
+  // 04/01, e un formulario di sabato 02/01/2027 registrato e omesso dal report non
+  // era «assente» in nessuna verifica.
+  const RS = await import('../base44/shared/reportSettimanali.ts');
+  const V = await caricaLibPagine('lib/verifiche');
+  for (const [nome, M] of [['reportSettimanali.ts', RS], ['src/lib/verifiche.js', V]]) {
+    verifica(`${nome}: la 53 del 2026 va dal 28/12/2026 al 03/01/2027`, JSON.stringify(M.intervalloSettimana(2026, 53)) === JSON.stringify({ inizio: '2026-12-28', fine: '2027-01-03' }), JSON.stringify(M.intervalloSettimana(2026, 53)));
+    verifica(`${nome}: la 1 del 2027 dal 04/01 al 10/01/2027`, JSON.stringify(M.intervalloSettimana(2027, 1)) === JSON.stringify({ inizio: '2027-01-04', fine: '2027-01-10' }));
+    verifica(`${nome}: la 1 del 2026 dal 29/12/2025 al 04/01/2026`, JSON.stringify(M.intervalloSettimana(2026, 1)) === JSON.stringify({ inizio: '2025-12-29', fine: '2026-01-04' }), JSON.stringify(M.intervalloSettimana(2026, 1)));
+    verifica(`${nome}: una settimana di meta' anno resta quella (la 37 del 2026)`, JSON.stringify(M.intervalloSettimana(2026, 37)) === JSON.stringify({ inizio: '2026-09-07', fine: '2026-09-13' }));
+    // Il codice di prima non l'aveva in reportSettimanali.ts: la prova lo dice e va avanti.
+    verifica(`${nome}: il 2026 ha 53 settimane, il 2027 e il 2025 52`, typeof M.settimaneNellAnno === 'function' && M.settimaneNellAnno(2026) === 53 && M.settimaneNellAnno(2027) === 52 && M.settimaneNellAnno(2025) === 52 && M.settimaneNellAnno(2020) === 53);
+  }
+  // Ogni giorno dal 21/12/2026 al 10/01/2027 sta in una settimana sola delle Verifiche.
+  const settimane = [];
+  for (const anno of [2026, 2027]) for (let s = 1; s <= V.settimaneNellAnno(anno); s++) settimane.push({ anno, s, ...V.intervalloSettimana(anno, s) });
+  const senza = [], doppi = [];
+  for (let d = new Date(Date.UTC(2026, 11, 21)); d <= new Date(Date.UTC(2027, 0, 10)); d.setUTCDate(d.getUTCDate() + 1)) {
+    const g = d.toISOString().slice(0, 10);
+    const dove = settimane.filter(x => g >= x.inizio && g <= x.fine);
+    if (!dove.length) senza.push(g);
+    if (dove.length > 1) doppi.push(g);
+  }
+  verifica('l\'1, il 2 e il 3 gennaio 2027 stanno nella 53 del 2026, e nessun giorno sta in due settimane', !senza.length && !doppi.length, JSON.stringify({ senza, doppi }));
+  verifica('la pagina scrive tutti e due gli anni di una settimana a cavallo', V.descriviIntervallo(V.intervalloSettimana(2026, 53)) === '28 dic 2026 – 3 gen 2027' && V.descriviIntervallo(V.intervalloSettimana(2026, 37)) === '7 set – 13 set 2026', V.descriviIntervallo(V.intervalloSettimana(2026, 53)));
+
+  // La verifica vera: un formulario del 02/01/2027 registrato e omesso dal report.
+  const prim = (id, fir, kg, fine) => primaria(id, fir, kg, { ordine_immesso_il: '2026-12-20T08:00:00Z', trasporto_iniziato_il: fine + 'T08:00:00Z', trasporto_finito_il: fine + 'T10:00:00Z' });
+  const d53 = await caricaMovimenti(base44({ rete: [
+    prim('ET26900001', 'RGYTR000901AA', 3000, '2026-12-29'),
+    prim('ET26900003', 'RGYTR000903AA', 2500, '2026-12-30'),
+    prim('ET26900002', 'RGYTR000902AA', 2000, '2027-01-02'),
+    prim('ET27900004', 'RGYTR000904AA', 1800, '2027-01-05'),
+  ] }));
+  const verificaDi = (anno, sett, righeReport) => {
+    const w = RS.intervalloSettimana(anno, sett);
+    const { righe } = normalizzaRigheReport(righeReport, 'kg');
+    return verificaReport(righe, d53.movimenti, { chiave: 'gatim', nome: IMPIANTO, inizio: w.inizio, fine: w.fine, senzaFine: d53.senza_fine });
+  };
+  const e53 = verificaDi(2026, 53, [{ n: 2, fir: 'RGYTR000901AA', peso: 3000, data_fine: '29/12/2026' }]);
+  const assenti53 = e53.assenti.map(a => a.fir || a.numero_fir).sort();
+  verifica('nella 53 il formulario del 02/01/2027 omesso dal report e\' «registrato assente nel report», insieme a quello del 30/12',
+    assenti53.join() === 'RGYTR000902AA,RGYTR000903AA', JSON.stringify(assenti53));
+  const e1 = verificaDi(2027, 1, [{ n: 2, fir: 'RGYTR000904AA', peso: 1800, data_fine: '05/01/2027' }]);
+  verifica('nella 1 del 2027 non e\' assente: non e\' della sua settimana', e1.assenti.length === 0, JSON.stringify(e1.assenti));
+  // Presente nel report della 53: sta nella settimana e nella sua quadratura.
+  const pieno = verificaDi(2026, 53, [
+    { n: 2, fir: 'RGYTR000901AA', peso: 3000, data_fine: '29/12/2026' },
+    { n: 3, fir: 'RGYTR000903AA', peso: 2500, data_fine: '30/12/2026' },
+    { n: 4, fir: 'RGYTR000902AA', peso: 2000, data_fine: '02/01/2027' },
+  ]);
+  const r4 = pieno.esiti.find(e => e.n === 4);
+  const ingressoRete = pieno.quadratura.find(q => q.formulari_report || q.formulari_gestionale);
+  verifica('presente nel report della 53, la riga del 02/01/2027 e\' della settimana, non «fuori settimana»', r4 && !r4.fuori_settimana && pieno.assenti.length === 0, JSON.stringify(r4 && r4.fuori_settimana));
+  verifica('e la quadratura della 53 la conta: 3 formulari, 7.500 kg da tutte e due le parti', ingressoRete && ingressoRete.formulari_report === 3 && ingressoRete.formulari_gestionale === 3 && ingressoRete.kg_report === 7500 && ingressoRete.kg_gestionale === 7500, JSON.stringify(pieno.quadratura));
+  // Nel report della 1 del 2027 la riga del 02/01 e' arretrata della 53.
+  const nella1 = verificaDi(2027, 1, [{ n: 2, fir: 'RGYTR000902AA', peso: 2000, data_fine: '02/01/2027' }]);
+  const a1 = nella1.esiti.find(e => e.n === 2);
+  verifica('nel report della 1 del 2027 la riga del 02/01 e\' della 53 del 2026, arretrata', a1 && a1.fuori_settimana && a1.fuori_settimana.anno === 2026 && a1.fuori_settimana.settimana === 53 && a1.fuori_settimana.arretrata === true, JSON.stringify(a1 && a1.fuori_settimana));
+
+  // I siti della settimana: attivi nell'anno ISO, anche se ricevono solo il 02/01/2027.
+  const soloGennaio = await caricaMovimenti(base44({ rete: [primaria('ET27900009', 'RGYTR000909AA', 2200, { destinazione: 'NUOVO IMPIANTO SRL', ordine_immesso_il: '2026-12-28T08:00:00Z', trasporto_iniziato_il: '2027-01-02T08:00:00Z', trasporto_finito_il: '2027-01-02T10:00:00Z' })] }));
+  const sogg = RS.soggettiDellaSettimana(soloGennaio, 2026, 53);
+  const nuovo = sogg.righe.find(r => /NUOVO IMPIANTO/.test(r.nome));
+  verifica('un impianto che nella 53 riceve solo il 02/01/2027 sta fra i soggetti della 53, col suo ingresso', !!nuovo && nuovo.movimentato && nuovo.canali[0].ingressi === 1 && sogg.inizio === '2026-12-28' && sogg.fine === '2027-01-03', JSON.stringify(sogg));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

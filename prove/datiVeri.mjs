@@ -28,6 +28,7 @@ import { build } from 'esbuild';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { giornoRoma } from '../base44/shared/giornoItaliano.ts';
 
 const qui = (p) => fileURLToPath(new URL(p, import.meta.url));
 const CARTELLA = process.env.DATI_VERI || qui('../../dati-veri/');
@@ -42,7 +43,18 @@ console.log(`Copia: ${copia}, letta il ${DATI.meta.letto_fino_al} (commit pubbli
 
 let ok = 0, ko = 0;
 const verifica = (nome, cond, extra = '') => { if (cond) ok++; else { ko++; console.log('  FALLITA: ' + nome + ' ' + extra); } };
-const ANNO = Number(String(DATI.meta.letto_fino_al).slice(0, 4));
+// L'ANNO DELLA COPIA E' QUELLO DEL GIORNO ITALIANO IN CUI LA LETTURA E'
+// COMINCIATA (prova del cambio d'anno del 15/10/2026, difetto 28), la stessa
+// regola con cui la copia di sicurezza chiede gli attesi (src/lib/copiaSicurezza.js:
+// giornoRoma dell'inizio). Prima si prendevano i primi quattro caratteri di
+// letto_fino_al, l'anno UTC della fine: una copia fatta fra le 00:05 e le 00:40
+// dell'01/01/2027 (fine 2026-12-31T23:40Z) aveva gli attesi del 2027 e la prova
+// cercava quelli del 2026; una cominciata alle 23:50 del 31/12 e finita all'01:10
+// aveva quelli del 2026 e la prova cercava il 2027. In tutti e due i casi
+// «manca la risposta del sito», su una copia buona. Le copie senza letto_dal
+// (quelle fatte prima della copia di sicurezza) usano la fine, col giorno
+// italiano. L'orologio della prova resta letto_fino_al.
+const ANNO = Number(giornoRoma(DATI.meta.letto_dal || DATI.meta.letto_fino_al).slice(0, 4));
 
 // LA COPIA DEVE AVERE TUTTO QUELLO CHE SERVE AI TRE CONTROLLI (15/10/2026).
 // Dal 14/10/2026 la copia si scarica anche da Caricamento Dati (la copia di

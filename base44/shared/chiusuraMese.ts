@@ -115,33 +115,32 @@ export function meseDaChiudere({ oggi, anno = null, mese = null } = {}) {
 }
 
 /**
- * LE SETTIMANE DI UN MESE, COME LE NUMERA LA QUADRATURA FIR: ISO, lunedi'-
- * domenica, e ferme ai confini dell'anno come intervalloSettimana
+ * LE SETTIMANE DI UN MESE, COME LE NUMERA LA QUADRATURA FIR: ISO, intere, da
+ * lunedi' a domenica, ciascuna col suo anno ISO, come intervalloSettimana
  * (reportSettimanali.ts). Una settimana a cavallo di due mesi sta in tutti e
- * due: ha giorni dell'uno e dell'altro. I giorni che la numerazione ISO da' a
- * un altro anno (il 29-31 dicembre 2025 sono la settimana 1 del 2026, l'1-3
- * gennaio 2027 la 53 del 2026) non stanno in nessuna quadratura, perche' la
- * settimana si ferma al 31/12 o parte dall'1/1: non si chiedono.
+ * due: ha giorni dell'uno e dell'altro. Anche a cavallo di due anni (prova del
+ * cambio d'anno del 15/10/2026, difetto 14; D1, decisione dell'utente del
+ * 15/10/2026): la 53 del 2026 va dal 28/12/2026 al 03/01/2027 e sta in
+ * dicembre 2026 e in gennaio 2027; la 1 del 2026 va dal 29/12/2025 al
+ * 04/01/2026 e sta anche in dicembre 2025. Fino ad allora la
+ * settimana si fermava al 31/12 o partiva dall'1/1, e l'1-3 gennaio 2027 non
+ * stavano in nessuna quadratura. anno e' l'anno ISO della settimana (quello con
+ * cui si salva la quadratura), dal e al i giorni del mese che ne fanno parte.
  */
 export function settimaneDelMese(periodo) {
   const out = [];
   const giorni = Number(periodo.fine.slice(8, 10));
   for (let g = 1; g <= giorni; g++) {
     const giorno = `${periodo.anno}-${pad(periodo.numero)}-${pad(g)}`;
-    if (annoSettimanaIso(giorno) !== periodo.anno) continue;
+    const anno = annoSettimanaIso(giorno);
     const s = settimanaIso(giorno);
-    const gia = out.find(x => x.settimana === s);
+    const gia = out.find(x => x.anno === anno && x.settimana === s);
     if (gia) { gia.al = giorno; continue; }
-    // Il lunedi' e la domenica della settimana, fermi all'anno.
+    // Il lunedi' e la domenica della settimana, interi.
     const d = new Date(Date.UTC(periodo.anno, periodo.mese_idx, g));
     const lun = new Date(d); lun.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
     const dom = new Date(lun); dom.setUTCDate(lun.getUTCDate() + 6);
-    const lunedi = lun.toISOString().slice(0, 10), domenica = dom.toISOString().slice(0, 10);
-    out.push({
-      anno: periodo.anno, settimana: s, dal: giorno, al: giorno,
-      lunedi: lunedi < `${periodo.anno}-01-01` ? `${periodo.anno}-01-01` : lunedi,
-      domenica: domenica > `${periodo.anno}-12-31` ? `${periodo.anno}-12-31` : domenica,
-    });
+    out.push({ anno, settimana: s, dal: giorno, al: giorno, lunedi: lun.toISOString().slice(0, 10), domenica: dom.toISOString().slice(0, 10) });
   }
   return out;
 }
@@ -918,7 +917,10 @@ export function passoQuadrature({ periodo, quadrature = [] }) {
   let daFare = 0, nonServe = 0;
   const settimaneDaFare = [];
   for (const w of settimane) {
-    const nome = `Settimana ${w.settimana} (${it(w.lunedi).slice(0, 5)}–${it(w.domenica).slice(0, 5)})`;
+    // Una settimana dell'anno ISO prima dice il suo anno: in gennaio 2027
+    // «Settimana 53 del 2026 (28/12–03/01)» (15/10/2026, settimane intere).
+    const numero = w.anno !== periodo.anno ? `${w.settimana} del ${w.anno}` : `${w.settimana}`;
+    const nome = `Settimana ${numero} (${it(w.lunedi).slice(0, 5)}–${it(w.domenica).slice(0, 5)})`;
     if (!settimanaDaQuadrare(w.anno, w.settimana)) {
       nonServe++;
       p.voci.push(voce('non_serve', `${nome}: le quadrature si chiedono ${confine}, quello che c'è prima non conta più.`));
@@ -926,7 +928,7 @@ export function passoQuadrature({ periodo, quadrature = [] }) {
     }
     const q = (quadrature || []).filter(x => x && Number(x.anno) === w.anno && Number(x.settimana) === w.settimana)
       .sort((a, b) => quando(b).localeCompare(quando(a)))[0] || null;
-    const no = (testo) => { daFare++; settimaneDaFare.push(w.settimana); p.voci.push(voce('da_fare', `${nome}: ${testo}`)); };
+    const no = (testo) => { daFare++; settimaneDaFare.push(numero); p.voci.push(voce('da_fare', `${nome}: ${testo}`)); };
     if (!q) {
       no('non ancora fatta.');
       continue;

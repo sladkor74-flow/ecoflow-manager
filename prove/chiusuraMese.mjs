@@ -67,9 +67,21 @@ console.log('LE SETTIMANE DELLA QUADRATURA');
   verifica('settembre 2026: dalla 36 (31/08-06/09) alla 40 (28/09-04/10)', s(2026, 8) === '36,37,38,39,40', s(2026, 8));
   const w40 = C.settimaneDelMese(SETTEMBRE).find(w => w.settimana === 40);
   verifica('la settimana a cavallo dice i suoi giorni interi', w40.lunedi === '2026-09-28' && w40.domenica === '2026-10-04');
-  verifica('dicembre 2026 arriva alla 53, ferma al 31/12', s(2026, 11) === '49,50,51,52,53' && C.settimaneDelMese(C.periodoDelMese(2026, 11)).pop().domenica === '2026-12-31');
-  verifica('gennaio 2027 non chiede l\'1-3, che la numerazione ISO da\' al 2026', s(2027, 0) === '1,2,3,4', s(2027, 0));
-  verifica('dicembre 2025 non chiede il 29-31, che sono della settimana 1 del 2026', s(2025, 11) === '49,50,51,52', s(2025, 11));
+  // LE SETTIMANE INTERE ANCHE A CAVALLO D'ANNO (prova del cambio d'anno del
+  // 15/10/2026, difetto 14; D1, decisione dell'utente del 15/10/2026). Prima la 53 del 2026 si fermava al 31/12 e gennaio 2027
+  // chiedeva le settimane dalla 1, dal 04/01: l'1, il 2 e il 3 gennaio non
+  // stavano in nessuna quadratura.
+  const dic26 = C.settimaneDelMese(C.periodoDelMese(2026, 11));
+  const w53 = dic26[dic26.length - 1];
+  verifica('dicembre 2026 arriva alla 53, intera: dal 28/12/2026 al 03/01/2027', s(2026, 11) === '49,50,51,52,53' && w53.anno === 2026 && w53.lunedi === '2026-12-28' && w53.domenica === '2027-01-03' && w53.al === '2026-12-31', JSON.stringify(w53));
+  const gen27 = C.settimaneDelMese(C.periodoDelMese(2027, 0));
+  verifica('gennaio 2027 chiede la 53 del 2026 (01-03/01) e poi la 1, 2, 3, 4 del 2027', s(2027, 0) === '53,1,2,3,4' && gen27[0].anno === 2026 && gen27[0].dal === '2027-01-01' && gen27[0].al === '2027-01-03' && gen27[0].lunedi === '2026-12-28' && gen27[1].anno === 2027, s(2027, 0));
+  const dic25 = C.settimaneDelMese(C.periodoDelMese(2025, 11));
+  verifica('dicembre 2025 chiede anche la 1 del 2026, dal 29/12/2025 al 04/01/2026', s(2025, 11) === '49,50,51,52,1' && dic25[4].anno === 2026 && dic25[4].lunedi === '2025-12-29' && dic25[4].domenica === '2026-01-04', s(2025, 11));
+  verifica('gennaio 2026 comincia dalla 1 del 2026, la stessa di dicembre 2025', s(2026, 0).startsWith('1,2,') && C.settimaneDelMese(C.periodoDelMese(2026, 0))[0].lunedi === '2025-12-29');
+  // La controprova: una settimana di meta' anno resta quella di prima.
+  const giu = C.settimaneDelMese(C.periodoDelMese(2026, 5));
+  verifica('giugno 2026: dalla 23 alla 27, le stesse di prima', s(2026, 5) === '23,24,25,26,27' && giu.every(w => w.anno === 2026) && giu[0].lunedi === '2026-06-01' && giu[4].domenica === '2026-07-05', s(2026, 5));
 }
 
 console.log('DATI DEL MESE COMPLETI');
@@ -448,6 +460,18 @@ console.log('QUADRATURE FIR');
   // Gli anni dopo chiedono tutte le loro settimane.
   const gen27 = C.passoQuadrature({ periodo: C.periodoDelMese(2027, 0), quadrature: [] });
   verifica('gennaio 2027 chiede tutte le sue settimane', gen27.stato === 'da_fare' && gen27.voci.length > 0 && gen27.voci.every(v => v.stato === 'da_fare'), JSON.stringify(gen27.voci));
+  // La 53 del 2026 in gennaio 2027 (difetto 14 della prova del cambio d'anno,
+  // 15/10/2026): si chiede col suo anno, e la quadratura salvata col 2026 la chiude.
+  verifica('gennaio 2027 chiede per prima la «Settimana 53 del 2026 (28/12–03/01)», poi la 1, 2, 3 e 4',
+    gen27.voci.length === 5 && /^Settimana 53 del 2026 \(28\/12–03\/01\): non ancora fatta\.$/.test(gen27.voci[0].testo) && /^Settimana 1 \(04\/01–10\/01\)/.test(gen27.voci[1].testo), JSON.stringify(gen27.voci));
+  const q53 = { anno: 2026, settimana: 53, stato: 'completata', per_canale: piena, avviata_il: '2027-01-05T08:00:00Z' };
+  const gen27con53 = C.passoQuadrature({ periodo: C.periodoDelMese(2027, 0), quadrature: [q53, ...[1, 2, 3, 4].map(s => ({ ...q53, anno: 2027, settimana: s }))] });
+  verifica('con la 53 del 2026 e le quattro del 2027 quadrate, gennaio 2027 e\' fatto', gen27con53.stato === 'fatto' && gen27con53.voci.length === 5, JSON.stringify(gen27con53.voci));
+  const gen27senza53 = C.passoQuadrature({ periodo: C.periodoDelMese(2027, 0), quadrature: [1, 2, 3, 4].map(s => ({ ...q53, anno: 2027, settimana: s })) });
+  verifica('senza la 53 del 2026 manca proprio quella, col suo anno', gen27senza53.stato === 'da_fare' && gen27senza53.manca.cosa === 'la quadratura FIR della settimana 53 del 2026', JSON.stringify(gen27senza53.manca));
+  // Una «53 del 2027» non esiste e non chiude niente.
+  const gen27conFalsa = C.passoQuadrature({ periodo: C.periodoDelMese(2027, 0), quadrature: [{ ...q53, anno: 2027 }, ...[1, 2, 3, 4].map(s => ({ ...q53, anno: 2027, settimana: s }))] });
+  verifica('una quadratura «53 del 2027» non chiude la 53 del 2026', gen27conFalsa.stato === 'da_fare', JSON.stringify(gen27conFalsa.voci));
   const dic26 = C.passoQuadrature({ periodo: C.periodoDelMese(2026, 11), quadrature: [] });
   verifica('dicembre 2026 chiede dalla 49 alla 53', dic26.voci.filter(v => v.stato === 'da_fare').length === 5, JSON.stringify(dic26.voci));
 }

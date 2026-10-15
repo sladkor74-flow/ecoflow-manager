@@ -31,9 +31,9 @@ import { etaArretrato } from "./cruscotto.ts";
 import { CHIAVE_SCELTA } from "./pianoAssistente.ts";
 import { PIVOT_DEFS, calcolaPivot, MESI } from "./reportMensile.ts";
 import { caricaGestionale, caricamentiAperti, contaDistinti } from "./quadraturaFirDati.ts";
-import { intervalloSettimana, settimanaIso, statoCaricamenti, riepilogoVociDate, voceDate } from "./reportSettimanali.ts";
+import { intervalloSettimana, settimanaIso, settimaneNellAnno, dataItaliana, statoCaricamenti, riepilogoVociDate, voceDate } from "./reportSettimanali.ts";
 import { situazioneGestionale, terminatiSenzaFine, totaleGiacenze, senzaFileDelPortale, testoVariazioni, testoVariazioniSuperate } from "./assistente.ts";
-import { listaOrdini, statoRichiesta, evasioneOrdini } from "./richiesteEct.ts";
+import { listaOrdini, statoRichiesta, evasioneOrdini, chiusaDalPortale, ordiniSalvatiRichiesta } from "./richiesteEct.ts";
 import { targetDelPortale } from "./targetRaccoglitori.ts";
 import { statoDichiarazione, sommaMateriali, leggiDichiarazioni, kgCaricatiDi } from "./dichiarazioniImpianti.ts";
 import { giorniAllaScadenza, fasciaScadenza, distanza } from "./omologhe.ts";
@@ -47,6 +47,7 @@ import { anomaliaSenzaFineAnno } from "./filtroPeriodo.ts";
 import { leggiRegistro, statoDelRegistro, avvisoCaricamento, nomeArchivio, RIGHE_REGISTRO } from "./registroCaricamenti.ts";
 import { datiFinoAl } from "./statoArchivi.ts";
 import { tariffaNonDisattivata, tariffaValeIl } from "./validitaTariffa.ts";
+import { daConfermare } from "./annoTarget.ts";
 import { storicoModifiche } from "./storicoModifiche.ts";
 import { provinciaChiesta } from "./province.ts";
 import { statoSurplus, euroTDi, periodoSurplus, surplusDellaTariffa, fornitoriDelSurplus, testoEuroT, NOMI_ORIGINE, DESTINATARI } from "./surplus.ts";
@@ -2225,11 +2226,40 @@ export const STRUMENTI = [
   {
     nome: 'settimana_formulari',
     descrizione: 'I formulari di una settimana, per flusso e per impianto: quanti e quanti chili, come li conta il gestionale nella quadratura FIR.',
-    parametri: { anno: 'numero', settimana: 'numero della settimana ISO' },
+    parametri: { anno: "numero: l'anno ISO della settimana, solo se la domanda lo dice", settimana: 'numero della settimana ISO' },
     moduli: ['Verifiche', 'Quadratura FIR'],
     async esegui(base44, p) {
-      const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
-      const settimana = Number(p.settimana) || settimanaIso(oggiRoma()).settimana;
+      // LA SETTIMANA E IL SUO ANNO ISO (prova del cambio d'anno del 15/10/2026,
+      // difetto 14; D1, decisione dell'utente del 15/10/2026). Il 02/01/2027
+      // lo strumento metteva l'anno di
+      // calendario (2027) accanto alla settimana ISO di oggi (la 53, che e' del
+      // 2026) e rispondeva «settimana 53 del 2027, dal 2028-01-03 al
+      // 2027-12-31», zero formulari. Senza settimana valgono settimana e anno ISO
+      // di oggi; con la sola settimana, l'anno dell'ultima settimana con quel
+      // numero gia' cominciata (la 53 chiesta il 05/01/2027 e' del 2026); con
+      // l'anno scritto, quello. Una settimana che in quell'anno non c'e' (la 53
+      // del 2027) si dice, senza numeri.
+      const oggi = oggiRoma();
+      const corrente = settimanaIso(oggi);
+      const chiesta = Number(p.settimana) || null;
+      const annoScritto = Number(p.anno) || null;
+      const settimana = chiesta || corrente.settimana;
+      let anno = annoScritto || corrente.anno;
+      if (chiesta && !annoScritto) {
+        while (anno > corrente.anno - 10 && (settimana > settimaneNellAnno(anno) || (anno === corrente.anno && settimana > corrente.settimana))) anno -= 1;
+      }
+      if (!Number.isInteger(settimana) || settimana < 1 || settimana > settimaneNellAnno(anno)) {
+        return {
+          fonte: 'Formulari terminati nella settimana',
+          periodo: `settimana ${settimana} del ${anno}`,
+          dati_al: oggi,
+          dati: {
+            settimana, anno, settimane_nell_anno: settimaneNellAnno(anno),
+            avviso_settimana: `Il ${anno} ha ${settimaneNellAnno(anno)} settimane ISO: la settimana ${settimana} non c'e'.`,
+            numero_non_calcolabile: 'Non scrivere nessun numero: la settimana chiesta non esiste in quell\'anno, e il numero non e\' zero.',
+          },
+        };
+      }
       const intervallo = intervalloSettimana(anno, settimana);
       const g = await caricaGestionale(base44, intervallo);
       const flussi = Object.entries(g).map(([chiave, d]) => ({
@@ -2277,10 +2307,11 @@ export const STRUMENTI = [
       const aperti = caricamentiAperti(g);
       return {
         fonte: 'Formulari terminati nella settimana',
-        periodo: `settimana ${settimana} del ${anno}, dal ${intervallo.inizio} al ${intervallo.fine}`,
+        // Le date come le legge chi chiede, gg/mm/aaaa (15/10/2026).
+        periodo: `settimana ${settimana} del ${anno}, dal ${dataItaliana(intervallo.inizio)} al ${dataItaliana(intervallo.fine)}`,
         dati_al: oggiRoma(),
         dati: {
-          settimana, intervallo,
+          settimana, anno, intervallo,
           canali: Object.values(perCanale),
           ...(conDate.length ? { date_obbligatorie_da_sistemare: { flussi: conDate, nota: 'Immissione, inizio e fine trasporto sono obbligatorie nei formulari. "senza_fine_trasporto": terminati di qualunque periodo senza la data di fine trasporto, esclusi da ogni settimana. "nella_settimana": formulari della settimana, contati, a cui manca l\'immissione o l\'inizio del trasporto o che hanno le date incoerenti. Vanno corretti nel file del portale e ricaricati; l\'extra raccolta nella sua scheda.' } } : {}),
           ...(aperti.length ? { avviso_caricamenti: `Caricamento ${aperti.some(a => a.interrotto) ? 'interrotto' : 'in corso'} di ${aperti.map(a => a.tipo_file).join(', ')}: l'archivio puo' essere a meta' e questi numeri non sono definitivi.` } : {}),
@@ -2612,9 +2643,58 @@ export const STRUMENTI = [
     parametri: { anno: 'numero', stato: 'aperta, da_confermare, evasa o annullata' },
     moduli: ['To-Do List'],
     async esegui(base44, p) {
-      const anno = Number(p.anno) || Number(oggiRoma().slice(0, 4));
+      const annoChiesto = Number(p.anno) || null;
+      const anno = annoChiesto || Number(oggiRoma().slice(0, 4));
       const svc = base44.asServiceRole.entities;
-      const richieste = await fetchAll(svc.RichiestaEct, { anno });
+      // LE RICHIESTE DI DICEMBRE ANCORA APERTE A GENNAIO (prova del cambio d'anno
+      // del 15/10/2026, difetto 2, la parte di EcoTyna). Lo strumento leggeva solo
+      // le richieste dell'anno di oggi: il 28/12/2026 una richiesta aperta e
+      // scaduta c'era, il 05/01/2027 «aperte 0, scadute 0», e nel foglio vero le
+      // richieste restano aperte da uno a tre mesi. Senza un anno chiesto si
+      // legge l'archivio intero, una lettura sola (e' piccolo: 48-64 richieste
+      // l'anno), e si tengono le richieste dell'anno di oggi piu' quelle degli
+      // anni prima non ancora chiuse: aperte, da confermare, o evase e non ancora
+      // risposte al consorzio (evasione_confermata). Ogni riga dice il suo anno.
+      // E' la regola di richiesteDaSeguire e ancoraDaSeguire che il gruppo delle
+      // Richieste ECT scrive in parallelo in richiesteEct.ts (15/10/2026): qui e'
+      // scritta per conto suo, e quando quella c'e' le due vanno tenute uguali.
+      // Con un anno chiesto restano tutte e sole le richieste di quell'anno.
+      //
+      // E QUELLE DEGLI ANNI PRIMA CHIUSE QUEST'ANNO, COME NELLA TO-DO LIST
+      // (seconda revisione del 15/10/2026). La pagina tiene anche le richieste
+      // degli anni prima chiuse nell'anno (richiesteDellaTodo e chiusaNellAnno,
+      // richiesteEct.ts, scritte in parallelo dal gruppo delle Richieste ECT): una
+      // richiesta di dicembre spuntata a gennaio resta fra le completate per tutto
+      // l'anno. Il 05/01/2027, con la richiesta del 10/12/2026 risposta al
+      // consorzio il 03/01/2027 e una del 2027 evasa, la To-Do List aveva 2 evase
+      // ed EcoTyna 1. Qui la stessa regola, scritta per conto suo: chiusa
+      // nell'anno e' spuntata quell'anno (evasione_confermata_il) o chiusa dal
+      // portale con un ordine visto cancellato quell'anno (visto_il). Il giorno si
+      // legge come lo legge la pagina: se la' cambia, va cambiato anche qui.
+      const annoDellaRichiesta = (r) => Number(r && r.anno) || annoDi(r && r.mail_inviata_il) || annoDi(r && r.ordine_immesso_il);
+      const ancoraDaSeguire = (r) => {
+        const esito = (r && r.esito) || statoRichiesta(r);
+        return esito === 'aperta' || esito === 'da_confermare' || (esito === 'evasa' && !r.evasione_confermata);
+      };
+      const chiusaNellAnno = (r, a) => {
+        if (!r || ancoraDaSeguire(r)) return false;
+        if (r.evasione_confermata && String(r.evasione_confermata_il || '').slice(0, 4) === String(a)) return true;
+        const o = chiusaDalPortale(r) ? ordiniSalvatiRichiesta(r) : null;
+        return !!o && o.cancellati.some(v => String(v.visto_il || '').slice(0, 4) === String(a));
+      };
+      // Le richieste degli anni prima chiuse quest'anno, per dirle su ogni riga.
+      const chiuseQuestAnno = new Set();
+      const richieste = annoChiesto
+        ? await fetchAll(svc.RichiestaEct, { anno })
+        : (await fetchAll(svc.RichiestaEct)).filter(r => {
+          if (!r) return false;
+          const suo = annoDellaRichiesta(r);
+          if (!suo || suo === anno) return true;
+          if (suo < anno && ancoraDaSeguire(r)) return true;
+          if (!chiusaNellAnno(r, anno)) return false;
+          chiuseQuestAnno.add(r);
+          return true;
+        });
       const oggi = oggiRoma();
       const giorni = (scadenza) => {
         const d = soloData(scadenza);
@@ -2693,6 +2773,10 @@ export const STRUMENTI = [
         const ordiniSenzaFine = senzaFine ? ordini.filter(id => senzaFine.has(id) && !terminati.has(id)) : [];
         const ordiniConDate = ordini.filter(id => dateDegliOrdini.has(id)).map(id => ({ id_ordine: id, date: dateDegliOrdini.get(id) }));
         return {
+          // L'anno della richiesta su ogni riga: a gennaio ci sono anche quelle di dicembre.
+          anno: annoDellaRichiesta(r) || null,
+          // Una richiesta degli anni prima chiusa quest'anno lo dice (seconda revisione del 15/10/2026).
+          ...(chiuseQuestAnno.has(r) ? { chiusa_nel: anno } : {}),
           pdr: r.pdr_nome, provincia: r.provincia, classe: r.classe,
           ordini, stato, scadenza: soloData(r.scadenza),
           giorni_alla_scadenza: g,
@@ -2723,11 +2807,30 @@ export const STRUMENTI = [
       const riallineo = anno === Number(oggi.slice(0, 4))
         ? 'la pagina si riallinea al prossimo caricamento delle primarie o alla sua apertura da parte dell\'amministratore.'
         : `per il ${anno} la pagina non si ricalcola da sola: il ricontrollo automatico riguarda solo le richieste dell'anno in corso.`;
+      // Le richieste degli anni prima ancora da seguire, e quelle chiuse quest'anno,
+      // contate e dette nel periodo.
+      const anniPrima = [...new Set(tutte.map(r => r.anno).filter(a => a && a < anno))].sort((x, y) => x - y);
+      const dagliAnniPrima = tutte.filter(r => r.anno && r.anno < anno).length;
+      const chiusePrima = tutte.filter(r => r.anno && r.anno < anno && r.chiusa_nel).length;
+      const daSeguirePrima = dagliAnniPrima - chiusePrima;
+      const quali = [daSeguirePrima ? 'non ancora chiuse' : '', chiusePrima ? `chiuse nel ${anno}` : ''].filter(Boolean).join(' o ');
+      const notaPrima = () => {
+        const di = `del ${anniPrima.join(' e del ')}`;
+        const seguire = daSeguirePrima === 1 ? 'e\' ancora da seguire' : 'sono ancora da seguire';
+        if (!chiusePrima) return `${dagliAnniPrima} ${dagliAnniPrima === 1 ? 'richiesta e\'' : 'richieste sono'} ${di}: ${seguire} (da ritirare, da confermare o da rispondere al consorzio), e ogni riga dice il suo anno. Le richieste chiuse degli anni prima non ci sono: per quelle si chiede l'anno.`;
+        const chiuse = `${chiusePrima} ${chiusePrima === 1 ? 'e\' stata chiusa' : 'sono state chiuse'} nel ${anno} ("chiusa_nel"), e la To-Do List la tiene fra le completate per tutto l'anno`;
+        return `${dagliAnniPrima} ${dagliAnniPrima === 1 ? 'richiesta e\'' : 'richieste sono'} ${di}: ${daSeguirePrima ? `${daSeguirePrima} ${seguire} (da ritirare, da confermare o da rispondere al consorzio), ` : ''}${chiusePrima === 1 ? chiuse : chiuse.replace('la tiene', 'le tiene')}; ogni riga dice il suo anno. Le richieste degli anni prima chiuse prima del ${anno} non ci sono: per quelle si chiede l'anno.`;
+      };
       return {
         fonte: `Richieste ECT${terminati ? ', ritiri ricontrollati sui terminati di adesso' : inCorso.length ? ', esito salvato' : ''}`,
-        periodo: `anno ${anno}`,
+        periodo: dagliAnniPrima ? `anno ${anno}, con le richieste del ${anniPrima.join(' e del ')} ${quali}` : `anno ${anno}`,
         dati_al: oggi,
         dati: {
+          ...(dagliAnniPrima ? {
+            dagli_anni_prima: dagliAnniPrima,
+            ...(chiusePrima ? { dagli_anni_prima_chiuse_nell_anno: chiusePrima } : {}),
+            nota_anni_prima: notaPrima(),
+          } : {}),
           aperte: tutte.filter(r => r.stato === 'aperta').length,
           scadute: tutte.filter(r => r.scaduta).length,
           da_confermare: tutte.filter(r => r.stato === 'da_confermare').length,
@@ -3786,8 +3889,37 @@ export const STRUMENTI = [
         const da = String(t.data_inizio_validita || '').slice(0, 10);
         return da && da > oggi ? 'non ancora in vigore' : 'scaduta';
       };
+      // UNA TARIFFA COPIATA E NON CONFERMATA NON «VALE OGGI» E BASTA (prova del
+      // cambio d'anno del 15/10/2026, difetto 15, la parte di EcoTyna; D4,
+      // decisione dell'utente del 15/10/2026). Il
+      // 15/01/2027, con le tariffe 2027 copiate da «Prepara le tariffe» il
+      // 28/12/2026 e mai confermate, EcoTyna diceva «vale oggi» a 202 €/t (rete,
+      // da Ecotyre) e a 70 €/t (raccolta di GATIM), senza dire che erano i prezzi
+      // del 2026. La copia si riconosce come in Target & Status (daConfermare,
+      // annoTarget.ts: la nota «copiato dal AAAA, da confermare» nelle note o
+      // nell'ultima voce dello storico) e lo stato lo dice, con gli anni: «vale
+      // oggi, copiata dal 2026 e da confermare». Una riga del mese con un prezzo
+      // copiato e non confermato ferma il documento come una riga senza prezzo;
+      // la conferma e' in Target & Status › Nuovo anno.
+      const annoDellaCopia = (t) => {
+        let storico = '';
+        try {
+          const s = typeof t.storico_json === 'string' ? JSON.parse(t.storico_json) : t.storico_json;
+          storico = Array.isArray(s) && s.length ? String((s[s.length - 1] || {}).nota || '') : '';
+        } catch { storico = ''; }
+        const m = `${String(t.note || '')} ${storico}`.match(/copiato dal (\d{4})/);
+        const inizio = Number(String(t.data_inizio_validita || '').slice(0, 4));
+        return m ? Number(m[1]) : inizio ? inizio - 1 : null;
+      };
+      const daConfermareQui = (t, v) => (v === 'vale oggi' || v === 'non ancora in vigore') && daConfermare(t);
+      const statoDetto = (t, v) => {
+        if (!daConfermareQui(t, v)) return v;
+        const da = annoDellaCopia(t);
+        return `${v}, ${da ? `copiata dal ${da}` : "copiata dall'anno prima"} e da confermare`;
+      };
       const conValidita = righe.map(t => ({ t, v: validitaOggi(t) }))
         .sort((a, b) => ORDINE_VALIDITA.indexOf(a.v) - ORDINE_VALIDITA.indexOf(b.v));
+      const copiateDaConfermare = conValidita.filter(({ t, v }) => daConfermareQui(t, v));
 
       // IL SURPLUS SULLE TARIFFE (13/10/2026). Un surplus in €/t con le sue date
       // (il Fuel Surcharge del consorzio Ecotyre: +5 €/t dal 01/10 al 31/12/2026
@@ -3856,7 +3988,8 @@ export const STRUMENTI = [
         dati_al: oggi,
         dati: {
           tariffe: elenco(conValidita.map(({ t, v }) => ({
-            stato_validita: v,
+            stato_validita: statoDetto(t, v),
+            ...(daConfermareQui(t, v) ? { da_confermare: true } : {}),
             fornitore: t.fornitore_nome || t.cliente, prestazione: t.prestazione, direzione: t.direzione,
             tipologia: t.tipologia, servizio: t.servizio_nome, produttore: t.produttore, destinatario: t.destinatario || t.destinazione,
             regione: t.regione, provincia: t.provincia, classe: t.classe_materiale,
@@ -3879,6 +4012,9 @@ export const STRUMENTI = [
             ? { avviso_canale: `"${p.tipologia}" non e' un canale: qui ci sono le tariffe di tutti i canali, ciascuna col suo.` } : {}),
           ...(soloAttive ? { nota_riservate: 'Qui ci sono solo le tariffe attive (quanto ci spetta). ' + COSTI_RISERVATI } : {}),
           nota_validita: "stato_validita dice se la tariffa vale oggi. «disattivata, non vale mai» e' una tariffa messa a non attiva: non vale in nessun giorno, nemmeno dentro le sue date, e non e' un prezzo da usare. Una tariffa rinegoziata invece resta attiva con la sua data di fine, e vale per i mesi gia' fatti: oggi e' «scaduta».",
+          ...(copiateDaConfermare.length ? {
+            avviso_copiate: `${copiateDaConfermare.length} ${copiateDaConfermare.length === 1 ? 'tariffa e\' copiata' : 'tariffe sono copiate'} dall'anno prima e ${copiateDaConfermare.length === 1 ? 'non e\' ancora confermata' : 'non sono ancora confermate'} («copiata dal ... e da confermare»): il prezzo e' quello dell'anno prima, e una riga del mese fatturata con quel prezzo ferma il documento come una riga senza prezzo finche' non si conferma in Target & Status › Nuovo anno. Dillo nella risposta, accanto al prezzo.`,
+          } : {}),
         },
       };
     },

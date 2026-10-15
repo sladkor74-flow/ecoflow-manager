@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { giorniAllaScadenza, fasciaScadenza } from '@/lib/omologhe';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 // Omologhe per PDR, per mostrarle dove si programma il ritiro.
 //
@@ -69,6 +70,9 @@ export function omologaDelPunto(indice, idPdr, idCliente) {
 
 function descrivi(o, livello) {
   const scadenza = quando(o) || null;
-  const giorni = giorniAllaScadenza(scadenza);
+  // Il giorno italiano, come nella pagina delle omologhe (prova del cambio d'anno
+  // del 15/10/2026, difetto 30): col giorno UTC, all'01/01/2027 alle 00:30 il
+  // badge dove si programma il ritiro diceva «scade oggi» a un'omologa scaduta.
+  const giorni = giorniAllaScadenza(scadenza, oggiRoma());
   return { livello, omologa: o, scadenza, giorni, fascia: fasciaScadenza(giorni) };
 }

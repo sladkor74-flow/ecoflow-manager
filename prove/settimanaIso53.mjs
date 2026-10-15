@@ -135,5 +135,105 @@ verifica('pivot degli assegnati, sull\'immissione: la stessa regola', pivotH.piv
 const soloAnno = await computeAllPivots(cliente({ PrimariaRete: [prim('P1', '2026-12-29T10:00:00Z'), prim('P2', '2027-01-02T10:00:00Z')] }), { anno: [2026] }, ['A']);
 verifica('con il solo anno vale il giorno: il 02/01/2027 e\' del 2027', soloAnno.pivotA.tree.totals.count === 1, JSON.stringify(soloAnno.pivotA.tree.totals));
 
+// ECOTYNA, «QUANTI FORMULARI QUESTA SETTIMANA?» IL 02/01/2027 (prova del cambio
+// d'anno del 15/10/2026, difetto 14; D1, decisione dell'utente del
+// 15/10/2026). Lo strumento settimana_formulari metteva l'anno di
+// calendario accanto alla settimana ISO di oggi e rispondeva «settimana 53 del
+// 2027, dal 2028-01-03 al 2027-12-31», zero formulari; strumentiDalPiano gli
+// dava l'anno di calendario anche quando la domanda non lo diceva.
+console.log('ECOTYNA: LA SETTIMANA DI OGGI E\' LA 53 DEL 2026');
+{
+  const S = await import('../base44/shared/strumentiAssistente.ts');
+  const PA = await import('../base44/shared/pianoAssistente.ts');
+  const catalogo = S.catalogoStrumenti();
+  const piano = (parametri, periodo = {}) => ({ strumenti: [{ nome: 'settimana_formulari', parametri }], canali: ['RETE'], periodo, serve_normativa: false });
+  const param = (oggi, domanda, p) => { const x = PA.strumentiDalPiano(p, catalogo, oggi, domanda)[0]; return x ? x.parametri : null; };
+  const questa = param('2027-01-02', 'quanti formulari abbiamo questa settimana?', piano({}));
+  verifica('il piano senza anno non riceve l\'anno di calendario', questa && questa.anno === undefined, JSON.stringify(questa));
+  const la53 = param('2027-01-02', 'quanti formulari nella settimana 53?', piano({ settimana: 53 }, { settimana: 53 }));
+  verifica('con la sola settimana nemmeno', la53 && la53.settimana === 53 && la53.anno === undefined, JSON.stringify(la53));
+  verifica('un anno che la domanda dice resta', (param('2027-01-02', 'la settimana 53 del 2026', piano({ settimana: 53, anno: 2026 })) || {}).anno === 2026);
+  // L'anno di calendario messo dal piano per abitudine, nei parametri o nel periodo, non passa.
+  const abitudine = param('2027-01-02', 'quanti formulari nella settimana 53?', piano({ settimana: 53, anno: 2027 }, { settimana: 53, anno: 2027 }));
+  verifica('l\'anno di calendario messo dal piano a una settimana detta senza anno non passa', abitudine && abitudine.settimana === 53 && abitudine.anno === undefined, JSON.stringify(abitudine));
+  const questaConAnno = param('2027-01-02', 'quanti formulari abbiamo questa settimana?', piano({}, { anno: 2027 }));
+  verifica('nemmeno a «questa settimana» col solo anno nel periodo', questaConAnno && questaConAnno.anno === undefined, JSON.stringify(questaConAnno));
+  verifica('«la settimana 10 dell\'anno scorso» tiene l\'anno del piano', (param('2027-01-02', 'quanti formulari nella settimana 10 dell\'anno scorso?', piano({ settimana: 10, anno: 2026 })) || {}).anno === 2026);
+  // Revisione del 15/10/2026: l'anno detto a parole in tutti i modi. «Dello
+  // scorso anno» e «dell'anno precedente» non si riconoscevano, e col piano
+  // {settimana 10, anno 2025} lo strumento rispondeva sulla 10 del 2026.
+  for (const d of ['quanti formulari nella settimana 10 dello scorso anno?', 'quanti formulari nella settimana 10 dell\'anno precedente?', 'quanti formulari nella settimana 10 dell’anno scorso?', 'quanti formulari nella settimana 10 dell\'anno prima?', 'quanti formulari nella settimana 10 del 2025?']) {
+    const p = param('2026-10-15', d, piano({ settimana: 10, anno: 2025 }, { settimana: 10, anno: 2025 }));
+    verifica(`15/10/2026 «${d}»: resta la settimana 10 del 2025`, p && p.settimana === 10 && p.anno === 2025, JSON.stringify(p));
+  }
+  // Seconda revisione del 15/10/2026: un anno PASSATO scritto dal piano resta
+  // sempre, anche se la domanda lo dice con parole che domandaDiceLAnno non
+  // conosce; si toglie solo l'anno di oggi messo per abitudine. Prima «la
+  // settimana 10 di due anni fa» col piano {settimana 10, anno 2024} rispondeva
+  // sulla 10 del 2026.
+  for (const [d, a] of [['quanti formulari nella settimana 10 di due anni fa?', 2024], ['quanti formulari nella settimana 10 del \'25?', 2025], ['quanti formulari nella settimana 10 di un anno fa?', 2025], ['quanti formulari nella settimana 10 di tre anni prima che finisse il contratto?', 2023]]) {
+    const p = param('2026-10-15', d, piano({ settimana: 10, anno: a }, { settimana: 10, anno: a }));
+    verifica(`15/10/2026 «${d}» col piano {settimana 10, anno ${a}}: l'anno del piano resta`, p && p.settimana === 10 && p.anno === a, JSON.stringify(p));
+  }
+  // E l'anno di oggi detto con l'apostrofo («del '26») si riconosce: la
+  // settimana 50 del 2026 non e' ancora cominciata il 15/10/2026, e senza l'anno
+  // lo strumento prenderebbe la 50 del 2025.
+  const del26 = param('2026-10-15', 'quanti formulari nella settimana 50 del \'26?', piano({ settimana: 50, anno: 2026 }));
+  verifica('«la settimana 50 del \'26» col piano {anno 2026}: resta il 2026', del26 && del26.anno === 2026, JSON.stringify(del26));
+  verifica('domandaDiceLAnno riconosce «del \'25», «nel ’26», «due anni fa», «un anno fa»', typeof PA.domandaDiceLAnno === 'function' && ['la settimana 10 del \'25', 'nel ’26', 'due anni fa', 'un anno fa', 'tre anni fa'].every(d => PA.domandaDiceLAnno(d)));
+  verifica('ma non scambia per un anno un giorno scritto dopo l\'apostrofo', typeof PA.domandaDiceLAnno === 'function' && !PA.domandaDiceLAnno('quanti formulari dall\'11 al 17?') && !PA.domandaDiceLAnno('la richiesta dell\'11/12') && !PA.domandaDiceLAnno('quanti anni fa abbiamo cominciato?'));
+  // La controprova: l'anno di oggi messo dal piano per abitudine se ne va ancora.
+  const abit26 = param('2026-10-15', 'quanti formulari nella settimana 10?', piano({ settimana: 10, anno: 2026 }, { settimana: 10, anno: 2026 }));
+  verifica('l\'anno di oggi scritto dal piano a una settimana detta senza anno se ne va ancora', abit26 && abit26.anno === undefined, JSON.stringify(abit26));
+  const tipografico = param('2026-10-15', 'quanti formulari nella settimana 10 di quest’anno?', piano({ settimana: 10, anno: 2026 }));
+  verifica('«di quest’anno» con l\'apostrofo del telefono tiene l\'anno', tipografico && tipografico.anno === 2026, JSON.stringify(tipografico));
+  verifica('domandaDiceLAnno: le frasi senza anno restano senza', typeof PA.domandaDiceLAnno === 'function' && ['quanti formulari questa settimana?', 'la settimana 53', 'quanti formulari nella settimana scorsa?'].every(d => !PA.domandaDiceLAnno(d)));
+
+  // Lo strumento vero, a orologio fermo, con sei formulari dal 28/12/2026 al 02/01/2027.
+  const giorniW = ['2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02'];
+  const archivi = { PrimariaRete: giorniW.map((g, i) => ({ id: 'w' + i, id_ordine: 'ET2699953' + i, numero_fir: 'FIR W53 ' + i, stato: 'terminato', partner_operativo: 'SMOCO', trasportatore: 'EMMESSE SRLS', destinazione: 'GATIM SRL', provincia: 'NA', classe: 'P',
+    ordine_immesso_il: '2026-12-20T08:00:00Z', trasporto_iniziato_il: g + 'T08:00:00Z', trasporto_finito_il: g + 'T10:00:00Z', ordine_chiuso_il: g + 'T12:00:00Z', peso_effettivo: 1000 })) };
+  const soddisfa = (r, f) => Object.entries(f || {}).every(([k, v]) => {
+    const x = r[k];
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if ('$in' in v && !v.$in.includes(x)) return false;
+      if ('$gte' in v && !(x != null && String(x) >= String(v.$gte))) return false;
+      if ('$lte' in v && !(x != null && String(x) <= String(v.$lte))) return false;
+      if ('$lt' in v && !(x != null && String(x) < String(v.$lt))) return false;
+      if ('$gt' in v && !(x != null && String(x) > String(v.$gt))) return false;
+      return true;
+    }
+    if (v === null) return x === null || x === undefined || x === '';
+    return x === v;
+  });
+  const ent = new Proxy({}, { get: (_t, n) => ({
+    filter: async (f, _s, lim = 5000, skip = 0) => (archivi[n] || []).filter(r => soddisfa(r, f)).slice(skip, skip + lim).map(r => ({ ...r })),
+    list: async (_s, lim = 5000, skip = 0) => (archivi[n] || []).slice(skip, skip + lim).map(r => ({ ...r })),
+  }) });
+  const sdk = { asServiceRole: { entities: ent }, entities: ent };
+  const OraVera = Date;
+  const alle = async (iso, f) => {
+    const ms = OraVera.parse(iso);
+    globalThis.Date = class extends OraVera { constructor(...a) { if (a.length) super(...a); else super(ms); } static now() { return ms; } };
+    try { return await f(); } finally { globalThis.Date = OraVera; }
+  };
+  const primarie = (r) => { const c = ((r.dati || {}).canali || []).find(x => x.canale === 'RETE'); const f = c ? c.flussi.find(x => x.flusso === 'rete_primarie') : null; return f ? f.formulari : 0; };
+  const oggi53 = await alle('2027-01-02T09:00:00Z', () => S.eseguiStrumento(sdk, 'settimana_formulari', questa, null));
+  verifica('il 02/01/2027, senza parametri: settimana 53 del 2026, dal 28/12/2026 al 03/01/2027, sei formulari', oggi53.periodo === 'settimana 53 del 2026, dal 28/12/2026 al 03/01/2027' && primarie(oggi53) === 6, JSON.stringify({ periodo: oggi53.periodo, n: primarie(oggi53), errore: oggi53.errore }));
+  const dal5 = await alle('2027-01-05T09:00:00Z', () => S.eseguiStrumento(sdk, 'settimana_formulari', { settimana: 53 }, null));
+  verifica('il 05/01/2027 «la settimana 53» e\' l\'ultima 53 gia\' cominciata, quella del 2026', /^settimana 53 del 2026, dal 28\/12\/2026 al 03\/01\/2027$/.test(dal5.periodo) && primarie(dal5) === 6, dal5.periodo);
+  const dal5w1 = await alle('2027-01-05T09:00:00Z', () => S.eseguiStrumento(sdk, 'settimana_formulari', {}, null));
+  verifica('il 05/01/2027 senza parametri: la 1 del 2027, nessun formulario', /^settimana 1 del 2027, dal 04\/01\/2027 al 10\/01\/2027$/.test(dal5w1.periodo) && primarie(dal5w1) === 0, dal5w1.periodo);
+  const non = await alle('2027-01-02T09:00:00Z', () => S.eseguiStrumento(sdk, 'settimana_formulari', { anno: 2027, settimana: 53 }, null));
+  verifica('«la 53 del 2027» non esiste: lo dice, senza numeri', /Il 2027 ha 52 settimane ISO: la settimana 53 non c'e'/.test((non.dati || {}).avviso_settimana || '') && !!(non.dati || {}).numero_non_calcolabile && !(non.dati || {}).canali, JSON.stringify(non.dati));
+  // La controprova: a meta' anno la settimana di oggi e' quella di sempre.
+  const ottobre = await alle('2026-10-15T09:00:00Z', () => S.eseguiStrumento(sdk, 'settimana_formulari', {}, null));
+  verifica('il 15/10/2026 senza parametri: la 42 del 2026', /^settimana 42 del 2026, dal 12\/10\/2026 al 18\/10\/2026$/.test(ottobre.periodo), ottobre.periodo);
+  const la40 = await alle('2026-10-15T09:00:00Z', () => S.eseguiStrumento(sdk, 'settimana_formulari', { settimana: 40 }, null));
+  verifica('il 15/10/2026 «la settimana 40»: quella del 2026', /^settimana 40 del 2026,/.test(la40.periodo), la40.periodo);
+  const la50 = await alle('2026-10-15T09:00:00Z', () => S.eseguiStrumento(sdk, 'settimana_formulari', { settimana: 50 }, null));
+  verifica('il 15/10/2026 «la settimana 50», che nel 2026 deve ancora venire: quella del 2025', /^settimana 50 del 2025,/.test(la50.periodo), la50.periodo);
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

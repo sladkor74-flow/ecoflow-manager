@@ -34,23 +34,40 @@ export function settimanaIso(ymd) {
   return { anno, settimana: Math.ceil(((d.getTime() - Date.UTC(anno, 0, 1)) / 86400000 + 1) / 7) };
 }
 
+// LA SETTIMANA E' QUELLA ISO INTERA, DA LUNEDI' A DOMENICA, E L'ANNO E' IL SUO
+// ANNO ISO (prova del cambio d'anno del 15/10/2026, difetto 14; D1, decisione
+// dell'utente del 15/10/2026: la settimana 53 del 2026 intera, dal 28/12/2026
+// al 03/01/2027, in tutte le Verifiche). Fino ad allora l'intervallo si fermava
+// all'anno solare: la 53 del 2026 finiva il 31/12 e la 1 del 2027 partiva dal
+// 04/01, e l'1, il 2 e il 3 gennaio 2027 non stavano in nessuna verifica. Un
+// formulario di sabato 02/01/2027 registrato e omesso dal report non era
+// «assente» ne' nella 53 ne' nella 1, e lo vedeva solo il consuntivo di
+// gennaio, a febbraio. Lo stesso buco c'era al passaggio 2025-2026 (le
+// secondarie del 29 e del 30/12/2025 sono della 1 del 2026). Secondarie e
+// riepilogo della settimana tenevano gia' la settimana intera (annoSettimanaIso,
+// movimenti.ts). Se la stampa WINSINFO della 53 si fermasse al 31/12, i
+// formulari dell'1-3 gennaio comparirebbero «registrati, assenti nel report», e
+// lo si vedrebbe subito. La stessa funzione, uguale, sta in
+// base44/shared/reportSettimanali.ts.
 export function intervalloSettimana(anno, settimana) {
   const gen4 = new Date(Date.UTC(anno, 0, 4));
   const giorno = gen4.getUTCDay() || 7;
   gen4.setUTCDate(gen4.getUTCDate() - giorno + 1 + (settimana - 1) * 7);
   const lunedi = gen4.toISOString().slice(0, 10);
-  const domenica = aggiungiGiorni(lunedi, 6);
-  const primo = `${anno}-01-01`, ultimo = `${anno}-12-31`;
-  return { inizio: lunedi < primo ? primo : lunedi, fine: domenica > ultimo ? ultimo : domenica };
+  return { inizio: lunedi, fine: aggiungiGiorni(lunedi, 6) };
 }
 
+// Quante settimane ISO ha un anno: 52 o 53 (il 2026 ne ha 53, il 2027 52). Il
+// 28 dicembre sta sempre nell'ultima. Uguale in base44/shared/reportSettimanali.ts.
 export function settimaneNellAnno(anno) {
-  const s = settimanaIso(`${anno}-12-31`);
-  return s.anno === anno ? s.settimana : settimanaIso(`${anno}-12-24`).settimana;
+  return settimanaIso(`${anno}-12-28`).settimana;
 }
 
+// «7 set – 13 set 2026»; una settimana a cavallo d'anno scrive tutti e due gli
+// anni: «28 dic 2026 – 3 gen 2027» (dal 15/10/2026, con le settimane intere).
 export function descriviIntervallo({ inizio, fine }) {
   const g = (d) => `${+d.slice(8, 10)} ${MESI_BREVI[+d.slice(5, 7) - 1]}`;
+  if (inizio.slice(0, 4) !== fine.slice(0, 4)) return `${g(inizio)} ${inizio.slice(0, 4)} – ${g(fine)} ${fine.slice(0, 4)}`;
   return `${g(inizio)} – ${g(fine)} ${fine.slice(0, 4)}`;
 }
 

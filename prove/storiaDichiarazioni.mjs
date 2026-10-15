@@ -757,5 +757,177 @@ if (!copie.length) {
   verifica('niente scritto sugli archivi nemmeno qui', globalThis.__SCRITTE_DATI_VERI.length === 0, globalThis.__SCRITTE_DATI_VERI.join());
 }
 
+// 11. PIU' MESI DICHIARATI A PORTALE LO STESSO GIORNO (prova del cambio d'anno
+// del 15/10/2026, difetto 13). Il portale fa un caricamento per giorno e per
+// impianto: Gatim che carica novembre 2026 (20.000 kg, alle 10:00) e dicembre
+// 2026 (15.000 kg, alle 10:20) il 12/01/2027 fa un caricamento solo da 35.000
+// kg, e nessuno dei due mesi provato da solo lo pareggiava. Restavano tutti e
+// due non caricati e il riquadro «da inserire» spingeva a creare un doppione.
+// Adesso i mesi consecutivi rimasti senza riscontro si provano insieme, e si
+// agganciano solo se gli ordini chiusi sono proprio di quei mesi.
+console.log('11. PIU\' MESI DICHIARATI A PORTALE LO STESSO GIORNO');
+{
+  const AGG = await import('../base44/shared/agganciaDichiarazioni.ts');
+  const riga = (id, ora, fine, kg) => ({ id_dichiarazione: id, partner_operativo: 'SMOCO', data_dichiarazione: ora, fine_trasporto: fine, destinazione: 'GATIM SRL', prodotto: 'PFU', peso_associato_kg: kg, granulo_kg: Math.round(kg * 0.6), fibre_kg: Math.round(kg * 0.1), metallo_kg: Math.round(kg * 0.2) });
+  // Le ore sono italiane: 10:00 e 10:20 del 12/01/2027 sono le 09:00 e le 09:20 UTC.
+  const stessoGiorno = [
+    riga('SIM-NOV', '2027-01-12T09:00:00Z', '2026-11-20T10:00:00Z', 12000),
+    riga('SIM-NOV', '2027-01-12T09:00:00Z', '2026-11-27T10:00:00Z', 8000),
+    riga('SIM-DIC', '2027-01-12T09:20:00Z', '2026-12-14T10:00:00Z', 15000),
+  ];
+  const nostre = () => [
+    { id: 'ott', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Ottobre', quantita_kg: 18000, caricata_inviata: true, caricata_il: '2026-11-10' },
+    { id: 'nov', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Novembre', quantita_kg: 20000, caricata_inviata: false, caricata_il: '' },
+    { id: 'dic', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Dicembre', quantita_kg: 15000, caricata_inviata: false, caricata_il: '' },
+  ];
+  const ottobre = [riga('SIM-OTT', '2026-11-10T09:00:00Z', '2026-10-15T10:00:00Z', 18000)];
+  const svc = (scritte) => ({ DichiarazioneSito: { update: async (id, campi) => { scritte.push({ id, ...campi }); return { id, ...campi }; } } });
+
+  const e26 = AGG.confrontaConIlPortale([...ottobre, ...stessoGiorno], 2026, nostre(), ['RETE']);
+  const t = (mese) => e26.trovati.find(x => x.dichiarazione.mese === mese);
+  verifica('novembre e dicembre, caricati lo stesso giorno, si riconoscono tutti e due nel caricamento del 12/01/2027',
+    t('Novembre') && t('Dicembre') && t('Novembre').caricata_il === '2027-01-12' && t('Dicembre').caricata_il === '2027-01-12', J(e26.trovati.map(x => [x.dichiarazione.mese, x.caricata_il])));
+  verifica('col segno «insieme» e i due mesi', !!t('Novembre') && J(t('Novembre').insieme_mesi) === J(['Novembre', 'Dicembre']) && J(t('Dicembre').insieme_mesi) === J(['Novembre', 'Dicembre']));
+  verifica('ottobre resta agganciato da solo, senza segno', t('Ottobre') && t('Ottobre').caricata_il === '2026-11-10' && !t('Ottobre').insieme_mesi);
+  verifica('nessun avviso «da inserire», niente di non trovato e niente arretrato', e26.da_inserire.length === 0 && e26.non_trovate.length === 0 && e26.arretrato.length === 0, J({ da: e26.da_inserire, non: e26.non_trovate }));
+  const mat = t('Novembre') && t('Dicembre') ? ['granulo_kg', 'fibre_kg', 'metalli_kg'].map(k => (t('Novembre').materiali[k] || 0) + (t('Dicembre').materiali[k] || 0)) : [];
+  verifica('i materiali del caricamento si dividono fra i due mesi senza perderne un chilo', J(mat) === J([21000, 3500, 7000]) && t('Novembre').materiali.granulo_kg === 12000, J(mat));
+
+  const scritte = [];
+  const al = await AGG.allineaDalPortale(svc(scritte), 2026, [...ottobre, ...stessoGiorno], nostre());
+  // Ottobre si riscrive solo per i materiali, che la nostra riga di prova non ha.
+  const dueMesi = scritte.filter(s => s.id !== 'ott');
+  verifica('l\'allineamento le segna caricate il 12/01/2027', J(dueMesi.map(s => [s.id, s.caricata_inviata, s.caricata_il]).sort()) === J([['dic', true, '2027-01-12'], ['nov', true, '2027-01-12']]), J(scritte));
+  const loro = al.aggiornate.filter(a => a.mese !== 'Ottobre');
+  const ott = al.aggiornate.find(a => a.mese === 'Ottobre');
+  verifica('e l\'esito dice che sono state caricate insieme', loro.length === 2 && loro.every(a => J(a.insieme_ad_altri_mesi) === J(['Novembre', 'Dicembre'])) && !(ott && ott.insieme_ad_altri_mesi) && al.da_inserire.length === 0, J(al.aggiornate));
+  // Con lo stesso caricata_il la storia della riga le racconta «insieme».
+  const st = abbinaCaricamenti([{ giorno: '2027-01-12', kg: 35000, prima_kg: 0, mesi: dodici({ 10: 20000, 11: 15000 }) }], [{ idx: 10, giorno: '2027-01-12', kg: 20000 }, { idx: 11, giorno: '2027-01-12', kg: 15000 }]).per;
+  verifica('la storia le dice caricate insieme', st.get(10) && J(st.get(10).insieme) === J([10, 11]));
+  // Nel 2027 lo stesso caricamento chiude ordini del 2026: e' l'arretrato, non un mese da inserire.
+  const e27 = AGG.confrontaConIlPortale(stessoGiorno, 2027, [{ id: 'g27', sito: 'Gatim Srl', anno: 2027, canale: 'RETE', mese: 'Gennaio', quantita_kg: 9000 }], ['RETE']);
+  verifica('nel 2027 il caricamento del 12/01 e\' l\'arretrato del 2026, non si aggancia a gennaio', e27.trovati.length === 0 && e27.da_inserire.length === 0 && e27.arretrato.length === 1 && e27.arretrato[0].kg === 35000, J(e27));
+  // Tre mesi lo stesso giorno, come l'arretrato di Gatim.
+  const tre = [riga('A', '2027-01-12T09:00:00Z', '2026-10-05T10:00:00Z', 18000), ...stessoGiorno];
+  const e3 = AGG.confrontaConIlPortale(tre, 2026, nostre().map(d => ({ ...d, caricata_inviata: false, caricata_il: '' })), ['RETE']);
+  verifica('tre mesi caricati lo stesso giorno: tutti e tre insieme', e3.trovati.length === 3 && e3.trovati.every(x => x.caricata_il === '2027-01-12' && J(x.insieme_mesi) === J(['Ottobre', 'Novembre', 'Dicembre'])) && e3.da_inserire.length === 0, J(e3.trovati.map(x => [x.dichiarazione.mese, x.insieme_mesi])));
+
+  // LA CONTROPROVA. Due mesi che fanno lo stesso peso per caso, ma il caricamento
+  // chiude ordini di altri mesi (agosto e settembre): non si agganciano.
+  const altriMesi = [
+    riga('X', '2027-01-12T09:00:00Z', '2026-08-20T10:00:00Z', 20000),
+    riga('Y', '2027-01-12T09:20:00Z', '2026-09-14T10:00:00Z', 15000),
+  ];
+  const eX = AGG.confrontaConIlPortale(altriMesi, 2026, nostre().filter(d => d.id !== 'ott'), ['RETE']);
+  verifica('stesso peso, ordini di altri mesi: niente aggancio, resta «da inserire» coi suoi mesi', eX.trovati.length === 0 && eX.non_trovate.length === 2 && eX.da_inserire.length === 1 && J(eX.da_inserire[0].mesi.map(m => m.mese)) === J(['2026-08', '2026-09']), J(eX));
+  // Il caricamento chiude anche un pezzo di ottobre (l'arretrato): i mesi non sono solo i nostri due.
+  const conOttobre = [
+    riga('SIM-NOV', '2027-01-12T09:00:00Z', '2026-10-30T10:00:00Z', 1000),
+    riga('SIM-NOV', '2027-01-12T09:00:00Z', '2026-11-20T10:00:00Z', 11000),
+    riga('SIM-NOV', '2027-01-12T09:00:00Z', '2026-11-27T10:00:00Z', 8000),
+    riga('SIM-DIC', '2027-01-12T09:20:00Z', '2026-12-14T10:00:00Z', 15000),
+  ];
+  const eO = AGG.confrontaConIlPortale(conOttobre, 2026, nostre().filter(d => d.id !== 'ott'), ['RETE']);
+  verifica('se il caricamento chiude anche ordini di ottobre non si aggancia a novembre e dicembre', eO.trovati.length === 0 && eO.da_inserire.length === 1, J(eO.trovati));
+  // Due giorni diversi: come prima, un mese per caricamento, senza segno.
+  const dueGiorni = stessoGiorno.map(r => (r.id_dichiarazione === 'SIM-DIC' ? { ...r, data_dichiarazione: '2027-01-13T09:20:00Z' } : r));
+  const eD = AGG.confrontaConIlPortale(dueGiorni, 2026, nostre().filter(d => d.id !== 'ott'), ['RETE']);
+  const tD = (mese) => eD.trovati.find(x => x.dichiarazione.mese === mese);
+  verifica('caricati in due giorni diversi: novembre il 12/01, dicembre il 13/01, ognuno per conto suo', tD('Novembre') && tD('Novembre').caricata_il === '2027-01-12' && tD('Dicembre') && tD('Dicembre').caricata_il === '2027-01-13' && !tD('Novembre').insieme_mesi && !tD('Dicembre').insieme_mesi, J(eD.trovati));
+  // Mesi non consecutivi non si mettono insieme.
+  const salto = [riga('S', '2027-01-12T09:00:00Z', '2026-09-20T10:00:00Z', 20000), riga('S', '2027-01-12T09:00:00Z', '2026-11-20T10:00:00Z', 15000)];
+  const eS = AGG.confrontaConIlPortale(salto, 2026, [
+    { id: 's9', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Settembre', quantita_kg: 20000 },
+    { id: 's11', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Novembre', quantita_kg: 15000 },
+  ], ['RETE']);
+  verifica('settembre e novembre, che non sono consecutivi, non si agganciano insieme', eS.trovati.length === 0, J(eS.trovati));
+
+  // MAI CARICAMENTI DI GIORNI DIVERSI (revisione del 15/10/2026). Novembre
+  // caricato il 05/12/2026 (20.000 kg di ordini di novembre), dicembre
+  // l'08/01/2027 (15.000 kg: 1.000 del resto di novembre e 14.000 di dicembre,
+  // il portale aggancia dal piu' vecchio); le nostre righe fanno 21.000 e 14.000.
+  // La prima versione sommava i due caricamenti (35.000 kg, mesi novembre e
+  // dicembre) e segnava novembre caricato l'08/01/2027: nelle giacenze diventava
+  // dichiarato dopo la fotografia del 31/12/2026.
+  const compensati = [
+    riga('NOV', '2026-12-05T09:00:00Z', '2026-11-20T10:00:00Z', 20000),
+    riga('DIC', '2027-01-08T09:00:00Z', '2026-11-27T10:00:00Z', 1000),
+    riga('DIC', '2027-01-08T09:00:00Z', '2026-12-14T10:00:00Z', 14000),
+  ];
+  const nostreC = () => [
+    { id: 'nov', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Novembre', quantita_kg: 21000, caricata_inviata: false, caricata_il: '' },
+    { id: 'dic', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Dicembre', quantita_kg: 14000, caricata_inviata: false, caricata_il: '' },
+  ];
+  const eC = AGG.confrontaConIlPortale(compensati, 2026, nostreC(), ['RETE']);
+  verifica('due giorni diversi che si compensano: niente aggancio insieme, i due mesi restano senza riscontro',
+    eC.trovati.length === 0 && J(eC.non_trovate.map(n => [n.mese, n.kg])) === J([['Novembre', 21000], ['Dicembre', 14000]]), J(eC.trovati.map(x => [x.dichiarazione.mese, x.caricata_il, x.insieme_mesi])));
+  verifica('e i due caricamenti restano «da inserire», ognuno col suo giorno', eC.da_inserire.length === 1 && J(eC.da_inserire[0].caricamenti.map(c => c.data)) === J(['2026-12-05', '2027-01-08']), J(eC.da_inserire));
+  const scritteC = [];
+  await AGG.allineaDalPortale(svc(scritteC), 2026, compensati, nostreC());
+  verifica('l\'allineamento non scrive su novembre la data dell\'08/01/2027', scritteC.length === 0, J(scritteC));
+  const { dichiaratoDopoLaFotografia } = await import('../base44/shared/giacenzaPortale.ts');
+  const dopoC = nostreC().map(d => ({ ...d, ...(scritteC.find(s => s.id === d.id) || {}) }));
+  const chiaveC = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  verifica('niente dichiarato dopo la fotografia del 31/12/2026 inventato da una data presa in prestito', ![...dichiaratoDopoLaFotografia(dopoC, '2026-12-31', chiaveC).values()].some(v => v > 15000), J([...dichiaratoDopoLaFotografia(dopoC, '2026-12-31', chiaveC)]));
+  // Lo stesso caricamento dell'08/01 chiude novembre e dicembre se le nostre
+  // righe fanno proprio quei 15.000 kg di quei due mesi: lo stesso giorno, si'.
+  const eC2 = AGG.confrontaConIlPortale(compensati, 2026, [
+    { id: 'nov', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Novembre', quantita_kg: 20000, caricata_inviata: true, caricata_il: '2026-12-05' },
+    { id: 'nov2', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Novembre', quantita_kg: 1000, caricata_inviata: false, caricata_il: '', provenienza: 'resto' },
+    { id: 'dic', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Dicembre', quantita_kg: 14000, caricata_inviata: false, caricata_il: '' },
+  ], ['RETE']);
+  const tC2 = (id) => eC2.trovati.find(x => x.dichiarazione.id === id);
+  verifica('controprova: il resto di novembre e dicembre nello stesso caricamento dell\'08/01 si agganciano insieme, novembre pieno resta al 05/12',
+    tC2('nov') && tC2('nov').caricata_il === '2026-12-05' && tC2('nov2') && tC2('nov2').caricata_il === '2027-01-08' && tC2('dic') && tC2('dic').caricata_il === '2027-01-08' && J(tC2('dic').insieme_mesi) === J(['Novembre', 'Dicembre']),
+    J(eC2.trovati.map(x => [x.dichiarazione.id, x.caricata_il, x.insieme_mesi || null])));
+
+  // I MATERIALI DI OGNI MESE SONO I SUOI (seconda revisione del 15/10/2026). La
+  // prima versione divideva i materiali del caricamento in proporzione ai chili e
+  // l'allineamento li scriveva sulle righe di rete: con rese diverse fra i due
+  // mesi (novembre granulo 60%, dicembre 70%) novembre diventava granulo 12.857 e
+  // metalli 3.429 invece di 12.000 e 4.000, dicembre 9.643 e 2.571 invece di
+  // 10.500 e 2.000.
+  const rigaM = (id, ora, fine, kg, g, f, m, dest = 'GATIM SRL') => ({ id_dichiarazione: id, partner_operativo: 'SMOCO', data_dichiarazione: ora, fine_trasporto: fine, destinazione: dest, prodotto: 'PFU', peso_associato_kg: kg, granulo_kg: g, fibre_kg: f, metallo_kg: m });
+  const rese = [
+    rigaM('D-NOV', '2027-01-12T09:00:00Z', '2026-11-20T10:00:00Z', 20000, 12000, 2000, 4000),
+    rigaM('D-DIC', '2027-01-12T09:20:00Z', '2026-12-14T10:00:00Z', 15000, 10500, 1500, 2000),
+  ];
+  const nostreR = (nov = 20000, dic = 15000) => [
+    { id: 'nov', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Novembre', quantita_kg: nov, caricata_inviata: false, caricata_il: '', granulo_kg: 1, fibre_kg: 2, metalli_kg: 3 },
+    { id: 'dic', sito: 'Gatim Srl', anno: 2026, canale: 'RETE', mese: 'Dicembre', quantita_kg: dic, caricata_inviata: false, caricata_il: '', granulo_kg: 4, fibre_kg: 5, metalli_kg: 6 },
+  ];
+  const mat3 = (m) => [m.granulo_kg, m.fibre_kg, m.metalli_kg];
+  const scritteR = [];
+  const alR = await AGG.allineaDalPortale(svc(scritteR), 2026, rese, nostreR());
+  const sR = (id) => scritteR.find(s => s.id === id) || {};
+  verifica('caricati insieme, ogni mese prende i SUOI materiali, quelli del portale per fine trasporto: novembre 12.000/2.000/4.000',
+    sR('nov').caricata_il === '2027-01-12' && J(mat3(sR('nov'))) === J([12000, 2000, 4000]), J(sR('nov')));
+  verifica('dicembre 10.500/1.500/2.000, non una parte in proporzione ai chili', J(mat3(sR('dic'))) === J([10500, 1500, 2000]), J(sR('dic')));
+  verifica('e l\'esito non dice niente di materiali non scritti', alR.aggiornate.length === 2 && alR.aggiornate.every(a => !a.materiali_non_scritti), J(alR.aggiornate));
+  // Due grafie dello stesso impianto (unite giorno per giorno) non perdono i materiali di ogni mese.
+  const grafie = [rese[0], { ...rese[1], destinazione: 'Gatim S.r.l.' }];
+  const eG = AGG.confrontaConIlPortale(grafie, 2026, nostreR(), ['RETE']);
+  const tG = (mese) => eG.trovati.find(x => x.dichiarazione.mese === mese);
+  verifica('anche con due grafie dell\'impianto, unite giorno per giorno', tG('Novembre') && tG('Dicembre') && J(mat3(tG('Novembre').materiali)) === J([12000, 2000, 4000]) && J(mat3(tG('Dicembre').materiali)) === J([10500, 1500, 2000]), J(eG.trovati.map(x => [x.dichiarazione.mese, x.materiali])));
+  // LA CONTROPROVA: i chili di ogni mese non tornano coi nostri (21.000 e 14.000
+  // contro 20.000 e 15.000 di ordini di novembre e di dicembre, stesso giorno).
+  // L'aggancio c'e' - stesso giorno, stessi mesi, stesso totale - ma i materiali
+  // di ogni mese si potrebbero solo stimare: non si scrivono, restano quelli della
+  // riga, e l'esito lo dice.
+  const scritteS = [];
+  const alS = await AGG.allineaDalPortale(svc(scritteS), 2026, rese, nostreR(21000, 14000));
+  const sS = (id) => scritteS.find(s => s.id === id) || {};
+  verifica('chili per mese che non tornano: le righe si segnano caricate il 12/01/2027, senza materiali scritti',
+    sS('nov').caricata_inviata === true && sS('nov').caricata_il === '2027-01-12' && sS('dic').caricata_il === '2027-01-12'
+    && scritteS.every(s => !('granulo_kg' in s) && !('fibre_kg' in s) && !('metalli_kg' in s)), J(scritteS));
+  verifica('e l\'esito dice perche\', coi chili per mese all\'italiana', alS.aggiornate.length === 2 && alS.aggiornate.every(a => /Novembre 2026 20\.000 kg, Dicembre 2026 15\.000 kg\) non tornano con i nostri mesi/.test(a.materiali_non_scritti || '')), J(alS.aggiornate));
+  const eS2 = AGG.confrontaConIlPortale(rese, 2026, nostreR(21000, 14000), ['RETE']);
+  verifica('nel confronto i materiali di quei mesi sono vuoti, non stimati', eS2.trovati.length === 2 && eS2.trovati.every(x => J(x.materiali) === '{}' && x.materiali_non_letti), J(eS2.trovati.map(x => [x.dichiarazione.mese, x.materiali])));
+  // Un mese solo, agganciato da solo, somma i materiali del suo caricamento come prima.
+  const scritteU = [];
+  await AGG.allineaDalPortale(svc(scritteU), 2026, [rese[0]], [nostreR()[0]]);
+  verifica('un mese agganciato da solo prende i materiali del suo caricamento come prima', J(mat3(scritteU[0] || {})) === J([12000, 2000, 4000]), J(scritteU));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

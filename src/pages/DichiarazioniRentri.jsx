@@ -7,6 +7,7 @@ import { parole, corrispondeA } from '@/lib/ricercaNomi';
 import {
   controlliDichiarazione, segnalazioni, eCodiceEsempio, impronta, verificaValida, COLLEGAMENTI, LIVELLI_CONTROLLO,
 } from '@/lib/dichiarazioniRentri';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -175,7 +176,9 @@ export default function DichiarazioniRentri() {
     const ws = XLSX.utils.json_to_sheet(dati);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Dichiarazioni RENTRI');
-    XLSX.writeFile(wb, `Dichiarazioni_RENTRI_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    // Il giorno italiano, non quello UTC: all'01/01/2027 alle 00:30 il file si
+    // chiamava col 31/12/2026 (prova del cambio d'anno del 15/10/2026, difetto 30).
+    XLSX.writeFile(wb, `Dichiarazioni_RENTRI_${oggiRoma()}.xlsx`);
   };
 
   return (

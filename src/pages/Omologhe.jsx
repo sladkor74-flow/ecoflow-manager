@@ -7,6 +7,7 @@ import {
   giorniAllaScadenza, fasciaScadenza,
   FASCE, STATI, NOME_DIVERGENZA, SPIEGA_DIVERGENZA, PESO_DIVERGENZA,
 } from '@/lib/omologhe';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -83,7 +84,11 @@ export default function Omologhe() {
 
   useEffect(() => { carica(); }, [carica]);
 
-  const oggi = new Date().toISOString().slice(0, 10);
+  // OGGI E' IL GIORNO ITALIANO (prova del cambio d'anno del 15/10/2026, difetto
+  // 30). Col giorno UTC, fra mezzanotte e l'una (le due d'estate) era ancora
+  // ieri: all'01/01/2027 alle 00:30 l'omologa del 31/12/2026 risultava «scade
+  // oggi», fuori dal filtro delle scadute, e il file si chiamava col 31/12.
+  const oggi = oggiRoma();
   const conGiorni = useMemo(() => righe.map(r => {
     const giorni = giorniAllaScadenza(r.scadenza_effettiva || r.omologa_a, oggi);
     return { ...r, giorni, fascia: fasciaScadenza(giorni) };

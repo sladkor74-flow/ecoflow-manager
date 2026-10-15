@@ -182,6 +182,16 @@ export function istruzioniPiano(catalogo, domanda, oggi, storia = []) {
     'Sei la parte di EcoTyna che decide dove andare a prendere i numeri. Non rispondi alla domanda: scegli soltanto quali strumenti interrogare e con quali parametri.',
     '',
     `Oggi e' ${oggi} (ora italiana): siamo nel ${MESI[meseIdx]} ${anno}. "Questo mese" e' ${MESI[meseIdx]} ${anno}, "il mese scorso" e' ${MESI[(meseIdx + 11) % 12]} ${meseIdx === 0 ? anno - 1 : anno}, "quest'anno" e' il ${anno}.`,
+    // UN MESE SENZA ANNO CHE DEVE ANCORA VENIRE E' DELL'ANNO SCORSO (prova del
+    // cambio d'anno del 15/10/2026, difetto 8; correzione approvata dall'utente
+    // il 15/10/2026). Il 05/01/2027 «quanto abbiamo
+    // raccolto a dicembre?» diventava dicembre 2027, zero tonnellate. La stessa
+    // regola la applica strumentiDalPiano quando il piano non scrive l'anno; le
+    // settimane sono ISO e il loro anno lo decide lo strumento (difetto 14).
+    // Le Richieste ECT senza anno chiesto hanno anche quelle degli anni prima
+    // non ancora chiuse (difetto 2; revisione del 15/10/2026: un anno scritto
+    // per abitudine le perdeva).
+    `Un mese detto senza l'anno e' l'ultimo gia' cominciato: per i fatti gia' avvenuti (raccolto, ordini chiusi, secondarie, terziarie, fatture, dichiarazioni) un mese che nel ${anno} deve ancora venire (dopo ${MESI[meseIdx]}) e' del ${anno - 1}, e allora lascia vuoto l'anno o scrivi ${anno - 1} ("a dicembre" chiesto a gennaio e' dicembre dell'anno scorso). Per il contratto, i target e la predittivita' un mese a venire resta del ${anno}. Una settimana detta col solo numero non ha l'anno: non scriverlo, lo decide lo strumento (le settimane sono ISO, da lunedi' a domenica: quella a cavallo di due anni e' intera e ha l'anno del suo giovedi'). Per le Richieste ECT non scrivere l'anno se la domanda non lo dice: senza anno lo strumento da' quelle del ${anno} e quelle degli anni prima non ancora chiuse.`,
     '',
     'Regole:',
     '- Scegli il numero piu' + '̀ piccolo di strumenti che basta a rispondere. Se ne serve uno solo, uno solo.',
@@ -690,7 +700,11 @@ export function correggiPiano(piano, catalogo, domanda = '', oggi = '') {
       if (tema.mesi.length === 1) riempi(x, 'mese', tema.mesi[0]);
       else riempi(x, 'mesi', tema.mesi);
     }
-    if (['ordini_chiusi', 'secondarie', 'terziarie', 'fatturazione'].includes(n) && !periodo.anno) riempi(x, 'anno', tema.anno);
+    // Anche alle Richieste ECT e alla settimana dei formulari, che senza anno
+    // decidono da se' (15/10/2026, prova del cambio d'anno): l'anno scritto nella
+    // domanda deve arrivare, altrimenti «la settimana 10 del 2025» diventava
+    // l'ultima 10 cominciata e «le richieste ECT del 2025» quelle di oggi.
+    if (['ordini_chiusi', 'secondarie', 'terziarie', 'fatturazione', 'richieste_ect', 'settimana_formulari'].includes(n) && !periodo.anno) riempi(x, 'anno', tema.anno);
     if (['secondarie', 'terziarie'].includes(n)) {
       riempi(x, 'stato', tema.aperti && !tema.chiusi ? 'aperte' : tema.chiusi && !tema.aperti ? 'chiuse' : '');
       riempi(x, 'destinazione', tema.destinazione);
@@ -724,6 +738,78 @@ export function correggiPiano(piano, catalogo, domanda = '', oggi = '') {
 }
 
 /**
+ * GLI STRUMENTI DEI FATTI GIA' AVVENUTI (prova del cambio d'anno del 15/10/2026,
+ * difetto 8; correzione approvata dall'utente il 15/10/2026): per loro un mese
+ * detto senza anno che deve ancora venire e' dell'anno scorso. Non ci sono contratto_ecotyre, target_raccoglitori e
+ * proiezione_secondarie, che parlano anche di mesi a venire (il target di
+ * novembre), ne' settimana_formulari, che ha l'anno della sua settimana ISO.
+ */
+export const STRUMENTI_DEI_FATTI = new Set(['raccolto', 'ordini_chiusi', 'secondarie', 'terziarie', 'fatturazione', 'report_mensile', 'dichiarazioni_impianti']);
+
+/**
+ * Gli strumenti a cui, senza un anno chiesto, non si scrive l'anno di oggi: lo
+ * decidono loro (prova del cambio d'anno del 15/10/2026, difetto 2). Le
+ * Richieste ECT senza anno sono quelle dell'anno di oggi piu' quelle degli anni
+ * prima non ancora chiuse. Gli strumenti con la settimana (settimana_formulari)
+ * hanno l'anno ISO della settimana, e si riconoscono dal parametro. A tutti e
+ * due l'anno di OGGI arriva solo se la domanda lo dice (domandaDiceLAnno), anche
+ * quando il piano ce l'ha scritto: il pianificatore riempie il periodo con l'anno
+ * di oggi per abitudine (revisione del 15/10/2026). Un anno passato scritto dal
+ * piano arriva sempre: viene dalla domanda (seconda revisione del 15/10/2026).
+ */
+export const ANNO_DELLO_STRUMENTO = new Set(['richieste_ect']);
+
+// Gli apostrofi tipografici («quest’anno», scritto dal telefono) valgono come
+// quelli dritti (revisione del 15/10/2026: «dicembre di quest’anno» chiesto il
+// 05/01/2027 non si riconosceva come anno detto e diventava dicembre 2026).
+const conApostrofiDritti = (s) => String(s || '').replace(/[\u2018\u2019\u0060\u00b4]/g, "'");
+
+/**
+ * La domanda dice di quale anno parla: scritto («del 2025») o a parole
+ * («quest'anno», «l'anno in corso», «l'anno scorso», «lo scorso anno», «l'anno
+ * precedente», «l'anno prima», «l'anno prossimo»). Revisione del 15/10/2026
+ * della prova del cambio d'anno: «la settimana 10 dello scorso anno» e
+ * «dell'anno precedente» non si riconoscevano, e la settimana 10 del 2025 scritta
+ * dal piano diventava quella del 2026.
+ */
+export function domandaDiceLAnno(domanda) {
+  const t = ' ' + conApostrofiDritti(domanda).toLowerCase() + ' ';
+  return /\b20\d\d\b/.test(t)
+    || /(quest'? ?anno|\banno in corso\b|\banno (?:scorso|passato|prima|precedente|prossimo|successivo|venturo)\b|\b(?:scorso|passato|precedente|prossimo) anno\b)/.test(t)
+    // «del '25», «nel '26» e «due anni fa», «un anno fa» (seconda revisione del
+    // 15/10/2026): anche questi dicono l'anno.
+    || /\b(?:del|nel|dal|al|il|anno)\s*'\d\d\b/.test(t)
+    || /\b(?:un|uno|due|tre|quattro|cinque|sei|sette|otto|nove|dieci|\d+)\s+ann[oi]\s+fa\b/.test(t);
+}
+
+// Gli indici dei mesi nominati nei valori del piano («Dicembre», «luglio e
+// agosto», ['Luglio', 'Agosto']), in ordine e senza doppioni.
+function indiciDeiMesi(valori) {
+  const indici = new Set();
+  for (const v of valori) {
+    if (v === null || v === undefined || v === '') continue;
+    const parole = comeTesto(v).trim().split(' ');
+    NOMI_MESI.forEach((m, i) => { if (parole.includes(m)) indici.add(i); });
+  }
+  return [...indici].sort((a, b) => a - b);
+}
+
+/** Il segno, nella scelta dello strumento, di un anno messo a un mese detto senza anno. */
+export const SEGNO_ANNO_DEL_MESE = "senza l'anno";
+
+// «anno 2026: dicembre senza l'anno e' dicembre 2026, l'ultimo dicembre finito
+// (dicembre 2027 deve ancora venire)».
+function annoDelMeseFinito(indici, annoOggi) {
+  const nomi = indici.map(i => NOMI_MESI[i]);
+  if (nomi.length === 1) {
+    const m = nomi[0];
+    return `anno ${annoOggi - 1}: ${m} ${SEGNO_ANNO_DEL_MESE} e' ${m} ${annoOggi - 1}, l'ultimo ${m} finito (${m} ${annoOggi} deve ancora venire)`;
+  }
+  const elenco = `${nomi.slice(0, -1).join(', ')} e ${nomi[nomi.length - 1]}`;
+  return `anno ${annoOggi - 1}: ${elenco} ${SEGNO_ANNO_DEL_MESE} sono quelli del ${annoOggi - 1}, gli ultimi finiti (nel ${annoOggi} devono ancora venire)`;
+}
+
+/**
  * Quali strumenti eseguire davvero, a partire dal piano.
  *
  * Due cose il modello se le dimentica quasi sempre, e sono proprio quelle che
@@ -749,7 +835,8 @@ export function strumentiDalPiano(pianoScelto, catalogo, oggi, domanda = '') {
   // conto suo. Il pianificatore ogni tanto ne mette uno solo e la risposta dice
   // che gli altri due non ci sono: allora li si aggiunge qui, a meno che la
   // domanda non nomini proprio un canale.
-  const t = ' ' + String(domanda || '').toLowerCase() + ' ';
+  // Gli apostrofi tipografici come quelli dritti (revisione del 15/10/2026).
+  const t = ' ' + conApostrofiDritti(domanda).toLowerCase() + ' ';
   const chiedeTutto = /(in tutto|complessiv|tutti e tre|tutti i canali|totale generale|tutte le commesse)/.test(t);
   const nominaCanale = /(\brete\b|\baci\b|autodemoliz|extra raccolta)/.test(t);
   if (chiedeTutto && !nominaCanale) canali = [...CANALI];
@@ -763,6 +850,30 @@ export function strumentiDalPiano(pianoScelto, catalogo, oggi, domanda = '') {
   // pianificatore metteva ottobre, e la risposta era un mese solo).
   const daInizioAnno = /\bdal?\s+(?:1°?\s+|primo\s+)?gennaio\s+(?:a|ad|al|fino\s+ad?)\s+(?:oggi|adesso|ora)\b/.test(t);
   const senzaMese = (chiedeAnno && !nominaMese) || daInizioAnno;
+  // L'ANNO DI UN MESE DETTO SENZA ANNO (prova del cambio d'anno del 15/10/2026,
+  // difetto 8; correzione approvata dall'utente il 15/10/2026). Il 05/01/2027
+  // «quanto abbiamo raccolto a dicembre?» prendeva l'anno di oggi e rispondeva
+  // «Dicembre 2027: 0 t»; l'esempio della Guida,
+  // «ordini chiusi a Cosenza da luglio a settembre», dava 0 ordini invece di 46
+  // (181,40 t, 2026); «quanto ci spetta da Ecotyre per dicembre?» il 10/02/2027
+  // guardava dicembre 2027. A gennaio quasi ogni mese nominato e' dell'anno
+  // scorso. Per gli strumenti dei fatti gia' avvenuti, se l'anno non e' scritto
+  // ne' nella domanda ne' nel piano e i mesi chiesti vengono tutti dopo il mese
+  // in corso, l'anno e' quello di oggi meno uno, e la scelta lo dice («dicembre
+  // 2026, l'ultimo dicembre finito»). Contratto, target e predittivita' possono
+  // parlare di mesi a venire e restano sull'anno di oggi; un anno passato
+  // scritto dal piano vale com'e' (le istruzioni del pianificatore dicono la
+  // stessa regola). L'anno di OGGI scritto dal piano senza che la domanda lo
+  // dica e' quello di abitudine (il pianificatore riempie il periodo): per un
+  // mese che deve ancora venire non puo' avere fatti, e vale la stessa regola
+  // (revisione del 15/10/2026: il piano {anno 2027, mese Dicembre} del 05/01/2027
+  // dava ancora dicembre 2027).
+  // Qui «l'anno scorso» non conta come anno detto: se il piano non l'ha scritto,
+  // per un mese a venire la regola da' proprio l'anno scorso.
+  const annoNellaDomanda = /\b20\d\d\b/.test(t) || /(quest'? ?anno|anno in corso|prossim[oa])/.test(t);
+  // Per le settimane e le Richieste ECT, invece, ogni anno detto conta.
+  const diceLAnno = domandaDiceLAnno(domanda);
+  const meseOggi = Number(String(oggi).slice(5, 7)) - 1;
   const scelti = [];
   const sconosciuti = [];
   // Prima si scartano i nomi che non esistono, poi si conta fino a quattro:
@@ -832,7 +943,38 @@ export function strumentiDalPiano(pianoScelto, catalogo, oggi, domanda = '') {
         ignorati.push({ parametro: k, valore: String(v) });
       }
     }
-    if (ok.has('anno') && base.anno == null) base.anno = Number(per.anno) || annoOggi;
+    // UNA SETTIMANA NON PRENDE L'ANNO DI CALENDARIO (prova del cambio d'anno del
+    // 15/10/2026, difetto 14; D1, decisione dell'utente del 15/10/2026).
+    // Il 02/01/2027 «quanti formulari questa
+    // settimana?» diventava la settimana 53 del 2027, «dal 2028-01-03 al
+    // 2027-12-31», zero formulari: la settimana di oggi e' la 53 del 2026. Uno
+    // strumento con la settimana riceve l'anno solo se la domanda ne parla
+    // («la settimana 10 del 2025», «di quest'anno»); senza, l'anno ISO lo decide
+    // lui (settimana_formulari, strumentiAssistente.ts), anche se il piano ci ha
+    // messo l'anno di calendario per abitudine.
+    // Lo stesso per le Richieste ECT (difetto 2, la parte di EcoTyna): senza un
+    // anno chiesto lo strumento da' quelle dell'anno di oggi piu' quelle degli
+    // anni prima non ancora chiuse; con l'anno di oggi scritto qui, il 05/01/2027
+    // le richieste di dicembre ancora aperte sparivano lo stesso.
+    // REVISIONE DEL 15/10/2026: anche l'anno scritto dal piano, nei parametri o
+    // nel periodo, arriva solo se la domanda dice un anno (domandaDiceLAnno). A
+    // «quali richieste ECT arrivate via email sono ancora aperte?» il 05/01/2027
+    // il piano {periodo: {anno: 2027}} faceva leggere solo il 2027, e la richiesta
+    // del 10/12/2026 aperta e scaduta spariva come prima della correzione. E «la
+    // settimana 10 dello scorso anno», «dell'anno precedente» col piano
+    // {settimana 10, anno 2025} perdevano il 2025: ora l'anno a parole si
+    // riconosce.
+    // SECONDA REVISIONE DEL 15/10/2026: si toglie solo l'anno di OGGI, quello
+    // messo per abitudine, come fa la regola dei mesi qui sotto. Un anno passato
+    // scritto dal piano resta com'e': la domanda lo dice con parole che qui non si
+    // possono elencare tutte («la settimana 10 di due anni fa», «le richieste ECT
+    // del '25»), e cancellato faceva rispondere sulla settimana 10 del 2026 e sulle
+    // richieste del 2026.
+    if (ok.has('anno') && base.anno == null) {
+      if (Number(per.anno)) base.anno = Number(per.anno);
+      else if (!ok.has('settimana') && !ANNO_DELLO_STRUMENTO.has(nome)) base.anno = annoOggi;
+    }
+    if ((ok.has('settimana') || ANNO_DELLO_STRUMENTO.has(nome)) && !diceLAnno && Number(base.anno) === annoOggi) delete base.anno;
     // «Da gennaio a oggi» e «quest'anno» parlano dell'anno IN CORSO: a uno
     // strumento chiesto per un anno passato (il confronto con lo stesso periodo
     // dell'anno scorso) i mesi del pianificatore restano, altrimenti il 2025
@@ -844,8 +986,22 @@ export function strumentiDalPiano(pianoScelto, catalogo, oggi, domanda = '') {
     if (ok.has('mesi') && !base.mesi && Array.isArray(per.mesi) && per.mesi.length && !senzaMeseQui) base.mesi = per.mesi;
     if (senzaMeseQui) { delete base.mese; delete base.mesi; }
     if (ok.has('settimana') && base.settimana == null && per.settimana) base.settimana = Number(per.settimana);
-    // Il perche' della guardia viaggia coi parametri fino al risultato (eseguiStrumento).
-    if (x.corretto) base[CHIAVE_SCELTA] = String(x.corretto);
+    // Un mese senza anno che deve ancora venire e' dell'anno scorso, per gli
+    // strumenti dei fatti gia' avvenuti (difetto 8, qui sopra annoNellaDomanda).
+    let notaAnno = '';
+    // L'anno e' qui quello di oggi se nessuno l'ha scritto o se il piano ha
+    // scritto proprio quello (l'abitudine, qui sopra): un anno passato scritto dal
+    // piano resta com'e'.
+    if (STRUMENTI_DEI_FATTI.has(nome) && ok.has('anno') && Number(base.anno) === annoOggi && !annoNellaDomanda && meseOggi >= 0) {
+      const chiesti = indiciDeiMesi([base.mese, ...(Array.isArray(base.mesi) ? base.mesi : [base.mesi])]);
+      if (chiesti.length && chiesti.every(i => i > meseOggi)) {
+        base.anno = annoOggi - 1;
+        notaAnno = annoDelMeseFinito(chiesti, annoOggi);
+      }
+    }
+    // Il perche' della guardia viaggia coi parametri fino al risultato (eseguiStrumento),
+    // e con lui l'anno messo a un mese detto senza anno.
+    if (x.corretto || notaAnno) base[CHIAVE_SCELTA] = [x.corretto, notaAnno].filter(Boolean).map(String).join('; ');
     // Il canale, che in fatturazione e tariffe si chiama tipologia.
     const campoCanale = ok.has('canale') ? 'canale' : (ok.has(SINONIMI_CANALE[nome] || '') ? SINONIMI_CANALE[nome] : '');
     if (campoCanale) {
@@ -934,10 +1090,18 @@ export function testoDati(risultati) {
     // (revisione del 14/10/2026).
     if (r.scelta_dello_strumento) {
       const s = String(r.scelta_dello_strumento);
+      // Un mese detto senza anno che deve ancora venire (difetto 8 della prova del
+      // cambio d'anno, 15/10/2026): l'anno l'ha messo strumentiDalPiano, e la
+      // risposta lo deve dire, perche' chi chiede pensava forse all'anno di oggi.
+      const soloAnno = /^anno \d{4}: /.test(s);
       parti.push(`SCELTA DELLO STRUMENTO: ${s}. ${/^aggiunto/.test(s)
         ? 'Il piano era vuoto e la guardia ha aggiunto questo modulo perche\' la domanda chiede dei dati: se invece chiede una norma o una procedura, rispondi su quella e lascia stare questi numeri.'
         : /scelto al posto/.test(s) ? 'Questo e\' il modulo giusto per la domanda: rispondi con questi dati.'
+        : soloAnno ? 'L\'anno viene dal mese della domanda: rispondi con questi dati.'
         : 'Il canale e i filtri qui sopra vengono dalla domanda: rispondi con questi dati.'}`);
+      if (s.includes(SEGNO_ANNO_DEL_MESE)) {
+        parti.push('ANNO DEL MESE: la domanda nomina il mese senza l\'anno, e quest\'anno quel mese deve ancora venire, quindi i dati sono dell\'ultimo gia\' finito. Scrivi nella risposta il mese con l\'anno e che e\' l\'ultimo finito, per esempio «dicembre 2026, l\'ultimo dicembre finito».');
+      }
     }
     if (r.parametri_ignorati && r.parametri_ignorati.length) {
       parti.push(`ATTENZIONE: questo strumento non conosce ${r.parametri_ignorati.map(i => `"${i.parametro}" (${i.valore})`).join(', ')}: il numero qui sotto NON e' filtrato per quello. Dillo nella risposta invece di far finta che il filtro ci fosse.`);

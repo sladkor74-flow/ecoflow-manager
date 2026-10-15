@@ -259,5 +259,34 @@ console.log('6. GLI ARCHIVI: OGNI CAMPO CHE SI SCRIVE E\' DICHIARATO');
   verifica('IndicatoreGiorno ha il campo delle identita\' fra moduli', I.properties.invarianti_json && I.properties.invarianti_json.type === 'string', J(Object.keys(I.properties)));
 }
 
+// 7. IL CONTROLLO NORMATIVO DEL MESE, COL MESE ITALIANO (prova del cambio d'anno
+// del 15/10/2026, difetto 36). Il giro pianificato non si ripete nello stesso
+// mese: confrontava il mese UTC di eseguito_il col mese italiano di oggi, e un
+// controllo lanciato a mano alle 00:30 dell'01/01/2027 (2026-12-31T23:30Z)
+// risultava di dicembre. Il giro delle 7:00 dello stesso giorno ne creava un
+// secondo, con le sue chiamate al modello.
+console.log('7. IL CONTROLLO NORMATIVO DEL MESE, COL MESE ITALIANO');
+{
+  const normativo = await caricaFunzione('controlloNormativo');
+  const OraVera = Date;
+  const alle = async (iso, f) => {
+    const ms = OraVera.parse(iso);
+    globalThis.Date = class extends OraVera { constructor(...a) { if (a.length) super(...a); else super(ms); } static now() { return ms; } };
+    try { return await f(); } finally { globalThis.Date = OraVera; }
+  };
+  const fatto = (eseguito_il) => ({ id: 'c1', eseguito_il, avviato_da: 'manuale', esito: 'completato', proposte: 0 });
+  const giro = (iso, eseguito_il) => alle(iso, () => chiama(normativo, { db: { ControlloNormativo: [fatto(eseguito_il)] }, ruolo: 'admin', corpo: {} }));
+  const nuovi = (r) => r.scritte.filter(s => s.entita === 'ControlloNormativo' && s.op === 'create').length;
+  // Il giro delle 7:00 italiane dell'01/01/2027, dopo uno a mano alle 00:30 dello stesso giorno.
+  const notte = await giro('2027-01-01T06:00:00Z', '2026-12-31T23:30:00.000Z');
+  verifica('l\'01/01/2027 alle 7:00, gia\' fatto alle 00:30 dello stesso giorno: si salta', notte.stato === 200 && notte.j.saltato === 'Controllo del mese gia\' eseguito' && nuovi(notte) === 0, J({ s: notte.stato, saltato: notte.j.saltato, nuovi: nuovi(notte) }));
+  // Come quando il primo e' delle 10:00.
+  const mattina = await giro('2027-01-01T10:00:00Z', '2027-01-01T09:00:00.000Z');
+  verifica('come quando il primo e\' delle 10:00', mattina.j.saltato === 'Controllo del mese gia\' eseguito' && nuovi(mattina) === 0);
+  // La controprova: uno del 31/12/2026 alle 23:30 italiane e' di dicembre, e non ferma quello di gennaio.
+  const dicembre = await giro('2027-01-01T06:00:00Z', '2026-12-31T22:30:00.000Z');
+  verifica('uno del 31/12/2026 alle 23:30 italiane non fa saltare quello di gennaio', !dicembre.j.saltato && nuovi(dicembre) === 1, J({ s: dicembre.stato, saltato: dicembre.j.saltato, nuovi: nuovi(dicembre) }));
+}
+
 console.log(`\n${ok} superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

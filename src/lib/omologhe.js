@@ -8,6 +8,7 @@
 // Specchio di base44/shared/omologhe.ts per le parti che servono anche qui.
 
 import { testo, daData, apriFoglio as apri, griglia } from '@/lib/foglioExcel';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 // Il documento si recepisce una volta, al primo ritiro, e da lì parte l'anno di
 // validità: i ritiri successivi non riportano l'annotazione e va bene così.
@@ -36,11 +37,16 @@ export const STATI = {
   annullata: { nome: 'Annullata', classe: 'bg-red-50 text-red-700 border-red-200' },
 };
 
-/** Giorni che mancano alla scadenza; negativo se è già passata. */
+/**
+ * Giorni che mancano alla scadenza; negativo se è già passata. Senza «oggi»
+ * vale il giorno italiano (prova del cambio d'anno del 15/10/2026, difetto 30):
+ * col giorno UTC, all'01/01/2027 alle 00:30 l'omologa del 31/12/2026 era a 0
+ * giorni, «scade oggi», invece che scaduta. Uguale in base44/shared/omologhe.ts.
+ */
 export function giorniAllaScadenza(omologaA, oggi) {
   if (!omologaA) return null;
   const fine = new Date(String(omologaA).slice(0, 10) + 'T00:00:00Z').getTime();
-  const adesso = new Date(String(oggi || new Date().toISOString()).slice(0, 10) + 'T00:00:00Z').getTime();
+  const adesso = new Date(String(oggi || oggiRoma()).slice(0, 10) + 'T00:00:00Z').getTime();
   if (Number.isNaN(fine) || Number.isNaN(adesso)) return null;
   return Math.round((fine - adesso) / 86400000);
 }
