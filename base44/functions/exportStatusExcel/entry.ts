@@ -5,7 +5,7 @@ import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
 import { computeRaccoltoData, MESI } from "../../shared/raccoltoCalculator.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { righeAndamento } from "../../shared/andamentoTarget.ts";
+import { righeAndamento, segnoTargetCopiati } from "../../shared/andamentoTarget.ts";
 
 // Esporta i dati di Status & Target in un file Excel (3 fogli: Raccoglitori, Regioni, Impianti;
 // un quarto, Date da sistemare, quando qualche terminato di rete ne ha).
@@ -47,12 +47,20 @@ export default async function(req) {
     //    restano al chilo e le formatta formattaPesi, che riconosce le colonne
     //    da «(t)» nell'intestazione: con «[t]» non le riconosceva, e il file
     //    usciva coi decimali grezzi.
+    //
+    //    I TARGET COPIATI E NON CONFERMATI (chiusura della prova generale del
+    //    cambio d'anno, 15/10/2026). La pagina dice «copiato, da confermare» sulla
+    //    riga, e cosi' il PDF e la presentazione (statusExports.js); il file
+    //    mostrava target e residuo come decisi. L'ultima colonna dice lo stesso
+    //    segno (segnoTargetCopiati), vuota per i target scritti a mano. In fondo,
+    //    perche' le prime colonne restano quelle di sempre.
     const t3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
     const raccoglitoriRows = [["Regione", "Raccoglitore", "Target annuo (t)", "Raccolto RETE (t)", "Residuo dell'anno (t)",
-      ...MESI.flatMap(m => [`${m} target (t)`, `${m} raccolto (t)`, `${m} Δ (t)`])]];
+      ...MESI.flatMap(m => [`${m} target (t)`, `${m} raccolto (t)`, `${m} Δ (t)`]), "Target da confermare"]];
     for (const r of righeAndamento({ mensili, annui, raccolto: raccolto.by_raccoglitore })) {
       const row = [r.regione, r.raccoglitore, t3(r.targetAnnuo), t3(r.raccoltoTotale), t3(r.leftover)];
       for (const m of r.mesi) row.push(t3(m.target), t3(m.raccolto), t3(m.delta));
+      row.push(segnoTargetCopiati(r));
       raccoglitoriRows.push(row);
     }
 

@@ -73,6 +73,15 @@ const EER_PFU = '160103';
 // e '#,##0.00 "€"' per gli importi.
 const t = (v) => formatTonnellate(v);
 const euro = (v) => `${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+// UNA RIGA SENZA PREZZO E' «—», NON 0,00 € (chiusura della prova generale del
+// cambio d'anno, 15/10/2026; D4 e D5, decisioni dell'utente del 15/10/2026). Il
+// foglio (passivaAmministrazione.js) da' prezzo e totale null alla voce o alla
+// tratta senza la tariffa dell'anno, o con una tariffa copiata dall'anno prima e
+// non confermata, e la lascia fuori dal totale, che lo dice (senza_prezzo).
+// L'Excel e la pagina lo scrivevano gia'; qui la cella del prezzo diceva «vari»
+// e quella del totale «0,00 €», cioe' un costo zero a chi paga i fornitori.
+const senzaPrezzo = (r) => !!r && (r.senza_prezzo === true || r.totale === null);
+const testoParziale = (b) => (b && b.senza_prezzo && b.senza_prezzo.testo ? b.senza_prezzo.testo : '');
 const prezzo = (v) => formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // Le date arrivano come aaaa-mm-gg, giorno italiano: si scrivono 10/09/2026 e
 // restano testo, per non rimettere in ballo i fusi orari su un documento.
@@ -177,11 +186,11 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       { etichetta: 'Sovracosto', valore: euro(oneri), sotto: 'pulizia e costi aggiuntivi degli interventi', colore: C.medio },
       { etichetta: 'TOTALE EXTRA RACCOLTA', valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro, surplus: diCui(f.extra.totale_surplus) },
     ] : [
-      { etichetta: 'Raccoglitori', valore: euro(f.raccoglitori.totale_euro), sotto: `${t(f.raccoglitori.totale_t)} t raccolte`, colore: C.blu, surplus: diCui(f.raccoglitori.totale_surplus) },
-      { etichetta: 'Impianti \\ stoccaggi', valore: euro(f.impianti.totale_euro), sotto: `${t(f.impianti.totale_t)} t trattate o stoccate`, colore: C.viola, surplus: diCui(f.impianti.totale_surplus) },
-      { etichetta: 'Trasporto secondarie', valore: euro(f.trasporti.totale_euro), sotto: `${t(f.trasporti.totale_t)} t · ${formatIntero(viaggi)} ${viaggi === 1 ? 'viaggio' : 'viaggi'}`, colore: C.medio, surplus: diCui(f.trasporti.totale_surplus) },
-      { etichetta: `TOTALE ${f.nome_canale}`, valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro, surplus: diCui(f.totale_surplus) },
-    ];
+      { etichetta: 'Raccoglitori', valore: euro(f.raccoglitori.totale_euro), sotto: `${t(f.raccoglitori.totale_t)} t raccolte`, colore: C.blu, surplus: diCui(f.raccoglitori.totale_surplus), parziale: !!testoParziale(f.raccoglitori) },
+      { etichetta: 'Impianti \\ stoccaggi', valore: euro(f.impianti.totale_euro), sotto: `${t(f.impianti.totale_t)} t trattate o stoccate`, colore: C.viola, surplus: diCui(f.impianti.totale_surplus), parziale: !!testoParziale(f.impianti) },
+      { etichetta: 'Trasporto secondarie', valore: euro(f.trasporti.totale_euro), sotto: `${t(f.trasporti.totale_t)} t · ${formatIntero(viaggi)} ${viaggi === 1 ? 'viaggio' : 'viaggi'}`, colore: C.medio, surplus: diCui(f.trasporti.totale_surplus), parziale: !!testoParziale(f.trasporti) },
+      { etichetta: `TOTALE ${f.nome_canale}`, valore: euro(f.totale_euro), sotto: 'solo questo canale: non si somma agli altri', colore: C.scuro, surplus: diCui(f.totale_surplus), parziale: !!testoParziale(f) },
+    ].map(r => (r.parziale ? { ...r, sotto: 'parziale: righe senza prezzo, vedi sotto' } : r));
     const gap = 4;
     const lw = (L - gap * (voci.length - 1)) / voci.length;
     const rigaDelSurplus = voci.some(r => r.surplus);
@@ -338,10 +347,14 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
     // Un prezzo solo non sempre c'e': quando le righe di una voce hanno tariffe
     // diverse fra loro si scrive «vari» e l'importo resta quello calcolato riga
     // per riga, che e' l'unico numero vero.
+    // Senza il prezzo dell'anno (o con una tariffa copiata e non confermata) e'
+    // «—», non «vari»: «vari» vuol dire tariffe diverse fra le righe, con un
+    // importo vero (15/10/2026).
     const noto = r.prezzo !== null && r.prezzo !== undefined;
-    const cella = noto
-      ? { testo: prezzo(r.prezzo), colore: r.prezzo ? C.testo : C.tenue }
-      : { testo: 'vari', colore: C.ambra };
+    const cella = r.senza_prezzo === true ? { testo: '—', colore: C.ambra }
+      : noto
+        ? { testo: prezzo(r.prezzo), colore: r.prezzo ? C.testo : C.tenue }
+        : { testo: 'vari', colore: C.ambra };
     if (!blocco.due_prezzi) return { prezzo1: cella };
     return r.colonna_prezzo === 'trattamento' ? { prezzo2: cella } : { prezzo1: cella };
   };
@@ -407,7 +420,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
         ...cellePrezzo(blocco, r),
         viaggi: { testo: r.viaggi ? formatIntero(r.viaggi) : '', colore: C.grigio },
         eer: piatto ? { testo: EER_PFU, colore: C.grigio } : {},
-        totale: { testo: euro(r.totale), colore: r.totale ? C.testo : C.tenue },
+        totale: senzaPrezzo(r) ? { testo: '—', colore: C.ambra } : { testo: euro(r.totale), colore: r.totale ? C.testo : C.tenue },
         note: { testo: r.note || '', colore: C.grigio },
       }, { sfondo: zebra++ % 2 ? C.zebra : null, rientro: !piatto });
     }
@@ -417,6 +430,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       totale: { testo: euro(blocco.totale_euro) },
     }, { sfondo: C.scuro, grassetto: true, colore: C.bianco, h: 7.5, senzaBordo: true });
     y += 1;
+    totaleParziale(blocco);
     codaBlocco(blocco);
     y += 3;
   };
@@ -483,9 +497,9 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
         destinatario: { testo: r.destinatario },
         tonnellate: { testo: t(r.tonnellate), grassetto: r.tonnellate > 0 },
         unita: { testo: unitaMisura(r.unita_misura), colore: C.grigio },
-        prezzo: { testo: prezzo(r.prezzo), colore: r.prezzo ? C.testo : C.tenue },
+        prezzo: r.senza_prezzo === true ? { testo: '—', colore: C.ambra } : { testo: prezzo(r.prezzo), colore: r.prezzo ? C.testo : C.tenue },
         viaggi: { testo: r.viaggi ? formatIntero(r.viaggi) : '', colore: C.grigio },
-        totale: { testo: euro(r.totale), colore: r.totale ? C.testo : C.tenue },
+        totale: senzaPrezzo(r) ? { testo: '—', colore: C.ambra } : { testo: euro(r.totale), colore: r.totale ? C.testo : C.tenue },
         note: { testo: r.note || '', colore: C.grigio },
       }, { sfondo: i % 2 ? C.zebra : null });
     });
@@ -494,7 +508,9 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       tonnellate: { testo: t(f.trasporti.totale_t) },
       totale: { testo: euro(f.trasporti.totale_euro) },
     }, { sfondo: C.scuro, grassetto: true, colore: C.bianco, h: 7.5, senzaBordo: true });
-    y += 4;
+    y += 1;
+    totaleParziale(f.trasporti);
+    y += 3;
   };
 
   // L'EXTRA RACCOLTA: il dettaglio degli interventi chiusi nel mese.
@@ -615,6 +631,14 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
   // un prezzo. Si scrivono in fondo al loro blocco, in ambra, dicendo cosa fare,
   // perche' sono il segnale che il modello delle voci va aggiornato: finche'
   // restano li', il foglio non sta fatturando tutto il mese.
+  // IL TOTALE PARZIALE (15/10/2026, D4 e D5): sotto il totale del blocco, in
+  // ambra, la frase del foglio (senza_prezzo.testo), la stessa dell'Excel.
+  function totaleParziale(blocco) {
+    const frase = testoParziale(blocco);
+    if (!frase) return;
+    riquadroNota([`Totale parziale: ${frase}.`], { colore: C.ambra, sfondo: C.ambraChiaro, inchiostro: C.ambraScuro });
+  }
+
   function codaBlocco(blocco) {
     const senza = (blocco.righe || []).filter(r => r.tipo === 'senza_voce');
     const fuori = blocco.non_previsti || [];
@@ -675,7 +699,7 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
     doc.setFontSize(12);
     doc.text(`${f.nome_canale} — ${[f.mese || mese, f.anno || anno].filter(Boolean).join(' ')}`, M, y + 4);
     doc.setFontSize(10.5);
-    doc.text(`Totale ${f.nome_canale}  ${euro(f.totale_euro)}`, W - M, y + 4, { align: 'right' });
+    doc.text(`Totale ${f.nome_canale}  ${euro(f.totale_euro)}${testoParziale(f) ? ' (parziale)' : ''}`, W - M, y + 4, { align: 'right' });
     doc.setDrawColor(...C.medio);
     doc.setLineWidth(0.4);
     doc.line(M, y + 6.2, W - M, y + 6.2);
@@ -700,6 +724,14 @@ export async function esportaPassivaAmministrazionePdf(fogli, { anno, mese } = {
       // Il surplus sulle tariffe si spiega solo dove c'e' (13/10/2026).
       ...(elenco.some(conSurplus) ? [
         'Le righe in corsivo con la barra indaco sono il surplus sulle tariffe (per esempio il Fuel Surcharge del consorzio Ecotyre): un importo in euro per tonnellata in più, con le sue date, sotto il fornitore che lo riceve. Le tonnellate sono le stesse del mese, scritte fra parentesi perché non si sommano una seconda volta; l\'importo è dentro il totale del fornitore e del canale. Un fornitore interno non lo riceve.',
+      ] : []),
+      // Le righe «—» si spiegano solo dove ci sono, con le due ragioni, come la
+      // nota dell'Excel (15/10/2026, D4 e D5).
+      ...(elenco.some(f => f.senza_prezzo && (f.senza_prezzo.mancanti ? Number(f.senza_prezzo.mancanti.voci) > 0 : Number(f.senza_prezzo.voci) > 0 && !f.senza_prezzo.da_confermare)) ? [
+        'Le voci con «—» hanno movimenti nel mese ma non la tariffa dell\'anno nel tariffario: restano senza prezzo e fuori dai totali finché la tariffa non c\'è, e la nota dice il prezzo della voce e di che anno è. Il totale del blocco e del canale è parziale e lo dice.',
+      ] : []),
+      ...(elenco.some(f => f.senza_prezzo && f.senza_prezzo.da_confermare && Number(f.senza_prezzo.da_confermare.voci) > 0) ? [
+        'Le righe con «—» e la nota «copiata» hanno una tariffa copiata dall\'anno prima e non ancora confermata: restano senza prezzo e fuori dai totali finché non è confermata in Target & Status › Nuovo anno, e la nota dice il prezzo copiato.',
       ] : []),
       ...(elenco.some(f => f.extra) ? [
         'L\'extra raccolta non ha voci fisse: ogni intervento fa storia a sé, coi suoi prezzi di raccolta, stoccaggio e trattamento scritti sull\'intervento prima di passarlo a terminato, più il sovracosto, che si paga al raccoglitore quando ha avuto costi imprevisti nella raccolta o all\'impianto quando li ha avuti nel trattamento: la nota di ogni riga dice a chi va. Entra nel mese in cui la fine trasporto è stata chiusa. Nel foglio Excel ci sono anche l\'ordine Ecotyre, il CER e la data di inizio trasporto.',

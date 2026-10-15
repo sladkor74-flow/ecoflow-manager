@@ -114,7 +114,11 @@ const PREFATTURA_CARICATA = { PrefatturaEcotyre: [{ id: 'p1', anno: 2026, mese: 
 const CASI = [
   { nome: 'congelaPassivaMese', corpo: { anno: 2026, mese: 9, canale: 'RETE' }, scrive: /ChiusuraPassivaMese/, legge: ['primarie', 'secondarie'] },
   { nome: 'elaboraFatturazioneAttiva', corpo: { anno: 2026, mese: 'Settembre' }, scrive: /DocumentoFatturazione/, legge: ['primarie'] },
-  { nome: 'chiusuraAnno', corpo: { anno: 2025, azione: 'salva' }, scrive: null, legge: ['primarie', 'secondarie', 'terziarie'] },
+  // Dalla prova generale del cambio d'anno (15/10/2026, difetto 4) la chiusura
+  // propone le aperture dal file degli ordini non dichiarati e dal report delle
+  // dichiarazioni: li legge, e il salvataggio si rinvia anche sui loro
+  // caricamenti (TIPI_RINVIO.chiusura piu' TIPI_PROPOSTE in chiusuraAnno).
+  { nome: 'chiusuraAnno', corpo: { anno: 2025, azione: 'salva' }, scrive: null, legge: ['dichiarazioni_trattamento', 'ordini_non_dichiarati', 'primarie', 'secondarie', 'terziarie'] },
   { nome: 'prefatturaEcotyre', corpo: { azione: 'carica', anno: 2026, mese: 'Settembre', nome_file: 'prefattura.xlsx', file_uri: 'privato/prefattura.xlsx' }, scrive: null, soloPrima: true, legge: ['primarie', 'terziarie'],
     misura: { corpo: { azione: 'confronta', anno: 2026, mese: 'Settembre' }, archivi: PREFATTURA_CARICATA } },
   { nome: 'riepilogoDichiarazioni', corpo: { registra: true }, scrive: /IndicatoreGiorno/, legge: ['dichiarazioni_trattamento', 'ordini_non_dichiarati', 'primarie', 'secondarie', 'terziarie'] },

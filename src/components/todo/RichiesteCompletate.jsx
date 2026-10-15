@@ -2,7 +2,8 @@ import React from 'react';
 import { CheckSquare, Square, Loader2 } from 'lucide-react';
 import SezioneCompletati from '@/components/todo/SezioneCompletati';
 import { completamentoRichiesta, testoCompletamentoRichiesta, gg } from '@/lib/todoSezioni';
-import { listaOrdini } from '@/lib/richiesteEct';
+import { listaOrdini, annoRichiesta } from '@/lib/richiesteEct';
+import { oggiRoma } from '@/lib/giornoItaliano';
 
 // LE RICHIESTE ECT COMPLETATE (richiesta dell'utente del 12/10/2026). Una
 // richiesta evasa - da sola, perche' i suoi ordini risultano terminati, dal
@@ -22,6 +23,13 @@ import { listaOrdini } from '@/lib/richiesteEct';
 // `tutte` sono le completate (gia' ordinate da dividiRichieste), `righe` quelle
 // da mostrare (con la ricerca in corso); `esitoDi` e' la regola della pagina.
 export default function RichiesteCompletate({ tutte = [], righe = tutte, esitoDi = (r) => r.esito, isAdmin = false, occupato = null, onSpunta = () => {} }) {
+  // UNA RICHIESTA DELL'ANNO PRIMA LO DICE (chiusura della prova generale del
+  // cambio d'anno, 15/10/2026). Da gennaio fra le completate restano anche le
+  // richieste di dicembre chiuse nell'anno nuovo (richiesteDellaTodo): come nella
+  // tabella delle da fare, la scheda scrive «richiesta del 2026». L'anno e'
+  // quello salvato, o quello della mail; oggi e' il giorno italiano.
+  const annoOggi = Number(oggiRoma().slice(0, 4));
+  const annoDi = (r) => Number(r && r.anno) || annoRichiesta(r);
   const daRispondere = tutte.filter(r => (completamentoRichiesta(r, esitoDi(r)) || {}).da_rispondere).length;
   const nota = daRispondere
     ? `${daRispondere === 1 ? 'una aspetta' : `${daRispondere} aspettano`} la risposta al consorzio e la spunta`
@@ -75,6 +83,7 @@ export default function RichiesteCompletate({ tutte = [], righe = tutte, esitoDi
             <p className="text-xs text-muted-foreground">
               Mail del {gg(r.mail_inviata_il) || '—'}{r.scadenza ? `, entro il ${gg(r.scadenza)}` : ''}{r.trasportatore ? ` · ${r.trasportatore}` : ''}
             </p>
+            {annoDi(r) && annoDi(r) !== annoOggi && <p className="text-[11px] text-amber-800">richiesta del {annoDi(r)}</p>}
             {r.nota && <p className="text-[11px] text-muted-foreground break-words">{r.nota}</p>}
           </div>
         );

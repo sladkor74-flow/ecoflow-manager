@@ -15,8 +15,19 @@
 import { base44 } from '@/api/base44Client';
 import { tonnellate } from '@/lib/target';
 import { oggiRoma } from '@/lib/giornoItaliano';
+import { targetCopiatiDelleRighe, fraseTargetCopiati, segnoTargetCopiati } from '@/lib/andamentoTarget';
 
 const ilGiorno = (g) => (g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : '');
+// I TARGET COPIATI E NON CONFERMATI (prova generale del cambio d'anno, revisione
+// del 15/10/2026). La pagina dice «copiato, da confermare» sulla riga e quanti
+// sono sopra la tabella (TargetTable, ReportGenerale); PDF e presentazione
+// dell'Andamento mostravano target annuo e residuo dei target copiati come
+// decisi. Ora lo dicono con le stesse parole (fraseTargetCopiati e
+// segnoTargetCopiati di andamentoTarget): copiati e' il conto dell'anno che la
+// pagina passa (targetCopiatiDellAnno, lo stesso della frase della pagina);
+// senza, si contano le righe.
+const conSegnoCopiato = (r) => { const s = segnoTargetCopiati(r); return s ? `${r.raccoglitore} (${s})` : r.raccoglitore; };
+const notaCopiati = (righe, copiati, anno) => fraseTargetCopiati(copiati && copiati.copiati !== undefined ? copiati : targetCopiatiDelleRighe(righe), anno);
 const NOTA_IMPIANTI = "Primarie RETE ricevute dagli impianti: solo le primarie, per impianto di destinazione e mese di fine trasporto. Non è il «Conferito RETE» delle Giacenze, che conta anche le secondarie in arrivo.";
 
 function downloadBlob(blob, filename) {
@@ -51,7 +62,7 @@ export async function exportExcel(anno) {
 //
 // E le colonne dicono di quale canale sono: questi numeri sono di RETE (il
 // raccolto arriva da computeRaccolto con canale rete), non del totale conferito.
-export async function exportPDF(kpis, mergedData, regioneData, impiantiData, anno) {
+export async function exportPDF(kpis, mergedData, regioneData, impiantiData, anno, copiati = null) {
   const { esportaSezioniPdf } = await import('@/lib/esportaTabella');
   const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
   await esportaSezioniPdf({
@@ -76,7 +87,7 @@ export async function exportPDF(kpis, mergedData, regioneData, impiantiData, ann
           { titolo: 'Residuo', tipo: 't', peso: 1 },
         ],
         righe: (mergedData || []).map(r => ({
-          celle: [r.regione, r.raccoglitore, num(r.targetAnnuo), num(r.raccoltoTotale), num(r.leftover)],
+          celle: [r.regione, conSegnoCopiato(r), num(r.targetAnnuo), num(r.raccoltoTotale), num(r.leftover)],
         })),
       },
       {
@@ -97,10 +108,11 @@ export async function exportPDF(kpis, mergedData, regioneData, impiantiData, ann
       },
     ],
     note: [
+      notaCopiati(mergedData, copiati, anno),
       'Tutti i numeri sono del canale RETE: ACI ed extra raccolta sono canali a se, e non si sommano mai.',
       'Residuo: target annuo meno raccolto, quanto manca (negativo: target superato).',
       NOTA_IMPIANTI,
-    ],
+    ].filter(Boolean),
   });
 }
 
@@ -119,7 +131,7 @@ export async function exportPDF(kpis, mergedData, regioneData, impiantiData, ann
 // xlsx, jspdf ed exceljs (AGENTS.md, «Le librerie pesanti si caricano quando
 // servono»), si prende qui dentro; la funzione era gia' asincrona e il pulsante
 // (ExportButtons) la aspetta. prove/pacchettiLeggeri.mjs lo controlla.
-export async function exportPPT(kpis, mergedData, regioneData, impiantiData, anno) {
+export async function exportPPT(kpis, mergedData, regioneData, impiantiData, anno, copiati = null) {
   const k = kpis || {};
   const { default: pptxgen } = await import('pptxgenjs');
   const pptx = new pptxgen();
@@ -164,9 +176,12 @@ export async function exportPPT(kpis, mergedData, regioneData, impiantiData, ann
   s2.addText('Target e raccolto per raccoglitore (RETE)', { x: 0.5, y: 0.3, fontSize: 24, bold: true, color: '1A1A2E' });
   const raccRows = [['Regione', 'Raccoglitore', 'Target annuo [t]', 'Raccolto RETE [t]', 'Residuo [t]']];
   for (const r of mergedData || []) {
-    raccRows.push([String(r.regione).substring(0, 15), String(r.raccoglitore).substring(0, 20), tonnellate(r.targetAnnuo), tonnellate(r.raccoltoTotale), tonnellate(r.leftover)]);
+    const segno = segnoTargetCopiati(r);
+    raccRows.push([String(r.regione).substring(0, 15), String(r.raccoglitore).substring(0, 20) + (segno ? ` (${segno})` : ''), tonnellate(r.targetAnnuo), tonnellate(r.raccoltoTotale), tonnellate(r.leftover)]);
   }
-  s2.addTable(raccRows, { x: 0.5, y: 1, w: 12, fontSize: 9, border: { type: 'solid', pt: 1 }, colW: [2, 4, 2, 2, 2] });
+  const fraseCopiati = notaCopiati(mergedData, copiati, anno);
+  if (fraseCopiati) s2.addText(fraseCopiati, { x: 0.5, y: 0.8, w: 12, fontSize: 10, color: 'B45309' });
+  s2.addTable(raccRows, { x: 0.5, y: fraseCopiati ? 1.2 : 1, w: 12, fontSize: 9, border: { type: 'solid', pt: 1 }, colW: [2, 4, 2, 2, 2] });
 
   // Slide 3: regioni
   const s3 = pptx.addSlide();

@@ -17,7 +17,13 @@ const TIPS = [
 ];
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta', anomalie: 'Anomalie e sospesi' };
 
-const statoRiga = (r) => (r.sospesa ? 'sospesa' : r.stato_validazione === 'errore' ? 'errore' : 'ok');
+// LA RIGA PREZZATA CON UNA TARIFFA COPIATA E NON CONFERMATA (prova generale del
+// cambio d'anno, 15/10/2026, difetto 15): il calcolo la fa «da_controllare» con
+// la nota «prezzo copiato dal 2026 ...», e la verifica del documento si ferma
+// finche' la tariffa non e' confermata (decisione dell'utente del 15/10/2026).
+// Qui usciva «ok» in verde: ora «da confermare», in ambra, con la nota.
+const daConfermareRiga = (r) => !r.sospesa && r.stato_validazione === 'da_controllare';
+const statoRiga = (r) => (r.sospesa ? 'sospesa' : r.stato_validazione === 'errore' ? 'errore' : daConfermareRiga(r) ? 'da confermare' : 'ok');
 // Gli importi e i prezzi vengono da formatoSoldi (chiusura dell'audit,
 // 11/10/2026): qui un totale che mancava diventava «€ 0,00», e il prezzo usciva
 // sempre a quattro decimali («€ 202,0000»).
@@ -76,7 +82,7 @@ export function opzioniEsportazione(chiave, righe, periodoTesto) {
     },
     // 'surplus' dice a esportaTabella che la riga e' del surplus: nel PDF ha la
     // forma dei fogli della passiva, indaco in corsivo con la barra (13/10/2026)
-    colore: (r) => (eRigaSurplus(r) ? 'surplus' : r.sospesa ? 'ambra' : r.stato_validazione === 'errore' ? 'rosso' : null),
+    colore: (r) => (eRigaSurplus(r) ? 'surplus' : r.sospesa || daConfermareRiga(r) ? 'ambra' : r.stato_validazione === 'errore' ? 'rosso' : null),
   };
 }
 
@@ -144,6 +150,7 @@ export function TabellaRighe({ righe, onApri = () => {} }) {
               <td className="text-center px-2 py-1.5">
                 {r.sospesa ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">sospesa</span>
                   : r.stato_validazione === 'errore' ? <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">errore</span>
+                  : daConfermareRiga(r) ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700" title={r.note || ''}>da confermare</span>
                   : <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">ok</span>}
               </td>
             </tr>
@@ -165,6 +172,7 @@ export default function AttivaDetail({ data, loading, periodo }) {
   const allRighe = [...(data.RETE?.righe || []), ...(data.ACI?.righe || []), ...(data.EXTRA_RACCOLTA?.righe || [])];
   const sospese = allRighe.filter(r => r.sospesa);
   const errori = allRighe.filter(r => r.stato_validazione === 'errore');
+  const daConfermare = allRighe.filter(daConfermareRiga);
   const periodoTesto = periodo ? `${periodo.mese} ${periodo.anno}` : '';
 
   const esporta = async (formato, chiave, righe) => {
@@ -200,7 +208,7 @@ export default function AttivaDetail({ data, loading, periodo }) {
 
   const renderTable = (righe) => <TabellaRighe righe={righe} onApri={setSelectedRiga} />;
 
-  const anomalie = [...sospese, ...errori.filter(r => !r.sospesa)];
+  const anomalie = [...sospese, ...errori.filter(r => !r.sospesa), ...daConfermare];
 
   return (
     <>
@@ -208,7 +216,7 @@ export default function AttivaDetail({ data, loading, periodo }) {
         <TabsList>
           {/* il numero e' quello dei formulari: la riga del surplus non e' una prestazione */}
           {TIPS.map(t => <TabsTrigger key={t.key} value={t.key}>{t.label} ({soloFormulari(data[t.key]?.righe).length})</TabsTrigger>)}
-          <TabsTrigger value="anomalie">Anomalie & Sospesi ({sospese.length + errori.length})</TabsTrigger>
+          <TabsTrigger value="anomalie">Anomalie & Sospesi ({sospese.length + errori.length + daConfermare.length})</TabsTrigger>
         </TabsList>
         {TIPS.map(t => (
           <TabsContent key={t.key} value={t.key} className="mt-3">
@@ -217,7 +225,7 @@ export default function AttivaDetail({ data, loading, periodo }) {
           </TabsContent>
         ))}
         <TabsContent value="anomalie" className="mt-3">
-          {sospese.length === 0 && errori.length === 0 ? (
+          {sospese.length === 0 && errori.length === 0 && daConfermare.length === 0 ? (
             <div className="text-center py-6 text-green-600">Nessuna anomalia. Tutte le prestazioni sono verificate.</div>
           ) : (
             <div className="space-y-3">
@@ -232,6 +240,13 @@ export default function AttivaDetail({ data, loading, periodo }) {
                 <div>
                   <h3 className="font-semibold text-red-700 mb-2">🔴 Prestazioni con Errori ({errori.length})</h3>
                   {renderTable(errori)}
+                </div>
+              )}
+              {daConfermare.length > 0 && (
+                <div>
+                  <h3 className="font-semibold text-amber-700 mb-2">Prestazioni con la tariffa da confermare ({daConfermare.length})</h3>
+                  <p className="text-xs text-muted-foreground mb-2">Prezzate con una tariffa copiata dall'anno prima e non ancora confermata: il documento non si verifica finché non la confermi in Target & Status › Nuovo anno e rielabori il mese.</p>
+                  {renderTable(daConfermare)}
                 </div>
               )}
             </div>

@@ -250,6 +250,7 @@ export const MODULI = [
       'Le schede Andamento, Target raccoglitori, Commessa Ecotyre, Impianti e stoccaggi, Zone dei raccoglitori e Nuovo anno.',
       'Un anno chiuso si consulta in sola lettura.',
       'Nuovo anno: che cosa manca all’anno nuovo per cominciare. Contratti e tariffe scadono il 31 dicembre.',
+      'Le tariffe copiate dall’anno prima con «Prepara le tariffe» si confermano nella scheda Nuovo anno: finché non lo sono, le righe che le usano restano «da confermare» e il documento del mese non si verifica.',
     ],
     esporti: ['Nella scheda Andamento: Excel, PDF e presentazione (PPT).'],
     soloAmministratore: [
@@ -454,6 +455,7 @@ export const MODULI = [
       'Due sezioni: Attività e Richieste ECT.',
       'Un’attività con l’ID ordine si chiude da sola quando l’ordine diventa terminato. Se il portale cancella l’ordine, passa da sola fra le cancellate.',
       'Il numero blu nel menu accanto a To-Do List: le attività da fare.',
+      'Una richiesta ECT dell’anno prima resta finché non si chiude, e porta scritto «richiesta del» e il suo anno.',
     ],
     esporti: [],
     senzaEsportazioni: 'Questa pagina non ha esportazioni.',
@@ -607,6 +609,7 @@ export const SEZIONI = [
         elementi: [
           { testo: 'Di’ se vuoi gli ordini aperti o quelli chiusi, il canale (rete, ACI, extra raccolta), il periodo e la provincia.' },
           { testo: 'Se dici «ordini» con un periodo, EcoTyna guarda quelli chiusi; senza un periodo, quelli aperti.' },
+          { testo: 'Un mese senza l’anno è l’ultimo già cominciato: a gennaio «dicembre» è il dicembre dell’anno prima, e la risposta dice l’anno.' },
           { testo: 'Per un ordine preciso scrivi il suo ID o il numero del formulario.' },
         ],
       },

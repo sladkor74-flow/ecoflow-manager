@@ -95,7 +95,14 @@ export default async function(req) {
     // come gli esclusi, la pagina lo rimanda indietro nell'aggiornamento rapido.
     let soggettiDaDate = daCorpo && Array.isArray(body.soggetti_da_date) ? body.soggetti_da_date : [];
     if (!soggetti) {
-      const esito = await individuaSoggetti(base44, anno);
+      // Da gennaio a marzo anche chi ha lavorato nell'ultimo trimestre dell'anno
+      // prima (individuaSoggetti con oggi, prova generale del cambio d'anno del
+      // 15/10/2026), come il controllo delle 7:30: senza, il 05/01/2027 la
+      // pagina, la fatturazione passiva e il ricalcolo dopo un caricamento
+      // trovavano 0 soggetti, la CQC di un fornitore del 2026 tornava «errore
+      // del catalogo», e il riepilogo del 2027 scritto giusto alle 7:30 si
+      // riscriveva senza gli scaduti.
+      const esito = await individuaSoggetti(base44, anno, { oggi });
       soggetti = esito.soggetti;
       esclusi = esito.esclusi;
       soggettiDaDate = esito.soggetti_da_date || [];

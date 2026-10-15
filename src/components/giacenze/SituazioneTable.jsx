@@ -567,7 +567,11 @@ export default function SituazioneTable({ righe, totali, onVaiDaDichiarare }) {
                     questo dipende dal canale, e i numeri dei canali stanno nelle
                     righe sotto, una per canale. */}
                 <tr className="border-t-2 bg-muted/20">
-                  <td className="px-3 py-2 font-medium">{r.sito}<DateRiga r={r} /></td>
+                  <td className="px-3 py-2 font-medium">{r.sito}<DateRiga r={r} />
+                    {/* Portato dall'anno prima finche' la riga dell'anno non c'e', da
+                        confermare sul contratto (decisione dell'utente del 15/10/2026, D3). */}
+                    {r.nota_portata && <span className="block text-[11px] font-normal text-amber-800">portato {r.nota_portata}</span>}
+                  </td>
                   <td className="px-3 py-2">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
                       r.tipo_destinazione === 'imp'

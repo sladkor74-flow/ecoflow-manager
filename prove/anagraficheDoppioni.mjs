@@ -74,7 +74,9 @@ console.log('2. LE TARIFFE DELLO STESSO FORNITORE SCRITTO IN DUE MODI');
   // la rinegoziazione: una tariffa aperta dello stesso fornitore scritto
   // nell'altro modo si chiude il giorno prima, come quella dello stesso id
   const aperta = { ...DB, Tariffa: [{ ...DB.Tariffa[0], data_fine_validita: '' }] };
-  const rineg = await chiama(modulo, { db: aperta, corpo: { entita: 'Tariffa', operazione: 'create', dati: { ...t27, data_fine_validita: '' } } });
+  // la tariffa nuova ha la sua fine: dalla prova generale del cambio d'anno
+  // (15/10/2026, difetto 7) una rete senza fine al 31/12 non si salva piu'
+  const rineg = await chiama(modulo, { db: aperta, corpo: { entita: 'Tariffa', operazione: 'create', dati: t27 } });
   verifica('rinegoziare chiude la tariffa aperta dell\'altra grafia il 31/05', rineg.stato === 200 && rineg.scritte.some(w => w.op === 'update' && w.id === 't26' && w.dati.data_fine_validita === '2026-05-31'), JSON.stringify(rineg.scritte));
   // una tariffa disattivata non e' un conflitto: non vale mai
   const spenta = { ...DB, Tariffa: [{ ...DB.Tariffa[0], stato: 'non_attivo' }] };
@@ -88,7 +90,8 @@ console.log('2. LE TARIFFE DELLO STESSO FORNITORE SCRITTO IN DUE MODI');
 
 console.log("3. L'UNITA' DI MISURA ANCHE SULLE PASSIVE");
 {
-  const base = { direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_id: 'fC', fornitore_nome: 'ALFA SRL', stato: 'attivo', data_inizio_validita: '2027-01-01' };
+  // con la fine al 31/12 dell'anno, come vuole una rete dal 15/10/2026 (difetto 7)
+  const base = { direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_id: 'fC', fornitore_nome: 'ALFA SRL', stato: 'attivo', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31' };
   const kg = await chiama(modulo, { db: DB, corpo: { entita: 'Tariffa', operazione: 'create', dati: { ...base, unita_misura: '€/kg', valore: 90 } } });
   verifica('90 €/kg su una passiva: errore (90.000 euro a tonnellata)', kg.stato === 400 && /€\/kg/.test(kg.j.error || '') && creati(kg, 'Tariffa').length === 0, JSON.stringify(kg.j));
   const t = await chiama(modulo, { db: DB, corpo: { entita: 'Tariffa', operazione: 'create', dati: { ...base, unita_misura: '€/t', valore: 0.09 } } });

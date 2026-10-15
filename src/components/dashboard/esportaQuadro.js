@@ -115,11 +115,22 @@ export function argomentiQuadroPdf({ quadro, impianti = null, annoInCorso = fals
   }
   // L'ECONOMIA: solo se chi esporta e' l'amministratore e la chiede.
   if (conEconomia && isAdmin && margine && Array.isArray(margine.canali)) {
+    // UN MARGINE CON PREZZI MANCANTI E' «—», E IL DOCUMENTO DICE PERCHE' (prova
+    // generale del cambio d'anno, 15/10/2026). Il calcolo mette margine, % ed €/t
+    // a null quando mancano dei prezzi e scrive la frase (testo_prezzi_mancanti):
+    // qui il PDF usciva coi trattini e basta, mentre la pagina e il riepilogo
+    // della settimana dicono perche' e che ricavo e costo sono parziali. Le
+    // stesse parole del riepilogo della settimana, anche per le righe con una
+    // tariffa copiata e da confermare (testo_da_confermare).
+    const nota = (x) => [
+      x.testo_prezzi_mancanti ? `${x.testo_prezzi_mancanti}; ricavo e costo parziali` : (x.parziale ? 'ricavo e costo parziali' : ''),
+      x.testo_da_confermare || '',
+    ].filter(Boolean).join('; ');
     sezioni.push({
       titolo: `Economia della commessa ${anno} (riservato: tre commesse, tre margini, non si sommano)`,
       colonne: [{ titolo: 'Canale', peso: 1.6 }, { titolo: 'Ricavo', tipo: 'euro' }, { titolo: 'Costo', tipo: 'euro' }, { titolo: 'Margine', tipo: 'euro' },
-        { titolo: '% del ricavo', tipo: 'percentuale' }, { titolo: 'Tonnellate', tipo: 't' }, { titolo: 'Ricavo per t', tipo: 'euro' }, { titolo: 'Costo per t', tipo: 'euro' }],
-      righe: margine.canali.map(c => ({ celle: [NOMI_CANALE[c.canale] || c.canale, n(c.anno.ricavo), n(c.anno.costo), n(c.anno.margine), n(c.anno.margine_pct), n(c.anno.tonnellate), n(c.anno.ricavo_t), n(c.anno.costo_t)] })),
+        { titolo: '% del ricavo', tipo: 'percentuale' }, { titolo: 'Tonnellate', tipo: 't' }, { titolo: 'Ricavo per t', tipo: 'euro' }, { titolo: 'Costo per t', tipo: 'euro' }, { titolo: 'Nota', peso: 2.4 }],
+      righe: margine.canali.map(c => ({ celle: [NOMI_CANALE[c.canale] || c.canale, n(c.anno.ricavo), n(c.anno.costo), n(c.anno.margine), n(c.anno.margine_pct), n(c.anno.tonnellate), n(c.anno.ricavo_t), n(c.anno.costo_t), nota(c.anno)] })),
     });
   }
 

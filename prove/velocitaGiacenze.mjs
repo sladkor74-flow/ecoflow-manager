@@ -280,7 +280,11 @@ console.log('1. SU UN ARCHIVIO COSTRUITO');
     Secondaria: [{ id: id('s', 1), id_ordine: 'SEC1', stato: 'terminato', stoccaggio: NAPPI, destinazione: ALFA, tipo_destinazione: 'imp', peso_effettivo: 5000, prodotto: '.class1', classe: 'P - fino a 35 kg', ordine_immesso_il: '2026-03-01T08:00:00Z', trasporto_iniziato_il: '2026-03-02T08:00:00Z', trasporto_finito_il: '2026-03-02T12:00:00Z' }],
     GiacenzaSito: [
       { id: id('g', 1), sito: ALFA, tipo_destinazione: 'imp', anno: 2025, dichiara_rete: true },
-      { id: id('g', 2), sito: ALFA, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: true, apertura_del: '2025-12-31', giacenza_riferimento_t: 12 },
+      // la lettura del 31/12 ha tutti e due i canali: dalla prova generale del
+      // cambio d'anno (15/10/2026, difetto 6) un'ACI mai scritta su una riga con
+      // apertura_del non e' zero ma «—», e il confronto col commit 5939d15, che
+      // la leggeva zero, non varrebbe piu'
+      { id: id('g', 2), sito: ALFA, tipo_destinazione: 'imp', anno: 2026, dichiara_rete: true, apertura_del: '2025-12-31', giacenza_riferimento_t: 12, giacenza_riferimento_aci_t: 0 },
       { id: id('g', 3), sito: NAPPI, tipo_destinazione: 'stoc', anno: 2026 },
     ],
     GiacenzaStoccaggio: [{ id: id('r', 1), sito: NAPPI, data_rilevazione: '2025-12-31', class1_kg: 20000, class9_kg: 0 }],

@@ -276,7 +276,13 @@ export async function situazioneGestionale(base44, oggi) {
     const quotaTesto = quota === null
       ? (finoAlRete === null
         ? "quota attesa non calcolabile: non si e' potuto leggere fin dove arrivano i dati della rete"
-        : 'quota attesa non calcolabile: nessun ritiro RETE terminato con la fine trasporto')
+        // L'anno in corso coi dati fermi all'anno prima (gennaio, prima del primo
+        // ritiro terminato): l'atteso non c'e' ancora, non e' zero, e si dice
+        // perche', come la Dashboard e Target & Status (giornoDellaMisura di
+        // attesoContratto.ts, prova generale del cambio d'anno del 15/10/2026).
+        : giornoDati && Number(giornoDati.slice(0, 4)) < anno
+          ? `quota attesa non calcolabile: nessun ritiro RETE del ${anno} e' ancora terminato (l'ultimo e' del ${ilGiorno(giornoDati)}): l'atteso del ${anno} non c'e' ancora, non e' zero, come nella Dashboard e in Target & Status`
+          : 'quota attesa non calcolabile: nessun ritiro RETE terminato con la fine trasporto')
       : `quota attesa a oggi ${p1(quota * 100)}% del target, contata sui giorni coperti dai dati (fino al ${ilGiorno(giornoDati)}, l'ultima fine trasporto di un ritiro RETE terminato) e sul profilo mensile del contratto, come la Dashboard e Target & Status`;
     const targetTesto = contratto.t === null
       ? 'target annuo non inserito nel contratto'

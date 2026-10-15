@@ -131,6 +131,11 @@ export const CAMPI_TRACCIATI = {
     soggetto: { nome: 'soggetto', unita: 'testo' },
     voce: { nome: 'voce', unita: 'testo', predefinito: '' },
     prezzo: { nome: 'prezzo', unita: 'prezzo_voce' },
+    // L'anno del prezzo della voce (prova generale del cambio d'anno, 15/10/2026;
+    // D5, decisione dell'utente del 15/10/2026): confermare un prezzo del 2026
+    // anche per il 2027 cambia solo lui, e il foglio dell'amministrazione passa
+    // da «—» a un totale. E' un numero che fa i conti: lo storico lo registra.
+    prezzo_anno: { nome: 'anno del prezzo', unita: 'testo' },
     unita_misura: { nome: 'unità di misura', unita: 'testo', predefinito: 'euro_tonnellata' },
     criterio_json: { nome: 'criterio dei movimenti', unita: 'json' },
     attiva: { nome: 'attiva nel foglio', unita: 'si_no', predefinito: true },

@@ -38,6 +38,9 @@ const chiaveRiga = (sito, td) => `${String(sito || '').trim().toLowerCase()}|${t
 // finisce nello storico delle modifiche, che si apre nella scheda del sito.
 const ORIGINE = 'Giacenze, siti e target';
 
+// Un numero scritto nel campo: vuoto, null o assente non lo sono (15/10/2026).
+const scritta = (v) => v !== undefined && v !== null && v !== '';
+
 const NOTA_APERTURA_PIAZZALE = "Conta solo per un piazzale senza nessuna rilevazione del portale: con una lettura l'apertura è l'ancora (la rilevazione del 31/12 dell'anno prima, o la prima dell'anno), portata al 31/12.";
 
 export default function TargetManager({ open, onClose, anno, destinazioni, righe = [], onSaved }) {
@@ -82,7 +85,13 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
         // target_totale_t e target_primarie_t non si toccano: i vecchi valori
         // restano dove sono e servono solo finche' il target non e' portato
         // in Target & Status.
-        giacenza_riferimento_t: Number(form.giacenza_riferimento_t) || 0,
+        // UN'APERTURA MAI SCRITTA RESTA NON SCRITTA (chiusura della prova
+        // generale del cambio d'anno, 15/10/2026, difetto 6). Qui si salvava 0
+        // anche se il campo non c'era e nessuno l'aveva toccato: salvando la
+        // tipologia di un impianto del 2027 senza la chiusura del 2026, la sua
+        // apertura diventava uno zero scritto a mano. Si scrive solo se c'e' o se
+        // e' stata scritta qui; un impianto nuovo parte da zero (startNew).
+        ...(scritta(form.giacenza_riferimento_t) ? { giacenza_riferimento_t: Number(form.giacenza_riferimento_t) || 0 } : {}),
         tipologia_trattamento: form.tipologia_trattamento || 'n.a.',
         note: form.note || '',
       };
@@ -144,7 +153,7 @@ export default function TargetManager({ open, onClose, anno, destinazioni, righe
                 <label className="text-xs text-muted-foreground block mb-1">
                   {form.tipo_destinazione === 'stoc' ? 'Apertura di rete (t), solo senza rilevazioni' : 'Giacenza di riferimento (t)'}
                 </label>
-                <Input type="number" step="0.01" value={form.giacenza_riferimento_t || 0} onChange={e => setForm({ ...form, giacenza_riferimento_t: Number(e.target.value) })} />
+                <Input type="number" step="0.01" placeholder="—" value={scritta(form.giacenza_riferimento_t) ? form.giacenza_riferimento_t : ''} onChange={e => setForm({ ...form, giacenza_riferimento_t: e.target.value === '' ? '' : Number(e.target.value) })} />
                 {form.tipo_destinazione === 'stoc' && <p className="text-[11px] text-muted-foreground mt-0.5">{NOTA_APERTURA_PIAZZALE}</p>}
               </div>
             </div>

@@ -157,11 +157,15 @@ export function Riconciliazione({ r, sito, righeGiacenze = null, chiusi = null }
       </div>
     );
   }
-  if (r.non_dovuta) return <p className="text-xs text-muted-foreground">Per accordo {nome} non ci dichiara la rete: il portale non tiene per noi una giacenza di rete, e non c&apos;è niente da riconciliare.</p>;
+  // Un impianto senza la riga dell'anno e' portato dall'anno prima, da
+  // confermare sul contratto (decisione dell'utente del 15/10/2026, D3): lo dice.
+  const portato = r.nota_portata ? <p className="text-amber-800">Portato {r.nota_portata}: la riga dell&apos;anno la scrivono la copia d&apos;anno o la chiusura.</p> : null;
+  if (r.non_dovuta) return <div className="text-xs text-muted-foreground space-y-1"><p>Per accordo {nome} non ci dichiara la rete: il portale non tiene per noi una giacenza di rete, e non c&apos;è niente da riconciliare.</p>{portato}</div>;
   const dellAnno = r.carichi_del !== null && r.carichi_del !== undefined;
   const ignoti = dellAnno ? null : senzaFineIgnoti(righeGiacenze, nome);
   return (
     <div className="text-xs border rounded-lg bg-card px-3 py-2 space-y-1">
+      {portato}
       {dellAnno ? (
         <p>
           <strong>Ordini dei carichi del {r.carichi_del} ancora da dichiarare oggi:</strong>{' '}
@@ -250,7 +254,7 @@ export function RiconciliazioneSiti({ r }) {
           <tbody>
             {impianti.map(x => (
               <tr key={x.sito}>
-                <td className="pr-3">{x.sito}</td>
+                <td className="pr-3">{x.sito}{x.nota_portata && <span className="block text-amber-800">portato {x.nota_portata}</span>}</td>
                 {x.non_dovuta ? (
                   <td className="pr-3 text-muted-foreground" colSpan={dellAnno ? 2 : 4}>per accordo non ci dichiara la rete: —</td>
                 ) : (

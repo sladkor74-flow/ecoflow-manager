@@ -55,7 +55,9 @@ async function presidiaDocumenti(req) {
     // dell'intestatario: si prende una volta sola per tutto il giro.
     let contesti = new Map();
     try {
-      const { soggetti } = await individuaSoggetti(base44, anno);
+      // con oggi: da gennaio a marzo anche i soggetti dell'ultimo trimestre
+      // dell'anno prima, come il controllo delle 7:30 (15/10/2026)
+      const { soggetti } = await individuaSoggetti(base44, anno, { oggi: oggiRoma() });
       contesti = new Map(soggetti.map(s => [s.chiave, { nome: s.nome, piva: s.piva, codice_fiscale: s.codice_fiscale }]));
     } catch (_e) { /* senza contesto si usa il nome scritto sul documento */ }
 

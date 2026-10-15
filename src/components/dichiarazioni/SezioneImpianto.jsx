@@ -33,7 +33,10 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
   const operazione = OPERAZIONI[sito.operazione];
   // Il perche' di un «—» di questo impianto: l'anno prima del gestionale, o
   // quello che dice la quadratura dell'anno chiuso.
-  const perche = sito.perche_prima_del_gestionale || (sito.quadratura_anno_chiuso && sito.quadratura_anno_chiuso.perche) || '';
+  // E l'apertura del 31/12 che manca (chiusura della prova generale del cambio
+  // d'anno, 15/10/2026, difetto 6): il riepilogo manda null la giacenza iniziale,
+  // la calcolata e quello che resta, col perche' in perche_senza_apertura.
+  const perche = sito.perche_prima_del_gestionale || sito.perche_senza_apertura || (sito.quadratura_anno_chiuso && sito.quadratura_anno_chiuso.perche) || '';
   return (
     <div className="border rounded-xl bg-card overflow-hidden">
       <div className="px-4 py-3 border-b bg-muted/30 flex flex-wrap items-start justify-between gap-3">
@@ -55,6 +58,14 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
               Della rete non manda dichiarazione, perche' quel trattamento non glielo paghiamo: qui si seguono le sue dichiarazioni ACI.
             </p>
           )}
+          {/* Un impianto senza la riga dell'anno e' portato dall'anno prima, coi
+              suoi ruolo e «dichiara la rete», da confermare sul contratto
+              (decisione dell'utente del 15/10/2026, D3): lo si dice qui. */}
+          {sito.nota_portata && (
+            <p className="text-xs text-amber-800 mt-0.5">
+              Portato {sito.nota_portata}: la riga dell&apos;anno la scrivono la copia d&apos;anno o la chiusura.
+            </p>
+          )}
         </div>
         <div className="text-right text-sm">
           {sito.quadra === true && <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="w-4 h-4" /> giacenza in linea con il portale</span>}
@@ -63,8 +74,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
               chiusura, non col portale di oggi; senza quella lettura la
               quadratura non si fa, e si dice perche' (11/10/2026). */}
           {/* Un anno prima del gestionale lo dice com'e', come la Quadratura (13/10/2026). */}
+          {/* Senza l'apertura del 31/12 la quadratura non si fa: non e' «il
+              portale non c'e'», e' il punto di partenza che manca (15/10/2026). */}
           {sito.quadra === null && (sito.prima_del_gestionale
             ? <span className="text-muted-foreground text-xs cursor-help" title={perche}>prima del gestionale: la giacenza non si ricostruisce</span>
+            : sito.perche_senza_apertura
+              ? <span className="text-amber-800 text-xs cursor-help" title={sito.perche_senza_apertura}>manca l&apos;apertura del 31/12: la giacenza di rete non si calcola</span>
             : sito.quadratura_anno_chiuso && !sito.quadratura_anno_chiuso.lettura
               ? <span className="text-muted-foreground text-xs cursor-help" title={sito.quadratura_anno_chiuso.perche}>anno chiuso: la quadratura col portale vale per l&apos;anno in corso</span>
               : <span className="text-muted-foreground text-xs">giacenza a portale non disponibile</span>)}
@@ -89,7 +104,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
         // La giacenza dall'anno prima e' una riga della tabella anche a gennaio,
         // quando e' l'unica cosa che c'e' (11/10/2026).
         const prima = flusso.dall_anno_prima && (flusso.dall_anno_prima.conferito_kg > 0 || flusso.dall_anno_prima.uscito_kg > 0) ? flusso.dall_anno_prima : null;
-        if (!mesiConDati.length && !prima) return null;
+        // Un canale senza l'apertura del 31/12 si mostra anche senza mesi
+        // (15/10/2026): a gennaio e' l'unica cosa da dire, e la sua giacenza e'
+        // «—», non assente. Il perche' del canale e' suo (flusso.perche).
+        const senzaApertura = !!flusso.senza_apertura;
+        if (!mesiConDati.length && !prima && !senzaApertura) return null;
+        const percheFlusso = flusso.perche || perche;
         const conStoccaggi = flusso.da_stoccaggi_t > 0;
         return (
           <div key={`${flusso.canale}-${flusso.provenienza}`} className="border-b last:border-b-0">
@@ -98,9 +118,12 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
               <span className="text-xs text-muted-foreground font-normal">
                 {/* Di un anno prima del gestionale non ci sono l'apertura e le
                     dichiarazioni scritte qui: «—», non 0,00 (13/10/2026). */}
-                {' '}— {prima ? (flusso.prima_del_gestionale ? <>dall&apos;anno prima <Manca perche={perche} />, </> : `dall'anno prima ${t(flusso.apertura_t)} t, `) : ''}arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {flusso.prima_del_gestionale ? <><Manca perche={perche} />, </> : <>{t(flusso.dichiarato_caricato_t)} t, </>}{flusso.non_dovuta ? 'giacenza: non dovuta per accordo' : flusso.resta_t === null ? <Manca perche={flusso.perche || perche} testo="in giacenza —" /> : `in giacenza ${t(flusso.resta_t)} t`}
+                {' '}— {prima ? (flusso.prima_del_gestionale ? <>dall&apos;anno prima <Manca perche={perche} />, </> : `dall'anno prima ${t(flusso.apertura_t)} t, `) : senzaApertura ? <>dall&apos;anno prima <Manca perche={percheFlusso} />, </> : ''}arrivati {t(flusso.conferito_t)} t{conStoccaggi ? `, di cui ${t(flusso.da_stoccaggi_t)} t in secondaria dagli stoccaggi` : ''}, dichiarati e caricati {flusso.prima_del_gestionale ? <><Manca perche={perche} />, </> : <>{t(flusso.dichiarato_caricato_t)} t, </>}{flusso.non_dovuta ? 'giacenza: non dovuta per accordo' : flusso.resta_t === null ? <Manca perche={flusso.perche || perche} testo="in giacenza —" /> : `in giacenza ${t(flusso.resta_t)} t`}
               </span>
             </p>
+            {!mesiConDati.length && !prima ? (
+              <p className="px-4 pb-3 text-xs text-amber-800">{percheFlusso || "Manca l'apertura del 31/12: quanto resta dell'anno prima non si sa."}</p>
+            ) : (
             <div data-scorre-lato>
               <table className="w-full text-xs">
                 <thead>
@@ -135,7 +158,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                         title={prima.uscito_stimato ? 'Ripartito dal gestionale: il report del portale non ha ancora questa dichiarazione' : 'Agganciato dal portale a carichi degli anni prima, dopo la lettura del 31/12'}>
                         {prima.uscito_kg > 0 ? `${prima.uscito_stimato ? '~' : ''}${kg(prima.uscito_kg)}` : '—'}
                       </td>
-                      <td className={`px-2 py-1.5 text-right tabular-nums ${prima.da_dichiarare_kg > 0 ? 'text-amber-800 font-medium' : 'text-muted-foreground'}`}>{prima.da_dichiarare_kg > 0 ? kg(prima.da_dichiarare_kg) : prima.da_dichiarare_kg === null ? <Manca perche={perche} /> : '—'}</td>
+                      <td className={`px-2 py-1.5 text-right tabular-nums ${prima.da_dichiarare_kg > 0 ? 'text-amber-800 font-medium' : 'text-muted-foreground'}`}>{prima.da_dichiarare_kg > 0 ? kg(prima.da_dichiarare_kg) : prima.da_dichiarare_kg === null ? <Manca perche={percheFlusso} /> : '—'}</td>
                       {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5" />)}
                       {/* null non e' «uscito tutto»: di un anno prima del gestionale non si sa (13/10/2026). */}
                       <td className="px-2 py-1.5 text-muted-foreground">{prima.resta_kg === null ? <Manca perche={perche} testo="non si ricostruisce" /> : prima.resta_kg > 0 ? 'in giacenza' : 'uscito tutto'}</td>
@@ -162,7 +185,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                             : (m.uscito_stimato ? 'Ripartito dal gestionale: il report del portale non ha ancora questa dichiarazione' : '')}>
                           {m.uscito_kg > 0 ? `${m.uscito_stimato ? '~' : ''}${kg(m.uscito_kg)}` : '—'}
                         </td>
-                        <td className={`px-2 py-1.5 text-right tabular-nums ${m.da_dichiarare_kg > 0 ? "text-amber-800 font-medium" : "text-muted-foreground"}`}>{m.da_dichiarare_kg > 0 ? kg(m.da_dichiarare_kg) : m.da_dichiarare_kg === null ? <Manca perche={perche} /> : "—"}</td>
+                        <td className={`px-2 py-1.5 text-right tabular-nums ${m.da_dichiarare_kg > 0 ? "text-amber-800 font-medium" : "text-muted-foreground"}`}>{m.da_dichiarare_kg > 0 ? kg(m.da_dichiarare_kg) : m.da_dichiarare_kg === null ? <Manca perche={percheFlusso} /> : "—"}</td>
                         {materiali.map(x => <td key={x.chiave} className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{kg(d && d[x.chiave])}</td>)}
                         <td className="px-2 py-1.5">
                           {stato === 'caricata' ? <span className="text-emerald-700">caricata a portale</span>
@@ -190,6 +213,7 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         );
       })}
@@ -203,7 +227,8 @@ export default function SezioneImpianto({ sito, onApri, soloLettura }) {
           </span>
         ))}
         {/* Di un anno prima del gestionale l'apertura non c'e': non e' 0,00 (13/10/2026). */}
-        <span>Giacenza al 31/12 dell'anno prima: <strong>{sito.prima_del_gestionale ? <Manca perche={perche} /> : <>{t(sito.giacenza_iniziale_t)} t</>}</strong></span>
+        {/* Senza l'apertura del 31/12 la giacenza da cui si parte e' «—», non 0,00 (15/10/2026). */}
+        <span>Giacenza al 31/12 dell'anno prima: <strong>{sito.prima_del_gestionale || sito.giacenza_iniziale_t === null ? <Manca perche={perche} /> : <>{t(sito.giacenza_iniziale_t)} t</>}</strong></span>
         <span>Primarie di rete arrivate: <strong>{t(sito.conferito_t)} t</strong></span>
         {sito.secondarie_in_t > 0 && <span>Secondarie di rete dagli stoccaggi: <strong>{t(sito.secondarie_in_t)} t</strong></span>}
         {sito.conferito_aci_t > 0 && <span>Primarie ACI: <strong>{t(sito.conferito_aci_t)} t</strong></span>}

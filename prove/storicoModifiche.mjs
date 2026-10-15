@@ -324,7 +324,9 @@ console.log('5. LE FUNZIONI VERE LASCIANO LE RIGHE');
   // Un prezzo senza data di fine si chiude da se' quando ne arriva uno nuovo
   // (gestisciAnagrafiche, caso d): anche la chiusura e' una modifica.
   const aperta = { ...DB, Tariffa: [{ ...DB.Tariffa[0], data_fine_validita: undefined }] };
-  const nuova = await chiama(ga, { db: aperta, corpo: { entita: 'Tariffa', operazione: 'create', dati: { direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_id: 'fE', fornitore_nome: 'EMMESSE SRL', unita_misura: '€/t', valore: 95, stato: 'attivo', data_inizio_validita: '2026-11-01' } } });
+  // La nuova ha la sua fine al 31/12: dalla prova generale del cambio d'anno
+  // (15/10/2026, difetto 7) una rete senza fine non si salva piu'.
+  const nuova = await chiama(ga, { db: aperta, corpo: { entita: 'Tariffa', operazione: 'create', dati: { direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_id: 'fE', fornitore_nome: 'EMMESSE SRL', unita_misura: '€/t', valore: 95, stato: 'attivo', data_inizio_validita: '2026-11-01', data_fine_validita: '2026-12-31' } } });
   const reg2 = nuova.db.ModificaDato || [];
   const chiusura = reg2.find(x => x.record_id === 't1');
   verifica('un prezzo nuovo che chiude il vecchio: la chiusura ha la sua riga e il suo motivo',

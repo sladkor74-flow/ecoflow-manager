@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { annoDiOggi } from '@/lib/periodoPagine';
+import { oggiRoma } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Loader2, Save, Trash2, MapPin, Lightbulb, AlertTriangle } from 'lucide-react';
@@ -20,10 +21,15 @@ import { chiaveNome } from '@/lib/target';
 // ritiri isolati: e' un punto di partenza da correggere, e resta marcata come
 // proposta finche' non la si conferma. Scrive solo l'amministratore.
 
-const ANNI = [annoDiOggi(), annoDiOggi() - 1];
-
 export default function ZoneRaccoglitori({ isAdmin }) {
-  const [anno, setAnno] = useState(ANNI[0]);
+  // GLI ANNI SI CONTANO QUANDO LA PAGINA SI DISEGNA, NON QUANDO IL MODULO SI
+  // CARICA (chiusura della prova generale del cambio d'anno, 15/10/2026, come
+  // le altre pagine col difetto 35). Erano una costante del modulo: con la
+  // scheda aperta dal 31/12/2026, il 04/01/2027 la scheda restava sul 2026 con
+  // [2026, 2025], e il 2027 non si poteva scegliere.
+  const oggi = oggiRoma();
+  const anni = useMemo(() => [annoDiOggi(oggi), annoDiOggi(oggi) - 1], [oggi]);
+  const [anno, setAnno] = useState(() => annoDiOggi());
   const [dati, setDati] = useState(null);
   const [zone, setZone] = useState([]);
   const [bozze, setBozze] = useState({});
@@ -117,7 +123,7 @@ export default function ZoneRaccoglitori({ isAdmin }) {
         <div>
           <label className="block text-xs font-medium mb-1">Anno</label>
           <select className="h-9 rounded-md border bg-background px-2 text-sm" value={anno} onChange={e => setAnno(Number(e.target.value))}>
-            {ANNI.map(a => <option key={a} value={a}>{a}</option>)}
+            {anni.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
         </div>
         <Button variant="outline" size="sm" onClick={carica} disabled={caricando}>
