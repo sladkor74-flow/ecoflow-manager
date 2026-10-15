@@ -35,12 +35,17 @@
 //   (decisione del 13/10/2026);
 // - un surplus sulle tariffe (il Fuel Surcharge del consorzio, 13/10/2026) e'
 //   UNA riga in piu' per canale, sotto le righe dei formulari, sulle stesse
-//   tonnellate del mese: vedi IL SURPLUS SULLE TARIFFE, piu' sotto.
+//   tonnellate del mese: vedi IL SURPLUS SULLE TARIFFE, piu' sotto;
+// - una riga prezzata con una tariffa copiata da «Prepara le tariffe» e non
+//   ancora confermata lo dice nella nota, e' «da_controllare», e il canale ha
+//   l'anomalia 'tariffa_da_confermare' che ferma il documento (15/10/2026): vedi
+//   LE TARIFFE COPIATE E NON CONFERMATE, piu' sotto.
 import { filtraPeriodo, meseToIndice, anomalieDateFormulari } from "./filtroPeriodo.ts";
 import {
   sortTariffe, resolveTariffa, calcolaTotale, fattoreConv, prezzoAttivoExtra, tariffeAttiveValide,
   eSecondariaExtra, servizioEcotyre, FATTURANTE_ATTIVA, avvisoPesoMancante,
   unitaAttivaRiconosciuta, unitaSconosciuta,
+  tariffaDaConfermare, notaTariffaDaConfermare, annoDellaCopia, prezzoInFrase,
 } from "./ecotyreTariffe.ts";
 import { PROV_TO_REGION } from "./raccoltoCalculator.ts";
 import { disattivateNelPeriodo } from "./validitaTariffa.ts";
@@ -165,6 +170,36 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     });
   };
 
+  // LE TARIFFE COPIATE E NON CONFERMATE (prova generale del cambio d'anno,
+  // 15/10/2026, difetto 15). Il 28/12/2026 «Prepara le tariffe» copia nel 2027 le
+  // tariffe del 2026 col loro prezzo e la nota «copiato dal 2026, da confermare».
+  // Se nessuno le conferma, il 10/02/2027 gennaio si fatturava a 202 €/t con le
+  // righe «verificato», la nota vuota e nessuna anomalia, e il documento si
+  // verificava: un prezzo vecchio passava per nuovo. Ora la riga lo dice (la nota
+  // di notaTariffaDaConfermare), e' «da_controllare» invece di «verificato», e il
+  // canale ha UN'anomalia 'tariffa_da_confermare' con le righe (quanti), le
+  // tonnellate e i prezzi, tariffa per tariffa. Il nome del tipo e' un accordo col
+  // margine (margine.ts), che lo conta: non si cambia.
+  //
+  // D4, DECISIONE DELL'UTENTE DEL 15/10/2026 («ok per i tuoi consigli sulle
+  // prime 4»): una riga prezzata con una tariffa copiata e non confermata ferma
+  // il documento del mese come una riga senza prezzo. Per questo l'anomalia ha
+  // gravita 'errore' (le pagine la mettono fra quello che va corretto prima di
+  // verificare) e cambiaStatoFatturazione non verifica il documento finche' ci
+  // sono righe cosi'. La riga pero' non e' «errore»: il prezzo c'e', e la
+  // fattura, il riepilogo e il margine lo contano; e' «da_controllare», con la
+  // nota che dice da dove viene e dove si conferma.
+  const daConfermarePerCanale = { RETE: new Map(), ACI: new Map(), EXTRA_RACCOLTA: new Map() };
+  const segnaDaConfermare = (tipologia, tariffa, valore, unita, kg, regione) => {
+    const chiave = String((tariffa && tariffa.id) || `${valore}|${unita}|${regione || ''}`);
+    const acc = daConfermarePerCanale[tipologia].get(chiave)
+      || { tariffa_id: String((tariffa && tariffa.id) || ''), valore: Number(valore), unita_misura: unita || '€/t', anno_copia: annoDellaCopia(tariffa), regioni: new Set(), kg: 0, quanti: 0 };
+    acc.kg += Number(kg) || 0;
+    acc.quanti++;
+    if (regione) acc.regioni.add(regione);
+    daConfermarePerCanale[tipologia].set(chiave, acc);
+  };
+
   const comune = (r, tipologia, tipoServizio, origine) => ({
     tipologia, tipo: 'ATTIVA',
     servizio_ecotyre: tipoServizio,
@@ -188,6 +223,9 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     // il dovuto e senza un avviso. Ora la riga vale zero, e' in errore e lo dice.
     const unitaIgnota = !!tariffa && !unitaAttivaRiconosciuta(tariffa.unita_misura);
     if (unitaIgnota) unitaNonLetta(tipologia, regioneTariffa, r.classe, r.cer, tipoServizio, kg, tariffa);
+    // una tariffa copiata e mai confermata: la riga lo dice (15/10/2026)
+    const copiata = !!tariffa && !unitaIgnota && tariffaDaConfermare(tariffa);
+    if (copiata) segnaDaConfermare(tipologia, tariffa, tariffa.valore, tariffa.unita_misura, kg, regioneRiga);
     return {
       ...comune(r, tipologia, tipoServizio, origine), ...altro,
       regione: regioneRiga,
@@ -197,9 +235,10 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
       unita_prezzo: tariffa?.unita_misura || '€/t',
       fattore_conversione: fattoreConv(tariffa),
       totale: r2(calcolaTotale(kg, tariffa)),
-      stato_validazione: tariffa && !unitaIgnota ? 'verificato' : 'errore',
+      stato_validazione: !tariffa || unitaIgnota ? 'errore' : copiata ? 'da_controllare' : 'verificato',
       note: !tariffa ? 'Nessuna tariffa attiva applicabile: riga a zero euro'
-        : unitaIgnota ? unitaSconosciuta(tariffa.unita_misura) : '',
+        : unitaIgnota ? unitaSconosciuta(tariffa.unita_misura)
+        : copiata ? notaTariffaDaConfermare(tariffa) : '',
     };
   };
 
@@ -373,13 +412,17 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
     if (prezzo.unita_sconosciuta) {
       unitaNonLetta('EXTRA_RACCOLTA', regione, r.classe, r.cer, tipoServizio, kg, { id: prezzo.id, valore: prezzo.valore, unita_misura: (tariffeSorted.find(t => t.id === prezzo.id) || {}).unita_misura });
     }
+    // La base copiata dal 2026 e non confermata: la nota di prezzoAttivoExtra lo
+    // dice, e il canale ne fa l'anomalia come per la rete e l'ACI (15/10/2026).
+    const copiata = !!prezzo.da_confermare && !!prezzo.valore && !prezzo.unita_sconosciuta;
+    if (copiata) segnaDaConfermare('EXTRA_RACCOLTA', tariffeSorted.find(t => t.id === prezzo.id) || { id: prezzo.id }, prezzo.valore, prezzo.unita, kg, regione);
     const rigaExtra = {
       ...base, regione,
       quantita: kg, unita_quantita: 'kg',
       tariffa_id: prezzo.id, tariffa_valore: prezzo.valore,
       unita_misura: prezzo.unita, unita_prezzo: prezzo.unita, fattore_conversione: prezzo.fattore,
       totale: r2(prezzo.totale(kg)),
-      stato_validazione: prezzo.valore && !prezzo.unita_sconosciuta ? 'verificato' : 'errore', note: prezzo.nota,
+      stato_validazione: !prezzo.valore || prezzo.unita_sconosciuta ? 'errore' : copiata ? 'da_controllare' : 'verificato', note: prezzo.nota,
     };
     righe.EXTRA_RACCOLTA.push(rigaExtra);
     segnaSurplus('EXTRA_RACCOLTA', r, rigaExtra);
@@ -549,6 +592,37 @@ export function calcolaRigheAttiva({ reteAll, aciAll, extraAll, fornitori, tarif
         descrizione: `${etichettaSurplus(s)}, ${testoEuroT(euroTDi(s, 'ATTIVA'))} da Ecotyre solo per ${nomi}: ${perche}`,
       });
     }
+  }
+  // Le tariffe copiate e non confermate: un'anomalia per canale (vedi LE TARIFFE
+  // COPIATE E NON CONFERMATE, qui sopra), con le righe, le tonnellate e i prezzi.
+  // prezzo e' il prezzo se il canale ne ha uno solo, altrimenti null e i prezzi
+  // stanno in «prezzi». Rete, ACI ed extra raccolta mai insieme.
+  const NOMI_CANALE = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
+  for (const tipologia of TIPOLOGIE_ATTIVA) {
+    const tariffeCopiate = [...daConfermarePerCanale[tipologia].values()];
+    if (!tariffeCopiate.length) continue;
+    const kg = tariffeCopiate.reduce((s, x) => s + x.kg, 0);
+    const quanti = tariffeCopiate.reduce((s, x) => s + x.quanti, 0);
+    const unico = new Set(tariffeCopiate.map(x => `${x.valore}|${x.unita_misura}`)).size === 1 ? tariffeCopiate[0] : null;
+    const anni = [...new Set(tariffeCopiate.map(x => x.anno_copia).filter(Boolean))].sort();
+    const daAnno = anni.length ? `dal ${anni.join(' e dal ')}` : "dall'anno prima";
+    // i prezzi in una frase: «202 €/t», o «230 €/t (Calabria, Sicilia) e 240 €/t (Puglia)»
+    const perPrezzo = new Map();
+    for (const x of tariffeCopiate) {
+      const k = `${prezzoInFrase(x.valore)} ${x.unita_misura}`;
+      if (!perPrezzo.has(k)) perPrezzo.set(k, new Set());
+      for (const reg of x.regioni) perPrezzo.get(k).add(reg);
+    }
+    const prezziFrase = [...perPrezzo.entries()].map(([k, regioni]) => (tipologia === 'ACI' && regioni.size ? `${k} (${[...regioni].sort().join(', ')})` : k));
+    const quali = prezziFrase.length === 1 ? `la tariffa a ${prezziFrase[0]}` : `le tariffe a ${prezziFrase.slice(0, -1).join(', ')} e ${prezziFrase[prezziFrase.length - 1]}`;
+    const una = tariffeCopiate.length === 1;
+    anomalie.push({
+      tipo: 'tariffa_da_confermare', gravita: 'errore', tipologia, regione: '', classe: '', eer_codice: '', servizio_ecotyre: '',
+      tonnellate: Math.round(kg) / 1000, quanti,
+      prezzo: unico ? unico.valore : null, unita_misura: unico ? unico.unita_misura : '',
+      prezzi: tariffeCopiate.map(x => ({ tariffa_id: x.tariffa_id, valore: x.valore, unita_misura: x.unita_misura, regioni: [...x.regioni].sort(), tonnellate: Math.round(x.kg) / 1000, quanti: x.quanti, anno_copia: x.anno_copia })),
+      descrizione: `${NOMI_CANALE[tipologia]}: ${quanti === 1 ? 'una riga' : `${quanti} righe`} (${formatoKgInTonnellate(kg)} t) ${quanti === 1 ? 'fatturata' : 'fatturate'} con ${quali}, ${una ? 'copiata' : 'copiate'} ${daAnno} con «Prepara le tariffe» e non ancora ${una ? 'confermata' : 'confermate'}. Il documento del canale non si verifica finché non ${una ? 'la confermi' : 'le confermi'} sul contratto ${annoNum} in Target & Status › Nuovo anno e non rielabori il mese.`,
+    });
   }
   if (extraSecondarieEscluse > 0) {
     anomalie.push({

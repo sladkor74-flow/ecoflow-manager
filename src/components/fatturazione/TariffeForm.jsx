@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Save, AlertTriangle, X } from 'lucide-react';
 import { notaTraccia } from '@/lib/scriviConTraccia';
+import { tariffaAnnuale, fineDellAnno, controlliPeriodoTariffa } from '@/lib/validitaTariffa';
 import StoricoModifiche from '@/components/shared/StoricoModifiche';
 
 const REGIONI = ['Campania', 'Puglia', 'Basilicata', 'Calabria', 'Lazio', 'Molise', 'Abruzzo', 'Sicilia', 'Sardegna', 'Toscana', 'Lombardia', 'Piemonte', 'Veneto', 'Emilia-Romagna', 'Marche', 'Umbria', 'Liguria', 'Friuli-Venezia Giulia', 'Trentino-Alto Adige', "Valle d'Aosta"];
@@ -26,12 +27,32 @@ function isArchiviata(t) {
 // vecchio valore). Vale per le date e per ogni campo facoltativo.
 const svuota = (v) => (String(v ?? '').trim() === '' ? null : v);
 
+// IL «VALIDO AL» DI UNA TARIFFA DI RETE O ACI (prova generale del cambio
+// d'anno, 15/10/2026, difetto 7). I contratti di rete e ACI sono annuali senza
+// tacito rinnovo, e cosi' le loro tariffe, attive e passive: il modulo proponeva
+// «Al» vuoto («vale fino a nuovo accordo») e mandava undefined, e il 05/01/2027
+// una tariffa rete 2027 scritta cosi' fatturava anche gennaio 2028. Ora per
+// rete, ACI e TUTTE il modulo propone il 31/12 dell'anno del «Dal», e il server
+// rifiuta una fine vuota o oltre quel giorno (controlliPeriodoTariffa di
+// validitaTariffa.js, la stessa regola di gestisciAnagrafiche): l'errore si
+// legge sotto il campo. L'extra raccolta resta libera.
+// La fine proposta quando cambiano il «Dal» o la tipologia: si cambia solo se
+// e' vuota o se era la proposta di prima, mai una data scritta a mano.
+function finePropostaDi(prima, dopo) {
+  if (!tariffaAnnuale(dopo) || !dopo.data_inizio_validita) return dopo.data_fine_validita;
+  const scritta = String(prima.data_fine_validita || '');
+  if (!scritta || scritta === fineDellAnno(prima.data_inizio_validita)) return fineDellAnno(dopo.data_inizio_validita) || scritta;
+  return scritta;
+}
+
 export default function TariffeForm({ open, onClose, onSaved, editing, duplicating, excludePrestazione, fornitori, province, destinazioniRaccolta, stoccaggi, destinazioniSecondaria, switchToRuoliTab }) {
   const [form, setForm] = useState({});
   const [multiClasse, setMultiClasse] = useState(false);
   const [valoriPerClasse, setValoriPerClasse] = useState({ P: '', M: '', G1: '', G2: '' });
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState([]);
+  // I messaggi da mostrare sotto un campo: { data_fine_validita: '...' } (15/10/2026)
+  const [erroriCampo, setErroriCampo] = useState({});
   const [conflict, setConflict] = useState(null);
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
@@ -44,7 +65,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
 
   useEffect(() => {
     if (!open) return;
-    setError(''); setFieldErrors([]); setConflict(null); setSuccess(''); setMotivo('');
+    setError(''); setFieldErrors([]); setErroriCampo({}); setConflict(null); setSuccess(''); setMotivo('');
     if (editing) {
       setForm({ ...editing, data_inizio_validita: editing.data_inizio_validita ? editing.data_inizio_validita.slice(0,10) : '', data_fine_validita: editing.data_fine_validita ? editing.data_fine_validita.slice(0,10) : '' });
       setMultiClasse(false);
@@ -59,9 +80,16 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
 
   // Auto-set tipologia TUTTE for TRASPORTO_SECONDARIA
   useEffect(() => {
-    if (form.prestazione === 'TRASPORTO_SECONDARIA' && !form.tipologia) setForm(f => ({ ...f, tipologia: 'TUTTE' }));
+    if (form.prestazione === 'TRASPORTO_SECONDARIA' && !form.tipologia) setForm(f => { const dopo = { ...f, tipologia: 'TUTTE' }; return { ...dopo, data_fine_validita: finePropostaDi(f, dopo) }; });
     if (form.prestazione && form.prestazione !== 'TRASPORTO_SECONDARIA' && form.tipologia === 'TUTTE') setForm(f => ({ ...f, tipologia: '' }));
   }, [form.prestazione]);
+
+  // Cambiare «Dal» o tipologia ripropone il 31/12 dell'anno per rete e ACI.
+  const cambia = (campi) => setForm(f => {
+    const dopo = { ...f, ...campi };
+    return { ...dopo, data_fine_validita: finePropostaDi(f, dopo) };
+  });
+  const annuale = tariffaAnnuale(form);
 
   const isAttiva = form.direzione === 'ATTIVA';
   const fornitore = fornitori.find(f => f.id === form.fornitore_id);
@@ -139,16 +167,36 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
     onClose();
   };
 
+  // Gli errori sui campi (15/10/2026): il campo si colora e il messaggio sta
+  // sotto di lui. Se il campo non e' a video (le date di una tariffa
+  // archiviata) il messaggio resta nel riquadro in fondo.
+  const mostraErroriCampo = (errori, generale) => {
+    const visibili = errori.filter(x => !archiviata || !/^data_/.test(x.campo));
+    setFieldErrors(errori.map(x => x.campo));
+    setErroriCampo(Object.fromEntries(visibili.map(x => [x.campo, x.messaggio])));
+    setError(visibili.length === errori.length ? '' : (generale || errori.map(x => x.messaggio).join(' ')));
+  };
   const handleResponseError = (e) => {
     const status = e?.response?.status;
     const data = e?.response?.data;
     if (status === 409) { setConflict(data); }
+    else if (status === 400 && (Array.isArray(data?.errori) || data?.campo)) {
+      mostraErroriCampo(Array.isArray(data?.errori) ? data.errori : [{ campo: data.campo, messaggio: data.error }], data?.error);
+    }
     else if (status === 400) { setFieldErrors(data?.mancanti || []); setError(data?.error || 'Errore di validazione'); }
     else { setError(data?.error || e?.message || 'Errore'); }
   };
 
   const save = async () => {
-    setError(''); setFieldErrors([]); setConflict(null); setSuccess(''); setSaving(true);
+    setError(''); setFieldErrors([]); setErroriCampo({}); setConflict(null); setSuccess('');
+    // Il periodo si controlla prima di mandarlo, con la regola del server: per
+    // rete e ACI inizio e fine nell'anno di contratto (15/10/2026).
+    const daSalvare = isEdit
+      ? { ...editing, ...(archiviata ? {} : { data_inizio_validita: svuota(form.data_inizio_validita), data_fine_validita: svuota(form.data_fine_validita), tipologia: form.tipologia }) }
+      : buildBase();
+    const erroriPeriodo = controlliPeriodoTariffa(daSalvare);
+    if (erroriPeriodo.length) { mostraErroriCampo(erroriPeriodo); return; }
+    setSaving(true);
     try {
       if (isEdit) {
         const updateData = { valore: Number(form.valore), unita_misura: form.unita_misura, note: form.note };
@@ -259,7 +307,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
                 {archiviata ? (
                   <div className="text-sm font-medium py-2">{form.tipologia || '—'}</div>
                 ) : (
-                  <Select value={form.tipologia} onValueChange={v => setForm({ ...form, tipologia: v })}>
+                  <Select value={form.tipologia} onValueChange={v => cambia({ tipologia: v })}>
                     <SelectTrigger className={fieldErr('tipologia')}><SelectValue placeholder="Seleziona tipologia" /></SelectTrigger>
                     <SelectContent>{tipologiaOpts.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                   </Select>
@@ -343,7 +391,7 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
                 {archiviata ? (
                   <div className="text-sm font-medium py-2">{form.tipologia === 'TUTTE' ? 'RETE + ACI' : form.tipologia || '—'}</div>
                 ) : (
-                  <Select value={form.tipologia} onValueChange={v => setForm({ ...form, tipologia: v })}>
+                  <Select value={form.tipologia} onValueChange={v => cambia({ tipologia: v })}>
                     <SelectTrigger className={fieldErr('tipologia')}><SelectValue placeholder="Seleziona tipologia" /></SelectTrigger>
                     <SelectContent>{tipologiaOpts.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                   </Select>
@@ -472,13 +520,20 @@ export default function TariffeForm({ open, onClose, onSaved, editing, duplicati
           {!archiviata && (
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Valido dal</label>
-                <Input type="date" value={form.data_inizio_validita} onChange={e => setForm({ ...form, data_inizio_validita: e.target.value })} />
+                <label className="text-xs text-muted-foreground block mb-1">Valido dal{annuale ? ' *' : ''}</label>
+                <Input type="date" value={form.data_inizio_validita} onChange={e => cambia({ data_inizio_validita: e.target.value })} className={fieldErr('data_inizio_validita')} />
+                {erroriCampo.data_inizio_validita && <p className="text-xs text-destructive mt-1">{erroriCampo.data_inizio_validita}</p>}
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Valido al</label>
-                <Input type="date" value={form.data_fine_validita} onChange={e => setForm({ ...form, data_fine_validita: e.target.value })} />
-                <p className="text-xs text-muted-foreground mt-1">Lascialo vuoto se il prezzo vale fino a nuovo accordo</p>
+                <label className="text-xs text-muted-foreground block mb-1">Valido al{annuale ? ' *' : ''}</label>
+                <Input type="date" value={form.data_fine_validita} onChange={e => setForm({ ...form, data_fine_validita: e.target.value })} className={fieldErr('data_fine_validita')} />
+                {erroriCampo.data_fine_validita
+                  ? <p className="text-xs text-destructive mt-1">{erroriCampo.data_fine_validita}</p>
+                  : <p className="text-xs text-muted-foreground mt-1">{annuale
+                    ? 'Rete e ACI: i contratti sono annuali senza tacito rinnovo, quindi al più fino al 31/12 dell’anno del «Dal». Per l’anno dopo si scrive una tariffa nuova.'
+                    : form.tipologia === 'EXTRA_RACCOLTA'
+                      ? 'Lascialo vuoto se il prezzo vale fino a nuovo accordo: l’extra raccolta è fatta di campagne occasionali.'
+                      : 'Rete, ACI e trasporti: al più fino al 31/12 dell’anno del «Dal». Vuoto solo per l’extra raccolta.'}</p>}
               </div>
             </div>
           )}

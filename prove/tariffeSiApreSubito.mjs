@@ -24,6 +24,15 @@
 //   5. la scheda Surplus apre il modulo del Fuel Surcharge chiesto dalla fascia,
 //      una volta sola.
 //
+// La prova generale del cambio d'anno (15/10/2026) ha aggiunto:
+//   6. il 02/01/2027, con le tariffe tutte finite il 31/12/2026, l'elenco vuoto
+//      dice «Nessuna tariffa in vigore oggi» e come si preparano le nuove, non
+//      «Nessuna tariffa. Clicca Aggiungi tariffa» (difetto 32);
+//   7. «Riapri» di una tariffa di rete o ACI la riapre al piu' fino al 31/12 del
+//      suo anno, e una tariffa del 2026 non si riapre sul 2027 (difetto 7);
+//   8. il modulo propone come «Al» il 31/12 dell'anno del «Dal» per rete, ACI e
+//      TUTTE, e dice l'errore sotto il campo (difetto 7).
+//
 // node prove/tariffeSiApreSubito.mjs
 import { caricaPagina, clienteFinto, trova, testo, aspetta, orologioFinto, nomeDi } from './dati/paginaFinta.mjs';
 
@@ -249,6 +258,146 @@ await sezione('4. LA SCHEDA SURPLUS APRE IL MODULO CHIESTO DALLA FASCIA, UNA VOL
   verifica('nel 2027 propone le date del Fuel Surcharge del 2026 spostate al 2027', !!m4 && m4.props.bozzaIniziale && m4.props.bozzaIniziale.dal === '2027-10-01' && m4.props.bozzaIniziale.al === '2027-12-31',
     J(m4 && m4.props.bozzaIniziale && [m4.props.bozzaIniziale.dal, m4.props.bozzaIniziale.al]));
   [r, r2, r3, r4].forEach(x => x.smonta());
+});
+
+// Un giorno fermo per le sezioni del cambio d'anno: la pagina legge oggi con
+// new Date() e oggiRoma(). Si rimette il vero alla fine della sezione.
+const OraVera = Date;
+function fermaIlGiorno(iso) {
+  const ms = OraVera.parse(iso);
+  globalThis.Date = class extends OraVera { constructor(...a) { if (a.length) super(...a); else super(ms); } static now() { return ms; } };
+  return () => { globalThis.Date = OraVera; };
+}
+const t26 = (p) => ({ unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31', ...p });
+const TARIFFE_2026 = [
+  t26({ id: 'r26', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', valore: 202 }),
+  t26({ id: 'a26', direzione: 'ATTIVA', tipologia: 'ACI', cliente: 'ECOTYRE', regione: 'Calabria', valore: 230 }),
+  t26({ id: 'g26', direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_id: 'f1', fornitore_nome: 'EMMESSE SRLS', valore: 85 }),
+];
+// La pagina con un client che registra le chiamate alle funzioni.
+async function apriIl(giorno, tariffe) {
+  const c = clienteFinto({ archivi: { Tariffa: tariffe, Fornitore: FORNITORI, SurplusTariffa: [], PrimariaRete: [], Secondaria: [] }, funzioni: { gestisciAnagrafiche: async () => ({}) } });
+  globalThis.__CLIENTE_FINTO = c.cliente;
+  const r = PAGINA.monta(PAGINA.Componente, {});
+  await orologio.avanza(5000);
+  return { r, c };
+}
+const messaggioTabella = (r) => {
+  const td = trova(r.albero, el => el.type === 'td' && el.props.colSpan === 13)[0];
+  return td ? testo(td).replace(/\s+/g, ' ').trim() : '';
+};
+
+await sezione("6. IL 02/01/2027 L'ELENCO VUOTO DICE CHE LE TARIFFE SONO FINITE E COME SI PREPARANO LE NUOVE (difetto 32)", async () => {
+  const ripristina = fermaIlGiorno('2027-01-02T09:00:00Z');
+  try {
+    const { r } = await apriIl('2027-01-02', TARIFFE_2026);
+    const m = messaggioTabella(r);
+    verifica('«Nessuna tariffa in vigore oggi: 3 tariffe sono scadute il 31/12/2026»', /^Nessuna tariffa in vigore oggi: 3 tariffe sono scadute il 31\/12\/2026\./.test(m), m);
+    verifica('e come si preparano: Target & Status › Nuovo anno › «Prepara le tariffe», oppure «Mostra archiviate»', /Per l’anno nuovo: Target & Status › Nuovo anno › «Prepara le tariffe», oppure «Mostra archiviate»\./.test(m), m);
+    verifica('non piu\' «Clicca "Aggiungi tariffa" per iniziare»', !/Clicca "Aggiungi tariffa"/.test(m), m);
+    const link = trova(r.albero, el => nomeDi(el) === 'Link' && /Prepara le tariffe/.test(testo(el)))[0];
+    // La scheda Nuovo anno prepara l'anno dopo quello scelto, come dal
+    // collegamento della dashboard: per il 2027 si apre col 2026.
+    verifica('il collegamento apre la scheda Nuovo anno che prepara il 2027, con l\'anno calcolato', !!link && link.props.to === '/target-status?tab=nuovo-anno&anno=2026', J(link && link.props.to));
+    const mostra = trova(r.albero, el => el.type === 'button' && /«Mostra archiviate»/.test(testo(el)))[0];
+    mostra.props.onClick();
+    await aspetta();
+    verifica('«Mostra archiviate» le fa vedere', trova(r.albero, el => el.type === 'tr' && ['r26', 'a26', 'g26'].includes(el.key)).length === 3 && !messaggioTabella(r), messaggioTabella(r));
+    r.smonta();
+    // la controprova: con una tariffa 2027 il messaggio non c'e'
+    const con27 = await apriIl('2027-01-02', [...TARIFFE_2026, { ...TARIFFE_2026[0], id: 'r27', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31', valore: 205 }]);
+    verifica('controprova: con la tariffa 2027 l\'elenco la mostra e il messaggio non c\'e\'', trova(con27.r.albero, el => el.type === 'tr' && el.key === 'r27').length === 1 && !messaggioTabella(con27.r), messaggioTabella(con27.r));
+    con27.r.smonta();
+    // e con l'archivio vuoto resta il messaggio di sempre
+    const vuoto = await apriIl('2027-01-02', []);
+    verifica('con l\'archivio vuoto resta «Nessuna tariffa. Clicca "Aggiungi tariffa" per iniziare.»', messaggioTabella(vuoto.r) === 'Nessuna tariffa. Clicca "Aggiungi tariffa" per iniziare.', messaggioTabella(vuoto.r));
+    vuoto.r.smonta();
+  } finally { ripristina(); }
+});
+
+await sezione('7. «RIAPRI» DI UNA TARIFFA DI RETE O ACI: AL PIU\' FINO AL 31/12 DEL SUO ANNO (difetto 7)', async () => {
+  const ripristina = fermaIlGiorno('2027-01-02T09:00:00Z');
+  const avvisi = [], domande = [];
+  const prima = { alert: globalThis.alert, confirm: globalThis.confirm };
+  globalThis.alert = (m) => { avvisi.push(String(m)); };
+  globalThis.confirm = (m) => { domande.push(String(m)); return true; };
+  try {
+    const tariffe = [
+      ...TARIFFE_2026,
+      t26({ id: 'r26b', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', classe_materiale: 'G1', valore: 210, data_fine_validita: '2026-06-30' }),
+      t26({ id: 'x26', direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 202, data_fine_validita: '2026-06-30' }),
+    ];
+    const { r, c } = await apriIl('2027-01-02', tariffe);
+    trova(r.albero, el => el.type === 'button' && /«Mostra archiviate»/.test(testo(el)))[0].props.onClick();
+    await aspetta();
+    const riapri = (id) => (trova(r.albero, el => el.type === 'tr' && el.key === id)[0] ? trova(trova(r.albero, el => el.type === 'tr' && el.key === id)[0], el => el.type === 'button' && el.props.title === 'Riapri')[0] : null);
+    const invocate = () => c.chiamate.filter(x => x.tipo === 'funzione' && x.nome === 'gestisciAnagrafiche').map(x => x.payload);
+    await riapri('r26').props.onClick();
+    await aspetta();
+    verifica('la rete 2026 finita il 31/12/2026 non si riapre sul 2027: niente mandato', invocate().length === 0, J(invocate()));
+    verifica('e lo dice, con dove si prepara quella del 2027', avvisi.length === 1 && /vale già fino al 31\/12\/2026/.test(avvisi[0]) && /Per il 2027 serve la sua tariffa/.test(avvisi[0]) && /Prepara le tariffe/.test(avvisi[0]), J(avvisi));
+    await riapri('r26b').props.onClick();
+    await aspetta();
+    const p1 = invocate()[0] || {};
+    verifica('una rete 2026 chiusa a giugno si riapre fino al 31/12/2026, non senza fine', p1.id === 'r26b' && p1.dati && p1.dati.data_fine_validita === '2026-12-31' && p1.dati.stato === 'attivo', J(p1));
+    verifica('e la domanda dice fino a quando', /fino al 31\/12\/2026/.test(domande[domande.length - 1] || ''), J(domande));
+    await riapri('x26').props.onClick();
+    await aspetta();
+    const p2 = invocate()[1] || {};
+    verifica('l\'extra raccolta resta libera: si riapre senza data di fine', p2.id === 'x26' && p2.dati && p2.dati.data_fine_validita === null, J(p2));
+    r.smonta();
+  } finally {
+    globalThis.alert = prima.alert; globalThis.confirm = prima.confirm;
+    ripristina();
+  }
+});
+
+await sezione('8. IL MODULO PROPONE «AL» AL 31/12 DELL\'ANNO DEL «DAL» E DICE L\'ERRORE SOTTO IL CAMPO (difetto 7)', async () => {
+  const FORM = await caricaPagina('src/components/fatturazione/TariffeForm.jsx');
+  const invocate = [];
+  const c = clienteFinto({ funzioni: { gestisciAnagrafiche: async (p) => { invocate.push(p); return {}; } } });
+  globalThis.__CLIENTE_FINTO = c.cliente;
+  const r = FORM.monta(FORM.Componente, { open: true, onClose: () => {}, onSaved: () => {}, editing: null, duplicating: null, excludePrestazione: '', fornitori: [], province: [], destinazioniRaccolta: [], stoccaggi: [], destinazioniSecondaria: [], switchToRuoliTab: () => {} });
+  await aspetta();
+  const tipologia = () => trova(r.albero, el => nomeDi(el) === 'Select' && trova(el.props.children, x => nomeDi(x) === 'SelectValue' && x.props.placeholder === 'Seleziona tipologia').length > 0)[0];
+  const date = () => trova(r.albero, el => nomeDi(el) === 'Input' && el.props.type === 'date');
+  const salva = async () => { trova(r.albero, el => nomeDi(el) === 'Button' && /Salva/.test(testo(el)))[0].props.onClick(); await aspetta(); };
+  const sotto = () => trova(r.albero, el => el.type === 'p' && /text-destructive/.test(el.props.className || '')).map(testo).join(' ');
+  tipologia().props.onValueChange('RETE');
+  await aspetta();
+  date()[0].props.onChange({ target: { value: '2027-01-01' } });
+  await aspetta();
+  verifica('rete, «Dal» 01/01/2027: «Al» proposto 31/12/2027', date()[1].props.value === '2027-12-31', J(date().map(d => d.props.value)));
+  date()[1].props.onChange({ target: { value: '' } });
+  await aspetta();
+  await salva();
+  verifica('«Al» vuoto: non si manda niente, e l\'errore sta sotto il campo', invocate.length === 0 && /Manca la data di fine validità/.test(sotto()) && /31\/12\/2027/.test(sotto()), J({ invocate, sotto: sotto() }));
+  date()[1].props.onChange({ target: { value: '2028-06-30' } });
+  await aspetta();
+  await salva();
+  verifica('«Al» 30/06/2028: non si manda, «finirebbe il 30/06/2028»', invocate.length === 0 && /finirebbe il 30\/06\/2028/.test(sotto()), sotto());
+  date()[1].props.onChange({ target: { value: '2027-06-30' } });
+  await aspetta();
+  date()[0].props.onChange({ target: { value: '2027-02-01' } });
+  await aspetta();
+  verifica('una fine scritta a mano non si tocca cambiando il «Dal»', date()[1].props.value === '2027-06-30', J(date().map(d => d.props.value)));
+  date()[1].props.onChange({ target: { value: '2027-12-31' } });
+  await aspetta();
+  await salva();
+  verifica('controprova: dal 01/02 al 31/12/2027 si manda, con la fine', invocate.length === 1 && invocate[0].dati.data_fine_validita === '2027-12-31' && invocate[0].dati.data_inizio_validita === '2027-02-01', J(invocate));
+  r.smonta();
+  // L'extra raccolta resta libera: «Al» vuoto si manda com'e'.
+  const r2 = FORM.monta(FORM.Componente, { open: true, onClose: () => {}, onSaved: () => {}, editing: null, duplicating: null, excludePrestazione: '', fornitori: [], province: [], destinazioniRaccolta: [], stoccaggi: [], destinazioniSecondaria: [], switchToRuoliTab: () => {} });
+  await aspetta();
+  trova(r2.albero, el => nomeDi(el) === 'Select' && trova(el.props.children, x => nomeDi(x) === 'SelectValue' && x.props.placeholder === 'Seleziona tipologia').length > 0)[0].props.onValueChange('EXTRA_RACCOLTA');
+  await aspetta();
+  trova(r2.albero, el => nomeDi(el) === 'Input' && el.props.type === 'date')[0].props.onChange({ target: { value: '2027-01-01' } });
+  await aspetta();
+  verifica('extra raccolta: «Al» resta vuoto', trova(r2.albero, el => nomeDi(el) === 'Input' && el.props.type === 'date')[1].props.value === '');
+  trova(r2.albero, el => nomeDi(el) === 'Button' && /Salva/.test(testo(el)))[0].props.onClick();
+  await aspetta();
+  verifica('e si manda senza data di fine', invocate.length === 2 && invocate[1].dati.tipologia === 'EXTRA_RACCOLTA' && invocate[1].dati.data_fine_validita === undefined, J(invocate));
+  r2.smonta();
 });
 
 orologio.ripristina();

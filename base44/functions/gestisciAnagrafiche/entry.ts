@@ -15,7 +15,8 @@ import {
   controlliSurplus, conflittiSurplus, giornoPrimaDi, mesiDelSurplus, euroTDi, valePerFornitore, fornitoriDelSurplus,
   importoSurplus, etichettaSurplus, periodoSurplus, testoEuroT, surplusValeIl, NOMI_CANALE,
 } from "../../shared/surplus.ts";
-import { tariffaNonDisattivata } from "../../shared/validitaTariffa.ts";
+import { tariffaNonDisattivata, controlliPeriodoTariffa } from "../../shared/validitaTariffa.ts";
+import { noteDopoIlPrezzo, noteDellaTariffaNuova } from "../../shared/inizializzazioneAnno.ts";
 import { arrotondaAlCentesimo } from "../../shared/ecotyreTariffe.ts";
 import { campoTracciato, stessoValore } from "../../shared/campiTracciati.ts";
 import { leggiCampo, precaricaParti } from "../../shared/testoLungo.ts";
@@ -752,12 +753,17 @@ export default async function(req) {
     let tariffeChiuse = [];
     // Gli avvisi che non fermano il salvataggio ma devono arrivare a chi salva.
     const avvisiTariffa = [];
+    // Le note da scrivere al posto di quelle mandate, quando un prezzo copiato
+    // viene cambiato a mano o una tariffa nuova arriva con la nota della copia
+    // (h, qui sotto): null se non cambiano.
+    let noteDellaTariffa = null;
     if (entita === 'Tariffa' && (operazione === 'create' || operazione === 'update')) {
       let effettivi = dati || {};
+      let esistente = null;
 
       // Per update, fondi il record esistente con i nuovi dati
       if (operazione === 'update') {
-        const esistente = await base44.asServiceRole.entities.Tariffa.get(id);
+        esistente = await base44.asServiceRole.entities.Tariffa.get(id);
         // LA DIREZIONE DI UNA TARIFFA NON SI CAMBIA (chiusura del giro del
         // 14/10/2026). La scheda la tiene in sola lettura, ma la funzione
         // accettava un update da PASSIVA ad ATTIVA: lo storico guarda il record
@@ -805,7 +811,26 @@ export default async function(req) {
       const inizio = effettivi.data_inizio_validita;
       const fine = effettivi.data_fine_validita;
       if (inizio && fine && new Date(fine) < new Date(inizio)) {
-        return Response.json({ error: 'La data di fine validità precede la data di inizio' }, { status: 400 });
+        return Response.json({ error: 'La data di fine validità precede la data di inizio', campo: 'data_fine_validita' }, { status: 400 });
+      }
+
+      // g) LE TARIFFE DI RETE E ACI SONO ANNUALI (prova generale del cambio
+      // d'anno, 15/10/2026, difetto 7). Una tariffa di rete, ACI o TUTTE senza
+      // data di fine, o con la fine dopo il 31/12 dell'anno in cui comincia, si
+      // salvava: «Riapri» mandava { data_fine_validita: null } e l'anno dopo si
+      // fatturava e si pagava a quel prezzo senza un avviso. Ora si ferma, col
+      // campo da correggere, come per il surplus (controlliPeriodoTariffa di
+      // validitaTariffa.ts). Si guarda il record com'e' dopo il salvataggio:
+      // anche una modifica del solo prezzo su una tariffa rimasta aperta chiede
+      // la sua data di fine. L'extra raccolta resta libera, e una tariffa
+      // disattivata non vale mai: il suo periodo non si controlla.
+      const erroriPeriodo = controlliPeriodoTariffa(effettivi);
+      if (erroriPeriodo.length) {
+        return Response.json({
+          error: erroriPeriodo.map(e => e.messaggio).join(' '),
+          campo: erroriPeriodo[0].campo,
+          errori: erroriPeriodo.map(e => ({ campo: e.campo, messaggio: e.messaggio })),
+        }, { status: 400 });
       }
 
       // TUTTE ammessa solo per TRASPORTO_SECONDARIA
@@ -848,6 +873,35 @@ export default async function(req) {
       const errore = controlli.find(c => c.gravita === 'errore');
       if (errore) return Response.json({ error: errore.messaggio }, { status: 400 });
       avvisiTariffa.push(...controlli.map(c => c.messaggio));
+
+      // h) UN PREZZO COPIATO E POI CAMBIATO A MANO NON E' PIU' COPIATO
+      // (revisione del 15/10/2026, difetto 15). Una tariffa copiata da «Prepara
+      // le tariffe» e corretta qui col prezzo del contratto (202 -> 205 €/t)
+      // restava «copiato dal 2026, da confermare», perche' il modulo rimanda la
+      // nota com'era: le righe del mese dicevano «prezzo copiato dal 2026» e la
+      // verifica del documento si fermava sulla «tariffa a 205 €/t, copiata dal
+      // 2026». Ora la nota della copia se ne va e resta chi ha scritto il prezzo
+      // e quando (noteDopoIlPrezzo di inizializzazioneAnno.ts); il prezzo di
+      // prima e quello nuovo li tiene lo storico. Le sole date o le sole note
+      // non confermano niente.
+      if (operazione === 'update') {
+        noteDellaTariffa = noteDopoIlPrezzo(esistente, dati, { il: oggiRoma(), da: user && user.email ? user.email : '' });
+        if (noteDellaTariffa !== null) {
+          avvisiTariffa.push('La tariffa era copiata dall\'anno prima e da confermare: col prezzo scritto a mano vale come confermata, e lo dice la nota.');
+        }
+      }
+      // E una tariffa NUOVA con la nota della copia (revisione del 15/10/2026):
+      // «Duplica» su una tariffa copiata tiene le note dell'originale, e il
+      // Lazio a 245 €/t scritto col contratto 2027 nasceva «copiato dal 2026, da
+      // confermare». Le copie le scrive soltanto «Prepara le tariffe», che non
+      // passa da qui: una create con quella nota e' sempre scritta a mano, e la
+      // nota della copia se ne va (noteDellaTariffaNuova di inizializzazioneAnno.ts).
+      if (operazione === 'create') {
+        noteDellaTariffa = noteDellaTariffaNuova(dati, { il: oggiRoma(), da: user && user.email ? user.email : '' });
+        if (noteDellaTariffa !== null) {
+          avvisiTariffa.push('Le note venivano da una tariffa copiata dall\'anno prima: «copiato, da confermare» non vale per una tariffa scritta a mano, ed è stato tolto.');
+        }
+      }
 
       // d) Chiudi le tariffe chiudibili (rinegoziazione prezzo)
       // La tariffa chiusa resta 'attivo': lo stato non_attivo vuol dire "non
@@ -929,7 +983,8 @@ export default async function(req) {
     // fa senza una lettura in piu'.
     let result;
     if (operazione === 'create' || operazione === 'update') {
-      const scritta = await traccia(svc, entita, operazione === 'update' ? id : null, dati || {}, comeScrive);
+      const daScrivere = noteDellaTariffa !== null ? { ...(dati || {}), note: noteDellaTariffa } : (dati || {});
+      const scritta = await traccia(svc, entita, operazione === 'update' ? id : null, daScrivere, comeScrive);
       tracce.push(scritta.traccia);
       result = scritta.record;
     } else if (operazione === 'delete') {

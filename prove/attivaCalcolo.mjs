@@ -248,5 +248,45 @@ console.log('UNA DICITURA DIVERSA NON E\' UNA DIFFERENZA DI FATTURAZIONE');
   }
 }
 
+// LA TARIFFA COPIATA DAL 2026 E NON CONFERMATA (prova generale del cambio
+// d'anno, 15/10/2026, difetto 15). La riga prezzata con una tariffa che «Prepara
+// le tariffe» ha copiato e nessuno ha confermato dice da dove viene il prezzo, e'
+// «da_controllare» invece di «verificato», e il canale ha UN'anomalia
+// 'tariffa_da_confermare' con tipologia, tonnellate e prezzo (il nome del tipo e'
+// un accordo col margine). Il riepilogo la mette fra gli errori che fermano il
+// documento (D4, decisione dell'utente del 15/10/2026).
+console.log('LA TARIFFA COPIATA E NON CONFERMATA SI DICE SULLA RIGA E FRA LE ANOMALIE (difetto 15)');
+{
+  const copia = (p) => ({ direzione: 'ATTIVA', cliente: 'ECOTYRE', unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31', note: 'copiato dal 2026, da confermare', ...p });
+  const T = [
+    copia({ id: 'c-rete', tipologia: 'RETE', valore: 202 }),
+    copia({ id: 'c-cal', tipologia: 'ACI', regione: 'Calabria', valore: 230 }),
+    copia({ id: 'c-pug', tipologia: 'ACI', regione: 'Puglia', valore: 240 }),
+  ];
+  const r = (id, kg, p = {}) => ({ ...base, id, id_ordine: id, numero_fir: 'F' + id, classe: 'P', peso_effettivo: kg, trasporto_finito_il: '2027-01-12T10:00:00.000Z', destinazione: 'IRIGOM SRL', provincia: 'NA', ...p });
+  const res = calcolaRigheAttiva({
+    reteAll: [r('R1', 1000), r('R2', 2500)],
+    aciAll: [r('A1', 1600, { provincia: 'VV' }), r('A2', 400, { provincia: 'BA' })],
+    extraAll: [], fornitori, tariffe: T, anno: 2027, mese: 'Gennaio',
+  });
+  const nota = 'prezzo copiato dal 2026 con «Prepara le tariffe», da confermare in Target & Status › Nuovo anno';
+  verifica('le righe tengono il prezzo copiato (202 €/t: 202,00 + 505,00)', res.righe.RETE.map(x => x.totale).join() === '202,505', JSON.stringify(res.righe.RETE.map(x => x.totale)));
+  verifica('ma sono «da_controllare», con la nota che dice l\'anno della copia e dove si conferma', res.righe.RETE.every(x => x.stato_validazione === 'da_controllare' && x.note === nota), JSON.stringify(res.righe.RETE.map(x => [x.stato_validazione, x.note])));
+  const anRete = res.anomalie.filter(a => a.tipo === 'tariffa_da_confermare' && a.tipologia === 'RETE');
+  verifica('un\'anomalia per la rete, con tipologia, tonnellate, prezzo e righe', anRete.length === 1 && anRete[0].tonnellate === 3.5 && anRete[0].prezzo === 202 && anRete[0].quanti === 2 && anRete[0].gravita === 'errore'
+    && /Rete: 2 righe \(3,50 t\) fatturate con la tariffa a 202 €\/t, copiata dal 2026/.test(anRete[0].descrizione), JSON.stringify(anRete));
+  const anAci = res.anomalie.filter(a => a.tipo === 'tariffa_da_confermare' && a.tipologia === 'ACI');
+  verifica('una per l\'ACI, con due prezzi: prezzo null e i prezzi per regione', anAci.length === 1 && anAci[0].prezzo === null && anAci[0].prezzi.length === 2 && anAci[0].tonnellate === 2
+    && /230 €\/t \(Calabria\) e 240 €\/t \(Puglia\)/.test(anAci[0].descrizione), JSON.stringify(anAci));
+  verifica('e mai rete e ACI insieme: due anomalie, una per canale', res.anomalie.filter(a => a.tipo === 'tariffa_da_confermare').length === 2);
+  // la controprova: le stesse tariffe confermate
+  const conf = T.map(t => ({ ...t, note: 'Confermata sul contratto 2027 il 05/01/2027 da amministratore.' }));
+  const ok2 = calcolaRigheAttiva({ reteAll: [r('R1', 1000)], aciAll: [], extraAll: [], fornitori, tariffe: conf, anno: 2027, mese: 'Gennaio' });
+  verifica('confermate: «verificato», nota vuota, nessuna anomalia', ok2.righe.RETE[0].stato_validazione === 'verificato' && ok2.righe.RETE[0].note === '' && !ok2.anomalie.some(a => a.tipo === 'tariffa_da_confermare'), JSON.stringify([ok2.righe.RETE[0], ok2.anomalie]));
+  // il riepilogo la mette fra gli errori, e fra le cose da guardare
+  const rie = readFileSync(new URL('../src/components/fatturazione/RiepilogoEcotyre.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('RiepilogoEcotyre: «tariffa_da_confermare» fra gli errori e in DA_GUARDARE', /const ERRORI = \[[^\]]*'tariffa_da_confermare'/.test(rie) && /const DA_GUARDARE = \[[^\]]*'tariffa_da_confermare'/.test(rie));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

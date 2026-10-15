@@ -344,7 +344,12 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
   // errore, la riga e' a zero euro e il documento ACI non si verifica finche' non
   // si corregge. Il calcolo lo dice con gravita 'errore'; il tipo resta, per
   // riconoscerlo anche in una risposta di prima.
-  const ERRORI = ['regione_mancante'];
+  // Dal 15/10/2026 anche le righe prezzate con una tariffa copiata da «Prepara
+  // le tariffe» e non ancora confermata (difetto 15 della prova generale del
+  // cambio d'anno): D4, decisione dell'utente del 15/10/2026, fermano il
+  // documento come una riga senza prezzo, e la conferma e' in Target & Status ›
+  // Nuovo anno. Prima gennaio 2027 si mostrava «uniforme 202 €/t» senza un avviso.
+  const ERRORI = ['regione_mancante', 'tariffa_da_confermare'];
   const eErrore = (a) => a.gravita === 'errore' || ERRORI.includes(a.tipo);
   const errori = tutte.filter(a => a.tipo && a.tipo !== 'senza_tariffa' && eErrore(a));
   const altre = tutte.filter(a => a.tipo && a.tipo !== 'senza_tariffa' && !eErrore(a));
@@ -355,7 +360,7 @@ export default function RiepilogoEcotyre({ periodo, onAnomalieChange, onVaiTarif
   // disattivata: uscivano in grigio, come se fossero un'informazione. Dal
   // 13/10/2026 anche il formulario ripetuto sullo stesso ordine
   // (calcolaRigheAttiva, 12/10/2026): e' da decidere, non da leggere e basta.
-  const DA_GUARDARE = ['prezzo_zero', 'prezzo_altro_anno', 'peso_mancante', 'unita_sconosciuta', 'tariffa_disattivata', 'formulario_ripetuto'];
+  const DA_GUARDARE = ['prezzo_zero', 'prezzo_altro_anno', 'peso_mancante', 'unita_sconosciuta', 'tariffa_disattivata', 'formulario_ripetuto', 'tariffa_da_confermare'];
   const daGuardare = (a) => DA_GUARDARE.includes(a.tipo) || String(a.tipo || '').startsWith('date_');
   // Le tonnellate senza prezzo si contano per canale: una somma unica di rete,
   // ACI ed extra raccolta non appartiene a nessuna commessa.

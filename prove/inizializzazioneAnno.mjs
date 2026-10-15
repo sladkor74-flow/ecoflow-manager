@@ -14,7 +14,17 @@
 // Qui si prova la regola - che cosa manca, che cosa si puo' copiare e come - e
 // soprattutto le due prudenze: non si copia sopra niente, e un prezzo copiato
 // resta «da confermare» finche' qualcuno non lo guarda. npm run prove
-import { listaAnno, tariffeDaRinnovare, tariffeDaConfermare, copiaTariffa, copreIlGiorno, chiaveTariffa, giorniAlPrimoGennaio } from '../base44/shared/inizializzazioneAnno.ts';
+//
+// La prova generale del cambio d'anno (15/10/2026) ha aggiunto due cose:
+// - difetto 7: una tariffa di rete o ACI senza data di fine, o con la fine oltre
+//   il 31/12 dell'anno in cui comincia, non rende «pronta» la lista dell'anno
+//   dopo: si dice «da chiudere». «Per sempre» vale solo per l'extra raccolta;
+// - difetto 21: la voce «Contratti ai subfornitori» dice «pronto» solo con tutti
+//   i contratti attesi dal modulo Contratti controfirmati; gli annullati non
+//   contano, e senza gli attesi (la dashboard) non dice mai «pronto»; ma se
+//   quelli fatti sono tutti controfirmati non tiene accesa la dashboard
+//   (revisione del 15/10/2026).
+import { listaAnno, tariffeDaRinnovare, tariffeDaConfermare, copiaTariffa, copreIlGiorno, chiaveTariffa, giorniAlPrimoGennaio, noteDopoIlPrezzo, noteDellaTariffaNuova } from '../base44/shared/inizializzazioneAnno.ts';
 import { daConfermare } from '../base44/shared/annoTarget.ts';
 
 let ok = 0, ko = 0;
@@ -38,7 +48,11 @@ const TARIFFE_2026 = [
 console.log('QUANDO UNA TARIFFA COPRE UN GIORNO');
 verifica('dentro la finestra', copreIlGiorno(TARIFFE_2026[0], '2026-06-30'));
 verifica('fuori, il giorno dopo la scadenza', !copreIlGiorno(TARIFFE_2026[0], '2027-01-01'));
-verifica('senza data di fine vale per sempre', copreIlGiorno(t({ data_fine_validita: '' }), '2030-01-01'));
+// «Per sempre» resta solo dell'extra raccolta, aperta per scelta (campagne
+// occasionali). Una tariffa di rete o ACI senza fine la fatturazione la legge
+// ancora cosi', ma non si salva piu' e la lista la dice «da chiudere» (15/10/2026,
+// difetto 7: qui sotto, UNA TARIFFA DI RETE O ACI APERTA NON E «PRONTA»).
+verifica('un\'extra raccolta senza data di fine vale per sempre', copreIlGiorno(t({ tipologia: 'EXTRA_RACCOLTA', data_fine_validita: '' }), '2030-01-01'));
 verifica('senza data di inizio vale da sempre', copreIlGiorno(t({ data_inizio_validita: '' }), '2020-01-01'));
 verifica('una tariffa non attiva non copre niente', !copreIlGiorno(t({ stato: 'non_attivo' }), '2026-06-30'));
 
@@ -122,26 +136,143 @@ console.log('LA LISTA DI CONTROLLO DELL ANNO NUOVO');
   verifica('a ottobre ancora', quando('2026-10-10') === false);
   verifica('dal 1° novembre parla', quando('2026-11-01') === true && quando('2026-10-31') === false);
   verifica('e continua a parlare anche ad anno cominciato, finche manca qualcosa', quando('2027-02-10') === true);
-  // Ma se non manca niente tace comunque, anche in piena finestra.
-  const aPosto = listaAnno({
-    anno: 2027, oggi: '2026-12-10',
+  // Ma se non manca niente tace comunque, anche in piena finestra. La lista
+  // chiamata come la chiama la dashboard (cruscottoOperativo): senza gli attesi
+  // dei contratti, che la dashboard non ha perche' non rilegge i movimenti.
+  // Revisione del 15/10/2026: con i contratti 2027 tutti controfirmati la voce
+  // dei contratti restava «parziale» e la dashboard diceva ogni mattina «2027: 1
+  // e da confermare · Contratti ai subfornitori» dal 01/11 al 28/02, con
+  // l'anno pronto. La prova era stata cambiata passando gli attesi, che la
+  // dashboard non passa mai: qui torna senza.
+  const PRONTO_2027 = {
     tariffe: TARIFFE_2026.map(x => ({ ...copiaTariffa(x, 2027), note: '' })),
     giacenzeSito: [{ anno: 2027 }], targetRaccoglitori: [{ anno: 2027 }], commesse: [{ anno: 2027 }],
-    contrattiFornitore: [{ anno: 2027 }], piazzali: [], rilevazioni: [],
-  });
-  verifica('un anno gia pronto non compare in dashboard', aPosto.pronto === true && aPosto.avvicinandosi === false);
-  // Il difetto trovato dalla prova, 10/10/2026: dove l'anno prima non aveva
-  // contratti, averne uno nuovo risultava «parziale» - si chiedeva di completare
-  // una cosa che non esiste.
-  const senzaStorico = listaAnno({ anno: 2027, contrattiFornitore: [], tariffe: [], piazzali: [], rilevazioni: [], oggi: '2026-12-10' });
-  verifica('senza contratti ne prima ne dopo non c e niente da rinnovare',
-    senzaStorico.voci.find(v => v.chiave === 'contratti_fornitori').stato === 'pronto');
-  const soloQuestAnno = listaAnno({ anno: 2027, contrattiFornitore: [{ anno: 2027 }], tariffe: [], piazzali: [], rilevazioni: [], oggi: '2026-12-10' });
-  verifica('e un contratto nuovo senza storico e pronto, non parziale',
-    soloQuestAnno.voci.find(v => v.chiave === 'contratti_fornitori').stato === 'pronto');
-  const meno = listaAnno({ anno: 2027, contrattiFornitore: [{ anno: 2027 }, { anno: 2026 }, { anno: 2026 }], tariffe: [], piazzali: [], rilevazioni: [], oggi: '2026-12-10' });
-  verifica('ma uno su due rispetto all anno prima resta parziale',
-    meno.voci.find(v => v.chiave === 'contratti_fornitori').stato === 'parziale');
+    contrattiFornitore: [{ anno: 2027, stato: 'controfirmato' }, { anno: 2027, stato: 'controfirmato' }, { anno: 2027, stato: 'annullato' }], piazzali: [], rilevazioni: [],
+  };
+  const aPosto = listaAnno({ anno: 2027, oggi: '2026-12-10', ...PRONTO_2027 });
+  verifica('un anno gia pronto non compare in dashboard', aPosto.avvicinandosi === false && aPosto.mancanti === 0, JSON.stringify(aPosto.voci.filter(v => v.stato !== 'pronto')));
+  // la voce dei contratti, senza gli attesi, resta gialla nella scheda e manda al modulo Contratti
+  const vContratti = aPosto.voci.find(v => v.chiave === 'contratti_fornitori');
+  verifica('senza gli attesi la voce dei contratti non dice «pronto» ma non tiene accesa la dashboard', vContratti.stato === 'parziale' && vContratti.tace_in_dashboard === true
+    && /2 contratti 2027, 2 controfirmati: quanti ne servono lo dice il modulo Contratti/.test(vContratti.dettaglio), JSON.stringify(vContratti));
+  // con gli attesi, come la chiama preparaAnno (Target & Status › Nuovo anno), l'anno e' pronto
+  const aPostoScheda = listaAnno({ anno: 2027, oggi: '2026-12-10', ...PRONTO_2027, totaliContratti: { attesi: 2, controfirmati: 2 } });
+  verifica('e con gli attesi tutti controfirmati la scheda dice «pronto»', aPostoScheda.pronto === true && aPostoScheda.avvicinandosi === false);
+  // la scelta dell'anno della dashboard e la voce scritta dal cruscotto vero, il
+  // 10/12/2026 e il 27/02/2027 (lo script del revisore r10_dashboardMaiPronta)
+  const { annoNuovoDaMostrare } = await import('../base44/shared/inizializzazioneAnno.ts');
+  const { cruscotto } = await import('../base44/shared/cruscotto.ts');
+  const vociNuovoAnno = (oggi, args) => {
+    const annoNuovo = annoNuovoDaMostrare({ ...args, oggi });
+    const dash = cruscotto({ oggi, adessoMs: Date.parse(`${oggi}T09:00:00Z`), anno: Number(oggi.slice(0, 4)), tipiFile: [], alertAperti: [], uploadLogs: [],
+      assegnatiRete: [], assegnatiAci: [], documenti: [], prefatture: [], riepilogoQualifica: null, richiesteEct: [], annoNuovo });
+    return (dash.da_gestire || []).filter(x => x.area === 'Nuovo anno');
+  };
+  for (const oggi of ['2026-12-10', '2027-02-27']) {
+    const v = vociNuovoAnno(oggi, PRONTO_2027);
+    verifica(`dashboard del ${oggi}: anno pronto e contratti fatti tutti controfirmati, nessuna voce «Nuovo anno»`, v.length === 0, JSON.stringify(v));
+  }
+  // La controprova: se c'e' ancora da fare sui contratti, la dashboard ne parla.
+  const unoDaFirmare = { ...PRONTO_2027, contrattiFornitore: [{ anno: 2027, stato: 'controfirmato' }, { anno: 2027, stato: 'generato' }] };
+  const vDaFirmare = vociNuovoAnno('2026-12-10', unoDaFirmare);
+  verifica('controprova: un contratto 2027 fatto e non controfirmato tiene accesa la dashboard', vDaFirmare.length === 1 && /Contratti ai subfornitori/.test(vDaFirmare[0].dettaglio), JSON.stringify(vDaFirmare));
+  const nessuno = { ...PRONTO_2027, contrattiFornitore: [{ anno: 2027, stato: 'annullato' }] };
+  const vNessuno = vociNuovoAnno('2026-12-10', nessuno);
+  verifica('controprova: nessun contratto 2027 (gli annullati non contano), la dashboard ne parla', vNessuno.length === 1 && /1 cosa manca/.test(vNessuno[0].titolo) && /Contratti ai subfornitori/.test(vNessuno[0].dettaglio), JSON.stringify(vNessuno));
+  // e quando c'e' altro da fare (qui i target, gialli) la voce dei contratti resta
+  // nell'elenco della dashboard e nel conto delle «da confermare», come nella scheda
+  const senzaTarget = { ...PRONTO_2027, targetRaccoglitori: [] };
+  const vSenzaTarget = vociNuovoAnno('2026-12-10', senzaTarget);
+  verifica('con altro da fare la voce resta nell\'elenco, coi numeri che dice la scheda', vSenzaTarget.length === 1 && /2027: 2 sono da confermare/.test(vSenzaTarget[0].titolo)
+    && /Target e siti · Contratti ai subfornitori/.test(vSenzaTarget[0].dettaglio), JSON.stringify(vSenzaTarget));
+}
+
+console.log('I CONTRATTI AI SUBFORNITORI: PRONTI SOLO SE CONTROFIRMATI (difetto 21, 15/10/2026)');
+{
+  // La prova generale del cambio d'anno: la voce contava i record dell'anno di
+  // qualunque stato, annullati compresi. Sui dati veri, senza contratti 2026 nel
+  // gestionale, diceva «pronto - Nel 2026 non ce n'erano: niente da rinnovare»
+  // mentre il modulo Contratti ne aspettava 32 il 28/12 e 13 il 05/01, nessuno
+  // controfirmato; un generato, una bozza e un annullato facevano «pronto - 3
+  // contratti per il 2027» con 15 attesi e 0 controfirmati.
+  const voce = (args) => listaAnno({ anno: 2027, tariffe: [], piazzali: [], rilevazioni: [], oggi: '2026-12-28', ...args }).voci.find(v => v.chiave === 'contratti_fornitori');
+  const c27 = (stato) => ({ anno: 2027, stato });
+  const a = voce({ contrattiFornitore: [], totaliContratti: { attesi: 32, controfirmati: 0 } });
+  verifica('scenario A, dati veri senza contratti, 32 attesi: «manca», non «pronto»', a.stato === 'manca' && /Nessun contratto 2027 controfirmato su 32 attesi/.test(a.dettaglio), JSON.stringify(a));
+  verifica('e la frase «Nel 2026 non ce n\'erano: niente da rinnovare» non c\'e\' piu\'', !/non ce n'erano|niente da rinnovare/.test(a.dettaglio), a.dettaglio);
+  const b = voce({ contrattiFornitore: [c27('generato'), c27('bozza'), c27('annullato'), { anno: 2026, stato: 'controfirmato' }], totaliContratti: { attesi: 15, controfirmati: 0 } });
+  verifica('scenario B, un generato, una bozza e un annullato con 15 attesi: «manca»', b.stato === 'manca' && /su 15 attesi/.test(b.dettaglio), JSON.stringify(b));
+  verifica('e l\'annullato non conta: «2 sono fatti ma non ancora controfirmati»', /2 sono fatti ma non ancora controfirmati/.test(b.dettaglio), b.dettaglio);
+  const parziale = voce({ contrattiFornitore: [c27('controfirmato'), c27('generato')], totaliContratti: { attesi: 15, controfirmati: 1 } });
+  verifica('uno controfirmato su 15: «parziale», coi numeri', parziale.stato === 'parziale' && /1 contratto controfirmato su 15 attesi/.test(parziale.dettaglio) && parziale.attesi === 15 && parziale.controfirmati === 1, JSON.stringify(parziale));
+  // la controprova: tutti gli attesi controfirmati
+  const pronto = voce({ contrattiFornitore: [c27('controfirmato'), c27('controfirmato')], totaliContratti: { attesi: 2, controfirmati: 2 } });
+  verifica('controprova: tutti gli attesi controfirmati, «pronto»', pronto.stato === 'pronto' && /Tutti i 2 contratti attesi per il 2027 sono controfirmati/.test(pronto.dettaglio), JSON.stringify(pronto));
+  // Senza gli attesi (la dashboard, che non rilegge i movimenti) non e' mai «pronto».
+  const senzaAttesi = voce({ contrattiFornitore: [c27('controfirmato'), c27('controfirmato'), c27('annullato')] });
+  verifica('senza gli attesi, anche coi contratti fatti tutti controfirmati: «parziale», e manda al modulo Contratti', senzaAttesi.stato === 'parziale'
+    && /2 contratti 2027, 2 controfirmati: quanti ne servono lo dice il modulo Contratti/.test(senzaAttesi.dettaglio), JSON.stringify(senzaAttesi));
+  const vuota = voce({ contrattiFornitore: [] });
+  verifica('senza gli attesi e senza contratti: «manca», e lo dice senza «0 contratti»', vuota.stato === 'manca' && vuota.dettaglio === 'Nessun contratto 2027: quanti ne servono lo dice il modulo Contratti.' && !vuota.tace_in_dashboard, JSON.stringify(vuota));
+  const soloPrima = voce({ contrattiFornitore: [{ anno: 2026, stato: 'controfirmato' }] });
+  verifica('i contratti dell\'anno prima non fanno l\'anno nuovo', soloPrima.stato === 'manca', JSON.stringify(soloPrima));
+}
+
+console.log('UNA TARIFFA DI RETE O ACI APERTA NON E «PRONTA» (difetto 7, 15/10/2026)');
+{
+  // Scenario A della prova generale: il 05/01/2027 l'amministratore scrive le
+  // tariffe 2027 dalle anagrafiche lasciando la fine vuota (rete attiva 205 €/t,
+  // raccolta GATIM 73 €/t) e un'ACI fino al 30/06/2028. Il 01/12/2027 la lista
+  // del 2028 diceva «2 tariffe coprono il 2028» e «1 tariffa copre il 2028», e il
+  // 10/02/2028 gennaio si fatturava e si pagava al prezzo del 2027.
+  const t27 = (p) => ({ unita_misura: '€/t', stato: 'attivo', data_inizio_validita: '2027-01-01', ...p });
+  const A = [
+    t27({ id: 'r27', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', valore: 205 }),
+    t27({ id: 'a27', direzione: 'ATTIVA', tipologia: 'ACI', cliente: 'ECOTYRE', regione: 'Calabria', valore: 233, data_fine_validita: '2028-06-30' }),
+    t27({ id: 'g27', direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_nome: 'GATIM S.R.L.', regione: 'Calabria', valore: 73 }),
+  ];
+  const l28 = listaAnno({ anno: 2028, tariffe: A, piazzali: [], rilevazioni: [], oggi: '2027-12-01' });
+  const att = l28.voci.find(v => v.chiave === 'tariffe_attive');
+  const pas = l28.voci.find(v => v.chiave === 'tariffe_passive');
+  verifica('il 01/12/2027 la lista del 2028 non dice «pronto» alle attive', att.stato !== 'pronto' && att.stato === 'manca', JSON.stringify(att));
+  verifica('e dice che le due tariffe del 2027 valgono anche nel 2028 e vanno chiuse', /2 tariffe di rete o ACI cominciate prima del 2028 valgono anche nel 2028/.test(att.dettaglio) && /vanno chiuse al 31\/12/.test(att.dettaglio), att.dettaglio);
+  verifica('con chi sono, in chiaro', att.da_chiudere && att.da_chiudere.length === 2 && att.da_chiudere.map(x => x.id).sort().join() === 'a27,r27' && /205,00 €\/t, dal 01\/01\/2027, senza fine/.test(att.dettaglio) && /fino al 30\/06\/2028/.test(att.dettaglio), JSON.stringify(att));
+  verifica('la passiva lo stesso: GATIM aperta non e\' «1 tariffa copre il 2028»', pas.stato === 'manca' && /GATIM S\.R\.L\./.test(pas.dettaglio) && !/copre il 2028/.test(pas.dettaglio), JSON.stringify(pas));
+  // IL PREZZO DI UN FORNITORE NON ESCE DALLA LISTA (revisione del 15/10/2026):
+  // la lista la legge chiunque apra Target & Status › Nuovo anno, e le passive
+  // sono i costi. Prima la frase diceva «GATIM S.R.L. raccolta RETE Calabria
+  // 73,00 €/t» e da_chiudere portava { valore: 73 }.
+  verifica('la passiva da chiudere si nomina senza prezzo: fornitore, prestazione, canale, regione e periodo', /GATIM S\.R\.L\. raccolta RETE Calabria, dal 01\/01\/2027, senza fine/.test(pas.dettaglio) && !/73/.test(pas.dettaglio), pas.dettaglio);
+  verifica('e in da_chiudere non c\'e\' il valore', pas.da_chiudere && pas.da_chiudere.length === 1 && !('valore' in pas.da_chiudere[0]) && !('unita_misura' in pas.da_chiudere[0]) && !/73/.test(JSON.stringify(pas.da_chiudere)), JSON.stringify(pas.da_chiudere));
+  verifica('le attive invece tengono il prezzo, che leggono tutti', att.da_chiudere.find(x => x.id === 'r27').valore === 205 && /ECOTYRE RETE 205,00 €\/t/.test(att.dettaglio), JSON.stringify(att.da_chiudere));
+  // La lista del loro anno: il prezzo c'e', ma la fine manca. Giallo, non verde.
+  const l27 = listaAnno({ anno: 2027, tariffe: A, piazzali: [], rilevazioni: [], oggi: '2027-01-05' });
+  const att27 = l27.voci.find(v => v.chiave === 'tariffe_attive');
+  verifica('nella lista del 2027 le stesse tariffe sono «parziale»: vanno chiuse al 31/12/2027', att27.stato === 'parziale' && /2 tariffe di rete o ACI del 2027/.test(att27.dettaglio) && /vanno chiuse al 31\/12\/2027/.test(att27.dettaglio), JSON.stringify(att27));
+  // Scenario B: «Riapri» sulle sette attive del 2026 il 02/01/2027 toglieva la
+  // fine, e la lista del 2027 diventava «7 tariffe coprono il 2027».
+  const riaperte = TARIFFE_2026.map(x => (x.direzione === 'ATTIVA' ? { ...x, data_fine_validita: null } : x));
+  const lB = listaAnno({ anno: 2027, tariffe: riaperte, piazzali: [], rilevazioni: [], oggi: '2027-01-02' });
+  const attB = lB.voci.find(v => v.chiave === 'tariffe_attive');
+  verifica('le attive del 2026 riaperte senza fine: la lista del 2027 non e\' «pronto»', attB.stato === 'manca' && /3 tariffe di rete o ACI cominciate prima del 2027 valgono anche nel 2027/.test(attB.dettaglio), JSON.stringify(attB));
+  verifica('e l\'extra raccolta aperta non e\' fra quelle da chiudere', !(attB.da_chiudere || []).some(x => x.tipologia === 'EXTRA_RACCOLTA'), JSON.stringify(attB.da_chiudere));
+  // La controprova: le tariffe 2027 dal 01/01 al 31/12/2027, confermate.
+  const chiuse = A.map(x => ({ ...x, data_fine_validita: '2027-12-31' }));
+  const lOk = listaAnno({ anno: 2027, tariffe: chiuse, piazzali: [], rilevazioni: [], oggi: '2027-01-05' });
+  verifica('controprova: dal 01/01 al 31/12/2027 le attive sono «pronto»', lOk.voci.find(v => v.chiave === 'tariffe_attive').stato === 'pronto', JSON.stringify(lOk.voci.find(v => v.chiave === 'tariffe_attive')));
+  verifica('e le passive anche', lOk.voci.find(v => v.chiave === 'tariffe_passive').stato === 'pronto', JSON.stringify(lOk.voci.find(v => v.chiave === 'tariffe_passive')));
+  const lOk28 = listaAnno({ anno: 2028, tariffe: chiuse, piazzali: [], rilevazioni: [], oggi: '2027-12-01' });
+  verifica('e la lista del 2028 dice che scadono il 31/12/2027 e il 2028 non le ha', lOk28.voci.find(v => v.chiave === 'tariffe_attive').stato === 'manca'
+    && /2 tariffe scadono il 31\/12\/2027/.test(lOk28.voci.find(v => v.chiave === 'tariffe_attive').dettaglio), JSON.stringify(lOk28.voci.find(v => v.chiave === 'tariffe_attive')));
+  // L'extra raccolta resta libera: aperta non e' da chiudere.
+  const extra = listaAnno({ anno: 2027, tariffe: [t27({ direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 210 })], piazzali: [], rilevazioni: [], oggi: '2027-01-05' });
+  verifica('un\'extra raccolta aperta resta libera: niente «da chiudere»', !extra.voci.some(v => v.da_chiudere), JSON.stringify(extra.voci.filter(v => v.da_chiudere)));
+  // Ma da sola non fa «pronte» le tariffe dell'anno: nella verifica del «Riapri»
+  // la lista del 2028 diceva «1 tariffa copre il 2028» con la sola extra raccolta
+  // del 2026 rimasta aperta, e il 2028 non aveva un prezzo di rete ne' di ACI.
+  const soloExtra = listaAnno({ anno: 2028, tariffe: [...TARIFFE_2026, t({ direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', valore: 202, data_fine_validita: null })], piazzali: [], rilevazioni: [], oggi: '2027-12-01' });
+  const attSolo = soloExtra.voci.find(v => v.chiave === 'tariffe_attive');
+  verifica('con la sola extra raccolta aperta le attive del 2028 non sono «pronto»: manca la rete e l\'ACI', attSolo.stato === 'manca' && /Nessuna tariffa di rete o ACI copre il 2028/.test(attSolo.dettaglio), JSON.stringify(attSolo));
 }
 
 console.log('QUANDO L ANNO E PRONTO, LA LISTA TACE');
@@ -156,7 +287,9 @@ console.log('QUANDO L ANNO E PRONTO, LA LISTA TACE');
     ],
     targetRaccoglitori: [{ anno: 2027, raccoglitore: 'SMOCO S.r.l.', regione: 'Puglia', target_tonnellate: 1850 }],
     commesse: [{ anno: 2027, target_annuo_t: 11000 }],
-    contrattiFornitore: [{ anno: 2027 }, { anno: 2027 }, { anno: 2026 }],
+    // i due contratti 2027 controfirmati, e il modulo Contratti ne aspetta due (15/10/2026)
+    contrattiFornitore: [{ anno: 2027, stato: 'controfirmato' }, { anno: 2027, stato: 'controfirmato' }, { anno: 2026 }],
+    totaliContratti: { attesi: 2, controfirmati: 2 },
     piazzali: ['irigom'],
     rilevazioni: [{ sito: 'irigom', data_rilevazione: '2026-12-31' }],
     oggi: '2026-12-31',
@@ -177,6 +310,28 @@ console.log('UN PREZZO COPIATO E NON CONFERMATO NON E «PRONTO»');
   // Dal 10/10/2026 la lista non si limita a dire «vanno confermate»: offre di
   // farlo. Prima non c'era un modo, se non cancellare la nota a mano.
   verifica('non offre piu di copiarle: offre di confermarle', att.azione === 'conferma_tariffe' && att.direzione === 'ATTIVA', JSON.stringify([att.azione, att.direzione]));
+}
+
+console.log('UN PREZZO COPIATO E CAMBIATO A MANO NON E\' PIU\' COPIATO (revisione del 15/10/2026)');
+{
+  // gestisciAnagrafiche lo usa per la «Modifica» di Tariffe & Anagrafiche: il
+  // modulo rimanda la nota com'era, e una rete 2027 portata da 202 a 205 €/t
+  // restava «copiato dal 2026, da confermare». La prova intera, con le funzioni
+  // vere, e' in prove/scadenzaTariffe2026.mjs.
+  const copia = { ...copiaTariffa(TARIFFE_2026[0], 2027), note: 'copiato dal 2026, da confermare · accordo di maggio' };
+  const note = noteDopoIlPrezzo(copia, { valore: 205, note: copia.note }, { il: '2027-01-20', da: 'amministratore' });
+  verifica('col prezzo cambiato la nota della copia se ne va, le altre note restano, e si dice chi e quando', note === 'accordo di maggio · Prezzo scritto a mano sul contratto 2027 il 20/01/2027 da amministratore: non è più quello copiato.', note);
+  verifica('e la tariffa non e\' piu\' da confermare', !daConfermare({ ...copia, valore: 205, note }));
+  verifica('lo stesso prezzo (cambiano solo le date o le note) non conferma niente', noteDopoIlPrezzo(copia, { valore: copia.valore, note: copia.note }) === null && noteDopoIlPrezzo(copia, { valore: String(copia.valore) }) === null && noteDopoIlPrezzo(copia, { note: 'x' }) === null);
+  verifica('una tariffa non copiata non si tocca', noteDopoIlPrezzo({ ...copia, note: '' }, { valore: 205 }) === null);
+  const passiva = { ...copiaTariffa(TARIFFE_2026.find(x => x.direzione !== 'ATTIVA') || TARIFFE_2026[0], 2027) };
+  verifica('vale anche per le passive', /^Prezzo scritto a mano sul contratto 2027/.test(noteDopoIlPrezzo(passiva, { valore: Number(passiva.valore) + 1 }) || ''), JSON.stringify(passiva));
+  // E una tariffa nuova fatta con «Duplica» da una copiata (revisione del 15/10/2026,
+  // r11): le note dell'originale arrivano con la create, e la nota della copia se ne va.
+  const nuova = noteDellaTariffaNuova({ regione: 'Lazio', valore: 245, data_inizio_validita: '2027-01-01', note: copia.note }, { il: '2027-01-20', da: 'amministratore' });
+  verifica('una tariffa nuova con la nota della copia: la nota se ne va, le altre restano, e si dice chi e quando', nuova === "accordo di maggio · Scritta a mano sul contratto 2027 il 20/01/2027 da amministratore: non è una copia dell'anno prima.", nuova);
+  verifica('e non e\' da confermare', !daConfermare({ note: nuova }));
+  verifica('senza la nota della copia non si tocca niente', noteDellaTariffaNuova({ valore: 245, note: 'contratto 2027' }) === null && noteDellaTariffaNuova({ valore: 245 }) === null && noteDellaTariffaNuova(null) === null);
 }
 
 console.log('LA BASE DELL EXTRA RACCOLTA DELL ANNO NUOVO');
@@ -429,6 +584,60 @@ console.log('LA CONFERMA DELLE TARIFFE COPIATE LASCIA LA SUA RIGA NELLO STORICO'
   verifica('ripetuta, non c\'e\' niente da confermare e nessuna riga in piu\'', niente.stato === 200 && niente.j.confermate === 0 && (niente.db.ModificaDato || []).length === 2 && !niente.scritte.length, JSON.stringify({ j: niente.j.confermate, s: niente.scritte }));
   const utente = await chiama(pa, { db: DB, ruolo: 'user', corpo: { anno, azione: 'conferma_tariffe', direzione: 'ATTIVA' } });
   verifica('chi non e\' amministratore non conferma e non scrive', utente.stato !== 200 && !utente.scritte.length, JSON.stringify({ s: utente.stato, w: utente.scritte }));
+}
+// LA LISTA E IL MODULO CONTRATTI DICONO GLI STESSI ATTESI (15/10/2026, difetto
+// 21): preparaAnno calcola i totali con situazioneContratti, le stesse letture e
+// la stessa regola di contrattiAnno, e li passa alla lista. Il banco e' quello
+// delle funzioni intere: due archivi uguali, due funzioni, lo stesso numero.
+console.log('LA VOCE DEI CONTRATTI DI PREPARAANNO E IL MODULO CONTRATTI DICONO GLI STESSI NUMERI');
+{
+  const { caricaFunzione, chiama } = await import('./dati/bancoFunzioni.mjs');
+  const ca = await caricaFunzione('contrattiAnno');
+  const pa = await caricaFunzione('preparaAnno');
+  const anno = Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome', year: 'numeric' }).format(new Date())) + 1;
+  const prima = anno - 1;
+  // due ritiri di rete dell'anno prima: NAPPI SUD raccoglie, Irigom tratta
+  const mov = (id) => ({
+    id, stato: 'terminato', id_ordine: 'ET' + id, numero_fir: 'F' + id, trasportatore: 'NAPPI SUD SRL', destinazione: 'Irigom S.r.l.', tipo_destinazione: 'imp',
+    classe: 'P', peso_effettivo: 2000, provincia: 'NA', regione: 'Campania', cer: '160103', ordine_immesso_il: `${prima}-09-01T10:00:00.000Z`,
+    trasporto_iniziato_il: `${prima}-09-10T08:00:00.000Z`, trasporto_finito_il: `${prima}-09-10T10:00:00.000Z`, ordine_chiuso_il: `${prima}-09-12T10:00:00.000Z`,
+  });
+  const contratto = (chiave, nome, tipo, stato) => ({ id: `c-${chiave}-${tipo}`, anno, soggetto_chiave: chiave, soggetto_nome: nome, tipo_contratto: tipo, canale: 'RETE', stato });
+  const DB = (contratti) => ({
+    Fornitore: [{ id: 'fN', ragione_sociale: 'NAPPI SUD SRL', stato: 'attivo', ruolo_raccolta: true }, { id: 'fI', ragione_sociale: 'Irigom S.r.l.', stato: 'attivo', ruolo_trattamento: true }],
+    PrimariaRete: [mov('1'), mov('2')], PrimariaAci: [], ExtraRaccolta: [], Secondaria: [], Tariffa: [], ContrattoFornitore: contratti,
+    ModelloContratto: [], TargetRaccoglitore: [], ImpiantoTargetSecondaria: [], QualificaInclusione: [], GiacenzaSito: [], CommessaEcotyre: [], GiacenzaStoccaggio: [],
+  });
+  const confronta = async (contratti) => {
+    const c = await chiama(ca, { db: DB(contratti), corpo: { anno } });
+    const p = await chiama(pa, { db: DB(contratti), corpo: { anno } });
+    return { totali: c.j.totali, voce: (p.j.voci || []).find(v => v.chiave === 'contratti_fornitori'), stato: p.stato };
+  };
+  const nessuno = await confronta([]);
+  verifica('senza contratti: due attesi in tutti e due i moduli, e la voce «manca»', nessuno.stato === 200 && nessuno.totali.attesi === 2 && nessuno.voce.attesi === 2 && nessuno.voce.controfirmati === 0 && nessuno.voce.stato === 'manca', JSON.stringify(nessuno));
+  const uno = await confronta([contratto('nappi sud', 'NAPPI SUD SRL', 'raccolta', 'controfirmato'), contratto('irigom', 'Irigom S.r.l.', 'trattamento', 'annullato')]);
+  verifica('uno controfirmato e uno annullato: 1 su 2, «parziale», come il modulo Contratti', uno.totali.controfirmati === 1 && uno.voce.controfirmati === 1 && uno.voce.attesi === uno.totali.attesi && uno.voce.stato === 'parziale', JSON.stringify(uno));
+  const tutti = await confronta([contratto('nappi sud', 'NAPPI SUD SRL', 'raccolta', 'controfirmato'), contratto('irigom', 'Irigom S.r.l.', 'trattamento', 'controfirmato')]);
+  verifica('controprova: tutti e due controfirmati, «pronto»', tutti.totali.attesi === 2 && tutti.totali.controfirmati === 2 && tutti.voce.stato === 'pronto', JSON.stringify(tutti));
+}
+// CHI NON E' AMMINISTRATORE NON LEGGE IL COSTO DI UNA TARIFFA DA CHIUDERE
+// (revisione del 15/10/2026). Lo script del revisore: una raccolta GATIM di rete
+// 2027 a 73 €/t scritta senza fine (il sito di oggi la salva ancora), e chi non
+// e' amministratore apre Target & Status › Nuovo anno 2028. Con la voce «da
+// chiudere» la risposta portava «73,00 €/t» e { valore: 73 }. La funzione vera,
+// sul banco, col ruolo di chi legge soltanto.
+console.log('LA VOCE «DA CHIUDERE» NON DICE IL PREZZO DI UN FORNITORE A CHI NON E\' AMMINISTRATORE');
+{
+  const { caricaFunzione, chiama } = await import('./dati/bancoFunzioni.mjs');
+  const pa = await caricaFunzione('preparaAnno');
+  const gatim = { id: 'g27aperta', direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_id: 'x', fornitore_nome: 'GATIM S.R.L.', regione: 'Calabria',
+    unita_misura: '€/t', valore: 73, stato: 'attivo', data_inizio_validita: '2027-01-01', data_fine_validita: null };
+  const DB = { Tariffa: [gatim], GiacenzaSito: [], TargetRaccoglitore: [], CommessaEcotyre: [], ContrattoFornitore: [], GiacenzaStoccaggio: [],
+    Fornitore: [], PrimariaRete: [], PrimariaAci: [], ExtraRaccolta: [], Secondaria: [], ModelloContratto: [], ImpiantoTargetSecondaria: [], QualificaInclusione: [] };
+  const r = await chiama(pa, { db: DB, ruolo: 'user', corpo: { anno: 2028 } });
+  const pas = ((r.j && r.j.voci) || []).find(v => v.chiave === 'tariffe_passive') || {};
+  verifica('chi non e\' amministratore legge la lista del 2028: GATIM «da chiudere», col nome', r.stato === 200 && r.j.puo_scrivere === false && pas.stato === 'manca' && /GATIM S\.R\.L\. raccolta RETE Calabria/.test(pas.dettaglio || ''), JSON.stringify({ s: r.stato, pas }));
+  verifica('ma nella risposta il costo di GATIM non c\'e\' da nessuna parte', !/73/.test(JSON.stringify(r.j)), JSON.stringify(pas));
 }
 console.log('');
 console.log(ok + ' verifiche superate, ' + ko + ' fallite');

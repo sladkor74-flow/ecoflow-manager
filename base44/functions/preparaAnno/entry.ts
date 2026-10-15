@@ -8,6 +8,9 @@ import { annoChiuso, annoCorrenteRoma } from "../../shared/annoTarget.ts";
 import { listaAnno, pianoCopiaTariffe, tariffeDaConfermare, confermaTariffa } from "../../shared/inizializzazioneAnno.ts";
 import { traccia, utenteDellaRichiesta, unisciTracce } from "../../shared/traccia.ts";
 import { etichettaDi, annoDi, unitaDelCampo, campoRiservato, testoDelValore, registraModifiche } from "../../shared/campiTracciati.ts";
+import { individuaSoggetti } from "../../shared/qualificaFornitori.ts";
+import { situazioneContratti } from "../../shared/contrattiDellAnno.ts";
+import { nuovaCache, chiaveLettura } from "../../shared/cacheLetture.ts";
 
 // L'ANNO NUOVO: CHE COSA GLI MANCA PER COMINCIARE, E QUELLO CHE SI PUO' FARE
 // DA QUI.
@@ -82,6 +85,67 @@ function righeConferma(confermate, { utente = '', origine = '', il = '', anno = 
   });
 }
 
+/**
+ * QUANTI CONTRATTI AI SUBFORNITORI ASPETTA L'ANNO, E QUANTI SONO CONTROFIRMATI
+ * (prova generale del cambio d'anno, 15/10/2026, difetto 21).
+ *
+ * La voce dei contratti della lista contava i record dell'anno di qualunque
+ * stato e diceva «pronto» anche senza un contratto controfirmato: il modulo
+ * Contratti intanto ne aspettava 32 il 28/12/2026 e 13 il 05/01/2027. Qui si
+ * calcolano gli stessi totali del modulo Contratti, con le stesse letture di
+ * contrattiAnno e la stessa regola (situazioneContratti di contrattiDellAnno.ts):
+ * soggetti dell'anno e, finche' l'anno non e' finito, dell'anno prima;
+ * movimenti, modelli, fornitori, target e tariffe. Ogni archivio si legge una
+ * volta sola: individuaSoggetti rilegge le primarie e le secondarie per due
+ * anni, e senza la cache sarebbero tre letture di decine di migliaia di righe
+ * contro il limite al minuto di tutta l'app (la stessa cache di contrattiAnno).
+ * Le tariffe, i contratti e i target dei raccoglitori sono gia' letti qui
+ * sopra: si passano, non si rileggono.
+ *
+ * Se qualcosa non si legge si risponde null: la lista allora non dice mai
+ * «pronto» per i contratti e manda al modulo Contratti, invece di fermare tutta
+ * la verifica.
+ */
+async function totaliContrattiDellAnno(base44, anno, { contratti, targetRaccoglitori, tariffe }) {
+  const cache = nuovaCache();
+  const svc = base44.asServiceRole.entities;
+  const entita = new Proxy({}, {
+    get: (_t, nome) => {
+      const archivio = svc[nome];
+      const inCache = {
+        list: (...args) => cache.leggi(chiaveLettura(`${String(nome)}|list|${JSON.stringify(args)}`), () => archivio.list(...args)),
+        filter: (filtro, ...resto) => cache.leggi(chiaveLettura(`${String(nome)}|filter|${JSON.stringify(resto)}`, filtro), () => archivio.filter(filtro, ...resto)),
+      };
+      return new Proxy({}, {
+        get: (_x, metodo) => (Object.prototype.hasOwnProperty.call(inCache, metodo) ? inCache[metodo]
+          : (typeof archivio[metodo] === 'function' ? archivio[metodo].bind(archivio) : archivio[metodo])),
+      });
+    },
+  });
+  const condivise = { asServiceRole: { entities: entita } };
+  const oggi = oggiRoma();
+  const conAnnoPrima = oggi <= `${anno}-12-31`;
+  const delAnno = await individuaSoggetti(condivise, anno);
+  const dellAnnoPrima = conAnnoPrima ? await individuaSoggetti(condivise, anno - 1) : { soggetti: [] };
+  const [rete, aci, extra, sec, modelli, fornitori, impiantiTarget] = await Promise.all([
+    fetchAll(entita.PrimariaRete),
+    fetchAll(entita.PrimariaAci),
+    fetchAll(entita.ExtraRaccolta),
+    fetchAll(entita.Secondaria),
+    fetchAll(entita.ModelloContratto),
+    fetchAll(entita.Fornitore),
+    fetchAll(entita.ImpiantoTargetSecondaria, { stato: 'attivo' }),
+  ]);
+  const situazione = situazioneContratti({
+    anno, oggi, admin: false,
+    soggettiAnno: delAnno.soggetti || [], esclusiAnno: delAnno.esclusi || [],
+    soggettiPrima: dellAnnoPrima.soggetti || [],
+    archivi: { rete, aci, extra, sec },
+    contratti, modelli, fornitori, targetRaccoglitori, impiantiTarget, tariffe,
+  });
+  return situazione && situazione.totali ? situazione.totali : null;
+}
+
 export default async function (req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -122,20 +186,35 @@ export default async function (req) {
       ...rilevazioni.map(r => norm(r.sito)),
     ].filter(Boolean))];
 
-    const lista = () => listaAnno({
+    // I contratti attesi e controfirmati dell'anno (15/10/2026, difetto 21): si
+    // leggono una volta per domanda e solo quando serve la lista, cioe' non per
+    // le simulazioni. La copia e la conferma delle tariffe non li cambiano.
+    let totaliLetti;
+    const totaliContratti = async () => {
+      if (totaliLetti === undefined) {
+        try {
+          totaliLetti = await totaliContrattiDellAnno(base44, anno, { contratti: contrattiFornitore, targetRaccoglitori, tariffe });
+        } catch {
+          totaliLetti = null;
+        }
+      }
+      return totaliLetti;
+    };
+    const lista = async () => listaAnno({
       anno,
       tariffe,
       giacenzeSito,
       targetRaccoglitori,
       commesse,
       contrattiFornitore,
+      totaliContratti: await totaliContratti(),
       rilevazioni: rilevazioni.map(r => ({ ...r, sito: norm(r.sito) })),
       piazzali,
       oggi: oggiRoma(),
     });
 
     if (azione === 'verifica') {
-      return Response.json({ ...lista(), puo_scrivere: !!puoScrivere, utente: user && user.email ? user.email : '' });
+      return Response.json({ ...(await lista()), puo_scrivere: !!puoScrivere, utente: user && user.email ? user.email : '' });
     }
 
     // --- La conferma delle tariffe copiate ---
@@ -164,7 +243,7 @@ export default async function (req) {
       })));
       const tariffeDopo = await fetchAll(svc.Tariffa);
       const dopo = listaAnno({
-        anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
+        anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, totaliContratti: await totaliContratti(),
         rilevazioni: rilevazioni.map(r => ({ ...r, sito: norm(r.sito) })), piazzali, oggi: oggiRoma(),
       });
       return Response.json({ ...dopo, confermate: confermate.length, non_confermate: nonConfermate, direzione: dir, traccia: unisciTracce(tracceConferma), puo_scrivere: true });
@@ -216,7 +295,7 @@ export default async function (req) {
     // quella di prima con un conteggio appiccicato sopra.
     const tariffeDopo = await fetchAll(svc.Tariffa);
     const dopo = listaAnno({
-      anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore,
+      anno, tariffe: tariffeDopo, giacenzeSito, targetRaccoglitori, commesse, contrattiFornitore, totaliContratti: await totaliContratti(),
       rilevazioni: rilevazioni.map(r => ({ ...r, sito: norm(r.sito) })), piazzali, oggi: oggiRoma(),
     });
     // Le copie non create perche' si scontravano con una tariffa gia' scritta:

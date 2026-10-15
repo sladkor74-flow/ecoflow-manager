@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { notaTraccia } from '@/lib/scriviConTraccia';
 import { useToast } from '@/components/ui/use-toast';
@@ -9,7 +10,7 @@ import { Loader2, Plus, Pencil, Copy, History, CalendarX, RotateCcw, Download, T
 import { formatNumber } from '@/lib/utils';
 import { fetchAllClient } from '@/lib/fetchAllClient';
 import { chiaveMatch, chiaveMatchAttiva, periodiSovrapposti } from '@/lib/conflittiTariffa';
-import { tariffaNonDisattivata } from '@/lib/validitaTariffa';
+import { tariffaNonDisattivata, fineRiapertura } from '@/lib/validitaTariffa';
 import { oggiRoma } from '@/lib/giornoItaliano';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import TariffeRuoliFornitori from './TariffeRuoliFornitori';
@@ -303,6 +304,38 @@ export default function TariffeUnificate({ sezione = null }) {
     return result;
   }, [tariffe, filters, showOnlyDup, showOnlyNoPrest, duplicateIds, surplusPerTariffa]);
 
+  // LE TARIFFE SCADUTE CHE L'ELENCO NASCONDE (prova generale del cambio d'anno,
+  // 15/10/2026, difetto 32). Il 02/01/2027 alle 10 la tabella diceva «Nessuna
+  // tariffa. Clicca "Aggiungi tariffa" per iniziare.» con 65 tariffe in archivio,
+  // tutte finite il 31/12/2026: sembrava che le tariffe fossero sparite. Qui le
+  // tariffe archiviate che i filtri di oggi farebbero vedere con «Mostra
+  // archiviate»; l'elenco vuoto lo dice, con il giorno in cui sono finite e come
+  // si preparano quelle nuove. L'anno si calcola, mai scritto a mano.
+  const archiviateNascoste = useMemo(() => {
+    if (filters.showArchived || filters.conSurplus || showOnlyDup || showOnlyNoPrest) return [];
+    return tariffe.filter(t => isArchiviata(t)
+      && (!filters.direzione || t.direzione === filters.direzione)
+      && (!filters.tipologia || t.tipologia === filters.tipologia)
+      && (!filters.prestazione || t.prestazione === filters.prestazione)
+      && (!filters.fornitore_id || t.fornitore_id === filters.fornitore_id));
+  }, [tariffe, filters, showOnlyDup, showOnlyNoPrest]);
+  const elencoVuoto = (() => {
+    if (!archiviateNascoste.length) return null;
+    const scadute = archiviateNascoste.filter(t => tariffaNonDisattivata(t) && t.data_fine_validita);
+    const fini = [...new Set(scadute.map(t => String(t.data_fine_validita).slice(0, 10)))].sort();
+    const disattivate = archiviateNascoste.length - scadute.length;
+    const n = scadute.length;
+    const quando = !n ? '' : fini.length === 1 ? `il ${dataIt(fini[0])}` : `fra il ${dataIt(fini[0])} e il ${dataIt(fini[fini.length - 1])}`;
+    const frase = [
+      n ? `${n === 1 ? 'una tariffa è scaduta' : `${n} tariffe sono scadute`} ${quando}` : '',
+      disattivate ? `${disattivate === 1 ? 'una è disattivata' : `${disattivate} sono disattivate`}` : '',
+    ].filter(Boolean).join(', e ');
+    // Le tariffe che servono sono quelle dell'anno di oggi. La scheda Nuovo anno
+    // prepara l'anno dopo quello scelto (come il collegamento della dashboard):
+    // per preparare il 2027 si apre col 2026.
+    return { frase, annoScheda: Number(String(oggi).slice(0, 4)) - 1 };
+  })();
+
   const closePeriod = async (t) => {
     // Chiudere il periodo lo accorcia, mai lo allunga (revisione del 13/10/2026):
     // a una tariffa gia' chiusa non si propone niente, e una data dopo la fine
@@ -331,12 +364,34 @@ export default function TariffeUnificate({ sezione = null }) {
     } catch (e) { alert(e?.response?.data?.error || e?.message); }
   };
   const reopenPeriod = async (t) => {
-    if (!confirm('Riaprire questa tariffa? Verrà impostata come attiva senza data di fine.')) return;
+    // RETE E ACI SI RIAPRONO SOLO DENTRO IL LORO ANNO (prova generale del cambio
+    // d'anno, 15/10/2026, difetto 7). «Riapri» toglieva la data di fine: il
+    // 02/01/2027 la tariffa rete del 2026 tornava a valere senza fine, e gennaio
+    // 2027 si fatturava a 202 €/t e si pagava Gatim a 70 €/t senza un avviso. I
+    // contratti di rete e ACI sono annuali senza tacito rinnovo: una tariffa di
+    // rete, ACI o TUTTE si riapre al piu' fino al 31/12 dell'anno in cui comincia
+    // (fineRiapertura di validitaTariffa.js, e il server rifiuta il resto), e per
+    // l'anno dopo serve la sua tariffa. L'extra raccolta resta libera: si riapre
+    // senza data di fine, come prima.
+    const fine = fineRiapertura(t);
+    if (fine === '') {
+      alert('Questa tariffa non ha la data di inizio: correggila con «Modifica», con inizio e fine dentro lo stesso anno di contratto.');
+      return;
+    }
+    if (fine !== null && tariffaNonDisattivata(t) && String(t.data_fine_validita || '').slice(0, 10) === fine) {
+      alert(`Questa tariffa vale già fino al ${dataIt(fine)}, la fine del suo anno: i contratti di rete e ACI sono annuali senza tacito rinnovo, e una tariffa non si riapre sull'anno dopo. Per il ${Number(fine.slice(0, 4)) + 1} serve la sua tariffa: Target & Status › Nuovo anno › «Prepara le tariffe», oppure «Aggiungi tariffa».`);
+      return;
+    }
+    const domanda = fine === null
+      ? 'Riaprire questa tariffa? Verrà impostata come attiva senza data di fine.'
+      : `Riaprire questa tariffa? Verrà impostata come attiva fino al ${dataIt(fine)}, la fine del suo anno: i contratti di rete e ACI sono annuali senza tacito rinnovo.`;
+    if (!confirm(domanda)) return;
     try {
       // null cancella la data di fine; con undefined la chiave spariva nel JSON
       // e il server la rifondeva dal record, cosi' «Riapri» non riapriva niente
-      // e nessuno lo diceva (06/10/2026).
-      const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: null, stato: 'attivo' }, motivo: 'riaperta dall\'elenco delle tariffe' });
+      // e nessuno lo diceva (06/10/2026). Per rete e ACI la fine e' il 31/12
+      // dell'anno della tariffa (15/10/2026).
+      const res = await base44.functions.invoke('gestisciAnagrafiche', { entita: 'Tariffa', operazione: 'update', id: t.id, dati: { data_fine_validita: fine, stato: 'attivo' }, motivo: 'riaperta dall\'elenco delle tariffe' });
       const fuoriStorico = notaTraccia(res.data);
       if (fuoriStorico) alert(fuoriStorico);
       load();
@@ -544,7 +599,12 @@ export default function TariffeUnificate({ sezione = null }) {
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && <tr><td colSpan={13} className="text-center py-8 text-muted-foreground">Nessuna tariffa. Clicca "Aggiungi tariffa" per iniziare.</td></tr>}
+                {filtered.length === 0 && !elencoVuoto && <tr><td colSpan={13} className="text-center py-8 text-muted-foreground">Nessuna tariffa. Clicca "Aggiungi tariffa" per iniziare.</td></tr>}
+                {filtered.length === 0 && elencoVuoto && (
+                  <tr><td colSpan={13} className="text-center py-8 px-4 text-muted-foreground">
+                    Nessuna tariffa in vigore oggi: {elencoVuoto.frase}. Per l’anno nuovo: <Link to={`/target-status?tab=nuovo-anno&anno=${elencoVuoto.annoScheda}`} className="font-medium text-primary underline">Target & Status › Nuovo anno › «Prepara le tariffe»</Link>, oppure <button type="button" onClick={() => setFilters({ ...filters, showArchived: true })} className="font-medium text-primary underline">«Mostra archiviate»</button>.
+                  </td></tr>
+                )}
               </tbody>
             </table>
           </div>

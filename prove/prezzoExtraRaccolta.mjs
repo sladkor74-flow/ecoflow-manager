@@ -153,5 +153,36 @@ console.log('LA PAGINA E LA SCHEDA LEGGONO LE TARIFFE E LE USANO');
   verifica('il prezzo di un altro anno si dice ma non si scrive sulla scheda', /p\.base && !p\.altro_anno/.test(s) && /senzaScritto\.altro_anno/.test(s));
 }
 
+// LA BASE COPIATA DAL 2026 NON E' «LA TARIFFA BASE ECOTYRE 2027» (prova generale
+// del cambio d'anno, 15/10/2026, difetto 15). Dopo «Prepara le tariffe» la
+// tariffa EXTRA_RACCOLTA del 2027 e' la copia del 2026, col prezzo del 2026 e la
+// nota «copiato dal 2026, da confermare»: la riga di un intervento senza prezzo
+// scritto diceva «Tariffa base Ecotyre 2027: 202 €/t», cioe' un prezzo vecchio
+// presentato come nuovo, mentre con la tariffa del 2026 rimasta aperta almeno
+// diceva «e' il prezzo del 2026». Ora dice «Tariffa copiata dal 2026, da
+// confermare: 202 €/t», per la fattura e per la pagina (lo specchio).
+console.log('LA BASE COPIATA DAL 2026 SI DICE COPIATA, IN FATTURA E IN PAGINA (difetto 15)');
+{
+  const { prezzoAttivoExtra: fattura } = await import('../base44/shared/ecotyreTariffe.ts');
+  const { prezzoAttivoExtra: specchio } = await import('../src/lib/ecotyreTariffe.js');
+  const t = (p) => ({ id: 'e', direzione: 'ATTIVA', tipologia: 'EXTRA_RACCOLTA', cliente: 'ECOTYRE', unita_misura: '€/t', stato: 'attivo', valore: 202, ...p });
+  const copiata = t({ id: 'e27', data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31', note: 'copiato dal 2026, da confermare' });
+  const intervento = { trasporto_finito_il: '2027-01-20T10:00:00.000Z', classe: 'P', regione: 'Sicilia', cer: '160103', prezzo_attivo_t: 0 };
+  for (const [lato, f] of [['fattura', fattura], ['pagina', specchio]]) {
+    const p = f(intervento, [copiata], '', 2027);
+    verifica(`${lato}: «Tariffa copiata dal 2026, da confermare: 202 €/t», non «Tariffa base Ecotyre 2027»`, /^Tariffa copiata dal 2026, da confermare: 202 €\/t/.test(p.nota) && !/Tariffa base Ecotyre 2027/.test(p.nota) && p.da_confermare === true, p.nota);
+    verifica(`${lato}: e dice dove si conferma, col prezzo che resta quello`, /Si conferma in Target & Status › Nuovo anno/.test(p.nota) && p.valore === 202 && p.altro_anno === false, JSON.stringify(p));
+    // la controprova: confermata e' la tariffa base del 2027
+    const conf = f(intervento, [{ ...copiata, note: 'Confermata sul contratto 2027 il 05/01/2027 da amministratore.' }], '', 2027);
+    verifica(`${lato}: confermata, «Tariffa base Ecotyre 2027: 202 €/t»`, /^Tariffa base Ecotyre 2027: 202 €\/t/.test(conf.nota) && conf.da_confermare === false, conf.nota);
+    // e la tariffa del 2026 rimasta aperta resta «prezzo di un altro anno»
+    const vecchia = f(intervento, [t({ data_inizio_validita: '2026-01-01' })], '', 2027);
+    verifica(`${lato}: la tariffa 2026 rimasta aperta dice ancora «e' il prezzo del 2026»`, vecchia.altro_anno === true && /ATTENZIONE: e' il prezzo del 2026, non del 2027/.test(vecchia.nota) && vecchia.da_confermare === false, vecchia.nota);
+  }
+  // un prezzo coi decimali si scrive all'italiana
+  const dec = fattura(intervento, [{ ...copiata, valore: 202.5 }], '', 2027);
+  verifica('un prezzo coi decimali all\'italiana: «202,50 €/t»', /da confermare: 202,50 €\/t/.test(dec.nota), dec.nota);
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

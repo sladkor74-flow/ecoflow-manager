@@ -171,5 +171,74 @@ console.log("9. L'ELENCO DELLE TARIFFE SEGNA DOPPIE QUELLE CHE IL SERVER RIFIUTA
   verifica('e lo storico di una tariffa anche', /chiaveMatch\(a, b\)/.test(storico) && !/'fornitore_id', 'direzione'/.test(storico));
 }
 
+// LE TARIFFE DI RETE E ACI SONO ANNUALI (prova generale del cambio d'anno,
+// 15/10/2026, difetto 7). I contratti di rete e ACI, attivi e passivi, sono
+// annuali senza tacito rinnovo. Una tariffa scritta dalle anagrafiche si salvava
+// senza data di fine (il modulo proponeva «Al» vuoto) e «Riapri» la toglieva: il
+// 05/01/2027 tre tariffe 2027 si salvavano 200 senza avvisi e il 10/02/2028
+// gennaio si fatturava a 205 €/t e si pagava Gatim a 73 €/t; il 02/01/2027
+// «Riapri» sulla rete 2026 faceva fatturare gennaio 2027 a 202 €/t. Ora per
+// RETE, ACI e TUTTE inizio e fine sono obbligatori e la fine al piu' il 31/12
+// dell'anno di inizio, altrimenti 400 col campo; l'extra raccolta resta libera.
+console.log('10. LE TARIFFE DI RETE E ACI SONO ANNUALI: INIZIO E FINE NELLO STESSO ANNO (difetto 7)');
+{
+  const V = await import('../base44/shared/validitaTariffa.ts');
+  const campi = (t) => V.controlliPeriodoTariffa(t).map(e => e.campo).join();
+  const rete = (p) => ({ direzione: 'ATTIVA', tipologia: 'RETE', stato: 'attivo', data_inizio_validita: '2027-01-01', ...p });
+  verifica('rete senza fine: errore sulla data di fine', campi(rete({})) === 'data_fine_validita' && /31\/12\/2027/.test(V.controlliPeriodoTariffa(rete({}))[0].messaggio), JSON.stringify(V.controlliPeriodoTariffa(rete({}))));
+  verifica('ACI fino al 30/06/2028: oltre il 31/12 dell\'anno di inizio, errore', campi(rete({ tipologia: 'ACI', data_fine_validita: '2028-06-30' })) === 'data_fine_validita');
+  verifica('TUTTE (il trasporto delle secondarie) anche', campi(rete({ direzione: 'PASSIVA', tipologia: 'TUTTE' })) === 'data_fine_validita');
+  verifica('senza inizio: errore sull\'inizio', campi(rete({ data_inizio_validita: '', data_fine_validita: '2027-12-31' })) === 'data_inizio_validita');
+  verifica('dal 01/01 al 31/12/2027: nessun errore', campi(rete({ data_fine_validita: '2027-12-31' })) === '');
+  verifica('una rinegoziazione dentro l\'anno, dal 01/09 al 31/12: nessun errore', campi(rete({ data_inizio_validita: '2027-09-01', data_fine_validita: '2027-12-31' })) === '');
+  verifica('l\'extra raccolta resta libera', campi(rete({ tipologia: 'EXTRA_RACCOLTA' })) === '' && !V.oltreLAnno(rete({ tipologia: 'EXTRA_RACCOLTA' })));
+  verifica('una disattivata non vale mai: il suo periodo non si controlla', campi(rete({ stato: 'non_attivo' })) === '' && !V.oltreLAnno(rete({ stato: 'non_attivo' })));
+  verifica('oltreLAnno: aperta o oltre il 31/12 si', V.oltreLAnno(rete({})) && V.oltreLAnno(rete({ data_fine_validita: '2028-01-01' })) && !V.oltreLAnno(rete({ data_fine_validita: '2027-12-31' })));
+  verifica('fineRiapertura: rete 2026 al 31/12/2026, extra raccolta senza fine', V.fineRiapertura(rete({ data_inizio_validita: '2026-01-01' })) === '2026-12-31' && V.fineRiapertura(rete({ tipologia: 'EXTRA_RACCOLTA' })) === null && V.fineRiapertura(rete({ data_inizio_validita: '' })) === '');
+
+  // La funzione vera, sul banco.
+  const { caricaFunzione, chiama } = await import('./dati/bancoFunzioni.mjs');
+  const ga = await caricaFunzione('gestisciAnagrafiche');
+  const FORN = [{ id: 'fG', ragione_sociale: 'GATIM S.R.L.', stato: 'attivo', ruolo_raccolta: true }];
+  const R26 = { id: 'r26', direzione: 'ATTIVA', tipologia: 'RETE', cliente: 'ECOTYRE', unita_misura: '€/t', valore: 202, stato: 'attivo', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31' };
+  const G26 = { id: 'g26', direzione: 'PASSIVA', tipologia: 'RETE', prestazione: 'RACCOLTA', fornitore_id: 'fG', fornitore_nome: 'GATIM S.R.L.', regione: 'Calabria', unita_misura: '€/t', valore: 70, stato: 'attivo', data_inizio_validita: '2026-01-01', data_fine_validita: '2026-12-31' };
+  const DB = { Fornitore: FORN, Tariffa: [R26, G26], ModificaDato: [], SurplusTariffa: [] };
+  const crea = (dati) => chiama(ga, { db: DB, corpo: { entita: 'Tariffa', operazione: 'create', dati, motivo: 'prova' } });
+  const nuove = (r) => (r.db.Tariffa || []).length - DB.Tariffa.length;
+  const a1 = await crea({ direzione: 'ATTIVA', cliente: 'ECOTYRE', tipologia: 'RETE', unita_misura: '€/t', valore: 205, data_inizio_validita: '2027-01-01' });
+  verifica('scenario A: rete attiva 205 dal 01/01/2027 senza fine, 400 col campo, niente scritto', a1.stato === 400 && a1.j.campo === 'data_fine_validita' && nuove(a1) === 0 && /Manca la data di fine/.test(a1.j.error || ''), JSON.stringify(a1.j));
+  const a2 = await crea({ direzione: 'PASSIVA', fornitore_id: 'fG', fornitore_nome: 'GATIM S.R.L.', tipologia: 'RETE', prestazione: 'RACCOLTA', regione: 'Calabria', unita_misura: '€/t', valore: 73, data_inizio_validita: '2027-01-01' });
+  verifica('raccolta GATIM 73 €/t senza fine: 400', a2.stato === 400 && a2.j.campo === 'data_fine_validita' && nuove(a2) === 0, JSON.stringify(a2.j));
+  const a3 = await crea({ direzione: 'ATTIVA', cliente: 'ECOTYRE', tipologia: 'ACI', regione: 'Calabria', unita_misura: '€/t', valore: 233, data_inizio_validita: '2027-01-01', data_fine_validita: '2028-06-30' });
+  verifica('ACI Calabria fino al 30/06/2028: 400, «al più fino al 31/12/2027»', a3.stato === 400 && a3.j.campo === 'data_fine_validita' && /al più fino al 31\/12\/2027/.test(a3.j.error || '') && Array.isArray(a3.j.errori), JSON.stringify(a3.j));
+  const a4 = await crea({ direzione: 'ATTIVA', cliente: 'ECOTYRE', tipologia: 'EXTRA_RACCOLTA', unita_misura: '€/t', valore: 210, data_inizio_validita: '2027-01-01' });
+  verifica('l\'extra raccolta senza fine si salva: 200', a4.stato === 200 && nuove(a4) === 1, JSON.stringify(a4.j));
+  const a5 = await crea({ direzione: 'ATTIVA', cliente: 'ECOTYRE', tipologia: 'RETE', unita_misura: '€/t', valore: 205, data_inizio_validita: '2027-01-01', data_fine_validita: '2027-12-31' });
+  verifica('controprova: rete dal 01/01 al 31/12/2027, 200', a5.stato === 200 && nuove(a5) === 1, JSON.stringify(a5.j));
+  // Scenario B: «Riapri» mandava { data_fine_validita: null, stato: 'attivo' }.
+  const riapri = (id, dati) => chiama(ga, { db: DB, corpo: { entita: 'Tariffa', operazione: 'update', id, dati, motivo: 'riaperta dall\'elenco delle tariffe' } });
+  const b1 = await riapri('r26', { data_fine_validita: null, stato: 'attivo' });
+  verifica('scenario B: la rete 2026 riaperta senza fine, 400, e resta al 31/12/2026', b1.stato === 400 && b1.db.Tariffa.find(t => t.id === 'r26').data_fine_validita === '2026-12-31', JSON.stringify(b1.j));
+  const b2 = await riapri('g26', { data_fine_validita: null, stato: 'attivo' });
+  verifica('e GATIM 2026 lo stesso', b2.stato === 400, JSON.stringify(b2.j));
+  // Il «Riapri» nuovo manda la fine dell'anno della tariffa (fineRiapertura).
+  const chiusaPrima = { ...DB, Tariffa: [{ ...R26, data_fine_validita: '2026-06-30' }, G26] };
+  const b3 = await chiama(ga, { db: chiusaPrima, corpo: { entita: 'Tariffa', operazione: 'update', id: 'r26', dati: { data_fine_validita: V.fineRiapertura(R26), stato: 'attivo' }, motivo: 'riaperta' } });
+  verifica('Riapri di una tariffa 2026 chiusa a giugno: torna fino al 31/12/2026, 200', b3.stato === 200 && b3.db.Tariffa.find(t => t.id === 'r26').data_fine_validita === '2026-12-31', JSON.stringify(b3.j));
+  // Una tariffa aperta gia' in archivio: anche cambiarle il prezzo chiede la fine.
+  const aperta = { ...DB, Tariffa: [{ ...R26, data_fine_validita: null }, G26] };
+  const b4 = await chiama(ga, { db: aperta, corpo: { entita: 'Tariffa', operazione: 'update', id: 'r26', dati: { valore: 204 }, motivo: 'prova' } });
+  verifica('una rete aperta in archivio: cambiarle il prezzo chiede la data di fine (400)', b4.stato === 400 && b4.j.campo === 'data_fine_validita', JSON.stringify(b4.j));
+  const b5 = await chiama(ga, { db: aperta, corpo: { entita: 'Tariffa', operazione: 'update', id: 'r26', dati: { stato: 'non_attivo' }, motivo: 'prova' } });
+  verifica('ma disattivarla si puo\' (200)', b5.stato === 200, JSON.stringify(b5.j));
+
+  // Le pagine: il «Riapri» e il modulo usano la stessa regola (le provano a
+  // video prove/tariffeSiApreSubito.mjs, sezioni 7 e 8).
+  const elenco = readFileSync(new URL('../src/components/fatturazione/TariffeUnificate.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('«Riapri» manda la fine di fineRiapertura, non piu\' null', /const fine = fineRiapertura\(t\)/.test(elenco) && /dati: \{ data_fine_validita: fine, stato: 'attivo' \}/.test(elenco) && !/dati: \{ data_fine_validita: null, stato: 'attivo' \}/.test(elenco));
+  const modulo = readFileSync(new URL('../src/components/fatturazione/TariffeForm.jsx', import.meta.url), 'utf8').replace(/\r/g, '');
+  verifica('il modulo controlla il periodo con la regola del server prima di mandarlo', /controlliPeriodoTariffa\(daSalvare\)/.test(modulo) && /from '@\/lib\/validitaTariffa'/.test(modulo));
+}
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

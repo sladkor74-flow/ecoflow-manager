@@ -14,7 +14,10 @@ import { eAci } from "./canaleSecondaria.ts";
 import { chiaveFormulario, raggruppaPerFormulario, ordineDi, ticketDi, MINIMO_ACI_KG, SOGLIA_ACI } from "./formulari.ts";
 import { anomalieDateFormulari } from "./filtroPeriodo.ts";
 import { tariffaValeIl, tariffaNonDisattivata, disattivateNelPeriodo } from "./validitaTariffa.ts";
-import { unitaSconosciuta, avvisoPesoMancante, arrotondaAlCentesimo, eSecondariaExtra } from "./ecotyreTariffe.ts";
+import {
+  unitaSconosciuta, avvisoPesoMancante, arrotondaAlCentesimo, eSecondariaExtra,
+  tariffaDaConfermare, notaTariffaDaConfermare, annoDellaCopia, prezzoInFrase,
+} from "./ecotyreTariffe.ts";
 import {
   surplusNelPeriodo, surplusDelMovimento, euroTDi, importoSurplus, etichettaSurplus, testoEuroT,
   fornitoriDelSurplus, NOMI_ORIGINE, DESTINATARI, NOMI_PRESTAZIONE,
@@ -764,6 +767,35 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
     // Tariffe con prestazione vuota → anomalia
     const anomalie = [];
 
+    // LE TARIFFE COPIATE E NON CONFERMATE (prova generale del cambio d'anno,
+    // 15/10/2026, difetto 15). Il 28/12/2026 «Prepara le tariffe» copia nel 2027
+    // le tariffe del 2026 col loro prezzo e la nota «copiato dal 2026, da
+    // confermare». Se nessuno le confermava, il 10/02/2027 gennaio si pagava a
+    // GATIM a 70 €/t senza una parola: un prezzo vecchio che passa per nuovo e'
+    // peggio di un prezzo che manca. Ora la riga lo dice nella nota (la stessa
+    // frase dell'attiva, notaTariffaDaConfermare), e il fornitore ha
+    // un'anomalia 'tariffa_da_confermare' per prestazione, tariffa e tratta, con
+    // tipologia, tonnellate e prezzo. Il nome del tipo e' un accordo col margine
+    // e coi consuntivi (margine.ts, consuntivoFornitore.ts), che lo contano: non
+    // si cambia. Un interno non si paga, e il prezzo unico della raccolta non e'
+    // una tariffa del trattamento: niente nota e niente anomalia. D4, decisione
+    // dell'utente del 15/10/2026: una riga cosi' ferma il conto come una riga
+    // senza prezzo; la nota non e' un'informazione, e' il problema della riga.
+    const daConfermarePassiva = new Map();
+    const copiataDaConfermare = (tariffa, interno) => !!tariffa && !interno && tariffaDaConfermare(tariffa);
+    const ambitoTariffa = (t) => [
+      t.provincia ? `Prov: ${t.provincia}` : '', t.regione ? `Regione: ${t.regione}` : '',
+      t.destinazione ? `Dest: ${t.destinazione}` : '', t.classe_materiale ? `classe ${t.classe_materiale}` : '',
+    ].filter(Boolean).join(', ') || 'tutte le zone e le classi';
+    const segnaDaConfermare = (tariffa, { fornitore, prestazione, classe = '', tratta = '', kg = 0 }) => {
+      const k = `${normalizzaRagioneSociale(fornitore)}|${prestazione}|${tratta}|${tariffa.id || `${tariffa.valore}|${tariffa.unita_misura}`}`;
+      const acc = daConfermarePassiva.get(k) || { tariffa, fornitore, prestazione, tratta, classi: new Set(), kg: 0, righe: 0 };
+      acc.kg += Number(kg) || 0;
+      acc.righe++;
+      for (const c of String(classe || '').split(/,\s*/)) if (c && c !== '—') acc.classi.add(c);
+      daConfermarePassiva.set(k, acc);
+    };
+
     // Una tariffa trovata con un'unita' che la passiva non sa leggere: la riga
     // resta a zero, ma lo si dice (chiusura dell'audit, 11/10/2026). Le voci
     // uguali si fondono in fondo, sommando le tonnellate.
@@ -1163,6 +1195,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         importo = tipologia === 'EXTRA_RACCOLTA' ? g.importoInterventi : calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
       }
       const ignota = !g.interno && unitaIgnota(g.tariffa, g.trasportatore, 'RACCOLTA', Array.from(g.classi_set).join(', '), g.peso_kg);
+      // la tariffa copiata e non confermata: la riga lo dice (15/10/2026)
+      const copiata = !ignota && copiataDaConfermare(g.tariffa, g.interno);
+      if (copiata) segnaDaConfermare(g.tariffa, { fornitore: g.trasportatore, prestazione: 'RACCOLTA', classe: Array.from(g.classi_set).join(', '), kg: g.peso_kg });
       // Il sovracosto degli interventi del gruppo si aggiunge qui, una volta
       // sola: segnaSovracosto lo ha sommato intervento per intervento, e un
       // intervento cade in un gruppo solo, quindi niente doppio conteggio.
@@ -1189,8 +1224,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           tariffa_criterio: g.tariffa ? (g.tariffa.criterio || 'generica') : '',
           importo: round2(importo),
           ...campiSovracosto(g),
+          ...(copiata ? { tariffa_da_confermare: true } : {}),
           ...noteRiga(
-            g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ignota ? unitaSconosciuta(um) : ''),
+            g.interno ? 'interno, non fatturato' : (!g.tariffa ? 'senza tariffa' : ignota ? unitaSconosciuta(um) : copiata ? notaTariffaDaConfermare(g.tariffa) : ''),
             notaSovracosto(g, 'della raccolta'),
           ),
         },
@@ -1201,9 +1237,15 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       const tonnellate = g.peso_kg / 1000;
       let importo = 0, um = '', valore = 0, viaggiFatturati = 0;
       const idTariffe = new Set();
+      const copiateQui = [];
       for (const pt of g.perTariffa.values()) {
         if (pt.tariffa) idTariffe.add(pt.tariffa.id || '');
         if (!pt.tariffa || g.interno) continue;
+        // una tariffa a viaggio copiata e non confermata (15/10/2026)
+        if (copiataDaConfermare(pt.tariffa, g.interno)) {
+          copiateQui.push(pt.tariffa);
+          segnaDaConfermare(pt.tariffa, { fornitore: g.trasportatore, prestazione: 'RACCOLTA', kg: pt.peso_kg });
+        }
         importo += calcImporto(pt.tariffa.unita_misura, pt.tariffa.valore, pt.peso_kg, pt.viaggiSet.size);
         viaggiFatturati += pt.viaggiSet.size;
         um = pt.tariffa.unita_misura; valore = pt.tariffa.valore;
@@ -1237,8 +1279,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           tariffa_valore: valore, unita_misura: um,
           importo: round2(importo),
           ...campiSovracosto(g),
+          ...(copiateQui.length ? { tariffa_da_confermare: true } : {}),
           ...noteRiga(
-            g.interno ? 'interno, non fatturato' : '',
+            g.interno ? 'interno, non fatturato' : copiateQui.length ? notaTariffaDaConfermare(copiateQui[0]) : '',
             notaSovracosto(g, 'della raccolta'),
           ),
         },
@@ -1454,6 +1497,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         importo = g.provenienza === 'extra' ? g.importoInterventi : calcImporto(um, valore, g.peso_kg, g.viaggiSet.size);
       }
       const ignota = !g.interno && unitaIgnota(g.tariffa, g.destinazione, g.prestazione, g.classe, g.peso_kg);
+      // la tariffa copiata e non confermata: la riga lo dice (15/10/2026)
+      const copiata = !ignota && !g.compresoNellaRaccolta && copiataDaConfermare(g.tariffa, g.interno);
+      if (copiata) segnaDaConfermare(g.tariffa, { fornitore: g.destinazione, prestazione: g.prestazione, classe: g.classe, kg: g.peso_kg });
       // Il sovracosto, una volta sola come per i raccoglitori. Si paga anche
       // quando sull'intervento il costo del trattamento e' zero: il sovracosto
       // non e' un prezzo del trattamento, e' un costo imprevisto che si
@@ -1471,10 +1517,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           compreso_nella_raccolta: !!g.compresoNellaRaccolta,
           di_cui: elencoDiCui(g.diCui),
           ...campiSovracosto(g),
+          ...(copiata ? { tariffa_da_confermare: true } : {}),
           ...noteRiga(
             g.interno ? 'interno, non fatturato'
               : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
-              : (!g.tariffa ? 'senza tariffa' : ignota ? unitaSconosciuta(um) : ''),
+              : (!g.tariffa ? 'senza tariffa' : ignota ? unitaSconosciuta(um) : copiata ? notaTariffaDaConfermare(g.tariffa) : ''),
             notaSovracosto(g, cosaSovra),
           ),
         },
@@ -1490,6 +1537,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
       // si moltiplica per i viaggi.
       if (!g.interno) importo += g.sovracostoEuro;
       const cosaSovra = (g.tariffa && g.tariffa.prestazione) === 'CONFERIMENTO_STOCCAGGIO' ? 'dello stoccaggio' : 'del trattamento';
+      // la tariffa a viaggio copiata e non confermata (15/10/2026)
+      const copiata = !g.compresoNellaRaccolta && copiataDaConfermare(g.tariffa, g.interno);
+      if (copiata) segnaDaConfermare(g.tariffa, { fornitore: g.destinazione, prestazione: g.tariffa.prestazione || '—', kg: g.peso_kg });
       impiantiRows.push({
         fornitore: g.destinazione, fornitore_norm: g.destKey, interno: g.interno,
         riga: {
@@ -1502,10 +1552,11 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           compreso_nella_raccolta: !!g.compresoNellaRaccolta,
           di_cui: elencoDiCui(g.diCui),
           ...campiSovracosto(g),
+          ...(copiata ? { tariffa_da_confermare: true } : {}),
           ...noteRiga(
             g.interno ? 'interno, non fatturato'
               : g.compresoNellaRaccolta ? 'compreso nel prezzo unico della raccolta'
-              : (!g.tariffa ? 'senza tariffa' : ''),
+              : (!g.tariffa ? 'senza tariffa' : copiata ? notaTariffaDaConfermare(g.tariffa) : ''),
             notaSovracosto(g, cosaSovra),
           ),
         },
@@ -1883,6 +1934,16 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
           note = unitaSconosciuta(um);
         }
 
+        // La tariffa della tratta copiata e non confermata: la nota lo dice per
+        // prima, e la riga non e' piu' solo un'informazione (15/10/2026). Non
+        // con un'unita' che la passiva non sa leggere: la riga e' gia' a zero.
+        const copiataTratta = ['€/viaggio', '€/t', '€/kg'].includes(um) && copiataDaConfermare(pt.tariffa, interno);
+        if (copiataTratta) {
+          segnaDaConfermare(pt.tariffa, { fornitore: fatturante, prestazione: 'TRASPORTO_SECONDARIA', tratta: `${tratta.stoccaggio} → ${tratta.destinazione}`, kg: tonnellateCanale * 1000 });
+          note = [notaTariffaDaConfermare(pt.tariffa), note].filter(Boolean).join('. ');
+          notaInformativa = false;
+        }
+
         // Il surplus del trasporto delle secondarie sulle tonnellate del canale
         // della tratta, anche sui viaggi misti: a tonnellata ogni canale paga le
         // sue, non c'e' una quota da dividere (13/10/2026). Una tratta senza
@@ -1919,6 +1980,7 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
             tariffa_valore: valore, unita_misura: um,
             importo: round2(importo), viaggio_misto: viaggioMisto, note,
             nota_informativa: notaInformativa,
+            ...(copiataTratta ? { tariffa_da_confermare: true } : {}),
             // la quota dell'altro canale sui misti che l'altro canale non paga,
             // perche' li' la tratta non ha una tariffa: fuori da ogni totale,
             // calcolata a questa tariffa. null se l'altro canale la paga.
@@ -2040,6 +2102,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         if (secondaria) segnaSovracosto(sovra, Number(r.sovracosto_pagato_raccoglitore || 0), r);
         if (!tr.origine && !(sovra.sovracostoEuro > 0)) continue;
         const ignota = !interno && tr.sconosciuta && unitaIgnota(tr.tariffa, fatt.nome, 'TRASPORTO_SECONDARIA', String(r.classe || '—'), peso);
+        // il contratto della tratta copiato e non confermato (15/10/2026)
+        const copiata = secondaria && !ignota && tr.origine === 'contratto' && copiataDaConfermare(tr.tariffa, interno);
+        if (copiata) segnaDaConfermare(tr.tariffa, { fornitore: fatt.nome, prestazione: 'TRASPORTO_SECONDARIA', tratta: `${String(r.stoccaggio || '—').trim()} → ${String(r.destinazione || '—').trim()}`, kg: peso });
         // Un surplus del trasporto delle secondarie vale solo sugli interventi
         // secondari, e solo se il trasporto si paga: il trasporto di un
         // intervento primario e' la sua raccolta.
@@ -2082,8 +2147,9 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
               viaggi_quota: round2(v.quota),
               viaggio_condiviso: { interventi: v.interventi, altri: v.altri, tonnellate_viaggio: round3(v.kg_viaggio / 1000), prezzo_viaggio: v.prezzo_viaggio },
             } : {}),
+            ...(copiata ? { tariffa_da_confermare: true } : {}),
             ...noteRiga(
-              interno ? 'interno, non fatturato' : ignota ? unitaSconosciuta(tr.unita_misura) : '',
+              interno ? 'interno, non fatturato' : ignota ? unitaSconosciuta(tr.unita_misura) : copiata ? notaTariffaDaConfermare(tr.tariffa) : '',
               [intervento, origine, condiviso, notaSovracosto(sovra, 'del trasporto')].filter(Boolean).join(' · '),
             ),
           });
@@ -2128,6 +2194,32 @@ export function calcolaPassivaMese({ primarieRete, primarieAci, secondarieAll, e
         tonnellate: round3(a.kg / 1000),
         quanti: a.quanti,
         ordini: a.ordini,
+      });
+    }
+
+    // Le tariffe copiate e non confermate (vedi LE TARIFFE COPIATE E NON
+    // CONFERMATE, in cima): un'anomalia per fornitore, prestazione, tratta e
+    // tariffa, con le tonnellate e il prezzo. Rete, ACI ed extra raccolta mai
+    // insieme: il calcolo e' gia' di un canale solo.
+    const PAROLE_PRESTAZIONE = { RACCOLTA: 'di raccolta', TRATTAMENTO: 'di trattamento', CONFERIMENTO_STOCCAGGIO: 'di stoccaggio', TRASPORTO_SECONDARIA: 'del trasporto' };
+    for (const a of daConfermarePassiva.values()) {
+      const t = a.tariffa;
+      const anno = annoDellaCopia(t);
+      const classi = [...a.classi].sort().join(', ');
+      anomalie.push({
+        tipo: 'tariffa_da_confermare',
+        tipologia,
+        descrizione: `${a.fornitore}: la tariffa ${PAROLE_PRESTAZIONE[a.prestazione] || String(a.prestazione || '').toLowerCase()} a ${prezzoInFrase(t.valore)} ${t.unita_misura || ''}${a.tratta ? ` (${a.tratta})` : ''} e' copiata ${anno ? `dal ${anno}` : "dall'anno prima"} con «Prepara le tariffe» e non ancora confermata: in ${String(mese || '').toLowerCase()} paga ${tTesto(a.kg)} t a quel prezzo. Si conferma sul contratto ${annoNum} in Target & Status › Nuovo anno.`.replace(/\s+/g, ' '),
+        fornitore: a.fornitore,
+        prestazione: a.prestazione,
+        classe: classi || '—',
+        ambito: a.tratta || ambitoTariffa(t),
+        tonnellate: round3(a.kg / 1000),
+        prezzo: Number(t.valore),
+        unita_misura: t.unita_misura || '',
+        tariffa_id: t.id || '',
+        anno_copia: anno,
+        quanti: a.righe,
       });
     }
 

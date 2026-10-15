@@ -10,6 +10,7 @@
 import { giornoRoma } from './giornoItaliano.js';
 import { normalizzaRagioneSociale } from './normalizzaRagioneSocialeClient.js';
 import { tariffaNonDisattivata, tariffaValeIl } from './validitaTariffa.js';
+import { daConfermare } from './annoTarget.js';
 
 // La tariffa base dell'extra raccolta verso Ecotyre, un valore per anno. Regola
 // dell'utente del 22/09/2026: «la tariffa dell'extra raccolta di base per la
@@ -269,9 +270,60 @@ const giornoLeggibile = (g) => {
 };
 
 /**
+ * UNA TARIFFA COPIATA E NON CONFERMATA SI DICE DOVE SI FATTURA (prova generale
+ * del cambio d'anno, 15/10/2026, difetto 15).
+ *
+ * «Prepara le tariffe» copia nell'anno nuovo le tariffe che scadono, col prezzo
+ * dell'anno prima e la nota «copiato dal 2026, da confermare» (daConfermare di
+ * annoTarget.ts). La lista del nuovo anno resta gialla finche' nessuno le
+ * conferma, ed e' giusto; ma dove si fattura e si paga nessuno lo diceva: il
+ * 10/02/2027 gennaio si fatturava a 202 €/t con le righe «verificato» e la nota
+ * vuota, il documento si verificava e la riga dell'extra raccolta scriveva
+ * «Tariffa base Ecotyre 2027: 202 €/t», che e' il prezzo del 2026. Una tariffa
+ * del 2026 rimasta aperta almeno diceva «e' il prezzo del 2026»: la copia lo
+ * nascondeva. Qui le frasi e il segno, uguali per la fattura, la passiva, la
+ * pagina dell'extra raccolta e la verifica del documento.
+ */
+const RE_ANNO_COPIA = /copiat[oa] dal (\d{4})/;
+// Il segno che una riga e' prezzata con una tariffa copiata e non confermata:
+// lo scrivono le note di questo blocco, e la verifica del documento lo cerca.
+const RE_RIGA_DA_CONFERMARE = /copiat[oa] (?:dal \d{4}|dall'anno prima)\b[^.]*?da confermare/;
+// «dal 2026», o «dall'anno prima» se l'anno non si legge.
+const dallAnno = (t) => { const a = annoDellaCopia(t); return a ? `dal ${a}` : "dall'anno prima"; };
+
+/** Vero se la tariffa e' stata copiata da «Prepara le tariffe» e nessuno l'ha ancora confermata. */
+export const tariffaDaConfermare = (t) => daConfermare(t);
+
+/** L'anno da cui la tariffa e' stata copiata: quello della nota, o l'anno prima del suo inizio; null se non si sa. */
+export function annoDellaCopia(t) {
+  const m = String((t && t.note) || '').match(RE_ANNO_COPIA);
+  if (m) return Number(m[1]);
+  const inizio = String((t && t.data_inizio_validita) || '').slice(0, 4);
+  return /^\d{4}$/.test(inizio) ? Number(inizio) - 1 : null;
+}
+
+/** La nota di una riga prezzata con una tariffa copiata e non confermata, con l'anno della copia. */
+export const notaTariffaDaConfermare = (t) => `prezzo copiato ${dallAnno(t)} con «Prepara le tariffe», da confermare in Target & Status › Nuovo anno`;
+
+/** Vero se la nota della riga dice che il suo prezzo viene da una tariffa copiata e non confermata. */
+export const rigaConTariffaDaConfermare = (riga) => RE_RIGA_DA_CONFERMARE.test(String((riga && riga.note) || ''));
+
+/** Un prezzo in una frase, all'italiana: 202, 72,50, 0,202. */
+export function prezzoInFrase(v) {
+  const n = Number(v);
+  if (v === null || v === undefined || v === '' || !Number.isFinite(n)) return '—';
+  if (Number.isInteger(n)) return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  let [intero, decimali] = Math.abs(n).toFixed(4).split('.');
+  decimali = decimali.replace(/0+$/, '').padEnd(2, '0');
+  return `${n < 0 ? '-' : ''}${intero.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${decimali}`;
+}
+
+/**
  * Il prezzo attivo di un intervento di extra raccolta e da dove viene:
  * { origine: 'intervento' | 'tabella' | 'base' | 'secondaria' | '', id, valore,
- *   unita, fattore, anno_tariffa, altro_anno, nota, totale(kg) }.
+ *   unita, fattore, anno_tariffa, altro_anno, da_confermare, nota, totale(kg) }.
+ * da_confermare (15/10/2026): il prezzo viene da una tariffa della tabella
+ * copiata da «Prepara le tariffe» e non ancora confermata; la nota lo dice.
  * 1) il prezzo scritto sull'intervento, se e' maggiore di zero;
  * 2) altrimenti la tariffa ATTIVA EXTRA_RACCOLTA valida alla fine del trasporto;
  * 3) altrimenti la base dell'anno (TARIFFA_BASE_EXTRA_RACCOLTA: 202 €/t nel 2026);
@@ -319,10 +371,18 @@ export function prezzoAttivoExtra(r, tariffeSorted, tipoServizio, anno, dataRife
     // Un'unita' che la fattura non sa leggere fa una riga a zero: si dice qui,
     // e chi calcola la riga la mette in errore (11/10/2026).
     const sconosciuta = !unitaAttivaRiconosciuta(daTabella.unita_misura);
+    // LA COPIA NON SI PRESENTA COME LA TARIFFA DELL'ANNO (15/10/2026, difetto
+    // 15): «Tariffa base Ecotyre 2027: 202 €/t» era il prezzo del 2026 copiato e
+    // mai confermato. Ora la nota dice da dove viene e dove si conferma.
+    const copiata = daConfermare(daTabella);
+    const prima = copiata
+      ? `Tariffa copiata ${dallAnno(daTabella)}, da confermare: ${prezzoInFrase(daTabella.valore)} ${unita}`
+      : `Tariffa base Ecotyre ${annoTariffa || anno}: ${daTabella.valore} ${unita}`;
     return {
       origine: 'tabella', id: daTabella.id || 'tabella', valore: Number(daTabella.valore), unita, fattore: fattoreConv(daTabella),
-      anno_tariffa: annoTariffa, altro_anno: altroAnno, unita_sconosciuta: sconosciuta,
-      nota: `Tariffa base Ecotyre ${annoTariffa || anno}: ${daTabella.valore} ${unita}, dalla tabella delle tariffe attive, ${periodo} (sull'intervento il prezzo non e' scritto)`
+      anno_tariffa: annoTariffa, altro_anno: altroAnno, unita_sconosciuta: sconosciuta, da_confermare: copiata,
+      nota: `${prima}, dalla tabella delle tariffe attive, ${periodo} (sull'intervento il prezzo non e' scritto)`
+        + (copiata ? '. Si conferma in Target & Status › Nuovo anno' : '')
         + (altroAnno ? `. ATTENZIONE: e' il prezzo del ${annoTariffa}, non del ${anno}` : '')
         + (sconosciuta ? `. ${unitaSconosciuta(daTabella.unita_misura)}` : ''),
       totale: (kg) => calcolaTotale(kg, daTabella),

@@ -2,6 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { oggiRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
+import { fetchAll } from "../../shared/fetchAll.ts";
+import { rigaConTariffaDaConfermare, prezzoInFrase } from "../../shared/ecotyreTariffe.ts";
 
 // Cambia lo stato di un documento di fatturazione:
 // azione: 'verifica' | 'approva' | 'chiudi' | 'riapri'
@@ -18,6 +20,40 @@ import { oggiRoma, giornoRoma } from "../../shared/giornoItaliano.ts";
 // l'amministrazione conferma che la fattura al cliente e' stata emessa ed e'
 // andata a buon fine. La conferma (giorno, numero se c'e') si scrive sul
 // documento: payload { conferma: { data, numero? } }.
+/**
+ * Le tariffe copiate e non confermate delle righe di un documento, una per
+ * prezzo: [{ valore, unita_misura, anno_copia, regioni, righe }], per il
+ * messaggio della verifica (15/10/2026). L'anno della copia e' quello scritto
+ * nella nota della riga («copiato dal 2026»).
+ */
+function tariffeDaConfermareDelDocumento(voci) {
+  const per = new Map();
+  for (const v of voci) {
+    const unita = String(v.unita_misura || '€/t');
+    const k = `${Number(v.tariffa_valore)}|${unita}`;
+    const anno = (String(v.note || '').match(/copiat[oa] dal (\d{4})/) || [])[1] || '';
+    const t = per.get(k) || { valore: Number(v.tariffa_valore), unita_misura: unita, anno_copia: anno ? Number(anno) : null, regioni: new Set(), righe: 0 };
+    t.righe++;
+    if (v.regione) t.regioni.add(String(v.regione));
+    per.set(k, t);
+  }
+  return [...per.values()].map(t => ({ ...t, regioni: [...t.regioni].sort() })).sort((a, b) => a.valore - b.valore);
+}
+
+/** Il messaggio della verifica fermata dalle tariffe da confermare: quali, e come si confermano. */
+function messaggioDaConfermare(doc, quante, tariffe, errori) {
+  const canale = { RETE: 'di rete', ACI: 'ACI', EXTRA_RACCOLTA: "dell'extra raccolta" }[String(doc.tipologia || '').toUpperCase()] || '';
+  const anni = [...new Set(tariffe.map(t => t.anno_copia).filter(Boolean))].sort();
+  const daAnno = anni.length ? `dal ${anni.join(' e dal ')}` : "dall'anno prima";
+  const prezzi = tariffe.map(t => `${prezzoInFrase(t.valore)} ${t.unita_misura}${String(doc.tipologia || '').toUpperCase() === 'ACI' && t.regioni.length ? ` (${t.regioni.join(', ')})` : ''}`);
+  const quali = prezzi.length === 1 ? `la tariffa a ${prezzi[0]}` : `le tariffe a ${prezzi.slice(0, -1).join(', ')} e ${prezzi[prezzi.length - 1]}`;
+  const una = tariffe.length === 1;
+  const anno = Number(doc.anno) || '';
+  return `Il documento ${canale} non si verifica: ${quante === 1 ? 'una riga è prezzata' : `${quante} righe sono prezzate`} con ${quali}, ${una ? 'copiata' : 'copiate'} ${daAnno} con «Prepara le tariffe» e non ancora ${una ? 'confermata' : 'confermate'}. ${una ? 'Confermala' : 'Confermale'} sul contratto ${anno} in Target & Status › Nuovo anno, poi rielabora il mese.`
+    .replace(/\s+/g, ' ')
+    + (errori > 0 ? ` In più ${errori === 1 ? 'una riga è' : `${errori} righe sono`} senza prezzo.` : '');
+}
+
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -37,12 +73,31 @@ export default async function(req) {
 
     if (azione === 'verifica') {
       if (!['elaborata', 'verificata'].includes(doc.stato)) return rifiuta(['elaborata', 'verificata']);
-      const voci = await base44.asServiceRole.entities.VoceFatturazione.filter({ documento_id });
+      // Tutte le righe del documento, a pagine: filter senza limite ne legge
+      // solo una parte, e una riga in errore oltre quella parte passava.
+      const voci = await fetchAll(base44.asServiceRole.entities.VoceFatturazione, { documento_id });
       const errori = voci.filter(v => v.stato_validazione === 'errore').length;
-      const newState = errori > 0 ? 'elaborata' : 'verificata';
+      // LE RIGHE PREZZATE CON UNA TARIFFA COPIATA E NON CONFERMATA (prova
+      // generale del cambio d'anno, 15/10/2026, difetto 15). D4, decisione
+      // dell'utente del 15/10/2026: una riga cosi' ferma il documento come una
+      // riga senza prezzo. Il 10/02/2027 gennaio si verificava «errori 0» con le
+      // righe a 202 €/t copiate dal 2026 e mai confermate. Le riconosce la nota
+      // che il calcolo dell'attiva scrive sulla riga (rigaConTariffaDaConfermare
+      // di ecotyreTariffe.ts); il documento resta «elaborata» e la risposta dice
+      // quali tariffe e come confermarle. Dopo la conferma il mese si rielabora:
+      // le righe nuove non hanno piu' la nota, e la verifica passa.
+      const daConfermare = voci.filter(v => v.stato_validazione !== 'errore' && rigaConTariffaDaConfermare(v));
+      const newState = errori > 0 || daConfermare.length > 0 ? 'elaborata' : 'verificata';
       await base44.asServiceRole.entities.DocumentoFatturazione.update(documento_id, {
         stato: newState, data_verifica: new Date().toISOString(), voci_errore: errori,
       });
+      if (daConfermare.length) {
+        const tariffe = tariffeDaConfermareDelDocumento(daConfermare);
+        return Response.json({
+          error: messaggioDaConfermare(doc, daConfermare.length, tariffe, errori),
+          stato: newState, errori, da_confermare: daConfermare.length, tariffe_da_confermare: tariffe,
+        }, { status: 400 });
+      }
       return Response.json({ stato: newState, errori });
     }
 
