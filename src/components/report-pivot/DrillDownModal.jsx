@@ -2,11 +2,14 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Loader2 } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
-import { giornoRoma } from '@/lib/giornoItaliano';
+import { dataPortaleIt } from '@/lib/giornoItaliano';
 
-// Le date come giorno italiano, 'GG/MM/AAAA': toLocaleDateString leggeva
-// l'istante nel fuso del browser.
-const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+// Le date 'GG/MM/AAAA' con dataPortaleIt: il giorno scritto nel file del portale
+// (difetto 9, 16/10/2026). La chiusura e' l'ora italiana del portale salvata
+// con la Z: letta come un istante, col fuso italiano (giornoRoma, com'era qui) o
+// del browser (toLocaleDateString, prima ancora), una chiusura dopo le 22
+// d'estate o dopo le 23 d'inverno usciva col giorno dopo. La fine del trasporto
+// e' un giorno senza ora, salvato a mezzanotte: le due letture coincidono.
 
 // La data di un movimento e' la fine del trasporto: e' la prima colonna di date.
 // La chiusura a portale, che prima era l'unica data mostrata, resta in fondo
@@ -50,14 +53,14 @@ export default function DrillDownModal({ open, onClose, title, loading, records,
                     <tr key={i} className="border-t hover:bg-muted/30">
                       <td className="px-2 py-1.5 font-mono">{r.id_ordine}</td>
                       <td className="px-2 py-1.5">{r.stato}</td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">{dataIt(r.trasporto_finito_il) || '—'}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap">{dataPortaleIt(r.trasporto_finito_il) || '—'}</td>
                       <td className="px-2 py-1.5 max-w-[200px] truncate" title={r.ragione_sociale}>{r.ragione_sociale}</td>
                       <td className="px-2 py-1.5">{r.comune}</td>
                       <td className="px-2 py-1.5">{r.provincia}</td>
                       <td className="px-2 py-1.5">{r.classe}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{r.peso_effettivo != null ? formatNumber(r.peso_effettivo, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—'}</td>
                       <td className="px-2 py-1.5 font-mono">{r.numero_fir}</td>
-                      <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{dataIt(r.ordine_chiuso_il) || '—'}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{dataPortaleIt(r.ordine_chiuso_il) || '—'}</td>
                     </tr>
                   ))}
                 </tbody>

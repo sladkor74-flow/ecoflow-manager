@@ -6,6 +6,7 @@ import * as XLSX from 'npm:xlsx@0.18.5';
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { dataPortaleIt } from "../../shared/giornoItaliano.ts";
 
 // Esporta i dati terziarie filtrati in Excel.
 // Payload: { filters: { impianto?, destinazione?, mese?, trasportatore?, materiale?, anno?, data?, date_da_sistemare? } }
@@ -22,6 +23,12 @@ import { fetchAll } from "../../shared/fetchAll.ts";
 // sistemare" della pagina vale anche qui. Con quel filtro i senza fine trasporto
 // ci sono anche con un filtro di periodo attivo: sono proprio quelli da
 // correggere, e un periodo non l'hanno. Schermo e file dicono le stesse righe.
+//
+// Le quattro date si scrivono gg/mm/aaaa con dataPortaleIt (difetto 9,
+// 16/10/2026): il giorno scritto nel file del portale. Prima il file riportava il
+// valore salvato cosi' com'era, «2026-12-31T23:30:00.000Z», che sembra un'ora UTC
+// ed e' invece l'ora italiana del portale con la Z per convenzione; e una data a
+// video si scrive sempre gg/mm/aaaa. Una data che manca resta una cella vuota.
 const SENZA_FINE = 'MANCA FINE TRASPORTO';
 const senzaFineTrasporto = (r) => eTerminato(r) && !giornoMovimento(r);
 
@@ -73,7 +80,7 @@ export default async function(req) {
     const rows = filtered.map((r) => ({
       'ID Ordine': r.id_ordine,
       'Stato': r.stato,
-      'Ordine immesso il': r.ordine_immesso_il,
+      'Ordine immesso il': dataPortaleIt(r.ordine_immesso_il),
       'Impianto Origine': r.unita_locale_origine,
       'Ragione Sociale': r.ragione_sociale,
       'Destinazione': r.destinazione,
@@ -90,11 +97,11 @@ export default async function(req) {
       'Trasportatore': r.trasportatore,
       'Partner Operativo': r.partner_operativo,
       'Numero FIR': r.numero_fir,
-      'Trasporto iniziato il': r.trasporto_iniziato_il,
-      'Trasporto finito il': r.trasporto_finito_il,
+      'Trasporto iniziato il': dataPortaleIt(r.trasporto_iniziato_il),
+      'Trasporto finito il': dataPortaleIt(r.trasporto_finito_il),
       // quale data obbligatoria manca o non torna; vuota se sono a posto
       'Date da sistemare': testoDate(r),
-      'Ordine chiuso il': r.ordine_chiuso_il,
+      'Ordine chiuso il': dataPortaleIt(r.ordine_chiuso_il),
     }));
 
     const ws = XLSX.utils.json_to_sheet(rows);

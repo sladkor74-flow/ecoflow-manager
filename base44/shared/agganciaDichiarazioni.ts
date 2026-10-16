@@ -15,7 +15,7 @@
 
 import { MESI } from "./dichiarazioniImpianti.ts";
 import { eAci } from "./canaleSecondaria.ts";
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, giornoPortale } from "./giornoItaliano.ts";
 import { fetchAll } from "./fetchAll.ts";
 import { nostraRiga } from "./giacenzaPortale.ts";
 import { formatoKg } from "./formato.ts";
@@ -43,8 +43,13 @@ export const MAX_RIPRESE = 3;
 export const MAX_MESI_INSIEME = 12;
 
 const num = (v) => Number(v) || 0;
-// Il giorno italiano: tagliare la stringa UTC spostava al giorno prima una data
-// salvata a mezzanotte italiana.
+// Il giorno italiano della fine trasporto: tagliare la stringa UTC spostava al
+// giorno prima una data salvata a mezzanotte italiana. La fine e' un giorno
+// senza ora, a mezzanotte Z. Il giorno del caricamento a portale
+// (data_dichiarazione) ha invece l'ora del portale - l'ora italiana scritta con
+// la Z - e si legge col giorno scritto nel file, giornoPortale (difetto 9,
+// 16/10/2026): con giornoRoma un caricamento delle 23:30 passava al giorno dopo,
+// e a capodanno all'anno dopo.
 const giorno = (v) => giornoRoma(v);
 
 /** Il canale di una riga del report delle dichiarazioni: l'ACI e' la classe 9 del prodotto. */
@@ -85,7 +90,7 @@ export function caricamentiPortale(righe, anno, canale = '', provenienza = '') {
     if (!nostraRiga(r)) continue;
     if (canale && canaleRigaPortale(r) !== canale) continue;
     if (provenienza && provenienzaRigaPortale(r) !== provenienza) continue;
-    const data = giorno(r.data_dichiarazione);
+    const data = giornoPortale(r.data_dichiarazione);
     if (!data) continue;
     // DI CHE ANNO E' UNA RIGA: LO DICE LA FINE TRASPORTO, NON IL CARICAMENTO.
     //

@@ -4,7 +4,7 @@
 
 import { PROV_TO_REGION, MESI, riepilogoDate, riepilogoDateVista } from "./raccoltoCalculator.ts";
 import { eTerminato, periodoMovimento, tempiRaccolta, dateIncoerenti } from "./movimenti.ts";
-import { oggiRoma, annoRoma } from "./giornoItaliano.ts";
+import { oggiRoma, annoPortale } from "./giornoItaliano.ts";
 import { classePfu } from "./giacenzaStoccaggi.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
@@ -450,7 +450,11 @@ export function computeSlaMetrics(records, anno = null) {
     if (!eTerminato(r)) continue;
     const periodo = periodoMovimento(r);
     if (!periodo) {
-      if (annoRoma(r.ordine_immesso_il) === annoNum) { segnala(r, 'senza_fine_trasporto'); dellAnno.push(r); }
+      // Un terminato senza fine trasporto si segnala nell'anno della sua
+      // immissione: l'anno scritto nel file del portale (annoPortale, difetto 9,
+      // 16/10/2026), non quello di giornoRoma, che a un'immissione del 31/12
+      // alle 23:30 aggiungeva di nuovo l'ora italiana e dava l'anno dopo.
+      if (annoPortale(r.ordine_immesso_il) === annoNum) { segnala(r, 'senza_fine_trasporto'); dellAnno.push(r); }
       continue;
     }
     if (periodo.anno !== annoNum) continue;

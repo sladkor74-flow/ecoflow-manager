@@ -5,9 +5,25 @@ import * as XLSX from 'npm:xlsx@0.18.5';
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
+import { dataPortaleIt } from "../../shared/giornoItaliano.ts";
+import { annoElenco, meseElenco } from "../../shared/movimenti.ts";
 
 // Esporta i dati Assegnati (dettaglio o matrice aggregata) in Excel.
 // Payload: { filters: {...}, mode: 'detail' | 'matrix' }
+//
+// MESE, ANNO E GIORNO DALL'IMMISSIONE SCRITTA NEL FILE (difetto 9, 16/10/2026).
+// Come computeAssegnatiMatrix: l'immissione e' l'ora italiana del portale
+// salvata con la Z, e i campi mese e anno salvati la leggevano col fuso
+// italiano, una seconda volta: un ordine del 31/12 alle 23:30 finiva a gennaio
+// dell'anno dopo. Si leggono con annoElenco e meseElenco (movimenti.ts), e il
+// campo salvato resta solo per un assegnato senza immissione. La data si scrive
+// con dataPortaleIt, gg/mm/aaaa con gli zeri. toLocaleDateString leggeva l'ora
+// come un istante, nel fuso del processo (sul server, in UTC, il giorno tornava
+// per caso; nel fuso italiano era il giorno dopo), e scriveva gli zeri o no
+// secondo i dati della lingua del motore («1/1/2027»).
+const annoDi = (r) => annoElenco(r) ?? (Number(r.anno) || null);
+const meseDi = (r) => meseElenco(r) || r.mese || null;
+
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -39,10 +55,13 @@ export default async function(req) {
     }
 
     const all = await fetchAll(base44.asServiceRole.entities[entityName]);
+    // Mese e anno di ogni ordine, ricavati una volta sola (vedi in testa).
+    const periodi: Map<any, any> = new Map(all.map(r => [r, { anno: annoDi(r), mese: meseDi(r) }]));
 
     const filtered = all.filter(r => {
-      if (!matchesFilterString(r.anno, filters.anno)) return false;
-      if (!matchesFilter(r.mese, filters.mese)) return false;
+      const p = periodi.get(r);
+      if (!matchesFilterString(p.anno, filters.anno)) return false;
+      if (!matchesFilter(p.mese, filters.mese)) return false;
       if (!matchesFilter(r.regione, filters.regione)) return false;
       if (!matchesFilter((r.provincia || '').toUpperCase().trim(), filters.provincia)) return false;
       if (!matchesFilter((r.partner_operativo || '').trim(), filters.partner_operativo)) return false;
@@ -55,8 +74,9 @@ export default async function(req) {
     if (mode === 'matrix') {
       const matrix: Record<string, any> = {};
       for (const r of filtered) {
-        const anno = String(r.anno || 'N/D');
-        const meseIdx = r.mese ? MESI.indexOf(r.mese) : -1;
+        const p = periodi.get(r);
+        const anno = String(p.anno || 'N/D');
+        const meseIdx = p.mese ? MESI.indexOf(p.mese) : -1;
         const semestre = meseIdx < 0 ? 'N/D' : (meseIdx < 6 ? '1° Semestre' : '2° Semestre');
         const regione = r.regione || 'N/D';
         const provincia = (r.provincia || 'N/D').toUpperCase().trim();
@@ -73,7 +93,7 @@ export default async function(req) {
       const rows = filtered.map(r => ({
         'ID Ordine': r.id_ordine,
         'Stato': r.stato,
-        'Ordine Immesso': r.ordine_immesso_il ? new Date(r.ordine_immesso_il).toLocaleDateString('it-IT') : '',
+        'Ordine Immesso': dataPortaleIt(r.ordine_immesso_il),
         'Ragione Sociale': r.ragione_sociale,
         'Comune': r.comune,
         'Provincia': r.provincia,
@@ -83,8 +103,8 @@ export default async function(req) {
         'Quantità Richiesta': r.quantita_richiesta,
         'Peso Stimato (kg)': r.peso_stimato,
         'Peso Stimato (t)': (r.peso_stimato || 0) / 1000,
-        'Mese Immissione': r.mese,
-        'Anno Immissione': r.anno,
+        'Mese Immissione': periodi.get(r).mese,
+        'Anno Immissione': periodi.get(r).anno,
         'Partner Operativo': r.partner_operativo,
         'Trasportatore': r.trasportatore,
       }));

@@ -13,7 +13,7 @@ import { computeRaccoltoData, MESI } from "./raccoltoCalculator.ts";
 import { aggregaTargetMensili, aggregaTargetAnnui, stessoRaccoglitore, targetDelPortale, targetMensiliValidi } from "./targetRaccoglitori.ts";
 import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { formatoTonnellate } from "./formato.ts";
-import { giornoRoma, annoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, annoPortale } from "./giornoItaliano.ts";
 import { eTerminato, giornoMovimento } from "./movimenti.ts";
 import { contaFormulari } from "./formulari.ts";
 import { commessaDellAnno } from "./annoTarget.ts";
@@ -188,7 +188,10 @@ export function terminatiSenzaFine(righe) {
   const esclusi = (righe || []).filter(r => eTerminato(r) && !giornoMovimento(r));
   const perAnno = new Map();
   for (const r of esclusi) {
-    const a = annoRoma(r.ordine_immesso_il);
+    // L'immissione e' un'ora del file del portale, l'ora italiana scritta con la
+    // Z: l'anno e' quello scritto (annoPortale). Con annoRoma un ordine immesso il
+    // 31/12 dopo le 23 finiva fra gli immessi dell'anno dopo (difetto 9, 16/10/2026).
+    const a = annoPortale(r.ordine_immesso_il);
     if (!perAnno.has(a)) perAnno.set(a, []);
     perAnno.get(a).push(r);
   }

@@ -2,7 +2,7 @@ import React from 'react';
 import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import { formatNumber, fmtTon } from '@/lib/utils';
-import { giornoRoma } from '@/lib/giornoItaliano';
+import { dataPortaleIt } from '@/lib/giornoItaliano';
 import { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 // giorno_ordine, fine_trasporto, mese e settimana li prepara la pagina
@@ -35,8 +35,12 @@ const COLUMNS = [
   { key: 'ordine_chiuso_il', label: 'Chiuso il', format: 'date' },
 ];
 
-// Le date si mostrano come giorno italiano, 'GG/MM/AAAA'.
-const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+// Le date si mostrano 'GG/MM/AAAA' con dataPortaleIt: il giorno scritto nel file
+// del portale (difetto 9, 16/10/2026). La chiusura e' l'ora italiana del
+// portale salvata con la Z, e letta col fuso italiano (giornoRoma, com'era qui)
+// una chiusura dopo le 22 d'estate o dopo le 23 d'inverno usciva col giorno
+// dopo. La fine del trasporto e' un giorno senza ora, salvato a mezzanotte: le
+// due letture danno lo stesso giorno.
 
 // Un terminato senza fine trasporto non ha mese ne' settimana: si scrive, invece
 // di collocarlo all'immissione (la pagina lo marca con senza_fine_trasporto).
@@ -75,7 +79,7 @@ export default function SecondarieTable({ records, loading, emptyMessage }) {
                 let val = r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'ton') val = val != null ? fmtTon(val) : '';
-                else if (col.format === 'date') val = dataIt(val);
+                else if (col.format === 'date') val = dataPortaleIt(val);
                 if (col.key === 'mese' && r.senza_fine_trasporto) val = SENZA_FINE;
                 return (
                   <td key={col.key} className={`px-3 py-2 whitespace-nowrap ${val === SENZA_FINE ? 'text-amber-600 font-medium' : ''}`}>

@@ -23,7 +23,7 @@
 // il file del portale lo contiene, nella giacenza a portale c'e'. La differenza
 // non si nasconde: formulariDaSistemare, qui sotto, dice per soggetto e canale
 // quali sono e quanto pesano, e avvisoSenzaFine lo scrive.
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, giornoPortale } from "./giornoItaliano.ts";
 import { eTerminato, dateDaSistemare, dateMancanti, dateIncoerenti, testoDate, giornoMovimento, annoOrdine, MESI_MOVIMENTI } from "./movimenti.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { movimentoStoccaggio, forseDopoLaChiusura, arrivatiDopoLaChiusura, leggiRettificate } from "./giacenzaStoccaggi.ts";
@@ -638,6 +638,10 @@ export function formulariDaSistemare({ anno = null, chiaveDi = (s) => String(s |
       const formulario = `${dove.tipo}|${id || r.numero_fir || r.id || `${k}|${g.ordini.size}`}`;
       const chiaveOrdine = `${formulario}|${dove.verso}`;
       if (g.ordini.has(chiaveOrdine)) return true;
+      // L'immissione e' l'ora del portale, l'ora italiana scritta con la Z: se
+      // ne legge il giorno scritto (giornoPortale, difetto 9, 16/10/2026). Inizio
+      // e fine sono giorni senza ora, a mezzanotte Z, e restano su giornoRoma.
+      const iniziato = giornoRoma(r.trasporto_iniziato_il);
       g.ordini.set(chiaveOrdine, {
         tipo: dove.tipo || 'primaria',
         verso: dove.verso === 'partenza' ? 'partenza' : 'arrivo',
@@ -645,8 +649,8 @@ export function formulariDaSistemare({ anno = null, chiaveDi = (s) => String(s |
         numero_fir: r.numero_fir || '',
         controparte: String(dove.controparte || '').trim(),
         kg: Math.round(Number(r.peso_effettivo) || 0),
-        immesso_il: giornoRoma(r.ordine_immesso_il),
-        iniziato_il: giornoRoma(r.trasporto_iniziato_il),
+        immesso_il: giornoPortale(r.ordine_immesso_il),
+        iniziato_il: iniziato,
         finito_il: giornoMovimento(r),
         mancano: dateMancanti(r),
         incoerenze: dateIncoerenti(r),

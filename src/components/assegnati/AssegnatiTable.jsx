@@ -7,6 +7,20 @@ import { useIndiceRentri } from '@/lib/rentriIndice';
 import BadgeRentri from '@/components/shared/BadgeRentri';
 import { useIndiceSedi } from '@/lib/sediIndice';
 import BadgeSedeOperativa from '@/components/shared/BadgeSedeOperativa';
+import { annoElenco, meseElenco } from '@/lib/movimenti';
+import { dataPortaleIt } from '@/lib/giornoItaliano';
+
+// IMMISSIONE, MESE E ANNO COME LI SCRIVE IL FILE DEL PORTALE (difetto 9,
+// 16/10/2026). L'immissione e' l'ora italiana del portale salvata con la Z: la
+// data si scrive con dataPortaleIt, gg/mm/aaaa con gli zeri. toLocaleDateString
+// la leggeva come un istante nel fuso del browser, e un ordine del 31/12 alle
+// 23:30 diventava del giorno dopo, con gli zeri o senza secondo il browser
+// («1/1/2027»). Mese e anno si leggono dall'immissione con annoElenco e
+// meseElenco (movimenti.js), come i filtri della pagina e la matrice, non dai
+// campi salvati, che l'arricchimento scriveva con lo stesso errore; il campo
+// salvato resta solo per un assegnato senza immissione.
+const annoDi = (r) => annoElenco(r) ?? (Number(r.anno) || null);
+const meseDi = (r) => meseElenco(r) || r.mese || null;
 
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
@@ -27,8 +41,8 @@ const COLUMNS = [
   // del suo ticket. Oltre, il peso va ripartito su un altro ordine.
   { key: 'max_chiudibile_kg', label: 'Max chiudibile (kg)', format: 'number', titolo: 'Solo ACI: il 10% in piu\' del peso stimato del ticket. Oltre questa cifra il peso va ripartito su un altro ordine.' },
   { key: 'peso_t', label: 'Peso (t)', format: 'ton' },
-  { key: 'mese', label: 'Mese' },
-  { key: 'anno', label: 'Anno' },
+  { key: 'mese', label: 'Mese', valore: meseDi },
+  { key: 'anno', label: 'Anno', valore: annoDi },
   { key: 'partner_operativo', label: 'Partner Op.' },
   { key: 'trasportatore', label: 'Trasportatore' },
 ];
@@ -98,10 +112,10 @@ export default function AssegnatiTable({ records, loading, ragioneSocialeFilter,
                 </td>
               )}
               {COLUMNS.map((col) => {
-                let val = r[col.key];
+                let val = col.valore ? col.valore(r) : r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'ton') val = val != null ? fmtTon(val) : '';
-                else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
+                else if (col.format === 'date') val = dataPortaleIt(val);
                 return (
                   <React.Fragment key={col.key}>
                     <td className="px-3 py-2 whitespace-nowrap">

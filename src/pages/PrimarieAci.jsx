@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { eTerminato, giornoElenco, giornoMovimento, dateDaSistemare, testoDate } from '@/lib/movimenti';
-import { giornoRoma } from '@/lib/giornoItaliano';
+import { dataPortaleIt } from '@/lib/giornoItaliano';
 import { base44 } from '@/api/base44Client';
 import { Loader2, RefreshCw, Truck, Factory, Package, Filter, X, AlertTriangle } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -61,8 +61,11 @@ const DETAIL_COLUMNS = [
   { key: 'ordine_chiuso_il', label: 'Chiuso il', format: 'date' },
 ];
 
-// Le date si mostrano come giorno italiano, 'GG/MM/AAAA'.
-const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+// Le date si mostrano 'GG/MM/AAAA' con dataPortaleIt: il giorno scritto nel file
+// del portale (difetto 9, 16/10/2026). La chiusura e' l'ora italiana del
+// portale salvata con la Z, e letta col fuso italiano (giornoRoma, com'era qui)
+// una chiusura dopo le 22 d'estate o dopo le 23 d'inverno usciva col giorno
+// dopo. La fine del trasporto qui e' gia' un giorno (giornoMovimento).
 
 export default function PrimarieAci() {
   const [records, setRecords] = useState([]);
@@ -430,7 +433,7 @@ export default function PrimarieAci() {
                       let val = r[col.key];
                       // un numero che manca non e' zero: si scrive «—»
                       if (col.format === 'number') val = val != null && val !== '' ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—';
-                      else if (col.format === 'date') val = dataIt(val);
+                      else if (col.format === 'date') val = dataPortaleIt(val);
                       return (
                         <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap ${col.format === 'number' ? 'text-right' : ''} ${col.key === 'ragione_sociale' || col.key === 'destinazione' ? 'truncate max-w-[200px]' : ''}`}>
                           {/* il segno delle date da sistemare, col dettaglio nel title (22/09/2026) */}

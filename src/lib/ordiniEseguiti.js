@@ -53,7 +53,7 @@
 // le righe di import).
 import { eEseguito, chiaveOrdine, giornoMovimento, primoAnnoControllato } from '@/lib/movimenti';
 import { canaleDi } from '@/lib/canaleSecondaria';
-import { giornoRoma } from '@/lib/giornoItaliano';
+import { giornoPortale, annoPortale } from '@/lib/giornoItaliano';
 
 /**
  * I gruppi, nell'ordine in cui si dicono. Un tipo di file e un canale per
@@ -174,8 +174,12 @@ export function ordiniEseguiti(archivi, { oggi = '', annoInizio = null, massimo 
       // La fine trasporto di un ordine e' una: se le righe ne portano piu' d'una
       // vale la piu' recente, che e' quella da cui l'ordine si poteva chiudere.
       const fine = suoi.map(giornoMovimento).filter(Boolean).sort().pop() || '';
-      const immesso = suoi.map(r => giornoRoma(r && r.ordine_immesso_il)).filter(Boolean).sort()[0] || '';
-      const annoImmissione = immesso ? Number(immesso.slice(0, 4)) : null;
+      // L'immissione e' l'ora del portale, l'ora italiana scritta con la Z: si
+      // legge il giorno scritto (giornoPortale, difetto 9, 16/10/2026). Con
+      // giornoRoma un ordine immesso il 31/12 alle 23:30 cadeva nell'anno dopo, e
+      // la frase di chi e' fuori dall'export sbagliava l'anno.
+      const immesso = suoi.map(r => giornoPortale(r && r.ordine_immesso_il)).filter(Boolean).sort()[0] || '';
+      const annoImmissione = annoPortale(immesso);
       const pesi = suoi.map(r => r && r.peso_effettivo).filter(p => p !== null && p !== undefined && p !== '' && Number.isFinite(Number(p)));
       const luogo = G.tipo === 'primarie'
         ? [primo('punto_di_raccolta') || primo('ragione_sociale'), primo('id_pdr') ? `PDR ${primo('id_pdr')}` : ''].filter(Boolean).join(' · ')

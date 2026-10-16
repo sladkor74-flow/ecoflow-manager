@@ -1,7 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { giornoOrdine, periodoMovimento, settimanaIso, annoPerFiltro, eTerminato, dateDaSistemare, testoDate, MESI_MOVIMENTI as MESI } from "../../shared/movimenti.ts";
-import { giornoRoma, oggiRoma } from "../../shared/giornoItaliano.ts";
+import { oggiRoma, dataPortaleIt } from "../../shared/giornoItaliano.ts";
 import { getRegioneFromProvincia } from "../../shared/dataEnrichment.ts";
 import { formattaPesi } from "../../shared/formatoExcel.ts";
 import * as XLSX from 'npm:xlsx@0.18.5';
@@ -37,9 +37,13 @@ import { canaleDi } from "../../shared/canaleSecondaria.ts";
 // La quota si chiamava senza_fine_trasporto_per_canale e sembrava un conteggio a
 // se': sommata al totale contava due volte gli stessi ordini.
 
-// Il giorno italiano come 'GG/MM/AAAA'. toLocaleDateString sul server (UTC)
-// scriveva il giorno prima per le date salvate a mezzanotte italiana.
-const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+// Le date si scrivono come 'GG/MM/AAAA' con dataPortaleIt (giornoItaliano.ts):
+// il giorno scritto nel file del portale. Immissione e chiusura sono l'ora
+// italiana del portale salvata con la Z, e lette col fuso italiano (giornoRoma,
+// com'era qui fino al 16/10/2026) un ordine immesso o chiuso dopo le 22
+// d'estate, o dopo le 23 d'inverno, usciva col giorno dopo (difetto 9). Inizio
+// e fine trasporto sono giorni senza ora, salvati a mezzanotte: per loro le due
+// letture danno lo stesso giorno.
 
 const SENZA_FINE = 'MANCA FINE TRASPORTO';
 
@@ -189,9 +193,9 @@ export default async function(req) {
             'Destinazione': r.destinazione,
             'Classe PFU': r.classe,
             'Peso Effettivo (kg)': r.peso_effettivo,
-            'Ordine Immesso': dataIt(r.ordine_immesso_il),
-            'Trasporto Iniziato': dataIt(r.trasporto_iniziato_il),
-            'Trasporto Finito': dataIt(r.trasporto_finito_il),
+            'Ordine Immesso': dataPortaleIt(r.ordine_immesso_il),
+            'Trasporto Iniziato': dataPortaleIt(r.trasporto_iniziato_il),
+            'Trasporto Finito': dataPortaleIt(r.trasporto_finito_il),
             'Date da sistemare': testoDate(r),
             'Nota': senza
               ? 'Senza fine trasporto non ha un mese: escluso dalle sintesi. Va corretto nel file del portale e ricaricato.'
@@ -223,8 +227,8 @@ export default async function(req) {
         return {
           'ID Ordine': r.id_ordine,
           'Stato': r.stato,
-          'Trasporto Finito': dataIt(r.trasporto_finito_il),
-          'Ordine Immesso': dataIt(r.ordine_immesso_il),
+          'Trasporto Finito': dataPortaleIt(r.trasporto_finito_il),
+          'Ordine Immesso': dataPortaleIt(r.ordine_immesso_il),
           'Stoccaggio Origine': r.stoccaggio,
           'Destinazione': r.destinazione,
           'Tipo Destinazione': r.tipo_destinazione,
@@ -249,7 +253,7 @@ export default async function(req) {
           // quale data obbligatoria manca o non torna; vuota se sono a posto
           'Date da sistemare': testoDate(r),
           // solo informazione: non decide mese, settimana ne' filtri
-          'Ordine Chiuso': dataIt(r.ordine_chiuso_il),
+          'Ordine Chiuso': dataPortaleIt(r.ordine_chiuso_il),
         };
       });
       const ws = XLSX.utils.json_to_sheet(rows);

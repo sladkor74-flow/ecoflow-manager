@@ -48,7 +48,7 @@ import { normalizzaRagioneSociale } from "./normalizzaRagioneSociale.ts";
 import { formatoKgInTonnellate } from "./formato.ts";
 import { getRegioneFromProvincia } from "./dataEnrichment.ts";
 import { classeNormalizzata, nomiCoincidono, aggiungiGiorni, giorniTra, dataDaValore } from "./reportSettimanali.ts";
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, giornoPortale } from "./giornoItaliano.ts";
 import { giornoMovimento, testoDate, motivoCancellazione } from "./movimenti.ts";
 
 export const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -68,7 +68,9 @@ const KG_RITIRO_INDICATIVO = 4000;
 // (evasioneAssegnatiDati.ts). La 2 e' quella del 21/09/2026: fine trasporto mai
 // chiusura, terminate senza fine trasporto segnalate, ordini di altri canali
 // fuori dai conti della lista. Si alza a ogni cambio che sposta i risultati.
-export const VERSIONE_REGOLE = 2;
+// La 3 e' del difetto 9 (16/10/2026): l'immissione e' il giorno scritto nel
+// file del portale (immessoDi), anche per le righe delle liste caricate prima.
+export const VERSIONE_REGOLE = 3;
 
 // === calendario ===
 
@@ -119,9 +121,17 @@ function lavoraDiSabato(movimenti, da, a) {
   return sabatiAttivi >= 4 && sabati > 0 && sabatiAttivi / sabati >= 0.25;
 }
 
-// Il giorno italiano, non i primi dieci caratteri della stringa: una mezzanotte
-// italiana salvata come 22:00Z del giorno prima portava un ritiro del 1 del mese
-// nel mese precedente, diverso da periodoMovimento degli altri moduli.
+// L'immissione di un ordine e' l'ora del portale: l'ora italiana scritta con
+// la Z, che non e' un istante e non si converte. Si legge il giorno scritto nel
+// file (giornoPortale, difetto 9, 16/10/2026): con giornoRoma un ordine immesso
+// il 31/12 alle 23:30 diventava del 01/01, e una richiesta arretrata dell'anno
+// prima non risultava arretrata.
+const immessoDi = (v) => giornoPortale(v) || null;
+// Il giorno italiano di un istante, non i primi dieci caratteri della stringa:
+// una mezzanotte italiana salvata come 22:00Z del giorno prima portava un
+// ritiro del 1 del mese nel mese precedente, diverso da periodoMovimento degli
+// altri moduli. Vale per gli istanti scritti dal gestionale: l'invio e il
+// caricamento di una lista.
 const ymd = (v) => giornoRoma(v) || null;
 const targa = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const kgT = (kg) => formatoKgInTonnellate(kg) + ' t';
@@ -144,7 +154,7 @@ export function normalizzaPrimaria(r, canale) {
     canale,
     trasportatore: String(r.trasportatore || '').trim(),
     chiaveTrasp: normalizzaRagioneSociale(r.trasportatore || ''),
-    immesso: ymd(r.ordine_immesso_il),
+    immesso: immessoDi(r.ordine_immesso_il),
     // La chiusura a portale non si legge nemmeno: qui niente la deve usare.
     fine: giornoMovimento(r) || null,
     // Le date obbligatorie che mancano o non tornano, a parole ('' se sono a
@@ -168,7 +178,7 @@ export function normalizzaAssegnato(r, canale) {
     canale,
     trasportatore: String(r.trasportatore || '').trim(),
     chiaveTrasp: normalizzaRagioneSociale(r.trasportatore || ''),
-    immesso: ymd(r.ordine_immesso_il),
+    immesso: immessoDi(r.ordine_immesso_il),
     produttore: String(r.ragione_sociale || r.punto_di_raccolta || r.produttore || '').trim(),
     punto_raccolta: String(r.punto_di_raccolta || '').trim(),
     comune: String(r.comune || '').trim(),
@@ -485,7 +495,15 @@ export function controllaLista({ lista, raccoglitore, anno, mese, oggi, terminat
     const s = t || a ? null : senzaFinePerId.get(r.id_ordine);
     const c = cancellatiPerId.get(r.id_ordine);
     const fonte = t || a || s || c;
-    const base = { ...r, canale: fonte ? fonte.canale : r.canale, stato: null, chiusa_il: null, chiusa_da: '', kg: null, automezzo: '', saltate: 0, saltate_ids: [], stima_kg: null };
+    // Il giorno di immissione e' quello dell'ordine vivo - assegnato, terminato o
+    // cancellato - e la copia salvata nella lista vale solo per un ordine che non
+    // c'e' piu' in nessun archivio (difetto 9, 16/10/2026). arricchisciLista la
+    // fissa al caricamento, e le liste caricate prima di questa correzione
+    // l'hanno col giorno di giornoRoma: un ordine immesso il 31/12 alle 23:30
+    // risultava del 01/01, e un'arretrata dell'anno prima non era arretrata.
+    // Da qui passano arretrate, ordine della cronologia, saltate, trascurate e
+    // l'esito salvato.
+    const base = { ...r, data_immissione: (fonte && fonte.immesso) || r.data_immissione || null, canale: fonte ? fonte.canale : r.canale, stato: null, chiusa_il: null, chiusa_da: '', kg: null, automezzo: '', saltate: 0, saltate_ids: [], stima_kg: null };
     if (fonte && fonte.canale !== 'rete') {
       // La lista e il target sono della rete: un ordine ACI o di extra raccolta
       // finito in lista non si somma alle sue evase, al suo valore o alle aperte.

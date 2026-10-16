@@ -95,10 +95,15 @@ const righeFile = [
 ];
 
 // Le tre date obbligatorie, uguali comunque siano scritte nel foglio.
+// Dal 16/10/2026 (difetto 9) inizio e fine trasporto sono giorni: lo scrittore
+// unico (dataDelPortale) li salva a mezzanotte Z anche se la cella porta
+// un'ora, e conta quelle celle (giorni_con_ora). L'immissione tiene la sua ora.
 const ATTESE = {
-  'ORD-1': ['2026-09-01T08:00:00.000Z', '2026-09-12T07:00:00.000Z', '2026-09-13T12:57:36.000Z'],
-  'ORD-2': ['2026-09-01T08:00:00.000Z', '2026-09-12T07:00:00.000Z', '2026-09-13T12:57:36.000Z'],
+  'ORD-1': ['2026-09-01T08:00:00.000Z', '2026-09-12T00:00:00.000Z', '2026-09-13T00:00:00.000Z'],
+  'ORD-2': ['2026-09-01T08:00:00.000Z', '2026-09-12T00:00:00.000Z', '2026-09-13T00:00:00.000Z'],
 };
+// Nel file finto ogni riga ha l'ora sull'inizio e sulla fine del trasporto.
+const CON_ORA_PER_RIGA = 2;
 // L'assegnato non ha ancora un trasporto: negli archivi degli assegnati si
 // conserva la sola immissione (CAMPI_ASSEGNATO).
 const IMMISSIONE_ORD3 = '2026-09-01T08:00:00.000Z';
@@ -180,6 +185,7 @@ verifica('il file passa il controllo delle intestazioni', esito.status === 200, 
 const rete = archivio('PrimariaRete');
 const assegnati = archivio('Assegnato');
 verifica('due terminati di rete e un assegnato', rete.length === 2 && assegnati.length === 1, `rete ${rete.length}, assegnati ${assegnati.length}`);
+verifica("le date di trasporto arrivate con un'ora si contano, tutte e tre le righe", esito.body.giorni_con_ora === 3 * CON_ORA_PER_RIGA, String(esito.body.giorni_con_ora));
 for (const r of rete) {
   verifica(`le tre date dell'ordine ${r.id_ordine}`, JSON.stringify(dateDi(r)) === JSON.stringify(ATTESE[r.id_ordine]), JSON.stringify(dateDi(r)));
 }
@@ -200,6 +206,7 @@ const blocco = await importaBlocco({
   righe: righeBrowser.filter(r => String(r.Stato).toLowerCase() === 'terminato'), blocco: 0,
 });
 verifica('il blocco delle primarie entra', blocco.status === 200 && blocco.body.scritte === 2, JSON.stringify(blocco.body).slice(0, 300));
+verifica("e dice quante date di trasporto avevano un'ora", blocco.body.giorni_con_ora === 2 * CON_ORA_PER_RIGA, String(blocco.body.giorni_con_ora));
 for (const r of archivio('PrimariaRete')) {
   verifica(`le tre date dell'ordine ${r.id_ordine}, a blocchi`, JSON.stringify(dateDi(r)) === JSON.stringify(ATTESE[r.id_ordine]), JSON.stringify(dateDi(r)));
 }

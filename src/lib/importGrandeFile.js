@@ -515,6 +515,13 @@ async function scriviBlocchi({ tipoFile, entita, righe, avvisa, avanzamento, rig
   };
   let righeIncerte = 0;
   let ultimoErrore = null;
+  // Le celle di inizio o fine trasporto arrivate con un'ora, che la function
+  // ha salvato col solo giorno e ha contato blocco per blocco (giorni_con_ora,
+  // difetto 9, 16/10/2026). Si sommano solo dai blocchi che ha confermato: e'
+  // un segnale per il registro («il portale ha cominciato a scrivere l'ora
+  // della fine?»), non un numero che fa i conti. Chi chiama lo manda con
+  // «registra», che lo scrive nella riga del registro.
+  let giorniConOra = 0;
   // Gli ordini di cui NON si sa, per scritture confermate, quante righe abbiano
   // in archivio: quelli dei blocchi che la function non ha confermato. Vedi
   // sotto, dove si riempie.
@@ -571,6 +578,7 @@ async function scriviBlocchi({ tipoFile, entita, righe, avvisa, avanzamento, rig
       if (dati.scritte > 0) {
         totaleScritte += dati.scritte;
         righeConfermate += dati.scritte;
+        giorniConOra += Number(dati.giorni_con_ora) || 0;
         segnaOrdini(confermatePerOrdine, fetta);
         segnaOrdini(scrittePerOrdine, fetta);
         scritto = true;
@@ -640,7 +648,7 @@ async function scriviBlocchi({ tipoFile, entita, righe, avvisa, avanzamento, rig
     stato('scrittura', blocco + 1);
   }
 
-  return { totaleScritte, righeConfermate, confermatePerOrdine, scrittePerOrdine, righeIncerte, ultimoErrore, blocchiDatiPerEntrati, righeDatePerEntrate, totaleBlocchi, ordiniDubbi };
+  return { totaleScritte, righeConfermate, confermatePerOrdine, scrittePerOrdine, righeIncerte, ultimoErrore, blocchiDatiPerEntrati, righeDatePerEntrate, totaleBlocchi, ordiniDubbi, giorniConOra };
 }
 
 /**
@@ -697,7 +705,7 @@ export async function importaGrandeFile({ file, tipoFile, onProgress, confermaFo
   const righeArchivioPrima = datiPrep ? datiPrep.righe_archivio_prima : undefined;
 
   // === Scrittura dei blocchi ===
-  const { totaleScritte, righeConfermate, righeIncerte, ultimoErrore, blocchiDatiPerEntrati, righeDatePerEntrate, totaleBlocchi } = await scriviBlocchi({
+  const { totaleScritte, righeConfermate, righeIncerte, ultimoErrore, blocchiDatiPerEntrati, righeDatePerEntrate, totaleBlocchi, giorniConOra } = await scriviBlocchi({
     tipoFile, righe, avvisa,
     avanzamento: { bloccoIniziale: 0, totaleBlocchi: Math.ceil(totaleRighe / RIGHE_PER_BLOCCO), righeIniziali: 0, totaleRighe },
   });
@@ -821,6 +829,10 @@ export async function importaGrandeFile({ file, tipoFile, onProgress, confermaFo
     righe_incerte: incerteRimaste || undefined,
     righe_archivio_prima: righeArchivioPrima,
     conferma_forzatura: confermaForzatura || undefined,
+    // Le date di inizio o fine trasporto arrivate con un'ora (difetto 9,
+    // 16/10/2026): «registra» le scrive nella riga del registro. Prima le
+    // contava ogni blocco e nessuno le portava fin li'.
+    giorni_con_ora: giorniConOra || undefined,
   });
 
   // === Le dichiarazioni caricate a portale si riconoscono da sole ===
@@ -877,6 +889,7 @@ export async function importaGrandeFile({ file, tipoFile, onProgress, confermaFo
       }
       : null,
     ultimo_errore: ultimoErrore,
+    giorni_con_ora: giorniConOra,
     allineamento,
     esito,
   };
@@ -2099,6 +2112,12 @@ async function caricaPrimarie({ file, onProgress, confermaForzatura = false }, b
       // non e' un archivio a cui mancano righe, e' una lettura da buttare.
       lettura_incoerente: verifica.incoerente === true,
       riparazione_non_fatta: riparazioneNonFatta,
+      // Le date di inizio o fine trasporto arrivate con un'ora (difetto 9,
+      // 16/10/2026), dai blocchi confermati della prima scrittura. La
+      // riparazione non riconta le righe che riscrive, perche' possono essere
+      // gia' contate; quelle di un blocco non confermato restano fuori dal
+      // conto. E' un segnale, non un numero da quadrare.
+      giorni_con_ora: esito.giorniConOra,
     };
   }
 
@@ -2214,6 +2233,10 @@ async function caricaPrimarie({ file, onProgress, confermaForzatura = false }, b
       // Quante righe la riparazione ha tolto davvero: nello storico la frase
       // dice il numero, invece di prendersi tutto il buco.
       tolte_dal_gestionale: x.tolte_dal_gestionale,
+      // Le date di inizio o fine trasporto arrivate con un'ora: «registra» le
+      // somma sui quattro archivi e le scrive nella riga del registro (difetto
+      // 9, 16/10/2026).
+      giorni_con_ora: x.giorni_con_ora || undefined,
     }]));
   const registrato = await invocaConRitentativi({
     azione: 'registra', tipo_file: tipoFile, nome_file: file.name, archivi: perIlRegistro,
@@ -2242,6 +2265,7 @@ async function caricaPrimarie({ file, onProgress, confermaForzatura = false }, b
     assegnati_aci_importati: archivi.AssegnatoAci.scritte,
     blocchi: totaleBlocchi,
     blocchi_confermati_dal_conteggio: blocchiDatiPerEntrati,
+    giorni_con_ora: Object.values(archivi).reduce((s, x) => s + (x.giorni_con_ora || 0), 0),
     avviso_date: prep.avviso_date || null,
     // Lo storico conservato: i terminati degli anni prima che il file non
     // contiene e che restano in archivio. Non e' un problema, ma si dice.

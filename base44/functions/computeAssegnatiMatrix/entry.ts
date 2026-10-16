@@ -3,11 +3,24 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { MESI } from "../../shared/raccoltoCalculator.ts";
 import { matchesFilter, matchesFilterString } from "../../shared/multiFilter.ts";
 import { fetchAll } from "../../shared/fetchAll.ts";
-import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { oggiRoma, giornoPortale } from "../../shared/giornoItaliano.ts";
 import { etaArretrato } from "../../shared/cruscotto.ts";
+import { annoElenco, meseElenco } from "../../shared/movimenti.ts";
 
 // Calcola la matrice analitica aggregata del backlog degli ordini Assegnati.
 // Payload: { filters: { anno?, mese?, regione?, provincia?, partner_operativo?, classe? } }
+//
+// MESE E ANNO DALL'IMMISSIONE, NON DAI CAMPI SALVATI (difetto 9, 16/10/2026).
+// L'immissione e' l'ora italiana scritta dal portale, salvata con la Z: i campi
+// mese e anno del record li scriveva l'arricchimento leggendola col fuso
+// italiano, cioe' aggiungendo un'altra volta l'ora italiana, e un ordine immesso
+// il 31/12 alle 23:30 finiva a gennaio dell'anno dopo. Qui si leggono con
+// annoElenco e meseElenco (movimenti.ts), che leggono il giorno scritto nel file.
+// Il campo salvato resta solo come ripiego per un assegnato senza immissione:
+// li' non c'e' un'ora da leggere, e quindi nemmeno l'errore.
+const annoDi = (r) => annoElenco(r) ?? (Number(r.anno) || null);
+const meseDi = (r) => meseElenco(r) || r.mese || null;
+
 export default async function(req) {
   try {
     const base44 = conLimiteRichieste(createClientFromRequest(req));
@@ -34,20 +47,21 @@ export default async function(req) {
     }
 
     const all = await fetchAll(base44.asServiceRole.entities[entityName]);
+    // Mese e anno di ogni ordine, ricavati una volta sola (vedi in testa).
+    const periodi: Map<any, any> = new Map(all.map(r => [r, { anno: annoDi(r), mese: meseDi(r) }]));
 
     // Applica filtri (supporto multi-selezione via array)
     const filtered = all.filter(r => {
-      if (!matchesFilterString(r.anno, filters.anno)) return false;
-      if (!matchesFilter(r.mese, filters.mese)) return false;
+      const p = periodi.get(r);
+      if (!matchesFilterString(p.anno, filters.anno)) return false;
+      if (!matchesFilter(p.mese, filters.mese)) return false;
       if (!matchesFilter(r.regione, filters.regione)) return false;
       if (!matchesFilter((r.provincia || '').toUpperCase().trim(), filters.provincia)) return false;
       if (!matchesFilter((r.partner_operativo || '').trim(), filters.partner_operativo)) return false;
       if (!matchesFilter(r.classe, filters.classe)) return false;
       if (!matchesFilter((r.stato || '').trim(), filters.stato)) return false;
-      if (filters.data) {
-        const d = r.ordine_immesso_il;
-        if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
-      }
+      // il giorno scritto nel file del portale, non quello di un istante UTC
+      if (filters.data && giornoPortale(r.ordine_immesso_il) !== filters.data) return false;
       return true;
     });
 
@@ -64,7 +78,8 @@ export default async function(req) {
       total_peso_kg += peso;
       total_quantita += quant;
 
-      const meseIdx = r.mese ? MESI.indexOf(r.mese) : -1;
+      const mese = periodi.get(r).mese;
+      const meseIdx = mese ? MESI.indexOf(mese) : -1;
       if (meseIdx >= 0 && meseIdx < 6) sem1_ton += peso / 1000;
       else if (meseIdx >= 6) sem2_ton += peso / 1000;
 
@@ -78,8 +93,9 @@ export default async function(req) {
     // Matrice: Anno -> Semestre -> Regione -> Provincia
     const matrix: Record<string, any> = {};
     for (const r of filtered) {
-      const anno = String(r.anno || 'N/D');
-      const meseIdx = r.mese ? MESI.indexOf(r.mese) : -1;
+      const p = periodi.get(r);
+      const anno = String(p.anno || 'N/D');
+      const meseIdx = p.mese ? MESI.indexOf(p.mese) : -1;
       const semestre = meseIdx < 0 ? 'N/D' : (meseIdx < 6 ? '1° Semestre' : '2° Semestre');
       const regione = r.regione || 'N/D';
       const provincia = (r.provincia || 'N/D').toUpperCase().trim();
@@ -114,8 +130,8 @@ export default async function(req) {
 
     // Opzioni filtri
     const filterOptions = {
-      anni: [...new Set(all.map(r => r.anno).filter(Boolean))].sort((a: any, b: any) => b - a),
-      mesi: MESI.filter(m => all.some(r => r.mese === m)),
+      anni: [...new Set(all.map(r => periodi.get(r).anno).filter(Boolean))].sort((a: any, b: any) => b - a),
+      mesi: MESI.filter(m => all.some(r => periodi.get(r).mese === m)),
       regioni: [...new Set(all.map(r => r.regione).filter(Boolean))].sort(),
       province: [...new Set(all.map(r => (r.provincia || '').toUpperCase().trim()).filter(Boolean))].sort(),
       partner: [...new Set(all.map(r => (r.partner_operativo || '').trim()).filter(Boolean))].sort(),

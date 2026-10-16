@@ -47,6 +47,22 @@ const per = periodoPrefattura(vero.righe);
 verifica('il mese si ricava dal file: luglio 2026 (seriali 46204 e 46234)', vero.righe[0].giorno === '2026-07-01' && vero.righe[1].giorno === '2026-07-31' && per.anno === 2026 && per.mese_idx === 6 && per.quota === 1);
 verifica('date scritte come testo', comeGiorno('31/07/2026') === '2026-07-31' && comeGiorno('2026-07-31T00:00:00Z') === '2026-07-31' && comeGiorno('n.d.') === '' && periodoPrefattura([{ giorno: '' }]) === null);
 
+// Un seriale con l'ora e' il giorno della cella, arrotondata al secondo (difetto
+// 9, 16/10/2026). Si arrotondava il seriale all'intero: 46278,54 - il 13/09/2026
+// alle 12:57 - diventava il 14, e da mezzogiorno in poi ogni data passava al
+// giorno dopo, nelle prefatture e nei consuntivi dei fornitori.
+verifica('una cella del 13/09 alle 12:57 resta il 13', comeGiorno(46278.54) === '2026-09-13', comeGiorno(46278.54));
+verifica('e alle 23:58 anche', comeGiorno(46278.999) === '2026-09-13', comeGiorno(46278.999));
+verifica('la mezzanotte e il mattino non cambiano', comeGiorno(46278) === '2026-09-13' && comeGiorno(46278.3) === '2026-09-13', `${comeGiorno(46278)} ${comeGiorno(46278.3)}`);
+// 23:59:59,9995 arrotondato al secondo e' la mezzanotte del giorno dopo, come nel file
+verifica("un seriale che manca la mezzanotte di un soffio e' il giorno dopo", comeGiorno(46279 - 0.0005 / 86400) === '2026-09-14', comeGiorno(46279 - 0.0005 / 86400));
+const conOra = leggiTabellePrefattura([{ nome: 'Worksheet', celle: [
+  ['Ordine', 'Data fine trasporto', 'Numero FIR', 'Quantità (kg)', 'Prezzo Totale'],
+  ['ET26130005', 46265.75, 'LQQDP001408LD', 3840, 775.68],
+] }]);
+verifica("in una prefattura la fine del 31/08 alle 18:00 resta di agosto",
+  conOra.righe[0].giorno === '2026-08-31' && periodoPrefattura(conOra.righe).mese_idx === 7, JSON.stringify(conOra.righe[0]));
+
 // Il mese della prefattura viene dalla FINE del trasporto, mai dalla chiusura a
 // portale (regola 1). La colonna si cercava con "data" oppure "trasporto" e vinceva
 // la prima da sinistra: se il portale aggiungesse una "Data chiusura" prima, il mese

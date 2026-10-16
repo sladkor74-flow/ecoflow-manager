@@ -7,9 +7,9 @@ import * as XLSX from 'npm:xlsx@0.18.5';
 import { SHEET_MAP, NUMERIC_FIELDS } from "../../shared/excelSchemas.ts";
 import { enrichRecords } from "../../shared/dataEnrichment.ts";
 import { FILE_SIGNATURES, checkSignature, detectType, mappaColonne } from "../../shared/fileSignatures.ts";
-import { CAMPI_ASSEGNATO, DATE_PRIMARIE, archivioPrimaria, dataPrimaria, soloNostroPartner } from "../../shared/primarie.ts";
+import { CAMPI_ASSEGNATO, ORE_PORTALE, GIORNI_PORTALE, archivioPrimaria, dataDelPortale, soloNostroPartner } from "../../shared/primarie.ts";
 import { livelloDi, puoCaricare, rispostaCaricamentoNegato } from "../../shared/livelli.ts";
-import { annoRoma } from "../../shared/giornoItaliano.ts";
+import { annoPortale } from "../../shared/giornoItaliano.ts";
 import { urlScaricabile, riferimentoDaSalvare, riferimentoDalCorpo } from "../../shared/fileScaricabile.ts";
 import { annoDelloStorico, ordiniDaConservare, cancellatiDaLasciare, svuotaTranne } from "../../shared/storicoConservato.ts";
 import { ordiniEseguiti, avvisoDelCaricamento, testoRegistro } from "../../shared/ordiniEseguiti.ts";
@@ -93,26 +93,6 @@ function avvisoEseguitiDi(eseguiti) {
   const avviso = avvisoDelCaricamento(eseguiti);
   if (!eseguiti.dal_file) return avviso;
   return { ...(avviso || { rete: QUOTA_VUOTA, aci: QUOTA_VUOTA, gruppi: [] }), non_riletti: eseguiti.non_riletti };
-}
-
-// Campi data per le nuove entita' (dichiarazioni/ordini): accettano sia seriale Excel che testo AAAA-MM-GG
-const DATE_FIELDS = new Set([
-  'data_chiusura', 'data_immissione', 'inizio_trasporto', 'fine_trasporto',
-  'data_esecuzione', 'data_dichiarazione'
-]);
-
-function excelSerialToDate(serial) {
-  const d = new Date(Date.UTC(1899, 11, 30) + Math.round(serial * 86400000));
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function toDateISO(val) {
-  if (val === null || val === undefined || val === '') return null;
-  if (val instanceof Date) return val.toISOString();
-  if (typeof val === 'number') { const d = excelSerialToDate(val); return d ? d.toISOString() : null; }
-  const s = String(val).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) { const d = new Date(s); return isNaN(d.getTime()) ? null : d.toISOString(); }
-  return null;
 }
 
 // Legge SOLO la prima riga di un foglio, senza materializzare tutte le righe.
@@ -233,12 +213,17 @@ export default async function(req) {
       }, { status: 502 });
     }
     const ab = await fileRes.arrayBuffer();
-    // I due report del portale portano le date come seriali Excel e vengono convertite
-    // da DATE_FIELDS: disattivare cellDates evita di creare un oggetto Date per ogni
-    // cella data, su oltre un milione di celle.
-    const usaCellDates = !(tipo_file === 'dichiarazioni_trattamento' || tipo_file === 'ordini_non_dichiarati');
+    // IL FOGLIO SI LEGGE SEMPRE SENZA cellDates (difetto 9, 16/10/2026).
+    //
+    // Le date arrivano come seriali Excel, che sono l'ora scritta nel file senza
+    // fuso, e le converte lo scrittore unico (dataDelPortale). Con cellDates la
+    // libreria costruiva un Date nel fuso del processo, e le stesse celle davano
+    // una stringa sul server e un'altra nel browser; in piu' quel Date perdeva un
+    // millesimo, e in archivio sono rimasti 979 orari che finiscono per .999.
+    // Secondarie e terziarie non hanno altre colonne data (shared/excelSchemas.ts),
+    // e sui due report si risparmia un Date per ognuna di oltre un milione di celle.
     fase = 'lettura del foglio';
-    const wb = XLSX.read(ab, { type: 'array', cellDates: usaCellDates });
+    const wb = XLSX.read(ab, { type: 'array', cellDates: false });
 
     // === 2. Riconosci il foglio tramite firma intestazioni ===
     fase = 'validazione intestazioni';
@@ -323,6 +308,9 @@ export default async function(req) {
     // un'intestazione con uno spazio in coda (fileSignatures.mappaColonne).
     const colMap = mappaColonne(config.columns, leggiIntestazioni(ws));
     const keyField = config.keyField || 'id_ordine';
+    // Le celle di inizio o fine trasporto che nel file avevano anche un'ora:
+    // si salvano col solo giorno, e si dicono (giorni_con_ora).
+    const conta = { giorni_con_ora: 0 };
     let mapped = rawRows.map(row => {
       const obj = {};
       for (const [excelCol, entityField] of Object.entries(colMap)) {
@@ -331,17 +319,16 @@ export default async function(req) {
         if (NUMERIC_FIELDS.has(entityField)) {
           const n = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
           obj[entityField] = isNaN(n) ? null : n;
-        } else if (DATE_FIELDS.has(entityField)) {
-          obj[entityField] = toDateISO(val);
-        } else if (DATE_PRIMARIE.has(entityField)) {
-          // Immissione, inizio e fine trasporto (e la chiusura): si convertono
-          // per il campo, non perche' la cella sia arrivata come Date. Una
-          // colonna esportata come testo o come numero generico finiva in
-          // archivio come stringa e le tre date obbligatorie risultavano
-          // mancanti su tutte le righe del caricamento.
-          obj[entityField] = dataPrimaria(val);
-        } else if (val instanceof Date) {
-          obj[entityField] = val.toISOString();
+        } else if (ORE_PORTALE.has(entityField) || GIORNI_PORTALE.has(entityField)) {
+          // Tutte le date passano dallo scrittore unico (difetto 9, 16/10/2026):
+          // l'ora italiana del file salvata com'e' scritta, inizio e fine
+          // trasporto a mezzanotte Z. Si convertono per il campo, non perche'
+          // la cella sia arrivata come data: una colonna esportata come testo o
+          // come numero generico finiva in archivio come stringa e le tre date
+          // obbligatorie risultavano mancanti su tutte le righe del caricamento.
+          // Un Date qui non arriva piu' (il foglio si legge senza cellDates):
+          // il ramo che lo trasformava con l'ora UTC non c'e' piu'.
+          obj[entityField] = dataDelPortale(val, entityField, conta);
         } else {
           if (entityField === 'stato') {
             obj[entityField] = String(val).trim().toLowerCase();
@@ -651,14 +638,15 @@ export default async function(req) {
     // di segnare a mano, impianto per impianto, che cosa e' stato dichiarato.
     // Ogni anno presente nel report, come l'azione "allinea" di importaBlocco
     // (la strada usata oggi per questo report) e il pulsante di Dichiarazioni
-    // Impianti; l'anno e' quello del giorno italiano, come lo legge
-    // allineaDalPortale: tagliando la stringa UTC un caricamento del 1 gennaio a
-    // mezzanotte italiana finiva nell'anno prima.
+    // Impianti; l'anno e' quello del giorno scritto nel report, come lo legge
+    // allineaDalPortale. E' un'ora del portale, l'ora italiana salvata con la Z:
+    // col giorno italiano (giornoRoma) un caricamento del 31/12 dopo le 23
+    // finiva nell'anno dopo (difetto 9, 16/10/2026).
     let allineamento = null;
     if (tipo_file === 'dichiarazioni_trattamento' && imported > 0) {
       fase = 'allineamento delle dichiarazioni mensili';
       try {
-        const anni = [...new Set(enriched.map(r => annoRoma(r.data_dichiarazione)).filter(Boolean))].sort((x, y) => x - y);
+        const anni = [...new Set(enriched.map(r => annoPortale(r.data_dichiarazione)).filter(Boolean))].sort((x, y) => x - y);
         const aggiornate = [];
         const nonTrovate = [];
         for (const a of anni) {
@@ -711,6 +699,12 @@ export default async function(req) {
       : (allineamento && allineamento.errore ? ` | allineamento non riuscito: ${allineamento.errore}` : '');
     // Gli «eseguito» restano scritti nel registro con gli ID, come per le primarie.
     const notaEseguiti = eseguitiDopo && eseguitiDopo.gruppi.length ? ` | ${testoRegistro(eseguitiDopo)}` : '';
+    // Le date di inizio o fine trasporto arrivate con un'ora (difetto 9): oggi
+    // nessuna. Se il portale cominciasse a scrivere l'ora della fine, lo si
+    // legge qui, e il giorno salvato resta quello scritto.
+    const notaGiorniConOra = conta.giorni_con_ora > 0
+      ? ` | ${conta.giorni_con_ora === 1 ? "1 data di inizio o fine trasporto aveva" : `${conta.giorni_con_ora} date di inizio o fine trasporto avevano`} anche un'ora nel file: si e' tenuto il giorno`
+      : '';
     // La riga aperta prima di svuotare prende l'esito: e' questo aggiornamento a
     // far partire gli alert (workflow AlertEngineAutoRun, su create e update).
     // Se dopo lo svuotamento non e' entrata nessuna riga l'archivio e' vuoto: la
@@ -719,7 +713,7 @@ export default async function(req) {
       utente: chi(user),
       tipo_file, nome_file, ...riferimentoDaSalvare({ file_uri, file_url }),
       righe_importate: imported, righe_fallite: failed, esito,
-      messaggio: messaggio + notaAllineamento + notaEseguiti, periodo_riferimento: periodo_riferimento || '',
+      messaggio: messaggio + notaAllineamento + notaEseguiti + notaGiorniConOra, periodo_riferimento: periodo_riferimento || '',
       foglio_usato: sheetName, righe_archivio_prima, forzato: !!conferma_forzatura,
       modalita
     };
@@ -752,6 +746,9 @@ export default async function(req) {
       tipo_file, entity: config.entity, foglio: sheetName,
       righe_lette: rawRows.length, righe_mappate: mapped.length, righe_da_importare: totaleDaImportare,
       righe_importate: imported, righe_fallite: failed, esito, lastError,
+      // Le celle di inizio o fine trasporto che avevano anche un'ora, salvate
+      // col solo giorno (difetto 9, 16/10/2026).
+      giorni_con_ora: conta.giorni_con_ora,
       // Le righe di un altro operatore trovate nel file: scartate, e dette.
       ...(altroPartner.scartate ? { righe_di_altri_partner: altroPartner.scartate } : {}),
       assegnati_importati, assegnati_falliti,

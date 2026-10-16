@@ -43,8 +43,12 @@ verifica('terminato: la fine trasporto, non la chiusura ne\' l\'immissione', gio
 const senzaFine = { stato: 'terminato', ordine_immesso_il: immessoMaggio, ordine_chiuso_il: '2026-07-04T10:00:00Z' };
 verifica('terminato senza fine trasporto: niente giorno, mese e anno', giornoElenco(senzaFine) === '' && meseElenco(senzaFine) === null && annoElenco(senzaFine) === null);
 verifica('giornoOrdine invece ripiega sull\'immissione (resta per i conteggi per anno di immissione)', giornoOrdine(senzaFine) === '2026-05-20');
+// L'immissione e' l'ora del portale, l'ora italiana scritta con la Z (difetto 9,
+// 16/10/2026): '2025-12-31T23:30:00Z' e' il 31/12/2025 alle 23:30 italiane, e
+// resta del 2025. Fino al 16/10/2026 questa verifica voleva il 01/01/2026: era
+// la regola sbagliata, che aggiungeva di nuovo l'ora italiana.
 const cancellato = { stato: 'cancellato', ordine_immesso_il: '2025-12-31T23:30:00Z' };
-verifica('non terminato: l\'immissione, sul giorno italiano', giornoElenco(cancellato) === '2026-01-01' && annoElenco(cancellato) === 2026 && meseElenco(cancellato) === 'Gennaio');
+verifica('non terminato: l\'immissione, sul giorno scritto nel file del portale', giornoElenco(cancellato) === '2025-12-31' && annoElenco(cancellato) === 2025 && meseElenco(cancellato) === 'Dicembre', JSON.stringify([giornoElenco(cancellato), annoElenco(cancellato), meseElenco(cancellato)]));
 verifica('non terminato con la fine trasporto: la fine trasporto', meseElenco({ stato: 'assegnato', ordine_immesso_il: immessoMaggio, trasporto_finito_il: '2026-06-10T08:00:00Z' }) === 'Giugno');
 verifica('senza date: niente', giornoElenco({ stato: 'assegnato' }) === '' && annoElenco({}) === null);
 

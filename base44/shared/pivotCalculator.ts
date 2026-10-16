@@ -12,7 +12,7 @@ import { getMeseFromDate, getSettimanaFromDate, getAnnoFromDate, getRegioneFromP
 import { matchesFilter } from "./multiFilter.ts";
 import { fetchAll } from "./fetchAll.ts";
 import { eTerminato, giornoMovimento, annoPerFiltro } from "./movimenti.ts";
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoPortale } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 
 function getMese(dateStr) {
@@ -80,8 +80,12 @@ function getRecordSettimanaImmissione(r) {
 // o un terminato senza data finivano nel mese in cui erano stati immessi. Il
 // periodo di un movimento e' solo la fine del trasporto; chi non l'ha resta fuori
 // dalle pivot e si conta a parte (movimentiContati).
+// Si legge come giorno, con giornoMovimento come i periodi di tutto il
+// gestionale (difetto 9, 16/10/2026): l'immissione invece e' un'ora del portale,
+// e i suoi mese, anno e settimana si leggono col giorno scritto nel file
+// (getMeseFromDate e le altre di dataEnrichment.ts).
 function getDataFineTrasporto(r) {
-  return r.trasporto_finito_il || null;
+  return giornoMovimento(r) || null;
 }
 
 // I movimenti che entrano nelle pivot: terminati con una fine trasporto
@@ -116,11 +120,14 @@ function applyFilters(rows, filters, useImmissione) {
   // Secondarie (annoPerFiltro di movimenti.ts, chiusura dell'audit 11/10/2026):
   // la settimana 53 del 2026 va dal 28/12 al 03/01, e con l'anno del giorno
   // «2026, settimana 53» perdeva i giorni di gennaio. Con il solo anno vale il
-  // giorno, come sempre.
+  // giorno, come sempre. Il giorno dell'immissione e' quello scritto nel file
+  // del portale (giornoPortale, difetto 9, 16/10/2026): e' l'ora italiana
+  // salvata con la Z, e con giornoRoma un ordine del 31/12 alle 23:30 finiva
+  // nell'anno dopo. La fine arriva gia' come giorno (getDataFineTrasporto).
   const conSettimana = hasFilter(filters.settimana);
   return rows.filter((row) => {
     const mese = useImmissione ? getRecordMeseImmissione(row) : getRecordMese(row);
-    const anno = annoPerFiltro(giornoRoma(useImmissione ? getDataImmissione(row) : getDataFineTrasporto(row)), conSettimana);
+    const anno = annoPerFiltro(giornoPortale(useImmissione ? getDataImmissione(row) : getDataFineTrasporto(row)), conSettimana);
     const sett = useImmissione ? getRecordSettimanaImmissione(row) : getRecordSettimana(row);
     if (hasFilter(filters.mese) && !matchesFilter(mese, filters.mese)) return false;
     if (hasFilter(filters.anno)) {

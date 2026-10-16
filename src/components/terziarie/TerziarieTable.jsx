@@ -3,7 +3,12 @@ import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import { formatNumber, fmtTon } from '@/lib/utils';
 import { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
+import { dataPortaleIt } from '@/lib/giornoItaliano';
 
+// La data si scrive gg/mm/aaaa con gli zeri, con dataPortaleIt (16/10/2026):
+// toLocaleDateString mette gli zeri o no secondo i dati della lingua del
+// browser, e puo' scrivere «4/9/2026». La fine del trasporto e' un giorno senza
+// ora, salvato a mezzanotte, e dataPortaleIt ne legge il giorno scritto.
 const COLUMNS = [
   { key: 'id_ordine', label: 'ID Ordine' },
   { key: 'unita_locale_origine', label: 'Impianto Origine' },
@@ -49,7 +54,7 @@ export default function TerziarieTable({ records, loading }) {
                 let val = r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
                 else if (col.format === 'ton') val = val != null ? fmtTon(val) : '';
-                else if (col.format === 'date') val = val ? new Date(val).toLocaleDateString('it-IT') : '';
+                else if (col.format === 'date') val = dataPortaleIt(val);
                 return (
                   <td key={col.key} className="px-3 py-2 whitespace-nowrap">
                     {/* il segno delle date da sistemare, col dettaglio nel title (22/09/2026):

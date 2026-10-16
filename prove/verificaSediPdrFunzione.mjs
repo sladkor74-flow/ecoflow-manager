@@ -216,5 +216,36 @@ const scaglione = await chiama({ anno: 2026, limite: 1 });
 verifica('con limite 1 ne controlla uno e dice che ne resta un altro',
   scaglione.body.controllati === 1 && scaglione.body.restanti === 1, JSON.stringify(scaglione.body));
 
+console.log('L\'ANNO DI UN ASSEGNATO E\' QUELLO DELL\'IMMISSIONE (difetto 9, 16/10/2026)');
+// L'immissione e' l'ora italiana del portale salvata con la Z. Il campo anno lo
+// scriveva l'arricchimento leggendola col fuso italiano, cioe' aggiungendo
+// un'altra volta l'ora italiana: un ordine immesso il 31/12/2025 alle 23:30
+// aveva anno 2026, e la funzione, che filtrava la lettura su quel campo, ne
+// controllava il punto di raccolta fra gli ordini del 2026 e non fra quelli del
+// 2025. Ora gli assegnati si leggono tutti e l'anno viene dall'immissione; il
+// campo salvato vale solo per un assegnato che l'immissione non ce l'ha.
+const archivioAnno = () => {
+  globalThis.__ARCHIVI = {
+    Pdr: PDR.map(p => ({ ...p })),
+    Assegnato: [{ id: 'a20', id_pdr: 18181, anno: 2026, mese: 'Gennaio', ordine_immesso_il: '2025-12-31T23:30:00.000Z' }],
+    // senza immissione: vale l'anno salvato
+    AssegnatoAci: [{ id: 'c20', id_pdr: 199, anno: 2026, mese: 'Marzo' }],
+    VerificaSedePdr: [],
+  };
+  globalThis.__PROMPT = []; globalThis.__RUOLO = 'admin';
+};
+archivioAnno();
+globalThis.__RISPOSTE = [{ indirizzo: 'S.S. 93 km 56,400', comune: 'Lavello', confidenza: 'alta', fonti: ['https://mappe.example/eurogomme'] }];
+const del2025 = await chiama({ anno: 2025, limite: 4 });
+verifica('con { anno: 2025 } si controlla il punto dell\'ordine immesso il 31/12/2025 alle 23:30',
+  del2025.status === 200 && del2025.body.controllati === 1 && del2025.body.verifiche[0].id_pdr === 18181,
+  JSON.stringify({ controllati: del2025.body.controllati, pdr: (del2025.body.verifiche || []).map(v => v.id_pdr) }));
+archivioAnno();
+globalThis.__RISPOSTE = [{ indirizzo: 'Viale Berlinguer 34', comune: 'Bernalda', confidenza: 'media', fonti: ['https://elenco.example/marciuliano'] }];
+const del2026 = await chiama({ anno: 2026, limite: 4 });
+verifica('con { anno: 2026 } no: c\'e\' solo l\'assegnato ACI senza immissione, col suo anno salvato',
+  del2026.status === 200 && del2026.body.controllati === 1 && del2026.body.verifiche[0].id_pdr === 199,
+  JSON.stringify({ controllati: del2026.body.controllati, pdr: (del2026.body.verifiche || []).map(v => v.id_pdr) }));
+
 console.log(`\n${ok} verifiche superate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

@@ -102,7 +102,10 @@ console.log('LA VISTA ACI: IL RIQUADRO SUBITO, SOPRA LA MATRICE');
 
 console.log('CON I FILTRI, E CON PIU\' ORDINI');
 {
-  const molti = [...ARCHIVIO, ...Array.from({ length: 6 }, (_, k) => ordine(`b${k}`, `ET2610100${k}`, 1000 + k * 10, { anno: 2025 }))];
+  // Gli ordini del 2025 lo sono anche nell'immissione: dal 16/10/2026 (difetto 9)
+  // la pagina legge l'anno dall'immissione, non dal campo anno salvato, e con
+  // l'immissione del modello (01/10/2026) sarebbero del 2026.
+  const molti = [...ARCHIVIO, ...Array.from({ length: 6 }, (_, k) => ordine(`b${k}`, `ET2610100${k}`, 1000 + k * 10, { anno: 2025, mese: 'Ottobre', ordine_immesso_il: '2025-10-01T08:00:00' }))];
   const { r, riquadro } = await monta('AssegnatoAci', molti);
   const t = riquadro() ? testo(riquadro()) : '';
   verifica('sette ordini: il conto, i primi cinque e «e altri 2»', /^7 ordini con lo stimato sotto i 1\.500 kg ammessi/.test(t) && / e altri 2\./.test(t), t);

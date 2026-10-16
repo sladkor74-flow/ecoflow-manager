@@ -1,4 +1,4 @@
-import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
+import { giornoRoma, giornoPortale, oggiRoma } from "./giornoItaliano.ts";
 import { eTerminato, giornoMovimento, dateDaSistemare, testoDate, GIORNI_SCADENZA_ORDINE, chiaveOrdine } from "./movimenti.ts";
 
 // Filtro periodo condiviso per fatturazione attiva, passiva e anteprima Ecotyre.
@@ -100,16 +100,21 @@ const piuGiorni = (g, n) => new Date(Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1
  * 2030: nascondeva le segnalazioni vere invece di farsi vedere. Si limita anche
  * lui a una finestra, la sola che si possa dire senza nessuna data: i mesi
  * dell'anno in corso, quello in cui lo si sta lavorando.
+ *
+ * L'immissione si legge col giorno scritto nel file del portale (giornoPortale,
+ * difetto 9, 16/10/2026): e' l'ora italiana salvata con la Z, e giornoRoma le
+ * aggiungeva di nuovo l'ora italiana. L'inizio del trasporto e' un giorno senza
+ * ora, a mezzanotte Z, dove le due letture danno lo stesso giorno.
  */
 function senzaFineNelMese(r, annoNum, meseIdx) {
-  const immesso = giornoRoma(r.ordine_immesso_il);
   const inizio = giornoRoma(r.trasporto_iniziato_il);
+  const immesso = giornoPortale(r.ordine_immesso_il);
   const prima = immesso && inizio ? (immesso < inizio ? immesso : inizio) : (immesso || inizio);
+  const dopo = immesso && inizio ? (immesso > inizio ? immesso : inizio) : prima;
   if (!prima) return annoNum === Number(oggiRoma().slice(0, 4));
   const annoPrima = Number(prima.slice(0, 4));
   if (annoPrima === annoNum) return meseIdx >= Number(prima.slice(5, 7)) - 1;
   if (annoPrima !== annoNum - 1) return false;
-  const dopo = immesso && inizio ? (immesso > inizio ? immesso : inizio) : prima;
   const ultimo = piuGiorni(dopo, GIORNI_OLTRE_ANNO);
   return `${annoNum}-${String(meseIdx + 1).padStart(2, '0')}-01` <= ultimo;
 }
@@ -119,7 +124,7 @@ const voceDate = (r) => ({
   ordine: String(r.id_ordine || '').trim(),
   numero_fir: String(r.numero_fir || '').trim(),
   kg: Math.round(Number(r.peso_effettivo || 0)),
-  immesso_il: giornoRoma(r.ordine_immesso_il),
+  immesso_il: giornoPortale(r.ordine_immesso_il),
   problema: testoDate(r),
 });
 

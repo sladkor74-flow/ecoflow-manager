@@ -20,7 +20,7 @@
 // aggiornato; contano quelli finiti dal giorno dopo. E' la stessa regola di
 // Dichiarazioni Impianti, Giacenze e Predittivita': un carico non puo' risultare
 // dentro per un modulo e fuori per un altro.
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, giornoPortale } from "./giornoItaliano.ts";
 import { formatoKg } from "./formato.ts";
 import { eAci } from "./canaleSecondaria.ts";
 
@@ -177,6 +177,12 @@ export function classiDiRilevazione(rec) {
  * Il giorno e' sempre la FINE DEL TRASPORTO sul giorno italiano; la chiusura a
  * portale si porta dietro solo per raccontarla - non colloca niente, e' il
  * portale che chiude l'ordine giorni dopo il trasporto.
+ * La chiusura pero' decide se un movimento a ridosso della fotografia e' arrivato
+ * dopo, anche nella chiusura dell'anno: e' l'ora del portale, l'ora italiana
+ * scritta con la Z, e se ne legge il giorno scritto nel file (giornoPortale,
+ * difetto 9, 16/10/2026). Con giornoRoma una chiusura delle 23:30 passava al
+ * giorno dopo. La fine e' un giorno senza ora, a mezzanotte Z, e resta su
+ * giornoRoma.
  * La classe la risolve chi chiama, con canaleEClasse.
  * Si porta dietro anche il TICKET (numero_ordine_interno, colonna AL dei file
  * del portale) e da quale archivio la riga viene: servono a chi apre un numero e
@@ -194,7 +200,7 @@ export function movimentoStoccaggio(r, { canale = 'RETE', verso = 'ingresso', cl
     classe: classe || 'ND',
     kg: Math.round(Number(r && r.peso_effettivo) || 0),
     finito_il: giornoRoma(r && r.trasporto_finito_il),
-    chiuso_il: giornoRoma(r && r.ordine_chiuso_il),
+    chiuso_il: giornoPortale(r && r.ordine_chiuso_il),
     controparte: String(controparte || '').replace(/\s+/g, ' ').trim(),
   };
 }

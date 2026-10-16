@@ -240,7 +240,16 @@ export function indiceSicurezza() {
 // solo dei controlli eseguiti prima di questa data: dopo, quelli vecchi sono
 // stati rifatti da un caricamento delle primarie o cancellati con la loro lista,
 // e la lettura in piu' non serve.
-const CONTROLLI_DA_VERIFICARE_FINO_AL = Date.parse('2026-10-15T00:00:00Z');
+//
+// La data e' il giorno del commit del difetto 9 (16/10/2026) piu' 30 giorni.
+// Con le regole 3 l'immissione e' il giorno scritto nel file del portale: i
+// controlli eseguiti prima - compresi quelli fatti dal codice vecchio fra il
+// commit e la pubblicazione - portano regole 2, si rileggono e si rifanno alla
+// prima apertura del loro mese, o al primo caricamento delle primarie. Col
+// limite di prima (15/10/2026) alzare VERSIONE_REGOLE non bastava: i controlli
+// gia' fatti non si sarebbero piu' riletti. Se la pubblicazione slitta oltre
+// questa data, la data va spostata prima di pubblicare.
+const CONTROLLI_DA_VERIFICARE_FINO_AL = Date.parse('2026-11-15T00:00:00Z');
 
 async function controlloSuperato(base44, c) {
   // Un controllo alleggerito non ha piu' l'esito da leggere: giudicarlo superato

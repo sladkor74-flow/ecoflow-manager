@@ -24,7 +24,7 @@
 //
 // Questo file ha uno specchio per il browser: src/lib/movimenti.js. Una regola
 // cambiata qui va cambiata la'.
-import { giornoRoma, oggiRoma } from '@/lib/giornoItaliano';
+import { giornoRoma, giornoPortale, oggiRoma } from '@/lib/giornoItaliano';
 import { eAci } from '@/lib/canaleSecondaria';
 
 export const MESI_MOVIMENTI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -65,8 +65,27 @@ export function motivoCancellazione(r) {
   return motivo ? motivo[0].toUpperCase() + motivo.slice(1) : '';
 }
 
-/** Il giorno italiano in cui e' finito il trasporto, 'AAAA-MM-GG'. Stringa vuota se manca. */
+/**
+ * Il giorno italiano in cui e' finito il trasporto, 'AAAA-MM-GG'. Stringa vuota se manca.
+ *
+ * Resta con giornoRoma apposta (difetto 9, 16/10/2026): la fine del trasporto e'
+ * un giorno senza ora, e lo scrittore dei file del portale (dataDelPortale in
+ * primarie.ts) la salva sempre a mezzanotte Z, dove giornoRoma e giornoPortale
+ * danno lo stesso giorno. Cosi' periodi, Giacenze e Dichiarazioni non cambiano
+ * lettura. L'immissione e la chiusura hanno invece l'ora del portale e si
+ * leggono con giornoPortale (giornoImmissione, qui sotto).
+ */
 export const giornoMovimento = (r) => giornoRoma(r && r.trasporto_finito_il);
+
+/**
+ * Il giorno in cui l'ordine e' stato immesso a portale, 'AAAA-MM-GG'. Stringa
+ * vuota se manca. L'immissione ha l'ora del portale: l'ora italiana scritta con
+ * la Z, che non e' un istante e non si converte. Se ne legge il giorno scritto
+ * nel file, con giornoPortale (difetto 9, 16/10/2026): con giornoRoma un ordine
+ * immesso il 31/12 alle 23:30 finiva al 01/01. E' il punto solo da cui la
+ * leggono giornoOrdine e tempiRaccolta.
+ */
+export const giornoImmissione = (r) => giornoPortale(r && r.ordine_immesso_il);
 
 /** Numero della settimana ISO di un giorno 'AAAA-MM-GG' (lunedi'-domenica), senza passare da nessun fuso. */
 export function settimanaIso(giorno) {
@@ -119,8 +138,13 @@ export function periodoMovimento(r) {
  * qui sotto. giornoOrdine e annoOrdine restano per chi attribuisce apposta
  * all'anno di immissione il solo conteggio dei senza fine trasporto (chi li
  * usa lo dice grep: esportazioni, giacenze, qualifica).
+ *
+ * L'immissione e' il giorno scritto nel file del portale (giornoImmissione,
+ * difetto 9, 16/10/2026). Con giornoRoma un ordine immesso il 31/12 alle 23:30
+ * finiva al 01/01, e con lui annoOrdine, meseOrdine, giornoElenco, annoElenco e
+ * meseElenco delle pagine e delle esportazioni.
  */
-export const giornoOrdine = (r) => giornoMovimento(r) || giornoRoma(r && r.ordine_immesso_il);
+export const giornoOrdine = (r) => giornoMovimento(r) || giornoImmissione(r);
 export const annoOrdine = (r) => { const g = giornoOrdine(r); return g ? Number(g.slice(0, 4)) : null; };
 export const meseOrdine = (r) => { const g = giornoOrdine(r); return g ? MESI_MOVIMENTI[Number(g.slice(5, 7)) - 1] : null; };
 
@@ -312,9 +336,15 @@ const istanteGiorno = (g) => Date.UTC(+g.slice(0, 4), +g.slice(5, 7) - 1, +g.sli
  * ritardo; ma un tempo da misurare non c'e', e chi fa medie e percentuali guarda
  * prima_dell_immissione e lo tiene fuori, in una voce a parte che dice che non
  * c'e' niente da correggere (computeSlaMetrics).
+ *
+ * L'immissione e' il giorno scritto nel file del portale (giornoImmissione),
+ * la fine il giorno del trasporto (difetto 9, 16/10/2026). Con giornoRoma
+ * sull'immissione un ordine immesso dopo le 22 d'estate o dopo le 23 d'inverno
+ * partiva dal giorno dopo: un giorno di raccolta in meno e la scadenza un giorno
+ * piu' in la'. Sulla copia dell'11/10/2026 erano 19 ordini di rete.
  */
 export function tempiRaccolta(r) {
-  const immesso = giornoRoma(r && r.ordine_immesso_il);
+  const immesso = giornoImmissione(r);
   if (!immesso) return null;
   const scadenza = new Date(istanteGiorno(immesso) + GIORNI_SCADENZA_ORDINE * 86400000).toISOString().slice(0, 10);
   const fine = giornoMovimento(r);

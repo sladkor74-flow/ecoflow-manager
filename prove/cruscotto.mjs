@@ -21,7 +21,11 @@ const eta = etaArretrato([
   { id_ordine: 'C', ordine_immesso_il: '2025-09-23T22:00:00Z', peso_stimato: 3000, ragione_sociale: 'Vecchio Srl' },
   { id_ordine: 'D', ordine_immesso_il: null },
 ], OGGI);
-verifica('fasce di eta\' e il piu\' vecchio sul giorno italiano (22:00Z del 23/9 = 24/9)', eta.totale === 4 && eta.entro_30 === 1 && eta.da_31_a_60 === 1 && eta.oltre_60 === 1 && eta.kg_oltre_60 === 3000 && eta.senza_data === 1 && eta.piu_vecchio.id_ordine === 'C' && eta.piu_vecchio.immesso_il === '2025-09-24' && eta.piu_vecchio.giorni === 361, JSON.stringify(eta));
+// L'immissione e' l'ora del portale, l'ora italiana scritta con la Z (difetto 9,
+// 16/10/2026): '2025-09-23T22:00:00Z' sono le 22:00 del 23/9, e il 23/9 resta.
+// Fino al 16/10/2026 questa verifica voleva il 24/9 e 361 giorni: era la regola
+// sbagliata, che aggiungeva di nuovo l'ora italiana.
+verifica('fasce di eta\' e il piu\' vecchio sul giorno scritto nel file (le 22:00 del 23/9 sono il 23/9)', eta.totale === 4 && eta.entro_30 === 1 && eta.da_31_a_60 === 1 && eta.oltre_60 === 1 && eta.kg_oltre_60 === 3000 && eta.senza_data === 1 && eta.piu_vecchio.id_ordine === 'C' && eta.piu_vecchio.immesso_il === '2025-09-23' && eta.piu_vecchio.giorni === 362, JSON.stringify(eta));
 
 console.log('CARICAMENTI');
 const logs = [
@@ -272,14 +276,18 @@ const vAlert = rd.da_gestire.filter(v => v.area === 'Alert');
 verifica('la voce generica degli alert non li conta due volte: resta il ritardo SLA', vAlert.length === 1 && vAlert[0].titolo === 'Un alert aperto' && /Ritardo SLA \(1\)/.test(vAlert[0].dettaglio) && rd.alert.totale === 4, vAlert.map(v => `${v.titolo} [${v.dettaglio}]`).join(' | '));
 
 console.log('DICHIARAZIONI RICONOSCIUTE A PORTALE');
-// Rete e ACI caricate lo stesso giorno, a mezzanotte italiana (22:00Z del giorno prima)
+// Rete e ACI caricate lo stesso giorno, il 10/06: la rete a mezzanotte, l'ACI
+// alle 22 italiane. L'ora del portale e' l'ora italiana scritta con la Z
+// (difetto 9, 16/10/2026): '2026-06-10T22:00:00Z' e' il 10/06, non l'11/06.
+// Fino al 16/10/2026 la riga dell'ACI era '2026-06-09T22:00:00Z', letta come la
+// mezzanotte italiana del 10: era la regola sbagliata.
 const righePortale = [
   { data_dichiarazione: '2026-06-10T00:00:00Z', destinazione: 'GATIM SRL', prodotto: 'G1 - pneumatici', peso_associato_kg: 71710, granulo_kg: 100 },
-  { data_dichiarazione: '2026-06-09T22:00:00Z', destinazione: 'GATIM SRL', prodotto: '.class9 PFU Autodemolizione', peso_associato_kg: 7770 },
+  { data_dichiarazione: '2026-06-10T22:00:00Z', destinazione: 'GATIM SRL', prodotto: '.class9 PFU Autodemolizione', peso_associato_kg: 7770 },
 ];
 const cRete = caricamentiPortale(righePortale, 2026, 'RETE').get('GATIM SRL');
 const cAci = caricamentiPortale(righePortale, 2026, 'ACI').get('GATIM SRL');
-verifica('caricamenti separati per canale, sul giorno italiano', cRete.length === 1 && cRete[0].kg === 71710 && cAci.length === 1 && cAci[0].kg === 7770 && cAci[0].data === '2026-06-10', JSON.stringify({ cRete, cAci }));
+verifica('caricamenti separati per canale, sul giorno scritto nel file del portale', cRete.length === 1 && cRete[0].kg === 71710 && cAci.length === 1 && cAci[0].kg === 7770 && cAci[0].data === '2026-06-10', JSON.stringify({ cRete, cAci }));
 const svcFinto = (scritte) => ({ DichiarazioneSito: { update: async (id, campi) => { scritte.push({ id, ...campi }); } } });
 let scritte = [];
 let esito = await allineaDalPortale(svcFinto(scritte), 2026, righePortale, [

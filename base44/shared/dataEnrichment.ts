@@ -3,28 +3,34 @@
 // Le colonne derivate vengono calcolate e salvate affiancate ai dati grezzi,
 // senza alterare la struttura sorgente.
 import { PROV_TO_REGION, MESI } from "./raccoltoCalculator.ts";
-import { giornoRoma, annoRoma, meseRoma } from "./giornoItaliano.ts";
-import { eTerminato, settimanaIso, tempiRaccolta } from "./movimenti.ts";
+import { giornoRoma, annoRoma, meseRoma, giornoPortale, annoPortale, mesePortale } from "./giornoItaliano.ts";
+import { eTerminato, settimanaIso, tempiRaccolta, giornoMovimento, giornoImmissione } from "./movimenti.ts";
 
 export { giornoRoma, annoRoma, meseRoma };
 
 // --- Helper di data ---
-
+//
+// Mese, settimana e anno di un giorno 'AAAA-MM-GG' o di un'ora dei file del
+// portale, come l'immissione. Si leggono sul giorno SCRITTO (giornoPortale,
+// difetto 9, 16/10/2026): l'immissione e' l'ora italiana salvata con la Z, e
+// con giornoRoma un assegnato immesso il 31/12 alle 23:30 finiva a gennaio
+// dell'anno dopo. La fine del trasporto chi chiama la passa gia' come giorno,
+// letta con giornoMovimento come la leggono periodi, Giacenze e Dichiarazioni
+// (giornoDiRiferimento, qui sotto; pivotCalculator.ts). Col fuso del server,
+// prima ancora, una mezzanotte italiana (22:00Z del giorno prima) finiva nella
+// settimana e, a capodanno, nell'anno precedenti.
 
 export function getMeseFromDate(dateStr) {
-  const m = meseRoma(dateStr);
+  const m = mesePortale(dateStr);
   return m < 0 ? null : MESI[m];
 }
 
-// Settimana e anno si leggono sul giorno italiano, come il mese: col fuso del
-// server una mezzanotte italiana (22:00Z del giorno prima) finiva nella settimana
-// e, a capodanno, nell'anno precedenti.
 export function getSettimanaFromDate(dateStr) {
-  return settimanaIso(giornoRoma(dateStr));
+  return settimanaIso(giornoPortale(dateStr));
 }
 
 export function getAnnoFromDate(dateStr) {
-  return annoRoma(dateStr);
+  return annoPortale(dateStr);
 }
 
 export function getRegioneFromProvincia(provincia) {
@@ -111,12 +117,15 @@ export function campiTempiRaccolta(record) {
   };
 }
 
-function getDataRiferimento(record, entityType) {
+// Il giorno di riferimento di un record, 'AAAA-MM-GG' o '' se non c'e'. Quale
+// data vale lo dice dataPeriodo; il giorno si legge secondo il campo (difetto 9,
+// 16/10/2026): la fine del trasporto con giornoMovimento, come i periodi, e
+// l'immissione col giorno scritto nel file del portale (giornoImmissione).
+function giornoDiRiferimento(record, entityType) {
   // Un assegnato non e' un movimento: non ha un trasporto, ha una data di immissione.
-  if (ASSEGNATO_ENTITIES.has(entityType)) {
-    return record.ordine_immesso_il;
-  }
-  return dataPeriodo(record);
+  if (ASSEGNATO_ENTITIES.has(entityType)) return giornoImmissione(record);
+  if (record.trasporto_finito_il) return giornoMovimento(record);
+  return dataPeriodo(record) ? giornoImmissione(record) : '';
 }
 
 // Arricchisce un record con tutte le colonne calcolate/derivate.
@@ -124,15 +133,15 @@ function getDataRiferimento(record, entityType) {
 export function enrichRecord(record, entityType) {
   const r = { ...record };
 
-  const dataRif = getDataRiferimento(r, entityType);
+  const giornoRif = giornoDiRiferimento(r, entityType);
 
   // Mese, settimana ISO e anno di riferimento. Si scrivono sempre, anche vuoti:
   // il file porta le sue colonne Mese, Settimane e Anno, con una regola che non e'
   // la nostra, e dove il periodo non c'e' (un terminato senza fine trasporto)
   // restavano quelle, cioe' un periodo di cui nessuno sa la base.
-  r.mese = getMeseFromDate(dataRif);
-  r.settimane = getSettimanaFromDate(dataRif);
-  r.anno = getAnnoFromDate(dataRif);
+  r.mese = getMeseFromDate(giornoRif);
+  r.settimane = getSettimanaFromDate(giornoRif);
+  r.anno = getAnnoFromDate(giornoRif);
 
   // Mese di immissione (solo per entità non-Assegnato)
   if (!ASSEGNATO_ENTITIES.has(entityType) && r.ordine_immesso_il) {

@@ -60,7 +60,7 @@
 // costruzione, su tutti e tre i canali. Il conto si chiude sulla giacenza anche
 // per ACI ed extra raccolta: senza report la parte di una dichiarazione che
 // supera il suo mese va sui carichi piu' vecchi, ed e' segnata come stimata.
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, giornoPortale } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { MESI } from "./dichiarazioniImpianti.ts";
 
@@ -124,7 +124,11 @@ export function raccoglitoreUscite({ chiaveDi = (s) => String(s || '').trim().to
       // Il giorno del caricamento: serve a dire quali mesi quella dichiarazione
       // ha portato via, che e' il processo che l'utente vuole leggere, e per i
       // carichi degli anni prima se l'aggancio e' venuto dopo la lettura del 31/12.
-      const quando = giornoRoma(r.data_dichiarazione);
+      // E' l'ora del portale, l'ora italiana scritta con la Z: se ne legge il
+      // giorno scritto nel file (giornoPortale, difetto 9, 16/10/2026), come fa
+      // agganciaDichiarazioni. Con giornoRoma un caricamento delle 23:30 passava
+      // al giorno dopo.
+      const quando = giornoPortale(r.data_dichiarazione);
       if (prima) x.prima.set(quando, (x.prima.get(quando) || 0) + kg);
       else { x.mesi[i] += kg; x.ha_anno = true; }
       if (!quando) return;

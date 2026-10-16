@@ -60,20 +60,34 @@ function eGiallo(argb) {
 // seconda strada INDIETRO DI UN GIORNO: dall'Italia siamo sempre avanti su UTC.
 //
 // Non e' un dettaglio: un carico del 1 settembre letto 31 agosto cambia mese, e
-// in un consuntivo di settembre diventa «riga di un altro mese». Si guarda
-// dove cade la mezzanotte e si legge il giorno di conseguenza - vale in
-// qualunque fuso, perche' una delle due e' sempre mezzanotte esatta.
-export function giornoDaExcel(d) {
-  if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) return d.toISOString().slice(0, 10);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// in un consuntivo di settembre diventa «riga di un altro mese».
+//
+// Fino al 16/10/2026 si guardava dove cadeva la mezzanotte: se era mezzanotte
+// UTC si leggevano le cifre UTC, altrimenti quelle locali. Reggeva sui giorni
+// senza ora, non su una cella con l'ora: exceljs da' «01/10/2025 22:07» come le
+// 22:07 UTC, non e' mezzanotte, e le cifre locali in Italia dicevano gia' il 2
+// ottobre (SMOCO.xlsx, foglio BARI, riga 2; sei celle vere). E' la stessa
+// famiglia del difetto 9: l'ora scritta nel foglio non e' un istante. Adesso lo
+// dice chi legge: ingenua vero per exceljs, che scrive l'ora del foglio con le
+// cifre UTC; falso per l'altra libreria, che la scrive con le cifre locali. Le
+// cifre si arrotondano al secondo, perche' un Date costruito da un seriale puo'
+// perdere un millesimo e cadere alle 23:59:59.999 del giorno prima.
+export function giornoDaExcel(d, ingenua = false) {
+  const t = Math.round(d.getTime() / 1000) * 1000;
+  const r = new Date(t);
+  if (ingenua) return r.toISOString().slice(0, 10);
+  return `${r.getFullYear()}-${String(r.getMonth() + 1).padStart(2, '0')}-${String(r.getDate()).padStart(2, '0')}`;
 }
 
-export function valoreCella(v) {
+// ingenua: vedi giornoDaExcel. Si passa sempre esplicito, e vale solo true: con
+// .map(valoreCella) l'indice della colonna finirebbe qui, e dalla seconda
+// colonna in poi una cella dell'altra libreria si leggerebbe con le cifre UTC.
+export function valoreCella(v, ingenua = false) {
   if (v === null || v === undefined) return null;
-  if (v instanceof Date) return giornoDaExcel(v);
+  if (v instanceof Date) return giornoDaExcel(v, ingenua === true);
   if (typeof v === 'object') {
     if (v.richText) return v.richText.map(t => t.text).join('');
-    if (v.result !== undefined) return v.result instanceof Date ? giornoDaExcel(v.result) : v.result;
+    if (v.result !== undefined) return v.result instanceof Date ? giornoDaExcel(v.result, ingenua === true) : v.result;
     if (v.text !== undefined) return v.text;
     return null;
   }
@@ -93,7 +107,8 @@ async function fogliDaXlsx(file) {
       const colonne = Math.min(ws.columnCount, 60);
       for (let j = 1; j <= colonne; j++) {
         const cella = row.getCell(j);
-        c.push(valoreCella(cella.value));
+        // exceljs: l'ora del foglio con le cifre UTC
+        c.push(valoreCella(cella.value, true));
         const f = cella.fill;
         if (f && f.type === 'pattern' && f.pattern !== 'none' && f.fgColor && eGiallo(f.fgColor.argb)) giallo = true;
       }
@@ -114,7 +129,9 @@ async function fogliSenzaColori(file, note = []) {
     const ws = wb.Sheets[nome];
     const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0 } };
     const righe = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: false, defval: null })
-      .map((c, i) => ({ r: range.s.r + i + 1, c: c.map(valoreCella), giallo: false }));
+      // l'altra libreria: l'ora del foglio con le cifre locali. Non .map(valoreCella):
+      // l'indice della colonna entrerebbe come secondo argomento.
+      .map((c, i) => ({ r: range.s.r + i + 1, c: c.map(v => valoreCella(v, false)), giallo: false }));
     return { file: file.name, nome, righe: righe.slice(0, 3000) };
   });
 }

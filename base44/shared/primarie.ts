@@ -1,4 +1,5 @@
 import { eAci } from "./canaleSecondaria.ts";
+import { giornoPortale, oraPortale, scrittaPortale } from "./giornoItaliano.ts";
 // Il file unico delle primarie si divide in quattro archivi secondo stato e classe:
 // ordini assegnati o no, classe ACI (PFU Autodemolizione) o rete. La regola e' una
 // sola per l'importazione lato server e per quella a blocchi letta nel browser.
@@ -43,23 +44,60 @@ export const ARCHIVI_PRIMARIE = ['PrimariaRete', 'PrimariaAci', 'Assegnato', 'As
 // a portale le accompagna.
 export const DATE_PRIMARIE = new Set(['ordine_immesso_il', 'trasporto_iniziato_il', 'trasporto_finito_il', 'ordine_chiuso_il']);
 
+// === LO SCRITTORE UNICO DELLE DATE DEI FILE DEL PORTALE (difetto 9, 16/10/2026) ===
+//
+// Il portale scrive l'ora ITALIANA, e il gestionale la salva com'e' scritta, con
+// la Z per convenzione: «31/12/2026 23:30» diventa '2026-12-31T23:30:00.000Z',
+// che sono le 23:30 italiane e non le 23:30 UTC. Non e' un istante e non si
+// converte mai: ne' qui, ne' quando si legge (giornoPortale e le sue sorelle in
+// giornoItaliano.ts). Primarie, secondarie, terziarie, il report delle
+// dichiarazioni e gli ordini non dichiarati passano tutti da dataDelPortale, e
+// la stessa cella da' la stessa stringa sul server, che gira in UTC, e nel
+// browser, che gira in Italia.
+//
+// I campi con l'ora: si salva l'ora scritta, al secondo.
+export const ORE_PORTALE = new Set(['ordine_immesso_il', 'ordine_chiuso_il', 'data_immissione', 'data_chiusura', 'data_dichiarazione', 'data_esecuzione']);
+// I campi di solo giorno: inizio e fine del trasporto. Si salvano SEMPRE a
+// mezzanotte Z del giorno scritto. Se un giorno il portale scrivesse anche
+// l'ora della fine, si tiene il giorno - regola della direzione del 19/09/2026,
+// «conta il giorno, non l'ora» - e lo si conta (giorni_con_ora nella risposta
+// del caricamento): cosi' giornoRoma, che legge la fine in Giacenze, nelle
+// Dichiarazioni, nelle tariffe e nelle chiusure, da' il giorno giusto per
+// costruzione.
+export const GIORNI_PORTALE = new Set(['trasporto_iniziato_il', 'trasporto_finito_il', 'inizio_trasporto', 'fine_trasporto']);
+
 /**
- * La data di un ritiro, da qualunque forma esca l'export del portale.
- * Il foglio si legge con cellDates, che restituisce un oggetto Date solo per le
- * celle con formato data: la stessa colonna esportata come testo ("13/09/2026")
- * o come numero generico (seriale 46278,54) arrivava come stringa e finiva in
- * archivio cosi' com'era, dove giornoRoma la legge vuota. Bastava un export
- * fatto in modo diverso perche' tutte e tre le date obbligatorie risultassero
- * mancanti su ogni riga del caricamento. Una data che resta illeggibile torna
- * null: e' un avviso visibile, non una data inventata.
+ * La data di un ritiro, da qualunque forma esca l'export del portale, come
+ * 'AAAA-MM-GGThh:mm:ss.000Z' con l'ora scritta nel file; null se non e' una data.
+ *
+ * Una colonna esportata come testo ("13/09/2026") o come numero generico
+ * (seriale 46278,54) arrivava come stringa e finiva in archivio cosi' com'era:
+ * bastava un export fatto in modo diverso perche' tutte e tre le date
+ * obbligatorie risultassero mancanti su ogni riga del caricamento. Una data che
+ * resta illeggibile torna null: e' un avviso visibile, non una data inventata.
+ * Tutto si arrotonda al secondo: il portale registra al secondo, i millesimi
+ * sono solo il resto del calcolo (dal 16/10/2026 non si scrivono piu' i .999
+ * che lasciava il Date costruito dalla libreria dei fogli).
  */
 export function dataPrimaria(val) {
   if (val === undefined || val === null || val === '') return null;
-  if (val instanceof Date) return isNaN(val.getTime()) ? null : val.toISOString();
+  // Un Date l'ha costruito la libreria dei fogli leggendo con cellDates, nel fuso
+  // del processo: le sue cifre LOCALI sono l'ora scritta nella cella, in UTC
+  // come in Italia. I due caricamenti leggono il foglio con cellDates false e
+  // qui un Date non arriva piu'; il ramo resta per chi legge ancora un foglio
+  // con cellDates (prove/ecotynaModuliGiusti.mjs), dove senza ramo la data
+  // diventerebbe mancante in silenzio. Il suo limite: in un processo in Italia
+  // un Date delle 02:00-02:59 dell'ultima domenica di marzo e' gia' spostato di
+  // un'ora dalla libreria quando arriva qui, e i getter non possono
+  // recuperarlo. Il portale quell'ora non la scrive, perche' in Italia non esiste.
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    const t = Date.UTC(val.getFullYear(), val.getMonth(), val.getDate(), val.getHours(), val.getMinutes(), val.getSeconds(), val.getMilliseconds());
+    return new Date(Math.round(t / 1000) * 1000).toISOString();
+  }
   const s = String(val).trim();
   if (s === '') return null;
-  // Seriale Excel, numero o testo: il portale registra al secondo, i millesimi
-  // sono solo il resto del calcolo.
+  // Seriale Excel, numero o testo: e' un orario da calendario, senza fuso.
   const n = typeof val === 'number' ? val : Number(s.replace(',', '.'));
   if (!isNaN(n) && n > 20000) {
     const d = new Date(Date.UTC(1899, 11, 30) + Math.round(n * 86400) * 1000);
@@ -75,8 +113,33 @@ export function dataPrimaria(val) {
     const d = new Date(Date.UTC(Number(aaaa), Number(mm) - 1, Number(gg), Number(ora), Number(min), Number(sec)));
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d.toISOString();
+  // Testo ISO: con la Z, con +00:00 o senza fuso valgono le cifre scritte, con i
+  // decimali dei secondi di qualunque lunghezza; con un altro fuso e' un istante
+  // vero e si porta all'ora italiana. Prima passava da new Date(s), che leggeva
+  // un testo senza fuso nell'ora del processo: sul server e nel browser la
+  // stessa cella dava due stringhe diverse. Ogni altro testo: nessuna data.
+  return scrittaPortale(s) || null;
+}
+
+/**
+ * Il giorno scritto di una data di solo giorno (inizio e fine del trasporto):
+ * 'AAAA-MM-GGT00:00:00.000Z', oppure null. Se la cella portava anche un'ora la
+ * si lascia e, con conta, la si conta in conta.giorni_con_ora.
+ */
+export function giornoPrimaria(val, conta = null) {
+  const d = dataPrimaria(val);
+  if (!d) return null;
+  if (conta && oraPortale(d)) conta.giorni_con_ora = (conta.giorni_con_ora || 0) + 1;
+  return giornoPortale(d) + 'T00:00:00.000Z';
+}
+
+/**
+ * La data di una cella del portale per il suo campo: i campi di solo giorno a
+ * mezzanotte Z (giornoPrimaria), quelli con l'ora con l'ora scritta (dataPrimaria).
+ * conta, facoltativo, raccoglie quante celle di solo giorno avevano un'ora.
+ */
+export function dataDelPortale(val, campo, conta = null) {
+  return GIORNI_PORTALE.has(campo) ? giornoPrimaria(val, conta) : dataPrimaria(val);
 }
 
 // Campi conservati negli archivi degli assegnati.

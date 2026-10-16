@@ -24,7 +24,7 @@ import { contaFormulari, MINIMO_ACI_KG } from "./formulari.ts";
 import { normalizzaRagioneSociale, risolviNome } from "./normalizzaRagioneSociale.ts";
 import { chiaveLettura, nuovaCache } from "./cacheLetture.ts";
 import { regioneDi } from "./regioneMovimento.ts";
-import { giornoRoma, oggiRoma } from "./giornoItaliano.ts";
+import { giornoRoma, giornoPortale, oggiRoma } from "./giornoItaliano.ts";
 import { eAci } from "./canaleSecondaria.ts";
 import { eTerminato, eEseguito, giornoMovimento, riepilogoEseguiti, periodoMovimento, chiaveOrdine } from "./movimenti.ts";
 import { etaArretrato } from "./cruscotto.ts";
@@ -68,7 +68,20 @@ export { oggiRoma };
 const TIPI_DEI_CARICAMENTI = ['primarie', 'secondarie', 'terziarie', 'ordini_non_dichiarati', 'dichiarazioni_trattamento', 'pdr', 'extra_raccolta'];
 
 // Di una data conta il giorno italiano: la regola sta in shared/giornoItaliano.ts.
+// soloData e' per gli istanti (le date scritte dal gestionale) e per i giorni
+// senza ora (la fine trasporto, le date di RichiestaEct e di RENTRI). Le ore dei
+// file del portale - immissione e chiusura degli ordini - sono l'ora italiana
+// scritta con la Z e si leggono con giornoPortale: con soloData un ordine
+// immesso dopo le 22 d'estate o dopo le 23 d'inverno finiva al giorno dopo
+// (difetto 9, 16/10/2026: ET26020377, immesso il 31/01/2026 alle 23:55,
+// risultava immesso il 01/02).
 const soloData = (v) => giornoRoma(v);
+// Il giorno di immissione di un ordine, come lo scrive il file del portale: una
+// lettura sola per l'elenco degli aperti e per i giorni di attesa, la stessa di
+// etaArretrato e della pagina Assegnati (difetto 9, 16/10/2026). Le schede
+// dell'extra raccolta salvano un giorno a mezzanotte Z (dataDaGiorno): letto
+// cosi' e' lo stesso giorno.
+const immessoIl = (r) => giornoPortale(r && r.ordine_immesso_il) || null;
 const terminato = (r) => String(r.stato || '').toLowerCase().trim() === 'terminato';
 const peso = (r) => Number(r.peso_effettivo) || 0;
 const t3 = (kg) => Math.round((Number(kg) || 0) / 1000 * 1000) / 1000;
@@ -556,7 +569,9 @@ async function ordiniAperti(base44, p, ctx) {
   const perNomi = aperti.concat(limboCanale);
   const soggetto = p.raccoglitore ? { chiesto: String(p.raccoglitore), ...risolviNome(perNomi.map(r => r.trasportatore), p.raccoglitore) } : null;
   const chiaviRacc = soggetto ? new Set(soggetto.trovato ? soggetto.chiavi : []) : null;
-  const giorniDi = (r) => { const g = giornoRoma(r.ordine_immesso_il); return g ? giorniTra(g, oggi) : null; };
+  // L'immissione e' un'ora del file del portale: il giorno e' quello scritto
+  // (immessoIl), come nella pagina Assegnati e in etaArretrato (difetto 9).
+  const giorniDi = (r) => { const g = immessoIl(r); return g ? giorniTra(g, oggi) : null; };
   const passa = (r) => {
     if (prov && (!prov.sigla || String(r.provincia || '').toUpperCase().trim() !== prov.sigla)) return false;
     if (regione && normalizzaRagioneSociale(regioneDi(r)) !== normalizzaRagioneSociale(regione)) return false;
@@ -691,7 +706,7 @@ async function ordiniAperti(base44, p, ctx) {
         return {
           id_ordine: r.id_ordine, pdr: r.id_pdr ?? null, punto_di_raccolta: String(r.punto_di_raccolta || r.produttore || '').trim(), ragione_sociale: String(r.ragione_sociale || '').trim(),
           comune: r.comune || '', provincia: r.provincia || '', classe: r.classe || '', raccoglitore: r.trasportatore || '',
-          immesso_il: giornoRoma(r.ordine_immesso_il) || null, giorni_di_attesa: g, peso_stimato_kg: Number(r.peso_stimato) || null,
+          immesso_il: immessoIl(r), giorni_di_attesa: g, peso_stimato_kg: Number(r.peso_stimato) || null,
           ...(canale === 'ACI' && (Number(r.peso_stimato) || 0) > 0 && Number(r.peso_stimato) < MINIMO_ACI_KG ? { stimato_sotto_1500_kg: true } : {}),
         };
       }), 60) : { quanti: 0, mostrate: 0, righe: [] },
@@ -891,8 +906,9 @@ async function trasportiSuccessivi(base44, quali, p, ctx) {
         aperte: calcolabile ? {
           ordini: aperte.length,
           elenco: elenco(aperte.map(r => {
-            const g = giornoRoma(r.ordine_immesso_il);
-            return { id_ordine: r.id_ordine, da: r[campoOrigine] || '', a: r.destinazione || '', trasportatore: r.trasportatore || '', immesso_il: g || null, giorni_di_attesa: g ? giorniTra(g, oggi) : null, peso_stimato_kg: Number(r.peso_stimato) || null };
+            // L'immissione e' un'ora del file del portale: il giorno scritto (difetto 9).
+            const g = immessoIl(r);
+            return { id_ordine: r.id_ordine, da: r[campoOrigine] || '', a: r.destinazione || '', trasportatore: r.trasportatore || '', immesso_il: g, giorni_di_attesa: g ? giorniTra(g, oggi) : null, peso_stimato_kg: Number(r.peso_stimato) || null };
           }), 40),
         } : { ordini: null },
       } : {}),
@@ -2348,9 +2364,14 @@ export const STRUMENTI = [
             punto_di_raccolta: r.punto_di_raccolta || '', provincia: r.provincia || '',
             trasportatore: r.trasportatore || '', destinazione: r.destinazione || '',
             classe: r.classe || '', peso_effettivo_kg: peso(r),
-            // tutte e tre le date obbligatorie, e cosa manca o non torna (22/09/2026)
-            ordine_immesso_il: soloData(r.ordine_immesso_il), trasporto_iniziato_il: soloData(r.trasporto_iniziato_il),
-            trasporto_finito_il: soloData(r.trasporto_finito_il), ordine_chiuso_il: soloData(r.ordine_chiuso_il),
+            // tutte e tre le date obbligatorie, e cosa manca o non torna (22/09/2026).
+            // Le quattro date sono quelle scritte nel file del portale (giornoPortale):
+            // immissione e chiusura hanno l'ora italiana scritta con la Z, e lette
+            // come istanti finivano al giorno dopo dalle 22 d'estate e dalle 23
+            // d'inverno; inizio e fine sono giorni a mezzanotte, e il giorno e' lo
+            // stesso con tutte e due le letture (difetto 9, 16/10/2026).
+            ordine_immesso_il: giornoPortale(r.ordine_immesso_il), trasporto_iniziato_il: giornoPortale(r.trasporto_iniziato_il),
+            trasporto_finito_il: giornoPortale(r.trasporto_finito_il), ordine_chiuso_il: giornoPortale(r.ordine_chiuso_il),
             ...(voceDate(r) ? { date_obbligatorie_da_sistemare: voceDate(r).date } : {}),
           });
         }

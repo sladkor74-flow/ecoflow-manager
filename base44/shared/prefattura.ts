@@ -107,10 +107,21 @@ export function comeNumero(v) {
   return isFinite(n) ? n : null;
 }
 
-/** Il giorno 'AAAA-MM-GG' di una cella: seriale di Excel, data o testo (gg/mm/aaaa o aaaa-mm-gg). */
+/**
+ * Il giorno 'AAAA-MM-GG' di una cella: seriale di Excel, data o testo (gg/mm/aaaa o aaaa-mm-gg).
+ *
+ * Il seriale e' il giorno della cella arrotondata al secondo, non il seriale
+ * arrotondato all'intero: Math.round(46278.54) e' 46279, e una cella del
+ * 13/09/2026 alle 12:57 diventava il 14 - da mezzogiorno in poi, il giorno dopo.
+ * E' la stessa famiglia del difetto 9 (16/10/2026): l'ora scritta non sposta il
+ * giorno. Vale per le prefatture e per i consuntivi dei fornitori
+ * (consuntivoFornitore.ts), che la usano senza toccarla: i consuntivi salvati
+ * prima con una data dalle 12:00 in poi tengono il giorno dopo, e si rifanno
+ * solo ricaricando il file, che non si conserva.
+ */
 export function comeGiorno(v) {
   if (v === null || v === undefined || v === '') return '';
-  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000).toISOString().slice(0, 10);
+  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899, 11, 30) + Math.floor(v + 0.5 / 86400) * 86400000).toISOString().slice(0, 10);
   if (v instanceof Date && !isNaN(v.getTime())) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
   const s = pulisci(v);
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { RefreshCw, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { exportDaDichiarareExcel } from '@/lib/giacenzeDaDichiarareExport';
 import { formatKg, formatIntero } from '@/lib/utils';
-import { giornoRoma } from '@/lib/giornoItaliano';
+import { giornoRoma, dataPortaleIt } from '@/lib/giornoItaliano';
 import { annoDiOggi } from '@/lib/periodoPagine';
 import { creaSequenza } from '@/lib/ultimaRichiesta';
 import EsportaPdf from '@/components/shared/EsportaPdf';
@@ -715,11 +715,16 @@ export default function DaDichiarareTable({ filtroSitoEsterno, filtroRuoloEstern
                 // un altro dalla fine trasporto della riga: un carico passato da
                 // uno stoccaggio arriva con la secondaria, e il suo mese e' quello.
                 const arrivo = r.giorno_al_sito && r.fine_trasporto && r.giorno_al_sito !== r.fine_trasporto ? r.giorno_al_sito : null;
+                // La chiusura a portale e' l'ora italiana del file salvata con
+                // la Z: il suo giorno si legge con dataPortaleIt, non con
+                // fmtData, che passa dal fuso italiano e dopo le 22 d'estate o
+                // le 23 d'inverno dava il giorno dopo (difetto 9, 16/10/2026).
+                const chiusoIl = dataPortaleIt(r.data_chiusura);
                 return (
                   <tr key={i} className={rowClass}>
                     <td className="px-2 py-1.5 font-mono text-xs">{r.ordine_primaria || r.ordine_secondaria}{!r.ordine_primaria && r.ordine_secondaria && <span className="block text-[10px] font-sans text-muted-foreground">secondaria</span>}</td>
                     <td className="px-2 py-1.5 font-mono text-xs">{r.numero_fir || '—'}</td>
-                    <td className="px-2 py-1.5" title={r.data_chiusura ? `chiuso a portale il ${fmtData(r.data_chiusura)}` : ''}>
+                    <td className="px-2 py-1.5" title={chiusoIl ? `chiuso a portale il ${chiusoIl}` : ''}>
                       {fmtData(r.fine_trasporto)}
                       {r.fine_dal_gestionale && <span className="block text-[10px] text-muted-foreground" title="Il file del portale non la scrive: e' quella del formulario nel gestionale">dal gestionale</span>}
                       {arrivo && <span className="block text-[10px] text-muted-foreground" title="La fine trasporto della secondaria che l'ha portato all'impianto: il mese della riga e' questo">all&apos;impianto il {fmtData(arrivo)}</span>}

@@ -3,6 +3,7 @@ import { conLimiteRichieste } from "../../shared/limiteRichieste.ts";
 import { fetchAll } from '../../shared/fetchAll.ts';
 import { rispostaSolaLettura } from "../../shared/permessi.ts";
 import { oggiRoma } from "../../shared/giornoItaliano.ts";
+import { annoElenco } from "../../shared/movimenti.ts";
 import { daVerificare, esitoVerifica, riportaDecisione, ultimaVerificaPerPdr, normalizzaIndirizzo, verificaApplicabile, decisioneDiAltroPunto } from "../../shared/sediOperative.ts";
 
 // CONTROLLA IN RETE LA SEDE OPERATIVA DEI PUNTI DI RACCOLTA.
@@ -162,11 +163,21 @@ export default async function(req) {
       const dentro = new Set(idRichiesti);
       elenco = pdrTutti.filter(p => dentro.has(Number(p.id_pdr))).map(p => ({ pdr: p, motivo: String(body.motivo || 'chiesto a mano') }));
     } else {
+      // L'ANNO DI UN ASSEGNATO E' QUELLO DELL'IMMISSIONE SCRITTA NEL FILE, NON IL
+      // CAMPO SALVATO (difetto 9, 16/10/2026). Il campo anno lo scriveva
+      // l'arricchimento leggendo l'immissione - l'ora italiana del portale,
+      // salvata con la Z - col fuso italiano, cioe' aggiungendo un'altra volta
+      // l'ora italiana: un ordine immesso il 31/12 dopo le 23 era dell'anno dopo,
+      // e il filtro { anno } nella lettura lo cercava li'. Gli assegnati si
+      // leggono tutti e si filtrano qui con annoElenco (movimenti.ts): sono gli
+      // ordini aperti, poche centinaia, una pagina di lettura per archivio come
+      // prima. Il campo salvato resta solo per un assegnato senza immissione.
       const [assRete, assAci] = await Promise.all([
-        fetchAll(svc.Assegnato, { anno }, 'id'),
-        fetchAll(svc.AssegnatoAci, { anno }, 'id'),
+        fetchAll(svc.Assegnato, null, 'id'),
+        fetchAll(svc.AssegnatoAci, null, 'id'),
       ]);
-      const conOrdini = [...new Set([...assRete, ...assAci].map(a => Number(a.id_pdr)).filter(n => !isNaN(n)))];
+      const dellAnno = (a) => (annoElenco(a) ?? (Number(a.anno) || null)) === anno;
+      const conOrdini = [...new Set([...assRete, ...assAci].filter(dellAnno).map(a => Number(a.id_pdr)).filter(n => !isNaN(n)))];
       elenco = daVerificare({ pdr: pdrTutti, idPdrConOrdini: conOrdini, verifiche, oggi, giorniValidita, limite: 10000 });
     }
 

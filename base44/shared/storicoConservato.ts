@@ -22,7 +22,7 @@
 // Non si conservano mai gli ordini aperti: un assegnato assente dal file e' un
 // vero mancante, e il controllo di sempre lo dice. I cancellati hanno la loro
 // regola, piu' sotto.
-import { annoRoma, oggiRoma } from "./giornoItaliano.ts";
+import { annoPortale, oggiRoma } from "./giornoItaliano.ts";
 import { eTerminato, eEseguito, primoAnnoControllato } from "./movimenti.ts";
 
 /**
@@ -120,6 +120,11 @@ export function ordiniDaConservare(archivio, idFile) {
  * stesso ID ordine solo se viene riaperto perche' e' stato cancellato per
  * errore, e allora il file lo riscrive come tale (utente, 25/09/2026).
  *
+ * L'immissione e' l'ora del portale, l'ora italiana scritta con la Z: l'anno e'
+ * quello scritto nel file (annoPortale, difetto 9, 16/10/2026). Con annoRoma un
+ * cancellato immesso il 31/12 alle 23:30 risultava dell'anno dopo, e si
+ * conservava un anno in piu'.
+ *
  * @returns {Set<string>} gli ID degli ordini da lasciar andare
  */
 export function cancellatiDaLasciare(archivio, annoInizio, idFile) {
@@ -136,7 +141,7 @@ export function cancellatiDaLasciare(archivio, annoInizio, idFile) {
   for (const [id, suoi] of perOrdine) {
     if (idFile.has(id)) continue;
     const vecchio = suoi.every(r => {
-      const a = annoRoma(r.ordine_immesso_il);
+      const a = annoPortale(r.ordine_immesso_il);
       return cancellato(r) && a !== null && a < annoInizio;
     });
     if (vecchio) esito.add(id);

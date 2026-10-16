@@ -9,7 +9,7 @@
 //
 // Funzioni pure: ricevono gli elenchi gia' letti. Rete, ACI ed extra raccolta
 // restano separati anche qui.
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoPortale } from "./giornoItaliano.ts";
 import { statoRichiesta, evasaInParte, oltreIlTermine } from "./richiesteEct.ts";
 import { giorniFa, chiSiScosta, notaDelGiorno, scostamentiAci, notaAci } from "./indicatoriGiorno.ts";
 import { surplusNonDisattivati, NOMI_ORIGINE } from "./surplus.ts";
@@ -66,8 +66,12 @@ export function etaArretrato(ordini, oggi) {
   const eta = { totale: 0, entro_30: 0, da_31_a_60: 0, oltre_60: 0, kg_oltre_60: 0, senza_data: 0, piu_vecchio: null };
   for (const r of ordini || []) {
     eta.totale++;
-    const g = giornoRoma(r.ordine_immesso_il);
+    const g = giornoPortale(r.ordine_immesso_il);
     if (!g) { eta.senza_data++; continue; }
+    // L'immissione e' l'ora del portale, l'ora italiana scritta con la Z: i
+    // giorni si contano dal giorno scritto nel file (giornoPortale, difetto 9,
+    // 16/10/2026). Con giornoRoma un ordine immesso dopo le 22 d'estate o dopo
+    // le 23 d'inverno aspettava un giorno in meno.
     const giorni = giorniFra(g, oggi);
     if (giorni <= 30) eta.entro_30++; else if (giorni <= 60) eta.da_31_a_60++; else { eta.oltre_60++; eta.kg_oltre_60 += Number(r.peso_stimato) || 0; }
     if (!eta.piu_vecchio || giorni > eta.piu_vecchio.giorni) eta.piu_vecchio = { giorni, id_ordine: r.id_ordine || '', ragione_sociale: r.ragione_sociale || r.punto_di_raccolta || '', provincia: r.provincia || '', immesso_il: g, partner_operativo: r.partner_operativo || '' };

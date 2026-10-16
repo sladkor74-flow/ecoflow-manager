@@ -14,7 +14,8 @@
 //   facevano verifiche, quadrature e alert. La regola su che cosa vuol dire «in
 //   corso o interrotto» e' una sola, in registroCaricamenti.ts, e li' stanno
 //   anche gli archivi che legge ciascun conto.
-import { giornoRoma } from "./giornoItaliano.ts";
+import { giornoRoma, giornoPortale } from "./giornoItaliano.ts";
+import { ORE_PORTALE } from "./primarie.ts";
 import { nostraRiga } from "./giacenzaPortale.ts";
 import { statoCaricamenti, caricamentiDuranteLettura, descriviCaricamento } from "./reportSettimanali.ts";
 import { TIPI_ATTIVA, TIPI_PASSIVA, TIPI_PREFATTURA, TIPI_CHIUSURA, TIPI_GIACENZE } from "./registroCaricamenti.ts";
@@ -59,6 +60,18 @@ const TETTO_NOSTRE = 1000;
 // created_date arriva in UTC senza la Z finale: la si rimette, come per il registro.
 const conZ = (v) => String(v).replace(/(Z|[+-]\d{2}:?\d{2})?$/, 'Z');
 
+// Il giorno si legge secondo il campo (difetto 9, 16/10/2026):
+// - created_date e' un istante vero, in UTC: giornoRoma lo porta al giorno
+//   italiano;
+// - la dichiarazione e l'immissione degli assegnati sono ore del portale
+//   (ORE_PORTALE), l'ora italiana scritta con la Z: se ne legge il giorno
+//   scritto nel file, con giornoPortale. Con giornoRoma un ordine immesso il
+//   31/12 alle 23:30 diceva «assegnati fino al 01/01»;
+// - la fine trasporto e' un giorno, salvato a mezzanotte Z: resta su
+//   giornoRoma, come giornoMovimento, cosi' il «fino al» dice lo stesso giorno
+//   dei periodi.
+const giornoDelCampo = (campo, v) => (campo === 'created_date' ? giornoRoma(conZ(v)) : ORE_PORTALE.has(campo) ? giornoPortale(v) : giornoRoma(v));
+
 // Il giorno ('AAAA-MM-GG'); null se l'archivio e' vuoto; undefined se la lettura
 // non riesce; { altrui, lette, tutte } se ci sono righe ma nessuna nostra.
 async function ultimoGiorno(svc, { entita, campo, filtro, tiene }) {
@@ -73,7 +86,7 @@ async function ultimoGiorno(svc, { entita, campo, filtro, tiene }) {
       const tenute = tiene ? righe.filter(r => r && tiene(r)) : righe;
       altrui += righe.length - tenute.length;
       const giorni = tenute.map(r => r && r[campo]).filter(Boolean)
-        .map(v => (campo === 'created_date' ? giornoRoma(conZ(v)) : giornoRoma(v)) || String(v).slice(0, 10)).filter(Boolean).sort();
+        .map(v => giornoDelCampo(campo, v) || String(v).slice(0, 10)).filter(Boolean).sort();
       if (giorni.length) return giorni[giorni.length - 1];
       if (righe.length < pagina) break;
     }

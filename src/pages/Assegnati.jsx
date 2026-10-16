@@ -13,6 +13,20 @@ import { fetchAllClient } from '@/lib/fetchAllClient';
 import CercaIdOrdine, { corrispondeIdOrdine } from '@/components/shared/CercaIdOrdine';
 import { creaAscoltoCaricamenti } from '@/lib/ascoltoCaricamenti';
 import { controlliPortaleAci, problemiDellaRiga } from '@/lib/controlliPortaleAci';
+import { annoElenco, meseElenco } from '@/lib/movimenti';
+import { giornoPortale } from '@/lib/giornoItaliano';
+
+// MESE, ANNO E GIORNO DALL'IMMISSIONE SCRITTA NEL FILE (difetto 9, 16/10/2026).
+// L'immissione e' l'ora italiana del portale, salvata con la Z per convenzione.
+// I campi mese e anno del record li scriveva l'arricchimento leggendola col fuso
+// italiano, una seconda volta: un ordine immesso il 31/12 alle 23:30 era di
+// gennaio dell'anno dopo, e i filtri della coda lo cercavano li'. Si leggono con
+// annoElenco e meseElenco (movimenti.js), come la matrice e il file Excel
+// (computeAssegnatiMatrix, exportAssegnati), e il campo salvato resta solo per
+// un assegnato senza immissione. Il giorno con giornoPortale: il giorno scritto
+// nel file, arrotondato al secondo, mai la stringa tagliata.
+const annoDi = (r) => annoElenco(r) ?? (Number(r.anno) || null);
+const meseDi = (r) => meseElenco(r) || r.mese || null;
 
 export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Rete — Backlog Richieste', description = 'Ordini in stato "assegnato" di classe diversa da PFU Autodemolizione, derivati automaticamente dal caricamento delle Primarie.' }) {
   const [data, setData] = useState(null);
@@ -92,18 +106,15 @@ export default function Assegnati({ entity = 'Assegnato', title = 'Assegnati Ret
 
   // Filtri diversi dalla ricerca del punto di raccolta: sono questi a definire la coda.
   const inFiltri = useCallback((r) => {
-    if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(r.anno))) return false;
-    if (filters.mese.length > 0 && !filters.mese.includes(r.mese)) return false;
+    if (filters.anno.length > 0 && !filters.anno.map(String).includes(String(annoDi(r)))) return false;
+    if (filters.mese.length > 0 && !filters.mese.includes(meseDi(r))) return false;
     if (filters.regione.length > 0 && !filters.regione.includes(r.regione)) return false;
     if (filters.provincia.length > 0 && !filters.provincia.includes((r.provincia || '').toUpperCase().trim())) return false;
     if (filters.partner_operativo.length > 0 && !filters.partner_operativo.includes((r.partner_operativo || '').trim())) return false;
     if (filters.trasportatore.length > 0 && !filters.trasportatore.includes((r.trasportatore || '').trim())) return false;
     if (filters.classe.length > 0 && !filters.classe.includes(r.classe)) return false;
     if (filters.stato.length > 0 && !filters.stato.includes((r.stato || '').trim())) return false;
-    if (filters.data) {
-      const d = r.ordine_immesso_il;
-      if (!d || new Date(d).toISOString().slice(0, 10) !== filters.data) return false;
-    }
+    if (filters.data && giornoPortale(r.ordine_immesso_il) !== filters.data) return false;
     return true;
   }, [filters]);
 

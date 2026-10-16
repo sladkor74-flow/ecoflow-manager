@@ -4,7 +4,7 @@ import { useTableSort } from '@/hooks/useTableSort';
 import SortHeader from '@/components/shared/SortHeader';
 import { formatNumber } from '@/lib/utils';
 import { eTerminato, giornoMovimento, giornoOrdine, meseOrdine, tempiRaccolta, dateIncoerenti, testoDate } from '@/lib/movimenti';
-import { giornoRoma } from '@/lib/giornoItaliano';
+import { dataPortaleIt } from '@/lib/giornoItaliano';
 import { SegnoDate } from '@/components/primarie-rete/DateDaSistemare';
 
 // LA COLONNA PDR (13/10/2026). La ragione sociale da sola non distingue due
@@ -35,8 +35,11 @@ const COLUMNS = [
   { key: 'ordine_chiuso_il', label: 'Chiuso il', format: 'date' },
 ];
 
-// Le date si mostrano come giorno italiano, 'GG/MM/AAAA'.
-const dataIt = (v) => { const g = giornoRoma(v); return g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''; };
+// Le date si mostrano 'GG/MM/AAAA' con dataPortaleIt: il giorno scritto nel file
+// del portale (difetto 9, 16/10/2026). La chiusura e' l'ora italiana del
+// portale salvata con la Z, e letta col fuso italiano (giornoRoma, com'era qui)
+// una chiusura dopo le 22 d'estate o dopo le 23 d'inverno usciva col giorno
+// dopo. La fine del trasporto qui e' gia' un giorno (giornoMovimento).
 
 // Il codice del punto di raccolta, come numero; null se l'ordine non lo porta
 // (allora la cella dice «—», non 0). E' un codice, non una quantita': si scrive
@@ -148,7 +151,7 @@ export default function PrimarieReteTable({ records, loading }) {
                 }
                 let val = r[col.key];
                 if (col.format === 'number') val = val != null ? formatNumber(val, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
-                else if (col.format === 'date') val = dataIt(val);
+                else if (col.format === 'date') val = dataPortaleIt(val);
                 const isTempi = col.key === 'raccolta_nei_tempi';
                 return (
                   <td
