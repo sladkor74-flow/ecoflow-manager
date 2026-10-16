@@ -64,6 +64,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - La prefattura del portale in PDF si legge dal suo testo
   - Il surplus nella prefattura: ogni ordine col suo (13/10/2026)
   - Il margine
+  - La simulazione del margine col costo di SMOCO raccoglitore (16/10/2026)
   - Il foglio della passiva dell'amministrazione (11/10/2026)
   - Un nome, un record: anagrafica e consuntivi (11/10/2026)
   - Prima di eliminare, chi lo usa (12/10/2026)
@@ -4978,6 +4979,150 @@ produttore dell'Excel e del PDF scrivono il margine «—» con la frase
 `testoInterventiSenzaPrezzo`. Prove: `prove/margine.mjs`,
 `prove/dashboardPagina.mjs`, `prove/riepilogoSettimanale.mjs`,
 `prove/extraRaccoltaSurplus.mjs` (6e), `prove/cambioAnnoRitocchi.mjs` (6).
+
+### La simulazione del margine col costo di SMOCO raccoglitore (16/10/2026)
+
+Richiesta dell'utente del 16/10/2026: simulare il margine della commessa al
+variare dell'unico valore che il gestionale non ha, il costo €/t di SMOCO come
+raccoglitore, «senza inficiare tutto il resto dei calcoli e della
+fatturazione», anche per mostrarlo al CEO di SMOCO. Quel costo lo valuta un
+altro ufficio, coi costi diretti e indiretti, e l'utente lo scrive a mano. SMOCO
+e' un fornitore interno (`Fornitore.interno`): a se stessi non si fattura, e
+nella passiva le tonnellate che raccoglie coi suoi mezzi costano zero. Sul
+margine vero va bene cosi' (e' la fatturazione), ma su quelle tonnellate il
+margine e' piu' alto del vero.
+
+**Dove sta e chi la vede.** La sezione «Simulazione»
+(`src/components/fatturazione/SimulazioneMargine.jsx`) sta dentro la scheda
+Margine, che e' solo dell'amministratore: `MargineCommessa.jsx` la disegna nel
+blocco dei dati, dopo le tre tabelle. Si scrive un €/t per canale, con la
+comodita' di un valore unico per tutti (`leggiEuroT`: '60', '60,5', '1.234,56',
+con o senza «€/t»; un negativo o un testo illeggibile e' un errore sotto il
+campo, vuoto vuol dire non simulato). Tre canali, tre simulazioni, mai un
+totale. Per mese e per l'anno: le t raccolte da SMOCO, il costo simulato (t x
+€/t arrotondato mese per mese; l'anno e' la somma dei mesi, come la colonna dei
+costi), il margine vero, il margine simulato con % ed €/t. Poi il costo di
+pareggio, la media dei raccoglitori esterni col confronto, e il margine
+dell'anno a costi diversi (0 €/t, il costo scritto, la media, il pareggio). Un
+mese col margine vero «—» (prezzi mancanti) resta «—» anche simulato, col
+`testo_prezzi_mancanti`.
+
+**La simulazione non entra in niente**: non si salva negli archivi e non tocca
+tariffe, passiva, attiva, fatturazione, margine vero, dashboard, alert, EcoTyna,
+riepilogo della settimana.
+- **La regola sta solo in `src/lib/simulazioneMargine.js`, senza copia in
+  `base44/shared`**, e quindi senza specchio in `prove/specchi.mjs`: una copia
+  nel server sarebbe il primo passo perche' un conto la usi. Non ha client e non
+  fa richieste; la importano solo `SimulazioneMargine.jsx` e
+  `simulazioneMargineExport.js`, e nessun file di `base44` la nomina.
+- La sezione usa la risposta di `calcolaMargine` che la scheda ha gia': nessuna
+  richiesta, nessuna scrittura.
+- Il browser ricorda solo l'ultimo valore scritto, in localStorage
+  `eco_simulazione_margine`. Ogni accesso sta dentro try/catch e la memoria si
+  cerca dentro il try: un default nella firma lancerebbe prima, con un
+  localStorage bloccato. Senza memoria si torna ai campi vuoti; si salva solo la
+  forma dei campi, a testi brevi.
+
+**Il campo `raccolta` del margine.** Ogni mese e l'anno di `calcolaMargineAnno`
+(`raccoltaDelMese`, `raccoltaDellAnno` in `margine.ts`) hanno in piu' il campo
+`raccolta`, fatto dall'oggetto della passiva che il calcolo ha gia': nessuna
+lettura in piu'. Tolto `raccolta`, il margine e' identico, al carattere, a quello
+del commit 19cf73e, anche sui dati veri. Contiene:
+- `tonnellate_interni` e `interni[]` coi `di_cui`: chi fattura tramite SMOCO
+  nella catena dei subfornitori e' di SMOCO anche qui, il costo scritto lo
+  comprende e la pagina lo dice col nome;
+- la media degli esterni: `tonnellate_esterni`, `euro_esterni`,
+  `euro_t_esterni` (null con 0 t) ed `esterni[]` per fornitore;
+- `tonnellate_prezzo_unico` con `euro_prezzo_unico`, `tonnellate_senza_prezzo`,
+  `surplus_esterni`, `secondarie_interni { tonnellate, viaggi }` e
+  `impianti_interni { tonnellate }`.
+
+Le righe esterne sono di tre classi, in quest'ordine. Prima il *prezzo unico*:
+la tariffa della riga (`tariffa_id`) ha `comprensiva_trattamento === true`, come
+Green Tyre sull'ACI a 225 €/t, che comprende il trattamento e non e' sola
+raccolta. Poi le righe *senza prezzo*: unita' non fra '€/t', '€/kg',
+'€/viaggio', oppure valore <= 0; hanno importo zero e abbasserebbero la media,
+ma un valore mancante non e' zero. Infine le *paragonabili*, le sole nella
+media. La media e' sulle tariffe di contratto: il surplus degli esterni si dice
+a parte. L'anno somma i mesi, unisce le liste per fornitore e rifa' gli €/t
+dalle somme, mai come media delle medie.
+
+**Il campo porta gli euro dei fornitori.** Arriva solo da `calcolaMargine`, che
+risponde solo all'amministratore (la dashboard la chiama solo per lui), e
+nessun'altra funzione usa `calcolaMargineAnno`. Chi lo facesse leggere a un
+altro conto o a EcoTyna passa da `vedeICosti` (vedi «I costi dei fornitori sono
+dell'amministratore, anche in EcoTyna»).
+
+**Il pareggio** e' il costo €/t piu' alto, al centesimo, a cui il margine
+simulato dell'anno (il margine meno la somma dei mesi r2(t x p), come la colonna
+dei costi) non va sotto zero. Si parte da floor(margine / t) al centesimo e ci si
+sposta di un centesimo, al massimo cento passi per verso. Non dipende dal costo
+scritto. E' null col perche' se il margine e' «—», se SMOCO ha 0 t o se il
+margine vero e' gia' <= 0.
+
+**Il confronto** con la media degli esterni dello stesso canale e periodo dice
+lo scarto in €/t, l'esito (`smoco`, `esterni`, `pari`), il margine se SMOCO
+costasse la media (`margine_alla_media`) e quanto si risparmia raccogliendo da
+se' sulle t di SMOCO (`differenza_affidando`; negativo vuol dire che affidare
+costerebbe meno). **Il risparmio e' il costo alla media meno il costo scritto,
+tutti e due mese per mese**: cosi' e' al centesimo il margine simulato meno il
+margine alla media, i due numeri che lo stesso documento scrive accanto.
+Chiusura del giro del 16/10/2026: fatto come (media - costo) x t sull'anno,
+l'ACI a 60 €/t diceva 2.895,63 € e i due margini 2.895,61, in 9 casi su 27 sui
+dati veri.
+
+**Il PDF e l'Excel per il CEO** stanno in `src/lib/simulazioneMargineExport.js`,
+che la sezione carica al clic (`await import`), nella veste dei documenti che
+escono: il PDF da `esportaSezioniPdf`, l'Excel dal corredo exceljs di
+`fogliProfessionali.js`, mai SheetJS.
+- «SIMULAZIONE» sta nel titolo, nel nome del file e nella riga in alto di ogni
+  pagina, insieme al giorno e a «NON ENTRA NELLA FATTURAZIONE»
+  (`intestazioneSimulazione`). I parametri stanno nel sottotitolo.
+- Nell'Excel c'e' un foglio per canale e il foglio «Note»; la frase della
+  simulazione e' la prima riga dopo la testa, e il titolo va nel piede di
+  stampa. Un valore che manca e' «—» nel PDF e una cella vuota nell'Excel, mai 0.
+- Le frasi della regola usano solo caratteri WinAnsi (il meno e' «-»), e il PDF
+  passa ogni testo da `perIlPdf` e spezza le celle lunghe con
+  `pezziDellaCella`. **Quelle due stanno nella libreria del riepilogo della
+  settimana, che nessun file importa in testa** (`prove/riepilogoSettimanale.mjs`,
+  sezione 5): il modulo la prende al clic dentro `argomentiSimulazionePdf`, che
+  per questo e' asincrona (chiusura del giro: l'import in testa faceva fallire
+  quella prova). Chi la chiama la aspetta: `EsportaPdf` fa l'await di `sezioni`.
+
+**Mai un totale dei canali, provato dappertutto.** La prova della pagina cerca
+ogni somma di due o tre canali per t, ricavo, costo simulato, margine vero,
+margine simulato e la sua percentuale, scritta all'italiana e cruda: a video,
+sulle pagine e nelle note del PDF, in ogni cella, intestazione e piede
+dell'Excel, Note compreso. A video, fuori dai riquadri dei canali, non resta
+nessun numero tolti i parametri, il periodo e il giorno, e ogni numero dell'anno
+si verifica accanto alla sua etichetta: un numero giusto scritto altrove non
+basta. Sotto il margine vero il perche' va solo se il margine vero manca: una
+risposta senza `raccolta` (la funzione pubblicata prima di questo `margine.ts`)
+ha il margine vero giusto, e la simulazione dice «—» col perche', perche' le t
+di SMOCO mancano e non sono zero.
+
+**I numeri sulla copia dell'11/10/2026** (gennaio-ottobre 2026, senza il Fuel
+Surcharge: la copia non ha l'archivio SurplusTariffa). Il margine vero non
+cambia: rete 542.558,63 € (30,5%), ACI 10.500,34 (30,0%), extra raccolta 54,32
+(31,3%).
+- SMOCO: 2.159,86 t sulla rete su 8.818,55, 83,16 sull'ACI su 147,86, 0,46
+  sull'extra raccolta su 0,86.
+- Esterni: 76,07 €/t sulla rete, 94,82 sull'ACI (fuori 5,32 t di Green Tyre a
+  prezzo unico, 1.197,00 €), 90,00 sull'extra raccolta su 0,40 t soltanto.
+- Pareggi: 251,20 / 126,26 / 118,09 €/t.
+- A 60 €/t: rete 412.967,03 € (23,2%, 46,83 €/t), 34.708,95 di risparmio
+  rispetto alla media degli esterni e 378.258,08 alla media; ACI 5.510,74
+  (15,7%), 2.895,61 e 2.615,13; extra raccolta 26,72 (15,4%), 13,80 e 12,92.
+- Le secondarie di SMOCO costano zero e non si simulano: 55 viaggi sulla rete
+  (786,82 t) e 7 sull'ACI (80,70 t). Stoccaggi interni: nessuno.
+
+La Guida lo dice nel modulo Fatturazione, fra le cose dell'amministratore, e nei
+passi «La fatturazione», col collegamento a `/fatturazione?tab=margine`. Prove:
+`prove/simulazioneMargine.mjs` (il campo, l'invarianza contro 19cf73e, i dati
+veri, la regola, la memoria che lancia, la guardia «non entra in niente») e
+`prove/simulazioneMarginePagina.mjs` (la sezione disegnata, la scheda, nessuna
+richiesta, il PDF col jspdf vero, l'Excel riaperto, la Guida, 375 px, i dati
+veri).
 
 ### Il foglio della passiva dell'amministrazione (11/10/2026)
 
