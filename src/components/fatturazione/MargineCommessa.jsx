@@ -11,6 +11,7 @@ import AvvisoCaricamenti from '@/components/shared/AvvisoCaricamenti';
 import { TIPI_PASSIVA } from '@/lib/registroCaricamenti';
 import { STILE_SURPLUS, nomiSurplusDistinti } from '@/lib/surplusVista';
 import NomeSurplus from './NomeSurplus';
+import SimulazioneMargine from './SimulazioneMargine';
 
 const NOMI = { RETE: 'Rete', ACI: 'ACI', EXTRA_RACCOLTA: 'Extra raccolta' };
 const euro = (v) => (v === null || v === undefined ? '—' : formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
@@ -305,6 +306,11 @@ export default function MargineCommessa() {
               <TabellaMargine c={c} />
             </div>
           ))}
+
+          {/* La simulazione col costo €/t di SMOCO come raccoglitore, scritto a
+              mano (16/10/2026): usa il margine gia' arrivato, non chiede niente
+              e non entra in nessun conto. Il PDF e l'Excel si caricano al clic. */}
+          <SimulazioneMargine data={data} />
         </>
       )}
     </div>

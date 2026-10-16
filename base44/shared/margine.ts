@@ -35,6 +35,30 @@
 // Surcharge: +1.268,40 € sulla rete (253,68 t raccolte da SMOCO x 5 €/t) e
 // +24,50 € sull'ACI. La riga del surplus non e' un ordine: ordini e tonnellate
 // si contano sulle righe dei formulari (eRigaDiMovimento).
+//
+// LA RACCOLTA DI SMOCO E DEGLI ESTERNI (16/10/2026). SMOCO e' un fornitore
+// interno: a se stessi non si fattura, e nella passiva le tonnellate che
+// raccoglie coi suoi mezzi costano zero. Sul margine vero va bene cosi' (e' la
+// fatturazione), ma su quelle tonnellate il margine e' piu' alto del vero: il
+// costo di SMOCO come raccoglitore lo valuta un altro ufficio, coi costi
+// diretti e indiretti, e il gestionale non lo ha. L'utente ha chiesto di
+// simularlo nella scheda Margine, scritto a mano, senza che entri in nessun
+// conto. Alla simulazione servono due numeri veri, che il calcolo ha gia' in
+// mano mese per mese (l'oggetto della passiva qui sotto), quindi nessuna
+// lettura in piu' e nessuna scrittura: le tonnellate di SMOCO, comprese quelle
+// di chi raccoglie per lui nella catena dei subfornitori (fattura tramite
+// SMOCO, e il costo scritto le comprende: si dicono col nome nei di_cui), e la
+// media per tonnellata dei raccoglitori esterni dello stesso canale e dello
+// stesso periodo, per dire se a quel costo conviene raccogliere da se' o
+// affidare. Dalla media restano fuori due tipi di righe: il prezzo unico (la
+// tariffa comprende anche il trattamento, Green Tyre sull'ACI a 225 €/t, e non
+// e' sola raccolta) e le righe senza un prezzo, che hanno importo zero e la
+// abbasserebbero (un valore mancante non e' zero). Il surplus pagato agli
+// esterni si dice a parte: e' per fornitore e non per riga, e la media e' sulle
+// tariffe di contratto. Anche i viaggi di secondarie che SMOCO fa da se' e gli
+// stoccaggi interni costano zero: la simulazione non li tocca, ma li dice.
+// Sono il campo `raccolta` di ogni mese e dell'anno (raccoltaDelMese,
+// raccoltaDellAnno); nessun altro campo cambia.
 import { calcolaRigheAttiva, eRigaDiMovimento, eRigaSurplus, TIPOLOGIE_ATTIVA } from "./attivaCalcolo.ts";
 import { calcolaPassivaMese, movimentiDateDelCanale } from "./passivaCalcolo.ts";
 import { anomaliaSenzaFineAnno } from "./filtroPeriodo.ts";
@@ -211,6 +235,112 @@ function tonnellateTrattenute(voci) {
   return [...perPrestazione.values()].reduce((s, t) => s + t, 0);
 }
 
+// LA RACCOLTA DI SMOCO E DEGLI ESTERNI (16/10/2026, vedi in testa). Le unita'
+// con cui la passiva sa fare un importo: una riga esterna con un'altra unita',
+// o con un valore non positivo, e' senza prezzo e non entra nella media.
+const UNITA_CON_PREZZO = ['€/t', '€/kg', '€/viaggio'];
+const perTonnellate = (a, b) => b.tonnellate - a.tonnellate || String(a.fornitore).localeCompare(String(b.fornitore), 'it');
+
+/**
+ * Le tonnellate di SMOCO (gli interni) e la media dei raccoglitori esterni di
+ * un mese e di un canale, dall'oggetto della passiva che il margine ha gia'
+ * (calcolaPassivaMese): nessuna lettura in piu'. Tre classi di righe esterne,
+ * in quest'ordine: prezzo unico (la tariffa scelta, tariffa_id, comprende il
+ * trattamento), senza prezzo (unita' non letta o valore <= 0), paragonabile.
+ * La media e' solo sulle paragonabili, senza il surplus, che si dice a parte.
+ */
+function raccoltaDelMese(costo, tariffePassivePerId) {
+  let tInterni = 0, tEsterni = 0, eEsterni = 0, tUnico = 0, eUnico = 0, tSenza = 0, surplus = 0;
+  const interni = [], esterni = [];
+  for (const f of (costo && costo.raccoglitori) || []) {
+    if (f.interno === true) {
+      const t = Number(f.totale_tonnellate) || 0;
+      tInterni += t;
+      interni.push({
+        fornitore: f.fornitore, tonnellate: r3(t),
+        di_cui: (f.di_cui || []).map(d => ({ fornitore: d.fornitore, tonnellate: r3(Number(d.tonnellate) || 0) })).sort(perTonnellate),
+      });
+      continue;
+    }
+    surplus += Number(f.totale_surplus) || 0;
+    let t = 0, e = 0, paragonabili = 0;
+    for (const riga of f.righe || []) {
+      const tr = Number(riga.tonnellate) || 0, imp = Number(riga.importo) || 0;
+      const tariffa = tariffePassivePerId.get(String(riga.tariffa_id));
+      if (tariffa && tariffa.comprensiva_trattamento === true) { tUnico += tr; eUnico += imp; continue; }
+      if (!UNITA_CON_PREZZO.includes(String(riga.unita_misura || '').trim()) || !(Number(riga.tariffa_valore) > 0)) { tSenza += tr; continue; }
+      t += tr; e += imp; paragonabili++;
+    }
+    if (!paragonabili) continue;
+    tEsterni += t; eEsterni += e;
+    const tt = r3(t), ee = r2(e);
+    esterni.push({ fornitore: f.fornitore, tonnellate: tt, euro: ee, euro_t: tt > 0 ? r2(ee / tt) : null });
+  }
+  let tSec = 0, viaggiSec = 0, tImp = 0;
+  for (const f of (costo && costo.trasporti_secondaria) || []) {
+    if (f.interno !== true) continue;
+    tSec += Number(f.totale_tonnellate) || 0;
+    viaggiSec += (f.righe || []).reduce((s, r) => s + (Number(r.viaggi) || 0), 0);
+  }
+  for (const f of (costo && costo.impianti_stoccaggi) || []) if (f.interno === true) tImp += Number(f.totale_tonnellate) || 0;
+  const tonnellate_esterni = r3(tEsterni), euro_esterni = r2(eEsterni);
+  return {
+    tonnellate_interni: r3(tInterni),
+    interni: interni.sort(perTonnellate),
+    tonnellate_esterni, euro_esterni,
+    euro_t_esterni: tonnellate_esterni > 0 ? r2(euro_esterni / tonnellate_esterni) : null,
+    esterni: esterni.sort(perTonnellate),
+    tonnellate_prezzo_unico: r3(tUnico), euro_prezzo_unico: r2(eUnico),
+    tonnellate_senza_prezzo: r3(tSenza),
+    surplus_esterni: r2(surplus),
+    secondarie_interni: { tonnellate: r3(tSec), viaggi: r2(viaggiSec) },
+    impianti_interni: { tonnellate: r3(tImp) },
+  };
+}
+
+/**
+ * La raccolta dell'anno: la somma dei mesi calcolati, con le liste unite per
+ * fornitore. Gli €/t si rifanno dalle somme, mai come media delle medie: un
+ * mese con poche tonnellate non deve pesare quanto uno pieno.
+ */
+function raccoltaDellAnno(mesi) {
+  const somma = (f) => mesi.reduce((s, x) => s + (Number(f(x.raccolta || {})) || 0), 0);
+  const interni = new Map(), esterni = new Map();
+  for (const x of mesi) {
+    const r = x.raccolta || {};
+    for (const i of r.interni || []) {
+      const v = interni.get(i.fornitore) || { fornitore: i.fornitore, tonnellate: 0, di_cui: new Map() };
+      v.tonnellate += i.tonnellate;
+      for (const d of i.di_cui || []) v.di_cui.set(d.fornitore, (v.di_cui.get(d.fornitore) || 0) + d.tonnellate);
+      interni.set(i.fornitore, v);
+    }
+    for (const e of r.esterni || []) {
+      const v = esterni.get(e.fornitore) || { fornitore: e.fornitore, tonnellate: 0, euro: 0 };
+      v.tonnellate += e.tonnellate; v.euro += e.euro;
+      esterni.set(e.fornitore, v);
+    }
+  }
+  const tonnellate_esterni = r3(somma(r => r.tonnellate_esterni)), euro_esterni = r2(somma(r => r.euro_esterni));
+  return {
+    tonnellate_interni: r3(somma(r => r.tonnellate_interni)),
+    interni: [...interni.values()].map(v => ({
+      fornitore: v.fornitore, tonnellate: r3(v.tonnellate),
+      di_cui: [...v.di_cui.entries()].map(([fornitore, t]) => ({ fornitore, tonnellate: r3(t) })).sort(perTonnellate),
+    })).sort(perTonnellate),
+    tonnellate_esterni, euro_esterni,
+    euro_t_esterni: tonnellate_esterni > 0 ? r2(euro_esterni / tonnellate_esterni) : null,
+    esterni: [...esterni.values()].map(v => {
+      const t = r3(v.tonnellate), e = r2(v.euro);
+      return { fornitore: v.fornitore, tonnellate: t, euro: e, euro_t: t > 0 ? r2(e / t) : null };
+    }).sort(perTonnellate),
+    tonnellate_prezzo_unico: r3(somma(r => r.tonnellate_prezzo_unico)), euro_prezzo_unico: r2(somma(r => r.euro_prezzo_unico)),
+    tonnellate_senza_prezzo: r3(somma(r => r.tonnellate_senza_prezzo)),
+    surplus_esterni: r2(somma(r => r.surplus_esterni)),
+    secondarie_interni: { tonnellate: r3(somma(r => r.secondarie_interni && r.secondarie_interni.tonnellate)), viaggi: r2(somma(r => r.secondarie_interni && r.secondarie_interni.viaggi)) },
+    impianti_interni: { tonnellate: r3(somma(r => r.impianti_interni && r.impianti_interni.tonnellate)) },
+  };
+}
+
 /**
  * dati: { reteAll, aciAll, extraAll, secondarieAll, fornitori, tariffe, surplusAll } letti una volta sola.
  * surplusAll: i record di SurplusTariffa, tutti (facoltativo: senza, i numeri
@@ -228,6 +358,9 @@ export function calcolaMargineAnno(dati, anno, finoAlMese = 11) {
     fornitoriAll: (dati.fornitori || []).filter(f => f.stato === 'attivo'),
     surplusAll,
   };
+  // le tariffe passive per id, una volta per chiamata: dicono quale riga della
+  // raccolta e' a prezzo unico (raccoltaDelMese, 16/10/2026)
+  const tariffePassivePerId = new Map(passiva.tariffeAll.filter(t => t && t.id).map(t => [String(t.id), t]));
   const canali = Object.fromEntries(TIPOLOGIE_ATTIVA.map(c => [c, { canale: c, mesi: [], senza_fine_trasporto: null }]));
 
   for (let m = 0; m <= Math.min(11, finoAlMese); m++) {
@@ -252,6 +385,9 @@ export function calcolaMargineAnno(dati, anno, finoAlMese = 11) {
         costo_surplus: (costo.totali.surplus && Number(costo.totali.surplus.totale)) || 0,
         tonnellate_surplus_interni: tonnellateTrattenute(surplus),
         surplus,
+        // le tonnellate di SMOCO e la media degli esterni, per la simulazione
+        // della scheda (16/10/2026): dallo stesso oggetto, nessuna lettura in piu'
+        raccolta: raccoltaDelMese(costo, tariffePassivePerId),
         // un ricavo o un costo calcolato con un prezzo mancante e' un margine falso: si dice
         righe_senza_prezzo: righe.filter(r => r.stato_validazione === 'errore').length,
         // e dal 15/10/2026 non si mostra: le righe della passiva senza tariffa e il
@@ -308,6 +444,7 @@ export function calcolaMargineAnno(dati, anno, finoAlMese = 11) {
       costo_raccolta: somma('costo_raccolta'), costo_impianti: somma('costo_impianti'), costo_trasporti: somma('costo_trasporti'),
       ricavo_surplus: somma('ricavo_surplus'), costo_surplus: somma('costo_surplus'), tonnellate_surplus_interni: somma('tonnellate_surplus_interni'),
       surplus: surplusAnno,
+      raccolta: raccoltaDellAnno(canali[canale].mesi),
       righe_senza_prezzo: somma('righe_senza_prezzo'), anomalie_passiva: somma('anomalie_passiva'),
       // un mese con prezzi mancanti fa l'anno senza margine (15/10/2026)
       passive_senza_tariffa: somma('passive_senza_tariffa'), prezzi_mancanti: somma('prezzi_mancanti'),

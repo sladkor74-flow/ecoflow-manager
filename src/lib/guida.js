@@ -315,8 +315,12 @@ export const MODULI = [
     soloAmministratore: [
       'Le schede Passiva, Margine, Fornitori, Tariffe & Anagrafiche e Storico: costi e margine li vede solo l’amministratore.',
       'Elaborare, verificare, approvare, chiudere e riaprire il mese dell’attiva.',
+      // La simulazione del margine (16/10/2026): il costo di SMOCO come
+      // raccoglitore, scritto a mano, che il gestionale non ha. La guida dice
+      // che e' solo una prova, perche' nessuno la scambi per il margine vero.
+      'La Simulazione della scheda Margine: il costo €/t di SMOCO come raccoglitore, scritto a mano, uno per canale o lo stesso per tutti; il margine mese per mese, il costo di pareggio e il confronto con la media dei raccoglitori esterni, con il PDF e l’Excel da mostrare. È solo una prova: non si salva e non entra nella fatturazione né in nessun conto; il browser ricorda l’ultimo valore scritto.',
     ],
-    parole: ['fatture', 'attiva', 'passiva', 'prefattura', 'tariffe', 'prezzi', 'margine', 'costi'],
+    parole: ['fatture', 'attiva', 'passiva', 'prefattura', 'tariffe', 'prezzi', 'margine', 'costi', 'simulazione', 'pareggio'],
   },
   {
     percorso: '/qualifica-fornitori',
@@ -674,6 +678,7 @@ export const SEZIONI = [
         elementi: [
           { testo: 'I fornitori fatturano a SMOCO. SMOCO fa a Ecotyre tre fatture, una per canale.' },
           { testo: 'La passiva, canale per canale, sta in Fatturazione, scheda Passiva; il margine nella scheda Margine. Costi e margine li vedi solo tu.', link: { percorso: '/fatturazione?tab=passiva', testo: 'Fatturazione passiva' } },
+          { testo: 'Nella scheda Margine, sotto le tabelle, la Simulazione: il margine col costo €/t di SMOCO come raccoglitore, che scrivi tu, con il costo di pareggio e la media dei raccoglitori esterni, in PDF ed Excel. È solo una prova e non entra nella fatturazione.', link: { percorso: '/fatturazione?tab=margine', testo: 'Margine' } },
           { testo: 'Contratti e tariffe sono annuali senza tacito rinnovo. Prima del 1° gennaio, Target & Status, scheda Nuovo anno, dice che cosa manca all’anno nuovo.', link: { percorso: '/target-status?tab=nuovo-anno', testo: 'Nuovo anno' } },
         ],
       },
