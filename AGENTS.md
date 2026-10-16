@@ -41,6 +41,7 @@ anche quando "funziona"**. Prima di riderivare una regola da zero, cercala qui.
   - La storia di una riga del Riepilogo (12/10/2026)
   - Canali indipendenti
   - Pesi
+  - Le ore del portale: l'ora italiana scritta con la Z (difetto 9, 16/10/2026)
   - Come si legge un movimento: un punto solo
 - **Regole della commessa**
   - Chi conferisce dove
@@ -330,6 +331,18 @@ prove` resta quello di prima. La prova di tutto questo e'
 `prove/proveSuGitHub.mjs`, che fa girare prove finte in un repository finto con
 la copia accanto.
 
+**Una prova aspetta una condizione, col tempo vero, mai un numero fisso di giri**
+(15-16/10/2026). Sul runner di GitHub i giri di `setImmediate` che sul PC
+bastavano non bastano: dal 9fc2653 il giro era rosso, sempre e solo per
+`prove/copiaSicurezza.mjs`, sezione 8, perche' la compressione va col tempo
+vero, fuori dal filo di node. Si aspetta finche' la condizione e' vera, fino a
+un limite di `performance.now()` (che l'orologio finto non tocca), e una
+verifica dice se ci si e' arrivati: `finoAllaFine` in
+`prove/copiaSicurezza.mjs`, `finoA` in `prove/orePortalePagine.mjs`. Dopo
+un'azione sulla pagina (un filtro scelto) si aspetta che la proprieta' cambi
+identita', non un risultato che sul codice sbagliato non arriverebbe mai. Una
+prova non deve dipendere dalla velocita' della macchina.
+
 **I minuti.** Un giro costa circa 5-6 minuti di GitHub Actions (misura del
 14/10/2026: le prove da sole, due alla volta come sul runner di un repository
 privato, fra un minuto e mezzo e due sul PC). Un repository privato nel piano
@@ -345,7 +358,10 @@ superate, 41 in parte o saltate (36 per la sola copia, 2 per i soli documenti
 del PC, 3 per tutti e due), 0 fallite. Alla chiusura delle cose nuove del
 15/10/2026 (copia di sicurezza, riepilogo della settimana, registro degli errori,
 Guida): 284 prove in circa un minuto, 240 superate, 44 in parte o saltate (39 per la
-sola copia, 2 per i soli documenti del PC, 3 per tutti e due), 0 fallite. La
+sola copia, 2 per i soli documenti del PC, 3 per tutti e due), 0 fallite. Alla
+chiusura del difetto 9 (16/10/2026): 297 prove in 1 min 10 s, 250 superate, 47
+in parte o saltate (41 per la sola copia, 3 per i soli documenti del PC, 3 per
+tutti e due), 0 fallite. La
 modalita' CI le elenca una per una con quello che e' mancato a ciascuna: quella
 parte gira solo sul PC.
 
@@ -890,6 +906,17 @@ rilevazione dei piazzali (difetto 29). Una data che arriva dal campo data come
 'AAAA-MM-GG' si confronta come giorno, senza passare per `new Date`. Prove:
 `prove/omologheRegistro.mjs`, `prove/battitoLavori.mjs`, `prove/menuTodo.mjs`.
 
+**`giornoRoma` e' per gli istanti, non per ogni data** (difetto 9, 16/10/2026).
+Un istante e' un momento vero, in UTC: «oggi», `created_date`, le date dei
+documenti e dei caricamenti scritte dal gestionale. `giornoRoma` lo porta al
+giorno italiano, ed e' giusto anche su inizio e fine trasporto, che sono giorni
+salvati a mezzanotte Z. Le **ore dei file del portale** (immissione e chiusura
+degli ordini, le date con l'ora del report delle dichiarazioni) non sono istanti:
+sono l'ora italiana scritta con la Z, e si leggono con `giornoPortale`,
+`annoPortale`, `mesePortale`, `oraPortale` e `dataPortaleIt`. Con `giornoRoma`
+un ordine immesso il 31/12 alle 23:30 finiva al 01/01. Vedi «Le ore del
+portale».
+
 ### I documenti che escono: una veste sola e la data dei dati (11/10/2026)
 
 **Ogni file che si manda fuori passa dal corredo `src/lib/fogliProfessionali.js`**: exceljs, mai SheetJS, che nella versione del progetto non sa scrivere ne' grassetti ne' colori. Un export costruisce le sue righe come prima, un elenco di elenchi, e le consegna a `foglioDaRighe(wb, nome, { doc, righe, testate, stili, formati, larghezze })`, che le scrive cella per cella uguali sotto il blocco di testa; `scaricaCartella(wb, nome)` scarica il file. Dall'11/10/2026 ci passano la passiva per canale, i tre report dell'attiva, il report dei conferimenti, il confronto col consuntivo, giacenze, dichiarazioni, andamento raccoglitori, extra raccolta (Excel e PDF), il Report Mensile (Excel al posto del CSV, `src/lib/reportMensileExport.js`) ed `esportaTabellaExcel`, quindi anche margine, dettaglio dell'attiva, matrice delle province e qualifica. Resta su SheetJS `giacenzeDaDichiarareExport.js`.
@@ -1070,12 +1097,16 @@ esterni**, dove il nome della colonna non e' il nostro.
   partenza, emissione, documento, fattura e scadenza (`INTESTAZIONI` in
   `base44/shared/prefattura.ts`): nemmeno una "Data documento" o una "Data
   fattura" puo' vincere, il controllo c'e' gia'.
-- **Campi `mese`, `anno`, `settimane` dei record.** Li scrive `getDataRiferimento`:
-  `dataPeriodo` per i movimenti, `ordine_immesso_il` per gli **Assegnati**, che non
-  hanno un trasporto ma una data di immissione. E
+- **Campi `mese`, `anno`, `settimane` dei record.** Li scrive `giornoDiRiferimento`
+  (`dataEnrichment.ts`): la fine trasporto letta con `giornoMovimento` per i
+  movimenti, il giorno scritto dell'immissione (`giornoPortale`) per gli
+  **Assegnati**, che non hanno un trasporto ma una data di immissione. E
   **non si rileggono mai** per decidere un periodo: si ricalcolano. L'unico punto
   che preferiva il campo memorizzato (`mese_immissione` in `pivotCalculator.ts`) e'
-  stato tolto.
+  stato tolto. Gli Assegnati li leggevano ancora fino al 16/10/2026 (pagina,
+  matrice, esportazione e il filtro sull'anno di `verificaSediPdr`): ora
+  calcolano mese e anno con `meseElenco` e `annoElenco` (difetto 9, vedi «Le ore
+  del portale»).
 
 ### Il periodo di un movimento e' la fine del trasporto
 
@@ -1467,7 +1498,8 @@ per tutto il gestionale, e le tonnellate si scrivono con `formatoTonnellate`:
 un secondo formato qui dentro scriveva «1,200 t» dove tutto il resto dice
 «1,20 t», e l'ha trovato una prova.
 
-Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`.
+Un assegnato non e' un movimento: il suo periodo e' `ordine_immesso_il`, sul
+giorno scritto nel file del portale (`giornoPortale`, «Le ore del portale»).
 
 ### Il cambio d'anno: la prova generale del 15/10/2026
 
@@ -1540,14 +1572,10 @@ nel commento del codice che la applica, con la data:
   dice e non la conta come zero) finche' la tariffa dell'anno non c'e', come
   nella fatturazione passiva; la nota dice l'anno del prezzo quando c'e'.
 
-**Il difetto 9 non e' di questo giro.** Le ore del file del portale sono
-italiane (lo dicono le pause pranzo, uguali d'inverno e d'estate) e si salvano
-come ore UTC, a cui poi si aggiunge di nuovo l'ora italiana: un ordine immesso
-«31/12/2026 23:30» finisce in gennaio 2027, e sui dati veri 19 ordini di rete
-hanno l'immissione al giorno dopo (ET26020377, 31/01/2026 23:55, passa a
-febbraio). Oggi le fini trasporto arrivano senza ora, quindi raccolto e periodi
-non cambiano. Cambia il modo in cui si salvano le ore e le finestre di lettura
-di piu' moduli: va fatto in un giro a se'.
+**Il difetto 9 e' chiuso il 16/10/2026**, in un giro a se': vedi «Le ore del
+portale: l'ora italiana scritta con la Z». Un ordine immesso «31/12/2026 23:30»
+non finisce piu' in gennaio 2027, e le fini trasporto, cioe' raccolto e
+periodi, non sono cambiate.
 
 **La chiusura del giro** ha portato la regola nuova dove i gruppi non potevano
 arrivare, ognuna con la sua prova (`prove/cambioAnnoRitocchi.mjs`, piu'
@@ -2523,6 +2551,229 @@ delle migliaia, e lascia **vuota** una cella senza movimenti (prima ci scriveva
 0). Prima 12.345 kg erano 12,35 t li' e 12,345 t ovunque altrove. Prova:
 `prove/reportMensileFormato.mjs`.
 
+### Le ore del portale: l'ora italiana scritta con la Z (difetto 9, 16/10/2026)
+
+L'ora di un file del portale e' l'**ora italiana**. Lo provano quattro cose:
+- il portale scrive la creazione del file con `+02:00`;
+- due immissioni del 12/10/2026, lette come UTC, verrebbero dopo la creazione
+  del file;
+- la pausa pranzo cade alle 13 d'estate e d'inverno;
+- l'inizio della giornata non si sposta al cambio dell'ora.
+
+Il gestionale la salva **com'e' scritta, con la Z per convenzione**:
+`2026-12-31T23:30:00.000Z` e' il 31/12/2026 alle 23:30 italiane, non le 23:30
+UTC. Non e' un istante e non si converte.
+
+Fino al 16/10/2026 le pagine la convertivano con `giornoRoma` e aggiungevano di
+nuovo l'ora italiana. Un ordine immesso il 31/12 alle 23:30 finiva a gennaio
+negli Assegnati e al 31/12 nel filtro per giorno. Sulla copia dell'11/10/2026
+erano 19 immissioni di rete al giorno dopo (ET26020377, immesso il 31/01/2026
+alle 23:55, finiva a febbraio), 14 immissioni e 23 chiusure delle
+dichiarazioni. Con la correzione i tempi medi di raccolta sono saliti di pochi
+millesimi di giorno (+13, +5 e +1 giorni sommati nel 2026, 2025 e 2024; la
+media di rete del 2026 da 99,5372 a 99,5415): a un decimale non si vede.
+Giacenze e Dichiarazioni sono rimaste identiche al chilo (`prove/datiVeri.mjs`,
+158 su 158 sugli stessi attesi).
+
+La scelta (progetto del 16/10/2026, verificato da due revisioni avversarie; via
+dell'utente del 16/10/2026: «ho pubblicato, procedi con le correzioni»): **le
+date salvate non cambiano forma**, niente migrazione e niente ricaricamento. Si
+correggono i lettori dei campi con l'ora.
+
+- **I campi con l'ora**: `ordine_immesso_il` e `ordine_chiuso_il` di primarie,
+  assegnati, secondarie e terziarie; `data_immissione`, `data_chiusura`,
+  `data_dichiarazione` e `data_esecuzione` del report delle dichiarazioni e dei
+  non dichiarati (`ORE_PORTALE` in `base44/shared/primarie.ts`). Si leggono
+  **solo** con `giornoPortale`, `annoPortale`, `mesePortale`, `oraPortale` e
+  `dataPortaleIt` (`giornoItaliano`). **Mai** con `giornoRoma`,
+  `toLocaleDateString`, i getter del `Date`, ne' tagliando la stringa: le
+  funzioni arrotondano al secondo, e in archivio ci sono valori `.999` che il
+  taglio leggerebbe un secondo prima (979 in secondarie e terziarie sulla copia
+  dell'11/10/2026: il prossimo caricamento li riscrive `.000`, tranne i 227
+  delle righe del 2024, che i file non portano piu' e restano per sempre).
+- **Le funzioni accettano** la Z, `+00:00` e nessun fuso come la stessa cosa (le
+  cifre scritte), il separatore `T` o lo spazio, e i decimali dei secondi di
+  qualunque lunghezza (la piattaforma scrive le sue date con sei cifre e senza
+  la Z). Un altro fuso esplicito e' un istante vero e si porta all'ora italiana.
+  Un `Date` da' le sue cifre UTC. Tutto il resto, una data impossibile (30/02) o
+  un numero, da' `''`, `null` o `-1`.
+- **I campi di solo giorno**: inizio e fine trasporto (`GIORNI_PORTALE`). Lo
+  scrittore li salva **sempre** a mezzanotte Z, e se il portale un giorno
+  scrivesse l'ora della fine si tiene il giorno: la regola della direzione del
+  19/09/2026 dice «conta il giorno». Su questi `giornoRoma` e `giornoPortale`
+  danno lo stesso giorno per costruzione, quindi `giornoMovimento`, le tariffe e
+  i conti di Giacenze e Dichiarazioni (111 letture) restano con `giornoRoma`.
+  `giorni_con_ora` conta le celle di inizio o fine trasporto arrivate con
+  un'ora. `importEcotyreFile` lo scrive nella risposta e nel registro.
+  `importaBlocco` lo scrive nella risposta di ogni blocco, e in «registra» lo
+  legge da `archivi[a].giorni_con_ora` (primarie) o da `giorni_con_ora` (gli
+  altri report) e lo scrive nel registro: il browser (`importGrandeFile.js`) li
+  somma dai blocchi confermati e li manda. Oggi sono 0.
+- **`giornoRoma` e' per gli istanti**: `created_date` (con `conZ`), «oggi», le
+  date dei documenti e dei caricamenti scritte dal gestionale, e `data_chiusura`
+  di DocumentoFatturazione, che ha lo stesso nome di un campo del report ma e' un
+  istante.
+- **Le date dell'extra raccolta** le scrive la scheda come giorni
+  (`dataDaGiorno`). `dateDaCorreggere` resta su `giornoRoma` apposta: raddrizza
+  le mezzanotti italiane vecchie.
+- **Un solo scrittore**: `dataDelPortale(valore, campo)` (`primarie.ts`), per
+  primarie, secondarie, terziarie e report, nei due caricamenti.
+  - Dal seriale di Excel; i due caricamenti leggono il foglio con
+    `cellDates: false`, cosi' nessun `Date` della libreria dei fogli dipende dal
+    fuso del processo.
+  - Un `Date`, se capita, si legge coi getter locali. Unico limite: in un
+    processo in Roma un `Date` delle 02:00-02:59 dell'ultima domenica di marzo e'
+    gia' spostato di un'ora dalla libreria. Il portale non scrive quell'ora,
+    perche' in Italia non esiste.
+  - Un testo ISO con un fuso diverso da zero si porta all'ora italiana.
+  - Tutto si arrotonda al secondo.
+  - `scrittaPortale(v)` (`giornoItaliano`) da' l'ora del portale nella forma
+    salvata, `AAAA-MM-GGThh:mm:ss.000Z`, arrotondata al secondo: la usa lo
+    scrittore per il testo ISO, cosi' scrittura e lettura hanno un solo modo di
+    capire una data. Chi legge usa le cinque funzioni, non questa.
+  - `giornoPrimaria(valore, conta)` e `dataDelPortale(valore, campo, conta)`
+    hanno un terzo argomento facoltativo, `{ giorni_con_ora: 0 }`, che conta le
+    celle di inizio o fine trasporto arrivate con un'ora.
+- **Gli Assegnati** leggono mese e anno dall'immissione (`annoElenco` e
+  `meseElenco`), non dai campi `mese` e `anno` salvati: pagine, esportazione,
+  matrice e `verificaSediPdr`. Il campo salvato resta solo come ripiego per un
+  assegnato senza immissione (`annoElenco(r) ?? (Number(r.anno) || null)`,
+  `meseElenco(r) || r.mese || null`). La regola e' scritta in cinque punti
+  (`computeAssegnatiMatrix`, `exportAssegnati`, `Assegnati.jsx`,
+  `AssegnatiTable.jsx`, `verificaSediPdr`): chi la cambia, la cambia in tutti.
+- **`verificaSediPdr`** legge tutti gli assegnati di rete e ACI senza il filtro
+  `{ anno }` e li filtra con `annoElenco` (col ripiego sull'anno salvato per un
+  assegnato senza immissione): sono gli ordini aperti, una pagina di lettura per
+  archivio come prima.
+- **Le date a video e nei file** si scrivono con `dataPortaleIt` (gg/mm/aaaa,
+  con gli zeri; vuota se la data manca), anche quelle di inizio e fine
+  trasporto: tabelle di primarie, secondarie, terziarie, ACI e assegnati, il
+  dettaglio delle pivot, il titolo «chiuso a portale il» di «Da dichiarare», gli
+  Excel di assegnati, secondarie e terziarie. **Mai `toLocaleDateString`**:
+  legge l'ora come un istante nel fuso del processo, e gli zeri li mette o no
+  secondo i dati della lingua del motore (il node 24 del PC, ICU 78, scrive
+  «04/09/2026»; un motore con dati piu' vecchi «4/9/2026»). Per questo
+  `prove/orePortalePagine.mjs` fa scrivere a `toLocaleDateString` senza zeri per
+  tutta la prova: una data che ci passa ancora si vede subito.
+- **Le liste degli assegnati** salvano in `righe_json` il giorno di immissione
+  al caricamento. `controllaLista` usa quello dell'ordine vivo, e la copia
+  salvata solo per un ordine che non e' piu' in nessun archivio: le liste
+  caricate prima del 16/10/2026 hanno il giorno di `giornoRoma`. Per questo
+  `VERSIONE_REGOLE` e' passata a 3, e il limite dei controlli da rileggere
+  (`CONTROLLI_DA_VERIFICARE_FINO_AL`) al 15/11/2026, il giorno del commit piu'
+  30: i controlli fatti prima, anche dal codice vecchio fra il commit e la
+  pubblicazione, si rifanno alla prima apertura del loro mese o al primo
+  caricamento delle primarie. Se la pubblicazione slitta oltre quella data, la
+  data va spostata prima di pubblicare.
+- **I derivati salvati delle primarie di rete** (`nr_giorni`, `scadenza_ordine`,
+  `mese_immissione`, `raccolta_nei_tempi`) non li legge nessun conto: tabella,
+  tempi di raccolta e alert li ricalcolano da `tempiRaccolta`, e li riscrive il
+  prossimo caricamento delle primarie. Mese, anno e settimane non cambiano per
+  chi ha la fine del trasporto. Un ordine aperto o cancellato invece si colloca
+  all'immissione: se e' stato salvato prima della correzione, porta il periodo
+  del giorno dopo finche' un caricamento delle primarie non lo riscrive, e un
+  cancellato conservato che il file non riporta piu' lo tiene per sempre. Non
+  si vede: le pagine non leggono mese e anno salvati, usano `meseElenco` e
+  `annoElenco`, e i conti dei terminati usano il periodo calcolato.
+- **I consuntivi dei fornitori** salvati prima del 16/10/2026, se una data aveva
+  un'ora dalle 12:00 in poi, tengono il giorno dopo (`comeGiorno`). Non si
+  ricalcolano: per rifarli si ricarica il file.
+- **EcoTyna** legge immissione e chiusura col giorno scritto (vedi «EcoTyna: il
+  modulo giusto», voce «Le date degli ordini») e passa al modello solo giorni,
+  mai un'ora del portale grezza. `dateAllItaliana` (`formato.ts`), che riscrive
+  le date nel testo della risposta, legge un'ora come un istante con
+  `giornoRoma`: un'ora del portale ricopiata nel testo dopo le 22 (le 23
+  d'inverno) diventerebbe il giorno dopo.
+- **Perche' non l'istante vero.** Andavano riscritti 83.181 valori in circa
+  30.700 record, e fra la pubblicazione e la fine della migrazione l'archivio
+  sarebbe stato in due forme che nessun lettore sa distinguere.
+- **Della stessa famiglia**, corretti nello stesso giro:
+  - `giornoDaExcel` e `valoreCella` (`src/lib/evasioneAssegnati.js`): exceljs da'
+    l'ora del foglio come UTC, xlsx come ora locale, e la lettura dipendeva
+    dalla libreria. `valoreCella(v, ingenua)` legge le cifre UTC solo con
+    `ingenua === true` (exceljs). L'altra libreria passa `false` esplicito, mai
+    `.map(valoreCella)`: l'indice della colonna entrerebbe come secondo
+    argomento. Sui file veri delle liste 6 celle su 1.037 finivano al giorno
+    dopo (SMOCO.xlsx, foglio BARI, riga 2, e cinque in assegnati.xlsx); con la
+    correzione 0, in UTC e in Roma;
+  - `comeGiorno` (`prefattura.ts`), per prefatture e consuntivi: arrotondava il
+    seriale e dalle 12:00 dava il giorno dopo. Ora e' il giorno della cella
+    arrotondata al secondo.
+- **Le prove.**
+  - `prove/orePortale.mjs`: le cinque funzioni, lo scrittore e i due
+    caricamenti sul banco. Si rilancia da sola con `TZ=UTC` e `TZ=Europe/Rome` e
+    pretende le stesse stringhe scritte nei due fusi: una stringa diversa e' la
+    stessa cella salvata in due modi. `prove/importDate.mjs` e' cambiata apposta:
+    inizio e fine trasporto con l'ora si salvano a mezzanotte Z e si contano.
+    `prove/orePortaleCaricamento.mjs` fa parlare il modulo del browser con la
+    function vera e pretende la nota dei `giorni_con_ora` nel registro, per le
+    primarie (somma per archivio) e per gli altri report.
+  - `prove/orePortaleSentinella.mjs`, con tre reti. L'elenco chiuso dei file che
+    nominano un campo con l'ora: un file nuovo va messo nell'elenco col motivo e
+    con la sua prova, e uno che smette di nominarli va tolto. La regola sul testo:
+    la riga del campo e le due dopo, alias locali compresi, con le eccezioni per
+    file e campo o per pezzo di riga, ognuna col motivo (quelle di
+    `strumentiAssistente.ts` valgono finche' quelle righe restano scritte cosi').
+    Il controllo che ogni file corretto abbia la sua prova sul comportamento, e
+    che la prova nomini il file che copre (la cartella per una funzione, il nome
+    del file per il resto). La regola sul testo non vede una lettura attraverso
+    una variabile o un aiutante di un altro file: un lettore nuovo si prova
+    sempre col valore delle 23:30 del 31/12. Un aiutante che taglia una stringa
+    che e' gia' un giorno, come `giorniTra` di `strumentiAssistente.ts`, per la
+    regola conta come alias: il campo si legge allora su una riga sua
+    (`immessoIl`), e il giorno si passa dopo. Non si aggiunge un'eccezione.
+  - `prove/orePortaleCalcoli.mjs`, `prove/orePortaleEcoTyna.mjs` e
+    `prove/orePortalePagine.mjs`, in UTC e in Roma, col valore delle 23:30 del
+    31/12 e con la replica di ET26020377.
+  - `prove/orePortaleDatiVeri.mjs`, che sui dati veri pretende regole e non
+    numeri: i conteggi della copia dell'11/10 valgono solo su quella. Sui
+    derivati salvati delle primarie di rete la regola e' questa: ogni differenza
+    di `nr_giorni`, `scadenza_ordine`, `mese_immissione` e `raccolta_nei_tempi`
+    sta su un ordine immesso dopo la mezzanotte italiana letta come UTC; mese,
+    anno e settimane differiscono solo per un ordine aperto o cancellato salvato
+    col codice di prima, e la prova lo ammette solo se il valore salvato e'
+    proprio quello della lettura di prima (revisione del 16/10/2026: con «mese,
+    anno e settimane non cambiano mai» la prova cadeva su una copia nuova senza
+    che niente fosse rotto).
+  - Cambiate apposta, perche' e' cambiata la regola: `prove/cruscotto.mjs` (le
+    22:00 del 23/9 sono il 23/9), `prove/movimenti.mjs` (un cancellato immesso il
+    31/12/2025 alle 23:30 resta del 2025), `prove/assegnatiAciStimato.mjs` (i sei
+    ordini del 2025 lo sono anche nell'immissione). Estese:
+    `prove/giornoDaExcel.mjs`, `prove/prefattura.mjs`,
+    `prove/verificaSediPdrFunzione.mjs`.
+  - A mano, prima del commit del 16/10/2026: lo scrittore vero sui file veri
+    (PRIMARIE, SECONDARIE, TERZIARIE, Report Dichiarazioni e Ordini non
+    dichiarati) e le funzioni vere sulla copia dell'11/10 danno, in UTC e in
+    Roma, le stesse uscite del prototipo del progetto: le stesse stringhe che
+    l'archivio ha gia', al secondo. L'unica riga diversa e' quella voluta: un
+    testo con `+00:00` si legge come la Z (le 22:30 restano le 22:30).
+- **Che cosa resta fuori, da guardare in un giro a se'.**
+  - `created_date` e `updated_date` sono scritti dalla piattaforma senza la Z:
+    cinque punti li passano a funzioni di data, e nel browser potrebbero
+    spostarsi di 1 o 2 ore.
+  - Le 2.157 chiusure a mezzanotte del 2024 in PrimariaRete (piu' 38 ACI, 196
+    secondarie e 102 terziarie) sono copie della fine trasporto, non la chiusura
+    vera del portale: e' un problema di dati, non di ore.
+  - Da verificare se si possono togliere (regola «prima di eliminare, chi lo
+    usa»): `elaboraFatturazionePassivaRete`, senza chiamanti;
+    `base44/shared/pivotCalculator.ts`, che importano solo due prove; e la
+    cartella `src/components/report-pivot/`, che non importa nessun file
+    (`DrillDownModal` e' corretto e provato lo stesso).
+  - Al primo consuntivo vero di un fornitore si guarda se le sue date portano
+    l'ora: se si', i consuntivi salvati prima del 16/10/2026 con un'ora dalle
+    12:00 in poi vanno ricaricati.
+  - La pagina Assegnati ha `filters.data` nello stato, ma nessun controllo lo
+    imposta: il filtro per giorno c'e' nella matrice e non a video.
+  - La regola di anno e mese di un assegnato (i cinque punti qui sopra) puo'
+    diventare una funzione sola in `movimenti.ts` e nel suo specchio.
+  - L'immissione dell'extra raccolta in EcoTyna e nell'eta' dell'arretrato si
+    legge con `giornoPortale`, giusto per i giorni che la scheda salva a
+    mezzanotte Z (tutte e 7 le schede della copia). Una mezzanotte italiana
+    vecchia, non ancora raddrizzata da `dateDaCorreggere`, si leggerebbe un
+    giorno prima: sulla copia sono 0.
+  - `base44/shared/fileEcoTyna.ts` ha un suo `valoreCella`: non tratta date,
+    solo numeri e testo per riconoscere le righe, quindi non serve cambiarlo.
+
 ### Come si legge un movimento: un punto solo
 
 `base44/shared/movimenti.ts` (specchio per le pagine: `src/lib/movimenti.js`).
@@ -2561,7 +2812,8 @@ li', e non riscrive la regola:
   `prove/chiusuraMese.mjs`, `prove/settimanaIso53.mjs`;
 - `giornoElenco / annoElenco / meseElenco`: per gli elenchi e i loro filtri di
   giorno, mese e anno, che mostrano anche ordini senza trasporto. Un terminato
-  si colloca solo sulla fine trasporto; un ordine non terminato all'immissione.
+  si colloca solo sulla fine trasporto; un ordine non terminato all'immissione,
+  sul giorno scritto nel file del portale (`giornoPortale`, dal 16/10/2026).
   Un **terminato senza fine trasporto** non ha giorno, mese ne' anno: nessun
   filtro di periodo lo prende, e la pagina lo conta e lo segnala a parte. Mai la
   chiusura a portale;
@@ -2605,7 +2857,9 @@ Anche «oggi» e' il giorno italiano (`oggiRoma()`), non `new Date()` del server
 E nessun modulo si fa una correzione sua del giorno: il report settimanale ne
 aveva una che riportava al giorno italiano solo le ore 22:00 e 23:00 tonde, e un
 trasporto finito alle 23:30 UTC del 30 giugno restava a giugno li' e andava a
-luglio altrove (audit del 10/10/2026). Si usa `giornoRoma`. Nella stessa prova
+luglio altrove (audit del 10/10/2026). Si usa `giornoRoma` per la fine
+trasporto, che e' un giorno; l'immissione e la chiusura si leggono con
+`giornoPortale` (vedi «Le ore del portale»). Nella stessa prova
 (`prove/indicatoriVeri.mjs`) due avvisi che dicevano il falso: la matrice delle
 province contava **il mese in corso come un mese vuoto** (il primo del mese,
 due mesi senza raccolte per un mese cominciato da un giorno), e la regex dei
@@ -6313,6 +6567,9 @@ istruita, e sono state misurate sul codice:
   istruzioni e `dateAllItaliana` sulla risposta (`testoAllItaliana` fa numeri e
   date): 2026-10-05 diventa 05/10/2026, un istante col suo orario diventa il
   giorno italiano (giornoRoma), le date dentro nomi di file e codici restano.
+  Un'ora del portale non e' un istante: gli strumenti la passano gia' come
+  giorno (`giornoPortale`), mai grezza (difetto 9, 16/10/2026; vedi «Le ore del
+  portale»).
 - **La fatturazione si calcola, non si legge** (audit del 10/10/2026). Lo
   strumento `fatturazione` fa lo stesso conto del modulo sui movimenti di oggi,
   attiva e passiva, col mese o senza: senza mese, mese per mese fino a quello in
@@ -6723,6 +6980,18 @@ arrivate via email.
     per domanda, e contano come le pagine: le chiuse per fine trasporto nel
     periodo, le aperte tutte. Le secondarie restano divise per canale; le
     terziarie non hanno canale.
+  - **Le date degli ordini** (difetto 9, 16/10/2026). Immissione e chiusura sono
+    ore del file del portale, l'ora italiana scritta con la Z, e EcoTyna le legge
+    col giorno scritto. Gli aperti di `ordini_aperti`, `secondarie` e `terziarie`
+    (giorno di immissione, giorni di attesa, filtro «da almeno N giorni»)
+    passano da `immessoIl`, una lettura sola con `giornoPortale`. Le quattro date
+    di `cerca_movimento` vanno con `giornoPortale`. L'anno dei terminati senza
+    fine va con `annoPortale` (`terminatiSenzaFine` in `assistente.ts`).
+    `soloData` (`giornoRoma`) resta per gli istanti e per i giorni senza ora:
+    RichiestaEct, RENTRI, le date scritte dal gestionale. Fino al 16/10/2026
+    «quando e' stato immesso ET26020377?» rispondeva 01/02/2026, e l'ordine e'
+    stato immesso il 31/01/2026 alle 23:55. Prova: `prove/orePortaleEcoTyna.mjs`,
+    in UTC e in Roma, con «oggi» fissato al 31/12/2026 e al 31/01/2027.
   - Sui dati veri dell'11/10/2026 dicono i numeri dei moduli: a Cosenza, rete,
     da luglio a settembre 46 ordini chiusi (181,40 t); l'ultimo ritiro del PDR
     42872 il 07/10/2026 (due ordini); terziarie di agosto 17; aperti di rete a
@@ -7168,6 +7437,16 @@ ricalcoli: la scheda e' gia' salvata, e senza la riga l'alert delle date
 dell'extra raccolta non partiva piu' finche' non si salvava un'altra scheda.
 Prove: `prove/caricamentoAperto.mjs`, `prove/cruscotto.mjs` (UNA REGOLA SOLA),
 `prove/statoArchivi.mjs`.
+
+**La riga dice le date di trasporto arrivate con un'ora** (difetto 9,
+16/10/2026). Inizio e fine trasporto si salvano col solo giorno; se una cella
+del file porta anche un'ora, la riga del registro lo scrive («N date di inizio
+o fine trasporto avevano anche un'ora nel file: si e' tenuto il giorno»). Sui
+due percorsi: `importEcotyreFile` dal suo conto; il caricamento a blocchi dalla
+somma che il browser fa delle risposte dei blocchi confermati e manda con
+«registra» (`giorni_con_ora`, per archivio sulle primarie). Oggi sono 0: se il
+portale cominciasse a scrivere l'ora della fine, lo si vede qui. Prova:
+`prove/orePortaleCaricamento.mjs`.
 
 ### Lo storico delle modifiche: chi ha cambiato un numero che fa i conti (11/10/2026)
 
